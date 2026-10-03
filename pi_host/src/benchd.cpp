@@ -136,6 +136,9 @@ double g_tof_boom_z_m           = -0.070;   // 70 mm AFT; forward is +Z, so nega
 // consumer's calibration, not to the wire.  Read-only for the subscriber: this socket
 // carries no verbs, so it cannot become the brain-rate control path SPEC §1.1 forbids on
 // the calibration channel.  0 = off (default): no socket, no extra bus reads, byte-identical.
+// How long the HAT rail must stay below VBAT_LIMP_V before benchd limps (see frame()).
+// 0 = the old instant trip.  --vbat-sustain-ms overrides.
+int64_t  g_vbat_sustain_ms = 1000;
 int      g_state_pub_port = 0;
 void*    g_state_pub      = nullptr;
 uint64_t g_state_seq      = 0;
@@ -187,6 +190,8 @@ struct State {
     int  bus_errors = 0;
     json last_adc = json::array({0, 0, 0, 0, 0});
     bool low_battery = false;
+    int64_t vbat_low_since_ms = -1;   // start of the current below-limp stretch, -1 if none
+    double  vbat_dip_min      = 99.0;
     std::string rescue_name = "rescue";      // the pose that stands in for limp on this HAT
     int64_t rescue_until_ms = 0;              // while set, the tick keeps feeding the driver
     std::vector<std::pair<int,int>> pose_queue;  // (ch, us) still to start, in order
@@ -567,10 +572,30 @@ struct State {
         const double vbat = adc[4].get<int>() * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
         // SPEC 4.6 — low-voltage auto-safe.  The HAT powers the Pi too, so a dying pack
         // takes the whole robot down; go limp early and say so.
-        if (!low_battery && vbat < VBAT_LIMP_V && vbat > 1.0) {
-            low_battery = true; rescue("low battery");
-            record("low_battery", {{"vbat", vbat}, {"limp_v", VBAT_LIMP_V}});
-        } else if (low_battery && vbat > VBAT_RECOVER_V) {
+        // ⚠ SUSTAINED, not instantaneous (operator, 2026-10-03).  With the Pi on its own BEC
+        // the HAT rail can sag under servo inrush without browning the Pi out, and the HAT
+        // rides a brownout far better than the Pi did.  The instant trip fired on a ~100 ms
+        // inrush dip to 6.21 V on a bench supply (benchd log 2026-10-03 15:43) and threw a
+        // standing robot into rescue mid-move.  So the voltage must stay below the limp line
+        // for g_vbat_sustain_ms (10 Hz samples) before benchd limps and refuses arming; a dip
+        // that recovers first is RECORDED (min volts, duration) so the sag stays visible
+        // rather than silently absorbed.  g_vbat_sustain_ms = 0 is the old instant trip.
+        if (vbat < VBAT_LIMP_V && vbat > 1.0) {
+            if (vbat_low_since_ms < 0) { vbat_low_since_ms = now; vbat_dip_min = vbat; }
+            vbat_dip_min = std::min(vbat_dip_min, vbat);
+            if (!low_battery && now - vbat_low_since_ms >= g_vbat_sustain_ms) {
+                low_battery = true; rescue("low battery");
+                record("low_battery", {{"vbat", vbat}, {"limp_v", VBAT_LIMP_V},
+                                       {"below_ms", now - vbat_low_since_ms}, {"min_v", vbat_dip_min},
+                                       {"sustain_ms", g_vbat_sustain_ms}});
+            }
+        } else if (vbat_low_since_ms >= 0) {
+            if (!low_battery)
+                record("vbat_dip", {{"min_v", vbat_dip_min}, {"below_ms", now - vbat_low_since_ms},
+                                    {"limp_v", VBAT_LIMP_V}, {"sustain_ms", g_vbat_sustain_ms}});
+            vbat_low_since_ms = -1;
+        }
+        if (low_battery && vbat > VBAT_RECOVER_V) {
             low_battery = false; record("battery_ok", {{"vbat", vbat}});
         }
         if (now >= throttled_next_ms) {
@@ -1198,6 +1223,7 @@ int main(int argc, char** argv) {
         else if (a == "--tof-offset") { g_tof_offset_mm = std::atof(argv[i + 1]); g_tof_override = true; }
         else if (a == "--normal-slew") g_normal_slew_us = std::max(1, std::atoi(argv[i + 1]));
         else if (a == "--state-pub") g_state_pub_port = std::max(0, std::atoi(argv[i + 1]));
+        else if (a == "--vbat-sustain-ms") g_vbat_sustain_ms = std::max(0, std::atoi(argv[i + 1]));
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
     // ---- fitted constants: the calib FILE is the source, flags are the override ----
@@ -1292,6 +1318,8 @@ int main(int argc, char** argv) {
         std::lock_guard<std::mutex> lk(S.m);   // the tick thread reads it under the lock
         g_state_pub = sp;
     }
+    std::printf("ogma_benchd: low-voltage limp below %.2f V sustained %lld ms%s\n", VBAT_LIMP_V,
+                (long long)g_vbat_sustain_ms, g_vbat_sustain_ms == 0 ? " (INSTANT — legacy)" : "");
     std::printf("ogma_benchd: state feed %s\n", g_state_pub_port > 0
                 ? ("ON  pub :" + std::to_string(g_state_pub_port) + "  (50 Hz: us[12], fsr[4], belly ToF)").c_str()
                 : "off");

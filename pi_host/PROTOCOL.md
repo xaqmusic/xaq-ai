@@ -36,10 +36,13 @@ channel, and the deadman belongs to the calibration channel only. In `bench`:
   500–2500 µs for at most **120 s**, logs entry and exit, and `cal.end` (or the timeout, or any
   deadman trip) restores the operating limits. Calibration exercises the real driver — clamp,
   slew, watchdog — never a bypass (SPEC §4.4).
-- **Low battery (SPEC §4.6).** The HAT powers the Pi as well as the servos, so a dying pack
-  takes the whole robot down. Below **6.4 V** on A4 the daemon limps everything and refuses
+- **Low battery (SPEC §4.6).** Below **6.4 V** on A4, **sustained for `--vbat-sustain-ms`
+  (default 1000 ms; 0 = the old instant trip)**, the daemon limps everything and refuses
   `servo.set` / `cal.begin` until the pack reads above **6.7 V** again (`low_battery` in
-  telemetry). `pi_throttled` echoes `vcgencmd get_throttled` (bit 0 = under-voltage now,
+  telemetry). A dip that recovers inside the window is recorded as `vbat_dip` (min volts,
+  duration) rather than tripping. Sustained since 2026-10-03: the Pi now has its own BEC, so
+  servo inrush sags only the HAT rail, and an instant trip on a ~100 ms inrush dip to 6.21 V
+  threw a standing robot into rescue mid-move. `pi_throttled` echoes `vcgencmd get_throttled` (bit 0 = under-voltage now,
   bit 16 = has occurred since boot) so a servo-transient brownout of the Pi is visible.
 - **`limp` is a POSE, because this HAT cannot de-energise a servo (measured 2026-08-29).** Pulse
   count 0, 1 and ARR are ignored; a stopped timer is ignored; the MCU held in reset for 30 s
