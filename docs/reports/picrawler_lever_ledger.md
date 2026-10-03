@@ -5997,3 +5997,46 @@ not reversals, and in the sim 1.83 rad/s (20 µs/tick) stopped stepping (0 steps
    distress inputs may have been wrong for part of the run. When it diverged is unknown: inputs
    were not dumped. The next run needs `--dump-inputs`. The held-pose shadow run ended at upright
    0.9994, so this is new with motion.
+
+### ★★ 2026-10-03 — SERVO OUTPUT LAG α 0.2 ON THE ROBOT: the thrash on the line drops ~4×, current halves (`WORKING`, hardware signal)
+
+**Lever.** `benchd --servo-lag-alpha 0.2` puts a first-order lag between the slewed command and
+the HAT, in brain modes only (gain-0: alpha 0 is byte-identical). Rationale: in the sim the joint
+follows the slew-limited target through PD, torque lag and inertia. Unloaded it fits α 0.22–0.28
+per tick (P-e·h0 trace; stance is load-dominated and fits no lag). The hobby servo has almost
+none of that lag, so it passed the brain's raw thrash straight to the legs. α 0.2 is also the
+brain's own servo forward model, so its joints input becomes the pulse the servo actually receives.
+
+**Protocol.** Robot loose in the safety box, battery, ABBA (A = off, B = 0.2), 30 s each from the
+rescue pose, fresh brain each run (P-e·h0). Measured on benchd's 50 Hz state feed (`out` = pulse on
+the line), 5 Hz telemetry, and ogma_host input dumps every 10 ticks.
+
+| arm | reversals/s on the line | ticks at full slew | line speed (rad/s) | command speed | jerk (µs/tick²) | servo I mean / max (A) | A4 min (V) | tilt max |
+|---|---|---|---|---|---|---|---|---|
+| A1 (off) | 17.8 | 0.80 | 3.16 | 3.16 | 27.9 | 0.79 / 2.91 | 6.92 | 28° |
+| B1 (0.2) | 12.7 | 0.01 | 0.94 | 3.26 | 6.9 | 0.37 / 1.06 | 7.37 | 26° |
+| B2 (0.2) | 8.8 | 0.02 | 1.15 | 3.17 | 6.3 | 0.44 / 1.64 | 7.16 | 24° |
+| A2 (off) | 21.7 | 0.82 | 3.21 | 3.21 | 34.3 | 0.64 / 1.84 | 7.13 | 33° |
+
+- **Thrash.** Jerk on the line is ~4.5× lower, full-slew ticks fall from ~80 % to ~1–2 %, and
+  reversals roughly halve.
+- **Load.** Servo current about halves, and so does its peak.
+- **Brain.** The brain's own command is unchanged (3.2 rad/s, reversals as before): the lever
+  filters the plant, not the policy.
+- **Operator, watching:** "the lag/smoothing run looked good. definitely reduces the jitter."
+
+⚠ **Slightly MORE damped than the sim.** The robot passes 0.30–0.36 of command speed to the line;
+the sim's achieved joints move at 0.40–0.56 of their target (hip1 0.46, hip2 0.40, knee 0.56). α
+0.25–0.3 would match better. Not tested. Also n=2 per arm at 30 s with no distance sensor, so
+behavioural effects are unmeasured: a signal for the hardware cost, not a gait finding.
+
+### ★★ 2026-10-03 — ogma_host's IMU on a 225 Hz thread: the attitude divergence is gone (`WORKING`, signal)
+
+On the first brain-driven run, ogma_host's attitude filter ended 117° from the accelerometer with
+the robot resting upright. It sampled the IMU once per 50 Hz tick, and the servos step at exactly
+that rate; benchd's header already warns that a slow sample rate aliases motion. Moved to its own
+225 Hz thread; the tick takes the newest attitude and the mean gyro since the last tick. In all
+four ABBA runs, including the two no-lag arms that reproduce the earlier motion, the filter ended
+within 0.35° of the accelerometer (upright 0.9999), with 0 read errors and ~12 860 samples per
+run. Mid-run upright minimum 0.81–0.91, consistent with the 24–33° tilts benchd's own IMU saw.
+Not proven causal (the old path was not re-run), but the motion that diverged it no longer does.
