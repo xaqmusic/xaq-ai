@@ -5920,3 +5920,12 @@ arena difficulty 0.3.** Receipts checked (P-e: `honest[...]` off; the others on)
 **Registered as P-e·h0.** Not promoted and not cleared for hardware. It needs the operator's
 watch, a terrain test, and the remaining safety items (servo jitter, the robot-side input port
 and the actuation path).
+
+### ★★ 2026-10-03 — OPERATOR UI OBSERVATION: P-e·h0 is the better configuration; P-e·hr binds up on terrain
+
+The operator watched P-e·h0 and P-e·hr in the UI (rule 5): **"P-e·h0 is the better
+configuration. hr causes the robot to get bound up on terrain in some cases."** This sits
+beside the 100k-tick measurement (P-e·h0 0.25 tips per 100k vs P-e·hr 1.25) and points the
+same way. It is also the first observation on terrain, the height homeostat's stated re-use
+context. With the homeostat on (P-e·hr), the body binds on terrain; with it off (P-e·h0), it
+does not, in what the operator saw. A measured terrain A/B follows.
