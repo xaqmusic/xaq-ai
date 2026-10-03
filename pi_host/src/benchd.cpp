@@ -198,6 +198,11 @@ struct State {
     int  bus_errors = 0;
     json last_adc = json::array({0, 0, 0, 0, 0});
     bool low_battery = false;
+    // ---- tick split (instrument): where the 20 ms goes, per block, over a window --------
+    struct Split { double sum = 0, max = 0; long n = 0;
+                   void add(double us) { sum += us; max = std::max(max, us); ++n; }
+                   json out() const { return {{"mean_us", n ? sum / n : 0.0}, {"max_us", max}, {"n", n}}; } };
+    Split sp_servo, sp_adc, sp_tof, sp_servo_w, sp_adc_w, sp_tof_w;   // *_w = the window being filled
     json last_saved_pulses;           // what save_known_pulses() last wrote
     int64_t vbat_low_since_ms = -1;   // start of the current below-limp stretch, -1 if none
     double  vbat_dip_min      = 99.0;
@@ -569,6 +574,9 @@ struct State {
     }
 
     json frame() {   // caller holds m
+        // Publish the tick split for the last ~100 ms window and start a new one.
+        sp_servo = sp_servo_w; sp_adc = sp_adc_w; sp_tof = sp_tof_w;
+        sp_servo_w = {}; sp_adc_w = {}; sp_tof_w = {};
         const int64_t now = mono_ms();
         json servos = json::array();
         for (int c = 0; c < ServoDriver::N; ++c) {
@@ -686,7 +694,10 @@ struct State {
                 {"body", body}, {"vbat", vbat}, {"adc", adc}, {"armed_ch", armed_ch}, {"cal_ch", cal_ch},
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
-                {"overruns", overruns}, {"bus_errors", bus_errors}, {"low_battery", low_battery}, {"rescue_pose", has_rescue() ? json(rescue_name) : json(nullptr)},
+                {"overruns", overruns}, {"bus_errors", bus_errors},
+                {"tick_split", {{"servo", sp_servo.out()}, {"adc4", sp_adc.out()}, {"tof", sp_tof.out()}}},
+                {"i2c_retries", {{"hat_0x14", bus.retries(0x14)}, {"tof_0x29", bus.retries(0x29)},
+                                 {"ina_0x40", bus.retries(0x40)}}}, {"low_battery", low_battery}, {"rescue_pose", has_rescue() ? json(rescue_name) : json(nullptr)},
                 {"rescue_active", mono_ms() < rescue_until_ms}, {"pose_move_active", pose_move_active}, {"pose_queue", pose_queue.size()},
                 {"pi_throttled", pi_throttled},
                 // Whole-robot current: Pi + the 5 V regulator + all 12 servos (BOM 3).
@@ -833,7 +844,10 @@ void tick_thread(State& S) {
                 for (int c = 0; c < ServoDriver::N; ++c)
                     if (S.driver.armed(c)) S.driver.command(c, S.driver.target_us(c));
             if (S.cal_ch >= 0 && ms > S.cal_until_ms) S.end_cal("timeout");
-            S.driver.tick();
+            { timespec a0, a1; clock_gettime(CLOCK_MONOTONIC, &a0);
+              S.driver.tick();
+              clock_gettime(CLOCK_MONOTONIC, &a1);
+              S.sp_servo_w.add((a1.tv_sec - a0.tv_sec) * 1e6 + (a1.tv_nsec - a0.tv_nsec) / 1e3); }
         } catch (const std::exception& e) {
             // A NACK that survived the bus retries.  Count it, log it, carry on: the next
             // tick rewrites every armed pulse anyway.  Dying here left the robot limp and
@@ -860,7 +874,12 @@ void tick_thread(State& S) {
         // brain mode benchd owns the whole I2C bus (ToF included), so poll it from the
         // tick.  read_ready() is non-blocking: a tick with no new measurement costs one
         // status read.  Only with the state feed on; otherwise byte-identical.
-        if (want_state) S.sample_tof();
+        if (want_state) {
+            timespec a0, a1; clock_gettime(CLOCK_MONOTONIC, &a0);
+            S.sample_tof();
+            clock_gettime(CLOCK_MONOTONIC, &a1);
+            S.sp_tof_w.add((a1.tv_sec - a0.tv_sec) * 1e6 + (a1.tv_nsec - a0.tv_nsec) / 1e3);
+        }
         if (want_fast || want_state) {
             if (want_fast) S.adc_fast_next_ms = ms + g_adc_poll_ms;
             json a = json::array();
@@ -870,6 +889,7 @@ void tick_thread(State& S) {
                 clock_gettime(CLOCK_MONOTONIC, &r0);
                 for (int c = 0; c < 4; ++c) a.push_back(S.hat.adc_raw(c));   // A0-A3, the feet
                 clock_gettime(CLOCK_MONOTONIC, &r1);
+                S.sp_adc_w.add((r1.tv_sec - r0.tv_sec) * 1e6 + (r1.tv_nsec - r0.tv_nsec) / 1e3);
                 if (want_fast)
                     S.record("adc_fast", {{"a", a},
                                           {"us", (r1.tv_sec - r0.tv_sec) * 1000000L

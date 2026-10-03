@@ -72,6 +72,7 @@ void LinuxI2cBus::write(uint8_t addr, const std::vector<uint8_t>& bytes) {
         if (n == static_cast<ssize_t>(bytes.size())) return;
         if (attempt >= kRetries)
             throw std::runtime_error(std::string("LinuxI2cBus: write: ") + std::strerror(errno));
+        ++retries_[addr & 0x7F];
         std::this_thread::sleep_for(std::chrono::microseconds(500));
     }
 }
@@ -83,6 +84,7 @@ uint8_t LinuxI2cBus::read_byte(uint8_t addr) {
         if (::read(fd_, &b, 1) == 1) return b;
         if (attempt >= kRetries)
             throw std::runtime_error(std::string("LinuxI2cBus: read: ") + std::strerror(errno));
+        ++retries_[addr & 0x7F];
         std::this_thread::sleep_for(std::chrono::microseconds(500));
     }
 }
@@ -96,6 +98,7 @@ std::vector<uint8_t> LinuxI2cBus::read_bytes(uint8_t addr, std::size_t n) {
         if (::read(fd_, out.data(), n) == static_cast<ssize_t>(n)) return out;
         if (attempt >= kRetries)
             throw std::runtime_error(std::string("LinuxI2cBus: read_bytes: ") + std::strerror(errno));
+        ++retries_[addr & 0x7F];
         std::this_thread::sleep_for(std::chrono::microseconds(500));
     }
 }
