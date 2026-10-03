@@ -370,11 +370,12 @@ class Dash:
                                   "angles, god's-eye signals). On hardware it runs partly blind.",
                        C(BAD) | curses.A_BOLD); y += 2
         self._line(scr, y, 3, f"start pose: {self.poses[self.pose_idx]}   (P cycles saved poses)", C(OK)); y += 1
-        self._line(scr, y, 3, f"mode: autonomous — a HAT reset is recovered automatically (warning shown)", C(DIM)); y += 1
+        self._line(scr, y, 3, f"mode: autonomous — after a HAT reset the robot returns to '{self.poses[self.pose_idx]}' "
+                              f"and the run continues (warning shown)", C(DIM)); y += 1
         self._line(scr, y, 3, f"tilt guard: STOP past {dash_run.TILT_LIMIT_DEG:.0f}°    STOP/resume: SPACE    "
                               f"reset to start pose: R    end: E (rescue pose)", C(DIM)); y += 1
         self._line(scr, y, 3, "HAT off mid-run: SPACE (pause) → HAT off → move the robot → HAT on → SPACE "
-                              "(re-arms one servo at a time, then continues)", C(DIM)); y += 2
+                              "(back to the start pose, one servo at a time, then continues)", C(DIM)); y += 2
         for ck in self.checks:
             col = OK if ck.ok else (BAD if ck.blocking else WARN)
             self._line(scr, y, 3, ("✓ " if ck.ok else ("✗ " if ck.blocking else "! ")) + ck.text, C(col)); y += 1

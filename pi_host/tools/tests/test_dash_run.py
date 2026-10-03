@@ -80,6 +80,8 @@ class FakeRobot:
                 self.stopped = True; return {"ok": True}
             if verb == "resume":
                 self.stopped = False; return {"ok": True}
+            if verb == "recover.pose":
+                self.recover_pose = kw.get("name"); return {"ok": True}
             if verb == "pose.recall":
                 if not self.stopped or self.mode == "bench":
                     return {"ok": False, "error": "STOP first"}
@@ -184,7 +186,7 @@ def test_the_brain_starts_only_after_the_brain_mode_and_the_end_sequence_is_orde
     ctrl.end()
     ctrl.join(10)
     c = robot.calls
-    order = ["systemctl stop ogma-host", "pose.set", "mode.set=autonomous", "spawn", "resume"]
+    order = ["systemctl stop ogma-host", "pose.set", "mode.set=autonomous", "recover.pose", "spawn", "resume"]
     idx = [c.index(x) for x in order]
     assert idx == sorted(idx), c
     # No bench pre-roll: the brain process exists only once benchd is in the brain mode (STOPPED).
@@ -305,6 +307,8 @@ def test_a_hat_reset_mid_run_is_announced_then_its_recovery(tmp_path, monkeypatc
     while time.time() < t_end and "HAT RESET" not in ctrl.st.hat_warning:
         time.sleep(0.01)
     assert "auto-recovering" in ctrl.st.hat_warning, ctrl.st.hat_warning
+    assert "'stand'" in ctrl.st.hat_warning
+    assert robot.recover_pose == "stand"                   # benchd was told to recover to the start pose
     # the HAT is back, servos re-arm one at a time...
     robot.hat.update(outage=False, recovering=True)
     time.sleep(0.4)
@@ -330,7 +334,7 @@ def test_an_operator_paused_outage_waits_for_space(tmp_path, monkeypatch):
     t_end = time.time() + 3
     while time.time() < t_end and "HAT RESET" not in ctrl.st.hat_warning:
         time.sleep(0.01)
-    assert "SPACE re-arms" in ctrl.st.hat_warning
+    assert "SPACE returns to 'stand'" in ctrl.st.hat_warning
     assert "resume" not in robot.calls[robot.calls.index("resume") + 1:]   # the controller never resumes it
     ctrl.end(); ctrl.join(10)
 

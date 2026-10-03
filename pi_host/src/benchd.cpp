@@ -229,6 +229,12 @@ struct State {
     bool    recover_resume = false;   // resume the brain when the re-arm lands
     int64_t recover_started_ms = 0;
     std::vector<int64_t> outage_starts;                // for the backoff: 3 in 60 s
+    // ⚠ RECOVER TO A POSE, NOT TO THE SAVED PULSES, when one is set (operator, 2026-10-03).
+    // Restoring the saved pulses faithfully restored whatever the brain was doing — in the run
+    // that prompted this, the front-right hip1 was pinned at its limit before the reset, so the
+    // robot came back circling.  A known pose (the run's start pose) resets the body; the saved
+    // pulses are still used, as the place each servo RAMPS from, so nothing jumps far.
+    std::string recover_pose;
     int     recoveries = 0;
     int64_t last_hat_reset_ms = -100000;
     int64_t last_mcu_reset_ms = -100000;   // when benchd itself last reset the MCU
@@ -614,7 +620,7 @@ struct State {
             if (!unarmed.empty()) {
                 // After a HAT outage: re-arm the remembered pulses one channel at a time, and
                 // resume the brain when they land.  The reply is ok with stopped still true.
-                if (!recover_targets.empty()) {
+                if (can_recover()) {
                     if (!hat_healthy(now)) return "the HAT is not answering — is it switched on? (wait a moment after power-on)";
                     start_recovery(true, who);
                     return "";
@@ -647,6 +653,7 @@ struct State {
         else { stop("mode change"); stopped = false; stop_why.clear(); last_client_ms = mono_ms(); }
         mode = m;
         recovering = false; recover_resume = false; recover_targets.clear();
+        if (m == RunMode::Bench) recover_pose.clear();     // a run's recovery pose ends with the run
         // The output lag is a brain-mode property: calibration and pose moves stay unlagged.
         // stop() above froze every channel at its output, so this cannot jump anything.
         driver.set_output_lag(m != RunMode::Bench ? g_lag_alpha : 0.0);
@@ -698,21 +705,41 @@ struct State {
         armed_ch = -1;
         driver.forget_timers();
         try { driver.limp_all(); } catch (...) {}
+        // Seed each servo's known pulse with the one it was last sent: the recovery pose then
+        // RAMPS from there at the pose slew (ServoDriver::command) instead of each servo jumping
+        // to the pose at full speed from an unknown position.
+        for (const auto& [c, us] : recover_targets) driver.seed_known_pulse(c, us);
         if (brain_mode()) latch_stop("HAT reset");
         const bool auto_ok = mode == ogma::hw::brain::RunMode::Autonomous && stopped && stop_why == "HAT reset"
-                             && outages_last_60s(now) <= 3 && !recover_targets.empty();
+                             && outages_last_60s(now) <= 3 && can_recover();
         recover_resume = auto_ok;
         record("hat_reset", {{"why", why}, {"injected", injected}, {"count", hat_resets},
                              {"mode", ogma::hw::brain::mode_name(mode)}, {"saved_channels", recover_targets.size()},
                              {"auto_recover", auto_ok}, {"outages_60s", outages_last_60s(now)},
                              {"action", "timers forgotten, all channels disarmed"}});
     }
+    bool recover_pose_valid() const {
+        return !recover_pose.empty() && poses.contains(recover_pose) && poses[recover_pose].contains("us")
+               && poses[recover_pose]["us"].is_array() && poses[recover_pose]["us"].size() == size_t(ServoDriver::N);
+    }
+    bool can_recover() const { return recover_pose_valid() || !recover_targets.empty(); }
     // Start the staggered re-arm.  Caller holds m; the HAT must be healthy.
     bool start_recovery(bool resume_after, const char* who) {
-        if (recover_targets.empty() || recovering) return recovering;
-        begin_pose_move(recover_targets);
+        if (recovering) return true;
+        std::vector<std::pair<int,int>> targets;
+        if (recover_pose_valid()) {
+            for (int c = 0; c < ServoDriver::N; ++c) {
+                const json& v = poses[recover_pose]["us"][size_t(c)];
+                if (v.is_number() && v.get<int>() >= FULL_MIN_US && v.get<int>() <= FULL_MAX_US) targets.push_back({c, v.get<int>()});
+            }
+        } else {
+            targets = recover_targets;
+        }
+        if (targets.empty()) return false;
+        begin_pose_move(targets);
         recovering = true; recover_resume = resume_after; recover_started_ms = mono_ms();
-        record("hat_recover_start", {{"who", who}, {"channels", recover_targets.size()}, {"resume_after", resume_after}});
+        record("hat_recover_start", {{"who", who}, {"channels", targets.size()}, {"resume_after", resume_after},
+                                     {"to", recover_pose_valid() ? recover_pose : std::string("saved pulses")}});
         return true;
     }
     // Per tick (caller holds m): end an outage once the HAT is healthy, start an automatic
@@ -940,6 +967,7 @@ struct State {
                 {"servo_lag_alpha", driver.output_lag()}, {"hat_resets", hat_resets},
                 {"hat", {{"outage", hat_outage}, {"healthy", hat_healthy(now)}, {"recovering", recovering},
                          {"recover_resume", recover_resume}, {"saved_channels", recover_targets.size()},
+                         {"recover_pose", recover_pose_valid() ? json(recover_pose) : json(nullptr)},
                          {"outages_60s", outages_last_60s(now)}, {"recoveries", recoveries},
                          {"auto_recover", mode == ogma::hw::brain::RunMode::Autonomous},
                          {"last_reset_age_ms", hat_resets ? now - last_hat_reset_ms : -1}}},
@@ -1719,6 +1747,15 @@ json handle_ctl(State& S, const json& req) {   // caller holds m
     // FAULT INJECTION: reset the HAT's MCU through its GPIO line — the same event a brownout
     // causes — so recovery can be proven on the robot without waiting for one.  Recorded as
     // injected: a drill must never be mistaken for a real reset in the record.
+    // Which pose a HAT recovery returns to ("" = the saved pulses).  Cleared on return to bench.
+    if (verb == "recover.pose") {
+        const std::string name = req.value("name", "");
+        if (!name.empty() && !S.poses.contains(name)) return err("no saved pose '" + name + "'");
+        S.recover_pose = name;
+        S.record("recover.pose", {{"name", name}});
+        json o = summary(); o["recover_pose"] = name.empty() ? json(nullptr) : json(name);
+        return ok(o);
+    }
     if (verb == "hat.reset") {
         if (req.value("confirm", false) != true) return err("fault injection: send confirm=true");
         if (!S.mcu || !S.mcu->ok()) return err("no MCU reset line");
@@ -1726,7 +1763,7 @@ json handle_ctl(State& S, const json& req) {   // caller holds m
         S.on_hat_reset("injected via ctl hat.reset", true);
         return ok(summary());
     }
-    return err("unknown control verb '" + verb + "' (ping, mode.get, mode.set, stop, resume, pose.recall, hat.reset, status)");
+    return err("unknown control verb '" + verb + "' (ping, mode.get, mode.set, stop, resume, pose.recall, recover.pose, hat.reset, status)");
 }
 
 } // namespace

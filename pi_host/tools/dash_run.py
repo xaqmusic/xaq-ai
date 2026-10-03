@@ -14,7 +14,9 @@ The sequence, and why each step is where it is:
            mode change, so the brain is paused from its first tick: brain_run/arm.sh started
            it in bench mode, where it ticked ~12 s with its commands ignored.
   run      resume.  The run is AUTONOMOUS (operator, 2026-10-03): benchd recovers a HAT reset
-           by itself — disarm, wait for the HAT, re-arm one channel at a time, resume — and the
+           by itself — disarm, wait for the HAT, re-arm one channel at a time and RAMP to the
+           run's start pose (benchd `recover.pose`; restoring the saved pulses brought back a
+           hip1 pinned at its limit, and the robot circled), resume — and the
            dashboard shows a warning each time.  A tilt guard (80 deg, the operator's limit)
            STOPs the robot; benchd handles a lost brain stream (hold, then rescue) and low
            battery.  Pause -> HAT off -> move the robot -> HAT on -> SPACE resumes (benchd
@@ -419,7 +421,11 @@ class RunController:
         if not m or not m.get("ok"):
             self._ev(f"mode {self.run_mode} refused: {(m or {}).get('error', 'no reply')}")
             return False
-        self._ev(f"benchd in {self.run_mode}, STOPPED; starting the brain (paused until resume)")
+        rp = self.io.ctl.call("recover.pose", name=self.pose)
+        if not rp or not rp.get("ok"):
+            self._ev(f"⚠ could not set the HAT-recovery pose: {(rp or {}).get('error', 'no reply')} — "
+                     "a reset would restore the saved pulses instead")
+        self._ev(f"benchd in {self.run_mode}, STOPPED, HAT recovery → '{self.pose}'; starting the brain (paused until resume)")
         stamp = time.strftime("%Y%m%d_%H%M%S")
         self.st.log_path = LOG_DIR / f"dashrun_{stamp}_{Path(self.cfg.file).stem[-40:]}.log"
         self._host = self.io.spawn_host(self.cfg.path, self.st.log_path)
@@ -465,8 +471,8 @@ class RunController:
                         hat0 = hr
                         auto = f.get("stopped") and f.get("stop_why") == "HAT reset" and hat.get("recover_resume")
                         self.st.hat_warning = (f"⚠ HAT RESET #{self.st.hat_resets} at {time.strftime('%H:%M:%S')} — "
-                                               + ("auto-recovering: servos re-arm one at a time, then the run continues"
-                                                  if auto else "servos disarmed; SPACE re-arms and resumes, R stands, E ends"))
+                                               + (f"auto-recovering: re-arming one servo at a time, back to '{self.pose}', then the run continues"
+                                                  if auto else f"servos disarmed; SPACE returns to '{self.pose}' and resumes, E ends"))
                         self._ev(self.st.hat_warning)
                     if rec_prev and not self.st.recovering and not f.get("stopped"):
                         self._ev(f"recovered from HAT reset #{self.st.hat_resets} — run continues")
