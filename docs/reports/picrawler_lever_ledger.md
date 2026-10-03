@@ -6132,3 +6132,29 @@ rad, belly 63 mm).
 Open: is the roll repeatable (n=1)? Is the sim's stance compliance what the brain's posture was
 tuned on? The 12 s bench pre-roll (the brain ticks while its commands are not applied) is still in
 every run's protocol.
+
+### ★★★ 2026-10-03 — 60 s FROM `stand`, TILT GUARD AT 80°: THE BELLY STAYS UP THE WHOLE RUN, AND THE POSTURE STEADIES (`WORKING`, hardware signal)
+
+**Run.** The previous stand-start run repeated unchanged, except the harness's tilt guard moved from
+60° to 80° (operator: "the robot was not in danger of flipping over"). Full 60 s; the guard never
+tripped.
+
+| window | belly median (mm) | p10 | p90 | >10 mm | hip2 (rad) | knee | tilt median | tilt max | contact | servo I (A) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0–10 s | 37 | 6 | 84 | 88 % | +0.00 | −0.75 | 10.8° | 30.0° | 3.8 | 1.24 |
+| 10–20 s | 28 | 15 | 47 | 97 % | +0.02 | −0.74 | 7.0° | 21.9° | 2.6 | 1.57 |
+| 20–30 s | 28 | 19 | 53 | 100 % | +0.02 | −0.69 | 5.1° | 19.0° | 2.9 | 1.42 |
+| 30–40 s | 29 | 20 | 43 | 99 % | +0.03 | −0.75 | 4.8° | 14.1° | 3.2 | 1.44 |
+| 40–50 s | 30 | 21 | 41 | 100 % | +0.03 | −0.73 | 4.3° | 12.1° | 2.9 | 1.45 |
+| 50–60 s | 37 | 26 | 54 | 100 % | +0.04 | −0.65 | 6.7° | 20.8° | 2.9 | 1.52 |
+
+- **Belly up:** median 31 mm over the run, above 10 mm 97 % of the time and above 20 mm 88 %. The sim
+  holds 14–26 mm.
+- **Adaptation within the run:** the floor of the belly distribution (p10) rises 6 → 26 mm, and
+  median tilt falls from 10.8° to 4–5°. Per CLAUDE.md §3.3, regulation that tightens with experience
+  is the kind of result that reads as real; it is still n=1 at 60 s.
+- **The previous stand-start run's 73° roll did not repeat** (1 of 2 stand starts rolled).
+- **Cost:** holding the belly up draws 1.2–1.6 A mean on the servo branch, against ~0.4 A belly-down.
+  A4 dipped to 6.58 V at peaks, from 7.39 V at rest after ~11 runs on one charge: close to the
+  6.4 V limp line. The battery is the next run's limit.
+- IMU ended 0.28° from the accelerometer; 4198 commands, 0 dropped.
