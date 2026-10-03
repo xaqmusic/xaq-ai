@@ -363,6 +363,38 @@ TEST(ServoDriver, SlewLimitsRateAndFirstCommandDoesNotSweepIn) {
     EXPECT_EQ(bus.last(), (std::vector<uint8_t>{0x20, 0x01, 0x5C}));       // 1700us -> 348 = 0x15C
 }
 
+TEST(ServoDriver, FirstCommandRampsFromAKnownPulseInsteadOfJumping) {
+    // Robot, 2026-10-03: a fresh benchd's first pose jumped all 12 servos at full speed.
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.seed_known_pulse(0, 1200);                   // what the HAT was left holding
+    d.command(0, 1500);
+    EXPECT_EQ(d.current_us(0), 1200);              // starts where the servo is
+    d.tick(); EXPECT_EQ(d.current_us(0), 1240);    // and slews
+    for (int i = 0; i < 20; ++i) d.tick();
+    EXPECT_EQ(d.current_us(0), 1500);
+    EXPECT_EQ(d.last_sent_us(0), 1500);
+}
+
+TEST(ServoDriver, ReArmAfterLimpRampsFromTheLastWrittenPulse) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();                  // unknown start: legacy, at the target
+    EXPECT_EQ(d.last_sent_us(0), 1500);
+    d.limp_all();                                  // this HAT ignores pulse 0: 1500 stays on
+    EXPECT_FALSE(d.armed(0));
+    d.command(0, 1800);
+    EXPECT_EQ(d.current_us(0), 1500);              // no jump on re-arm
+    d.tick(); EXPECT_EQ(d.current_us(0), 1540);
+}
+
+TEST(ServoDriver, AnMcuResetForgetsTheKnownPulse) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.seed_known_pulse(0, 1200);
+    d.forget_timers();                             // MCU reset: PWM stopped, pulse unknown
+    EXPECT_EQ(d.last_sent_us(0), 0);
+    d.command(0, 1500);
+    EXPECT_EQ(d.current_us(0), 1500);              // falls back to the legacy start
+}
+
 TEST(ServoDriver, WatchdogLimpsWhenCommandsStop) {
     FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 5, 50.0});
     d.command(2, 1500);

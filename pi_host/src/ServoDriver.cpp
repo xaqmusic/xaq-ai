@@ -17,9 +17,11 @@ void ServoDriver::command(int ch, int us) {
     if (ch < 0 || ch >= N) throw std::out_of_range("ServoDriver channel");
     const int clamped = std::clamp(us, lim_[ch].min_us, lim_[ch].max_us);
     if (!armed_[ch]) {
-        // First command: no slew history — start from the clamped target so
-        // the servo does not sweep in from an arbitrary current_ value.
-        current_[ch] = clamped;
+        // First command.  If the pulse the HAT is holding is known, ramp from it (see
+        // known_ in the header — jumping is a full-speed move).  Only when it is unknown do we
+        // start at the target: sweeping in from an arbitrary current_ would be no better.
+        current_[ch] = known_[ch] > 0 ? std::clamp(known_[ch], lim_[ch].min_us, lim_[ch].max_us)
+                                      : clamped;
         if (!timer_ready_[ch]) {
             hat_.setup_servo_timer(ch);
             for (int c = (ch / 4) * 4; c < (ch / 4) * 4 + 4; ++c) timer_ready_[c] = true;
@@ -46,6 +48,7 @@ void ServoDriver::tick() {
         const int step  = std::clamp(delta, -cfg_.slew_us_per_tick, cfg_.slew_us_per_tick);
         current_[ch] += step;
         hat_.set_pulse_us(ch, current_[ch]);
+        known_[ch] = current_[ch];
         if (current_[ch] <= lim_[ch].min_us || current_[ch] >= lim_[ch].max_us) ++at_limit_ticks_[ch];
     }
 }

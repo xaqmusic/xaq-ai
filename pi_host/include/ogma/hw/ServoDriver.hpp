@@ -68,7 +68,21 @@ public:
     // and then call forget_timers(); see McuReset.)
     void limp_all();
     // After an MCU reset every timer is unprogrammed: the next command() re-programs it.
-    void forget_timers() { timer_ready_.fill(false); }
+    // The reset also stops the PWM, so the last-sent pulses no longer describe the servos.
+    void forget_timers() { timer_ready_.fill(false); known_.fill(0); }
+
+    // ⚠ THE FIRST COMMAND ON A CHANNEL MUST SLEW FROM WHERE THE SERVO IS, NOT JUMP.
+    // An unarmed channel has no slew history, and command() used to start it AT the target —
+    // a step change the servo then crosses at its own full speed.  On the robot (2026-10-03)
+    // every fresh benchd's first pose ran all 12 servos at full speed at once; the inrush
+    // pulled the bench supply to 6.21 V and tripped the low-voltage rescue.  But the servo is
+    // not "nowhere": the HAT keeps holding the last pulse written to it, by this process or a
+    // previous one.  known_ is that pulse (0 = unknown).  It is updated on every write, kept
+    // across limp_all() (this HAT ignores pulse 0, so the last pulse stays on the line), cleared
+    // by forget_timers() (an MCU reset stops the PWM), and can be SEEDED by the owner from a
+    // previous process's record.  With it, a first command ramps from there at the slew rate.
+    void seed_known_pulse(int ch, int us) { if (ch >= 0 && ch < N && us > 0) known_[ch] = us; }
+    int  last_sent_us(int ch) const { return known_[ch]; }
 
     bool   armed(int ch) const { return armed_[ch]; }
     int    target_us(int ch) const { return target_[ch]; }
@@ -85,6 +99,7 @@ private:
     std::array<int, N>  current_{};
     std::array<bool, N> armed_{};
     std::array<bool, N> timer_ready_{};
+    std::array<int, N>  known_{};            // last pulse written to the HAT, 0 = unknown
     std::array<uint64_t, N> at_limit_ticks_{};
     uint64_t tick_count_ = 0;
     uint64_t last_cmd_tick_ = 0;

@@ -139,6 +139,14 @@ double g_tof_boom_z_m           = -0.070;   // 70 mm AFT; forward is +Z, so nega
 // How long the HAT rail must stay below VBAT_LIMP_V before benchd limps (see frame()).
 // 0 = the old instant trip.  --vbat-sustain-ms overrides.
 int64_t  g_vbat_sustain_ms = 1000;
+// The pulses this daemon last WROTE to the HAT, carried across restarts so a fresh benchd's
+// first command ramps from where the servos are instead of jumping at full speed
+// (ServoDriver::known_).  tmpfs on purpose: a reboot clears it, and after a reboot the HAT's
+// state is genuinely unknown.  The boot id inside makes a stale file impossible to trust.
+constexpr const char* kPulseStatePath = "/dev/shm/ogma_benchd_pulses.json";
+std::string read_boot_id() {
+    std::ifstream f("/proc/sys/kernel/random/boot_id"); std::string id; std::getline(f, id); return id;
+}
 int      g_state_pub_port = 0;
 void*    g_state_pub      = nullptr;
 uint64_t g_state_seq      = 0;
@@ -190,6 +198,7 @@ struct State {
     int  bus_errors = 0;
     json last_adc = json::array({0, 0, 0, 0, 0});
     bool low_battery = false;
+    json last_saved_pulses;           // what save_known_pulses() last wrote
     int64_t vbat_low_since_ms = -1;   // start of the current below-limp stretch, -1 if none
     double  vbat_dip_min      = 99.0;
     std::string rescue_name = "rescue";      // the pose that stands in for limp on this HAT
@@ -517,6 +526,17 @@ struct State {
         }
     }
     void limp_all(const char* why) { rescue(why); }
+    // Record the pulses last written to the HAT (caller holds m).  Atomic (write + rename),
+    // and only on change, so the 10 Hz telemetry thread costs a tmpfs write at most.
+    void save_known_pulses() {
+        json us = json::array();
+        for (int c = 0; c < ServoDriver::N; ++c) us.push_back(driver.last_sent_us(c));
+        if (us == last_saved_pulses) return;
+        const json f = {{"boot_id", read_boot_id()}, {"t_mono_ms", mono_ms()}, {"us", us}};
+        const std::string tmp = std::string(kPulseStatePath) + ".tmp";
+        { std::ofstream o(tmp); if (!o) return; o << f.dump(); }
+        if (std::rename(tmp.c_str(), kPulseStatePath) == 0) last_saved_pulses = us;
+    }
 
     // Begin a staggered, gentle move of many channels.  Channels are ordered by distance
     // to travel (shortest first) so the big swings start last, one every stagger period.
@@ -929,7 +949,7 @@ void telemetry_thread(State& S, void* pub) {
         if (++host_poll >= 10) { host_poll = 0; fresh = hs.sample(); have_fresh = fresh.ok; }
         std::string body;
         { std::lock_guard<std::mutex> lk(S.m); if (have_fresh) S.host = fresh;
-          json f = S.frame(); body = f.dump(); S.record("telemetry", f); }
+          json f = S.frame(); body = f.dump(); S.record("telemetry", f); S.save_known_pulses(); }
         // ONE frame: "bench " + JSON.  ZMQ_CONFLATE on the subscriber does not support
         // multi-part messages, and SUB filtering is a prefix match, so the topic rides in-band.
         const std::string msg = "bench " + body;
@@ -1318,6 +1338,32 @@ int main(int argc, char** argv) {
         std::lock_guard<std::mutex> lk(S.m);   // the tick thread reads it under the lock
         g_state_pub = sp;
     }
+    // Seed the driver with the pulses a previous benchd left on the HAT (same boot only).
+    {
+        std::lock_guard<std::mutex> lk(S.m);
+        int seeded = 0;
+        std::string why = "no record (cold start)";
+        std::ifstream pf(kPulseStatePath);
+        if (pf) {
+            try {
+                const json j = json::parse(pf);
+                if (j.value("boot_id", std::string()) != read_boot_id()) why = "record is from another boot";
+                else {
+                    const auto& us = j.at("us");
+                    for (int c = 0; c < ServoDriver::N && c < int(us.size()); ++c)
+                        if (us[size_t(c)].get<int>() > 0) { S.driver.seed_known_pulse(c, us[size_t(c)].get<int>()); ++seeded; }
+                    why = "same boot";
+                }
+            } catch (const std::exception& e) { why = std::string("unreadable record: ") + e.what(); }
+        }
+        if (seeded)
+            std::printf("ogma_benchd: servo start: %d/%d channels seeded from the last session's pulses (%s) — "
+                        "first commands RAMP from there\n", seeded, ServoDriver::N, why.c_str());
+        else
+            std::printf("ogma_benchd: servo start: ⚠ pulses UNKNOWN (%s) — the FIRST command on each channel "
+                        "moves at FULL servo speed; start from a pose near the robot's resting position\n", why.c_str());
+        S.record("servo_start", {{"seeded", seeded}, {"why", why}});
+    }
     std::printf("ogma_benchd: low-voltage limp below %.2f V sustained %lld ms%s\n", VBAT_LIMP_V,
                 (long long)g_vbat_sustain_ms, g_vbat_sustain_ms == 0 ? " (INSTANT — legacy)" : "");
     std::printf("ogma_benchd: state feed %s\n", g_state_pub_port > 0
@@ -1356,6 +1402,7 @@ int main(int argc, char** argv) {
         // Leave the ToF stopped rather than free-running after we are gone: the part
         // draws while it ranges, and the next daemon should meet an idle one.
         if (S.tof) { try { S.tof->stop_continuous(); } catch (const std::exception&) {} }
+        S.save_known_pulses();   // the next benchd ramps from these (same boot)
         S.record("shutdown", {});
     }
     // ⚠ EVERY socket must be closed before zmq_ctx_term, which blocks until they are.  The
