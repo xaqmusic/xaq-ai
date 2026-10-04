@@ -163,6 +163,7 @@ uint64_t g_state_seq      = 0;
 // Both OFF by default: no socket, no new code path, and the daemon stays the bench daemon.
 // LOOPBACK ONLY, by bind address: ogma_host runs on this Pi, and nothing on the network —
 // the laptop's dashboard included — has any route to the servos through these.
+std::string g_log_dir = "pi_host/log";
 int   g_cmd_port = 0;            // SUB: "cmd " + {seq, tick, us[12]} from ogma_host, CONFLATE
 int   g_ctl_port = 0;            // REP: mode.get / mode.set / stop / resume / status
 void* g_cmd_sub  = nullptr;      // touched only by tick_thread once it starts
@@ -321,6 +322,20 @@ struct State {
     double  ina_energy  = 0.0;        // J drawn since start
     int64_t ina_last_ms = 0;
     int     ina_errors  = 0;
+    // ---- FAST CAPTURE (2026-10-04): what actually browns out the HAT ---------------------
+    // The telemetry config averages 128 samples on BOTH channels, so a reading lands every
+    // ~140 ms: on the brain runs of 2026-10-04 ~440 readings above 2.4 A caused no reset and
+    // looked exactly like the 5 that preceded one.  The reset is a faster transient than the
+    // instrument.  `ina.capture` switches the part to single 12-bit conversions — sag mode,
+    // current AND pack voltage, ~940 Hz; inrush mode, current only, ~1.9 kHz — and a thread
+    // writes every raw sample to pi_host/log/inacap_<stamp>_<mode>.csv on CLOCK_MONOTONIC us
+    // (the clock the state feed and the run recordings use).  Instrument only.
+    int     cap_mode = 0;                 // 0 off, 1 inrush, 2 sag
+    int64_t cap_until_ms = 0;
+    std::string cap_file;
+    long    cap_samples = 0, cap_clipped = 0;
+    double  cap_peak_a = 0.0, cap_min_v = 99.0;
+    int64_t cap_started_ms = 0;
     // Belly clearance (BOM 2 #4).  Instrument only -- nothing in this daemon steers on
     // it.  null when the part is absent, and benchd then behaves exactly as before.
     std::unique_ptr<Vl53l0x> tof;
@@ -965,6 +980,13 @@ struct State {
                 {"stopped_ms", stopped ? now - stopped_at_ms : 0}, {"stops", stops},
                 {"brain", brain}, {"cal_stream_refused", cal_guard.refused()},
                 {"servo_lag_alpha", driver.output_lag()}, {"hat_resets", hat_resets},
+                {"ina_capture", cap_mode ? json{{"mode", cap_mode == 1 ? "inrush" : "sag"}, {"file", cap_file},
+                                                {"samples", cap_samples}, {"peak_a", cap_peak_a},
+                                                {"min_v", cap_mode == 2 ? json(cap_min_v) : json(nullptr)},
+                                                {"clipped", cap_clipped},
+                                                {"rate_hz", now > cap_started_ms ? cap_samples * 1000.0 / double(now - cap_started_ms) : 0.0},
+                                                {"ms_left", std::max<int64_t>(0, cap_until_ms - now)}}
+                                         : json(nullptr)},
                 {"hat", {{"outage", hat_outage}, {"healthy", hat_healthy(now)}, {"recovering", recovering},
                          {"recover_resume", recover_resume}, {"saved_channels", recover_targets.size()},
                          {"recover_pose", recover_pose_valid() ? json(recover_pose) : json(nullptr)},
@@ -1370,6 +1392,68 @@ void telemetry_thread(State& S, void* pub) {
     }
 }
 
+// The fast INA219 capture (see State::cap_*).  Takes the bus mutex only for each read (one or
+// two register transactions, ~0.15-0.3 ms), so the servo tick waits at most one read; the file
+// is written outside the lock.  Paced at the conversion time on an absolute deadline.
+void ina_capture_thread(State& S) {
+    std::FILE* f = nullptr;
+    std::vector<char> buf;
+    int mode = 0;
+    auto next = std::chrono::steady_clock::now();
+    while (g_run) {
+        bool active; int64_t until; std::string file;
+        { std::lock_guard<std::mutex> lk(S.m); active = S.cap_mode != 0; until = S.cap_until_ms; file = S.cap_file; mode = S.cap_mode; }
+        if (!active) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); continue; }
+        if (!f) {
+            f = std::fopen(file.c_str(), "w");
+            if (f) {
+                std::lock_guard<std::mutex> lk(S.m);
+                std::fprintf(f, "# ina219 %s capture: r_shunt %.6f ohm, pga full scale %.3f V, conv_us %d, clock CLOCK_MONOTONIC us\n"
+                                "t_us,shunt_raw,bus_raw\n", mode == 1 ? "inrush" : "sag", S.ina->r_shunt(),
+                             Ina219::pga_full_scale_v(S.ina->pga()), mode == 1 ? 532 : 1064);
+            }
+            next = std::chrono::steady_clock::now();
+        }
+        const auto period = std::chrono::microseconds(mode == 1 ? 532 : 1064);
+        const int64_t now_ms = mono_ms();
+        if (now_ms >= until) {                       // done: telemetry config back, close
+            {
+                std::lock_guard<std::mutex> lk(S.m);
+                try { S.ina->configure(ina219_telemetry_config()); } catch (...) {}
+                S.record("ina_capture_done", {{"file", S.cap_file}, {"samples", S.cap_samples},
+                                              {"seconds", (now_ms - S.cap_started_ms) / 1000.0},
+                                              {"peak_a", S.cap_peak_a}, {"min_v", mode == 2 ? json(S.cap_min_v) : json(nullptr)},
+                                              {"clipped", S.cap_clipped}});
+                S.cap_mode = 0;
+            }
+            if (f) { std::fclose(f); f = nullptr; }
+            continue;
+        }
+        int16_t sh = 0; uint16_t bu = 0; bool okr = true;
+        {
+            std::lock_guard<std::mutex> lk(S.m);
+            try {
+                if (mode == 1) sh = S.ina->read_shunt_raw();
+                else { const auto smp = S.ina->read(); sh = smp.shunt_raw; bu = smp.bus_raw; }
+                ++S.cap_samples;
+                const double ia = S.ina->shunt_to_amps(sh);
+                S.cap_peak_a = std::max(S.cap_peak_a, ia);
+                if (mode == 2) S.cap_min_v = std::min(S.cap_min_v, (bu >> 3) * Ina219::BUS_LSB_V);
+                if (std::abs(int(sh)) >= Ina219::pga_clip_counts(S.ina->pga())) ++S.cap_clipped;
+            } catch (const std::exception&) { okr = false; }
+        }
+        if (okr && f) {
+            timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+            std::fprintf(f, "%lld,%d,%u\n", (long long)ts.tv_sec * 1000000LL + ts.tv_nsec / 1000, int(sh), unsigned(bu));
+        }
+        next += period;
+        const auto now_tp = std::chrono::steady_clock::now();
+        if (next < now_tp - std::chrono::milliseconds(20)) next = now_tp;   // fell behind (a long tick): resync, don't burst
+        std::this_thread::sleep_until(next);
+    }
+    if (f) std::fclose(f);
+}
+
 bool load_map(State& S, const std::string& path, std::string& why) {   // caller holds m
     std::ifstream f(path); if (!f) { why = "cannot read " + path; return false; }
     try { S.map = json::parse(f); } catch (const std::exception& e) { why = std::string("bad json: ") + e.what(); return false; }
@@ -1389,7 +1473,7 @@ json handle(State& S, const json& req) {   // caller holds m
     // verb that commands or reconfigures the robot still do.  Tools that hold a pose while
     // polling `status` were updated to `ping` explicitly.
     static const std::set<std::string> kObserverVerbs = {
-        "status", "pose.get", "pose.list", "pose.save", "pose.delete", "mark", "adc.rate"};
+        "status", "pose.get", "pose.list", "pose.save", "pose.delete", "mark", "adc.rate", "ina.capture"};
     if (!kObserverVerbs.count(verb)) S.last_client_ms = now;
     auto ok  = [](json extra = json::object()) { extra["ok"] = true; return extra; };
     auto err = [](const std::string& e) { return json{{"ok", false}, {"error", e}}; };
@@ -1397,6 +1481,22 @@ json handle(State& S, const json& req) {   // caller holds m
     int ch = -1;
 
     if (verb == "ping")   return ok({{"t_mono_ms", now}});
+    if (verb == "ina.capture") {
+        const std::string m = req.value("mode", "sag");
+        if (!S.ina) return err("no INA219");
+        if (m == "off") { S.cap_until_ms = 0; return ok({{"stopping", S.cap_mode != 0}}); }   // the thread closes the file
+        if (m != "sag" && m != "inrush") return err("mode must be sag, inrush or off");
+        if (S.cap_mode) return err("a capture is already running: " + S.cap_file);
+        const double secs = std::clamp(req.value("seconds", 60.0), 1.0, 900.0);
+        S.cap_mode = m == "inrush" ? 1 : 2;
+        S.cap_file = g_log_dir + "/inacap_" + stamp_now() + "_" + m + ".csv";
+        S.cap_samples = S.cap_clipped = 0; S.cap_peak_a = 0.0; S.cap_min_v = 99.0;
+        S.cap_started_ms = now; S.cap_until_ms = now + int64_t(secs * 1000.0);
+        S.ina->configure(S.cap_mode == 1 ? ina219_capture_config() : ina219_sag_config());
+        S.record("ina_capture_start", {{"mode", m}, {"file", S.cap_file}, {"seconds", secs}});
+        return ok({{"file", S.cap_file}, {"mode", m}, {"seconds", secs},
+                   {"conv_us", S.cap_mode == 1 ? 532 : 1064}});
+    }
     if (verb == "status") { json f = S.frame(); f["map"] = S.map; return ok(f); }
     if (verb == "limp")   { S.rescue("verb"); return ok({{"rescue_pose", S.has_rescue() ? json(S.rescue_name) : json(nullptr)}}); }
     // ⚠ THE CALIBRATION CHANNEL CAN SEE THE MODE AND CANNOT SET IT (SPEC §1.1: no path from
@@ -1824,6 +1924,7 @@ int main(int argc, char** argv) {
 
     signal(SIGINT, on_sig); signal(SIGTERM, on_sig);
     const std::string log_path = log_dir + "/benchd_" + stamp_now() + ".jsonl";
+    g_log_dir = log_dir;
     State S(dev, body, map_path, poses_path, log_path);
     S.rescue_name = rescue_name_arg;
     std::printf("ogma_benchd: rescue pose '%s' %s\n", S.rescue_name.c_str(), S.has_rescue() ? "loaded" : "NOT SAVED YET — limp is impossible on this HAT, save one");
@@ -1976,6 +2077,7 @@ int main(int argc, char** argv) {
     std::thread tt(tick_thread, std::ref(S));
     std::thread tl(telemetry_thread, std::ref(S), pub);
     std::thread ti(imu_thread, std::ref(S));
+    std::thread tc(ina_capture_thread, std::ref(S));
     while (g_run) {
         zmq_pollitem_t items[] = {{rep, 0, ZMQ_POLLIN, 0}, {ctl, 0, ZMQ_POLLIN, 0}};
         if (zmq_poll(items, ctl ? 2 : 1, 100) <= 0) continue;
@@ -2002,7 +2104,7 @@ int main(int argc, char** argv) {
             zmq_send(sock, out.data(), out.size(), 0);
         }
     }
-    tt.join(); tl.join(); ti.join();
+    tt.join(); tl.join(); ti.join(); tc.join();
     {
         std::lock_guard<std::mutex> lk(S.m);
         // Leave the ToF stopped rather than free-running after we are gone: the part

@@ -332,6 +332,7 @@ class RunController:
         self.rec_dir = LOG_DIR / f"dashrun_{stamp}"
         self._audio = None
         self._feed = None
+        self._inacap = None
 
     # ---- operator actions (UI thread) ----
     def start(self) -> None:
@@ -466,6 +467,13 @@ class RunController:
                 self._ev_rec("audio_started" if self._audio else "audio_FAILED")
                 self._ev(f"recording audio + 50 Hz feed -> {self.rec_dir}" if self._audio
                          else "⚠ could not open the mic — recording the feed only")
+                # Fast current + pack voltage (~940 Hz, benchd ina.capture sag): the 140 ms
+                # telemetry average cannot see what browns the HAT out.
+                rc = self.io.bench.call("ina.capture", mode="sag", seconds=900)
+                self._inacap = (rc or {}).get("file") if rc and rc.get("ok") else None
+                self._ev_rec("ina_capture_start", file=self._inacap)
+                if not self._inacap:
+                    self._ev(f"⚠ fast current capture not started: {(rc or {}).get('error', 'no reply')}")
             except Exception as e:
                 self._ev(f"⚠ recording not started: {e!r}")
         # ---- pose: the first motion ----
@@ -616,10 +624,14 @@ class RunController:
             self._ev_rec("audio_stop")
         if self._feed is not None:
             frames = self._feed.stop(); self._feed = None
+        if self._inacap:
+            self.io.bench.call("ina.capture", mode="off")
+            self._ev_rec("ina_capture_stop", file=self._inacap)
         if self.record and self.rec_dir.exists():
             meta = {"config": self.cfg.file, "name": self.cfg.name, "pose": self.pose, "run_mode": self.run_mode,
                     "audio": {"device": "plughw:CARD=Device,DEV=0", "rate": 48000, "seconds": round(secs, 1)},
                     "feed_frames": frames, "hat_resets": self.st.hat_resets,
+                    "ina_capture": self._inacap,
                     "brain_seconds": round(self.io.now() - self.st.started_at, 1) if self.st.started_at else 0.0,
                     "sync": {"leg": self.SYNC_PHYS_LEG, "joint": self.SYNC_JOINT, "us": self.SYNC_US, "n": self.SYNC_N}}
             try:
