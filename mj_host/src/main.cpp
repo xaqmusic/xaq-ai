@@ -17,7 +17,10 @@
 // than in somebody's memory.
 
 #include <algorithm>
+#include <malloc.h>
+#include <cstdlib>
 #include <deque>
+#include <fstream>
 #include <sstream>
 #include <cmath>
 #include <functional>
@@ -1325,6 +1328,18 @@ bool g_gaze_motion = false;
 // was last inside the sensor's 45 deg cone -- the stalest within MAX_YAW of the body's axis, if older than STALE_S; else
 // straight ahead.  A target for the head brain's learned gaze, not a sweep: a sector seen is fresh, so the look moves on.
 double g_look_around = 0.0, g_look_stale_s = 2.0;
+// OGMA_PROFILE=1 (2026-10-04): the process's resident memory at named points, beside the scheduler's per-module timing
+void profile_rss(const char* where) {
+    const char* p = std::getenv("OGMA_PROFILE");
+    if (!p || !p[0] || p[0] == '0') return;
+    std::ifstream f("/proc/self/status"); std::string line, rss = "?", hwm = "?";
+    while (std::getline(f, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) rss = line.substr(6);
+        if (line.rfind("VmHWM:", 0) == 0) hwm = line.substr(6);
+    }
+    const struct mallinfo2 mi = mallinfo2();
+    std::fprintf(stderr, "OGMA_PROFILE rss %-28s VmRSS%s  VmHWM%s  heap in use %zu kB\n", where, rss.c_str(), hwm.c_str(), mi.uordblks / 1024);
+}
 // THE SIGN FIXES (2026-10-04, design doc §17.108), each a lever:
 //   --fix-escape-sign: the stuck and wall escapes head for the freest sector of the cloud view (sector 0 is on the RIGHT, its
 //     azimuth + = left), not its mirror image;
@@ -1621,7 +1636,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     Policy scaffold(kStandScaffold);
     Policy walker(kWalkScaffold);
     Recovery recovery;
+    profile_rss("before the intent brain");
     IntentAdapter brain(graph, seed);
+    profile_rss("after the intent brain");
     if (open_loop) brain.set_override(*open_loop);
     if (g_wander_bored_s > 0.0) brain.set_wander(g_wander_bored_s, g_wander_turn_deg, seed);
     if (g_no_backing) brain.set_no_backing(true);
@@ -1782,7 +1799,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const bool has_objects = body.n_objects() > 0;
     std::unique_ptr<HeadAdapter> head;
     if (!g_head_graph.empty()) {
+        profile_rss("before the head brain");
         head = std::make_unique<HeadAdapter>(g_head_graph, seed);
+        profile_rss("after the head brain");
         if (g_head_gaze_sense) head->set_gaze_sense(true);
         if (g_head_stop_slew > 0.0) { head->set_release_slew(g_head_stop_slew);
             std::fprintf(stderr, "  head stop slew: at a stop the yaw slews home at %.2f rad/s until the look takes it, and back to the head brain's command when the stop lets go\n", g_head_stop_slew); }
@@ -1868,7 +1887,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         calibrate_stand_home(probe, seed, stand_home, stand_hcom);
         OgmaBrainAdapter::Config sc{g_stop_brain, seed, 0.35, stand_home, stand_hcom};
         sc.inspector_offset = 4; sc.inspector_role = "stand";
+        profile_rss("before the stop brain");
         stander = std::make_unique<OgmaBrainAdapter>(probe, sc);
+        profile_rss("after the stop brain");
         if (g_servo_filter) stander->set_servo_filter(true);
         if (!g_stop_load.empty()) {
             std::ifstream in(g_stop_load);
@@ -1878,6 +1899,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         }
         stander->set_learning(false);
         if (g_stop.keep_head) stander->freeze_module("motor_epm_head");   // the head is the head brain's: this module's commands are not applied
+        profile_rss("all three brains built");
         std::fprintf(stderr, "stops: every %.0f s for %.0f s from %.0f s; the joint brain %s%s%s takes the legs when still",
                      g_stop.every_s, g_stop.secs, g_stop.from_s, g_stop_brain.c_str(),
                      g_stop_load.empty() ? "" : " restored from ", g_stop_load.c_str());
@@ -3189,6 +3211,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (stander) for (const auto& line : stander->diagnostics()) std::fprintf(stderr, "  stander: %s\n", line.c_str());
     }
     const double total = recovery.brain_seconds() + recovery.scaffold_seconds();
+    profile_rss("end of the run");
+    if (const char* pp = std::getenv("OGMA_PROFILE"); pp && pp[0] && pp[0] != '0') {
+        std::fprintf(stderr, "OGMA_PROFILE state (JSON) intent %zu kB", brain.brain_state().dump().size() / 1024);
+        if (head) std::fprintf(stderr, ", head %zu kB", head->brain_state().dump().size() / 1024);
+        if (stander) std::fprintf(stderr, ", stop %zu kB", stander->brain_state().dump().size() / 1024);
+        std::fprintf(stderr, "\n");
+    }
     std::fprintf(stderr, "level-2 %.0f s — %d rescues, %.0f%% of the run walker-driven; learning frozen %.0f%%\n",
                  seconds, recovery.rescues(), 100.0 * recovery.brain_seconds() / std::max(total, 1e-9),
                  100.0 * frozen_ticks / ticks);

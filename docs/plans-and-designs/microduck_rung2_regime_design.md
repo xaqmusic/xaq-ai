@@ -7053,3 +7053,29 @@ during short-term decisions (not turning the wrong way into a wall), and seems m
 eye sees what n = 24 could not resolve (the walls and skill-contact leans, the sweep on the target's side). ★ F5 is the demo
 configuration for Pollen: config `a1v2_la1_f4_map_wide` + ★ LA1's host args + `--fix-escape-sign --fix-sweep-sign
 --map-bake-honest` (launcher preset, second row).
+
+### 17.110 The resource push: what the brain costs, and the cloud map's first optimisations (2026-10-04)
+
+**The operator:** would Pollen read the brain as too CPU- or memory-hungry for the Radxa Zero 3W (RK3566, 4× Cortex-A55)?
+Instruments: `OGMA_PROFILE=1` (the scheduler times every module's tick in thread CPU and prints mean / p50 / p95 / p99 / max per
+brain at exit; CloudMap prints its stages; the host prints RSS, heap in use around each brain's construction and each brain's
+state size). Off = no timing, byte-identical. Desktop (Intel Core Ultra 7 265F), ★ F5, 600 s:
+- **The intent brain** 264–288 µs a tick mean (p99 2.4–3.0 ms, max 5.4–8.4 ms), the **cloud map 84 %** of it; the other 14
+  modules ~45 µs together. **The head brain** 12.5 µs; **the stop brain** 39 µs, only while standing.
+- **Memory:** the brains' heap at construction 283 kB (intent) + 50 kB (head) + 105 kB (stop); state after 10 minutes 305 /
+  31 / 275 kB (JSON). The process's 0.5–0.77 GB is MuJoCo, ONNX and the stander's calibration body — none of it on the robot.
+- **On the picrawler-dev branch's Pi 5** the full picrawler graph ran 0.14–0.3 ms a tick, 0 overruns in 3000 ticks.
+
+**The cloud map's stages** (mean a tick): clustering 98 µs (max 4.3 ms), mover detection 40 (1.8 ms), adding the cast 31 (the
+host repeats each cast for 4 ticks and it was re-added each time), the profile 20, the new-voxel share 13, target_tall 11.
+- **O1 the tall index — `WORKING`, exact.** `tall_near` walked the whole cloud for every cluster (clusters × voxels); a per-column
+  count of tall voxels, built once per call, gives the identical count. ★ F5 seed 5 byte-identical over 600 s. Mean 266 → 228
+  µs, p99 2.36 → 1.64 ms, max 5.3 → 3.0 ms. Adopted (no switch: the result is identical).
+- **O2 `cast_once 1` — `REGRESSION`.** Each cast added once (repeats detected by the points' x, y: their z carries the trunk height
+  re-added each tick, MotionField's rule) and the profile cached until the cloud changes. Mean 228 → 177 µs, p99 1.13 ms; but
+  n = 24 against ★ F5: skills touching 35 → 25 % (CI [−18, −1]), skills, contacts and walls all leaning worse. **The stack's
+  thresholds were tuned on the 4× counting** (hits per column in the thing descriptor): changing the cloud's statistics is never
+  a free optimisation. Re-use: with the thresholds re-derived on single counts.
+- **O2b `cast_once 2` (weighted by the ticks a cast stood for) — behaviour `NULL` (ties every measure, boring 20.9 → 18.6 %),
+  cost unresolved:** a whole-run profile follows the run's own path (seed 1's weighted run built larger clouds and every stage,
+  related or not, cost ~2×). Cost A/Bs of the cloud need the SAME inputs: the replay benchmark (§17.111).

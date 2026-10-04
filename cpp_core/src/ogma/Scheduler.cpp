@@ -16,6 +16,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_set>
@@ -53,19 +58,58 @@ public:
         // (auto_subscribe=false), every module starts default-deny with
         // an allowlist seeded from boot_edges.
         if (!auto_subscribe_) install_manual_gates();
+        // OGMA_PROFILE=1 (2026-10-04, the resource question for Pollen): time every module's tick and the whole tick in
+        // this thread's CPU time, and print the distribution when the scheduler is destroyed.  Unset = no timing at all.
+        const char* prof = std::getenv("OGMA_PROFILE");
+        profile_ = prof && prof[0] && prof[0] != '0';
     }
+
+    ~MinimalScheduler() override { if (profile_) print_profile(); }
 
     void tick() override {
         process_pending_patches();
 
         bus_->begin_tick(current_tick_);
-        for (auto& m : *modules_) m->tick(current_tick_);
+        if (!profile_) {
+            for (auto& m : *modules_) m->tick(current_tick_);
+        } else {
+            if (order_.empty()) for (auto& m : *modules_) order_.emplace_back(std::string(m->id()), std::string(m->type_name()));
+            const double t_all = cpu_us();
+            for (auto& m : *modules_) {
+                const double t0 = cpu_us();
+                m->tick(current_tick_);
+                const double dt = cpu_us() - t0;
+                auto& s = mod_[std::string(m->id())];
+                s.sum += dt; s.max = std::max(s.max, dt); ++s.n;
+            }
+            whole_.push_back(cpu_us() - t_all);
+        }
         bus_->end_level();
         bus_->end_tick();
         ++current_tick_;
     }
 
     uint64_t current_tick() const override { return current_tick_; }
+
+    static double cpu_us() {
+        timespec ts; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+        return double(ts.tv_sec) * 1e6 + double(ts.tv_nsec) * 1e-3;
+    }
+    void print_profile() const {
+        if (whole_.empty()) return;
+        std::vector<double> w = whole_; std::sort(w.begin(), w.end());
+        const auto q = [&](double f) { return w[std::min(w.size() - 1, size_t(f * double(w.size())))]; };
+        double sum = 0.0; for (double v : w) sum += v;
+        std::fprintf(stderr, "OGMA_PROFILE brain [%s ...] %zu modules, %zu ticks, thread CPU us per tick: mean %.1f p50 %.1f p95 %.1f p99 %.1f max %.1f\n",
+                     order_.empty() ? "" : order_.front().first.c_str(), order_.size(), w.size(),
+                     sum / double(w.size()), q(0.5), q(0.95), q(0.99), w.back());
+        for (auto const& [id, type] : order_) {   // names copied at the first profiled tick: the modules may be gone by now
+            auto it = mod_.find(id);
+            if (it == mod_.end() || it->second.n == 0) continue;
+            std::fprintf(stderr, "OGMA_PROFILE   %-22s %-24s mean %8.2f us  max %9.1f us  share %5.1f %%\n", id.c_str(),
+                         type.c_str(), it->second.sum / double(it->second.n), it->second.max, 100.0 * it->second.sum / sum);
+        }
+    }
 
     BatchId enqueue_hot_patch(GraphPatchBatch batch) override {
         std::lock_guard<std::mutex> lock(patch_mutex_);
@@ -422,6 +466,11 @@ private:
     }
 
     Bus*                                                bus_;
+    bool profile_ = false;
+    struct ModStat { double sum = 0.0, max = 0.0; uint64_t n = 0; };
+    std::map<std::string, ModStat> mod_;
+    std::vector<double> whole_;
+    std::vector<std::pair<std::string, std::string>> order_;
     ModuleList*                                         modules_;
     std::vector<EdgeSpec>                               edges_;
     bool                                                auto_subscribe_   = true;

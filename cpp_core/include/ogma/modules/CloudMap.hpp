@@ -122,7 +122,14 @@ public:
     };
 
     CloudMap() = default;
-    ~CloudMap() override = default;
+    ~CloudMap() override;
+    // OGMA_PROFILE=1 (2026-10-04): thread-CPU time per stage of the tick, printed at destruction
+    enum Stage { kStAddCast, kStNewFrac, kStThings, kStMovers, kStTall, kStProfile, kStRest, kStages };
+    bool prof_ = false;
+    double prof_us_[kStages] = {}, prof_max_[kStages] = {};
+    uint64_t prof_n_ = 0;
+    static double prof_now();
+    mutable double prof_cl_[5] = {};   // inside cluster_things: columns, components+stats, chain, line build, line use + near_tall
 
     std::string_view       type_name()      const override;
     std::vector<TopicSpec> input_topics()   const override;
@@ -354,6 +361,15 @@ private:
     // free_rays (S1): every ray of the cast, returning or not (the empty zones' rays from the cast's appended block),
     // walked from the origin; per column the highest free sample above break_lo.  small_needs_top gates `small` on it.
     bool     free_rays_ = false, small_needs_top_ = false;
+    // CAST ONCE (2026-10-04, the resource push): the host republishes a ToF cast every tick until the next one (the sensor
+    // casts every 4th); with cast_once a repeated cast is not re-added (it had counted every point 4x and pulled each voxel's
+    // mean height toward the latest cast), and the profile is recomputed only when the cloud changed.  Off = byte-identical.
+    bool cast_once_ = false;
+    bool cast_weighted_ = false;      // cast_once 2: a cast counts for the ticks it stood for (the hit counts as before)
+    uint64_t last_cast_tick_ = 0; uint32_t cast_w_ = 1;
+    std::vector<float> last_cast_;
+    bool cloud_dirty_ = true;
+    std::vector<float> profile_cache_;
     // line_tol_k (S1b): > 0 = a small cluster with half or more of its columns within max(1 voxel, line_tol_k x range) of the
     // closed tall footprint is a fragment of it, not a thing.  line_close_k: the closing radius per metre of range (the
     // ToF's zone spacing, 45 deg / 8 = 0.098 rad).  0 = off, byte-identical.

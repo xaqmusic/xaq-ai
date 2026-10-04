@@ -1,6 +1,9 @@
 #include "ogma/modules/CloudMap.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <unordered_set>
 #include <cmath>
 
@@ -27,6 +30,22 @@ std::string get_s(ParamMap const& p, const char* k, const char* dflt = "") {
 }  // namespace
 
 std::string_view CloudMap::type_name() const { return "CloudMap"; }
+
+double CloudMap::prof_now() {
+    timespec ts; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return double(ts.tv_sec) * 1e6 + double(ts.tv_nsec) * 1e-3;
+}
+CloudMap::~CloudMap() {
+    if (!prof_ || prof_n_ == 0) return;
+    static const char* const names[kStages] = {"add_cast", "new_frac", "things (cluster)", "movers", "target_tall", "profile", "rest"};
+    double tot = 0.0; for (double v : prof_us_) tot += v;
+    std::fprintf(stderr, "OGMA_PROFILE cloud stages over %llu ticks (mean us per tick, max, share):\n", (unsigned long long)prof_n_);
+    std::fprintf(stderr, "OGMA_PROFILE   inside clustering, mean us per tick: columns %.2f, components+stats %.2f, chain %.2f, line build %.2f, line use + near_tall %.2f\n",
+                 prof_cl_[0] / double(prof_n_), prof_cl_[1] / double(prof_n_), prof_cl_[2] / double(prof_n_), prof_cl_[3] / double(prof_n_), prof_cl_[4] / double(prof_n_));
+    for (int i = 0; i < kStages; ++i)
+        std::fprintf(stderr, "OGMA_PROFILE   %-18s %8.2f us  max %8.1f us  %5.1f %%\n", names[i], prof_us_[i] / double(prof_n_), prof_max_[i],
+                     tot > 0.0 ? 100.0 * prof_us_[i] / tot : 0.0);
+}
 
 std::vector<TopicSpec> CloudMap::input_topics() const {
     std::vector<TopicSpec> t;
@@ -231,6 +250,9 @@ ParamSchema CloudMap::params_schema() const {
         {"mover_isolated", ParamMutability::HotMutable,
          "The mover candidate must be isolated (tall_near 0): a young fragment of a wall base or a chair is not a mover.",
          ParamValue{false}},
+        {"cast_once", ParamMutability::HotMutable,
+            "Add each ToF cast once (the host repeats it between casts) and recompute the profile only when the cloud changed. 0 = every tick, as before.",
+            ParamValue{0.0}},
         {"free_rays", ParamMutability::HotMutable,
          "TOP SEEN (the ten-minutes phase S1): walk every ray of each cast from the sensor's origin -- returning rays to "
          "1.5 voxels short of the return, empty rays (the host's --tof-free-rays block) to max_range -- and record per column "
@@ -330,7 +352,7 @@ ParamMap CloudMap::current_params() const {
     m["target_tall_topic"] = ParamValue{target_tall_topic_}; m["target_iso_radius"] = target_iso_radius_;
     m["iso_height"] = iso_height_; m["iso_radius"] = iso_radius_; m["mover_isolated"] = mover_isolated_;
     m["things_isolated"] = things_isolated_; m["things_age_dim"] = things_age_dim_;
-    m["free_rays"] = free_rays_; m["small_needs_top"] = small_needs_top_;
+    m["free_rays"] = free_rays_; m["small_needs_top"] = small_needs_top_; m["cast_once"] = cast_once_;
     m["line_tol_k"] = line_tol_k_; m["line_close_k"] = line_close_k_; m["context_topic"] = ParamValue{context_topic_};
     m["walk_reset_m"] = walk_reset_m_;
     return m;
@@ -373,6 +395,7 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "mover_isolated") mover_isolated_ = get_d(one, "mover_isolated", 0.0) > 0.5;
     else if (k == "things_isolated") things_isolated_ = get_d(one, "things_isolated", 0.0) > 0.5;
     else if (k == "free_rays") free_rays_ = get_d(one, "free_rays", 0.0) > 0.5;
+    else if (k == "cast_once") { const double c = get_d(one, "cast_once", 0.0); cast_once_ = c > 0.5; cast_weighted_ = c > 1.5; }
     else if (k == "small_needs_top") small_needs_top_ = get_d(one, "small_needs_top", 0.0) > 0.5;
     else if (k == "line_tol_k") line_tol_k_ = get_d(one, "line_tol_k", line_tol_k_);
     else if (k == "line_close_k") line_close_k_ = get_d(one, "line_close_k", line_close_k_);
@@ -391,6 +414,7 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
 
 void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     bus_ = bus;
+    { const char* pe = std::getenv("OGMA_PROFILE"); prof_ = pe && pe[0] && pe[0] != '0'; }
     input_topic_  = get_s(params, "input_topic");
     place_topic_  = get_s(params, "place_topic");
     output_topic_ = get_s(params, "output_topic");
@@ -446,6 +470,7 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     things_isolated_ = get_d(params, "things_isolated", 0.0) > 0.5;
     things_age_dim_ = get_d(params, "things_age_dim", 0.0) > 0.5;
     free_rays_ = get_d(params, "free_rays", 0.0) > 0.5;
+    { const double c = get_d(params, "cast_once", 0.0); cast_once_ = c > 0.5; cast_weighted_ = c > 1.5; }
     small_needs_top_ = get_d(params, "small_needs_top", 0.0) > 0.5;
     line_tol_k_ = get_d(params, "line_tol_k", line_tol_k_);
     line_close_k_ = get_d(params, "line_close_k", line_close_k_);
@@ -453,6 +478,7 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
 }
 
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
+    cloud_dirty_ = true; last_cast_.clear();
     vox_.clear();
     vacated_.clear();
     free_col_.clear();
@@ -479,6 +505,19 @@ void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick
 }
 
 void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, uint64_t tick) {
+    if (cast_once_) {
+        // the same cast again (the host repeats it until the sensor's next): the points' x, y are unchanged (their z carries
+        // the trunk's height, re-added every tick, so it moves between casts -- MotionField's rule)
+        const int n = std::min<int>(int(v.size()), 5 + 3 * kZones);
+        bool same = int(last_cast_.size()) == n;
+        for (int i = 5; same && i + 1 < n; i += 3) same = last_cast_[size_t(i)] == v[i] && last_cast_[size_t(i + 1)] == v[i + 1];
+        if (same) return;
+        last_cast_.assign(v.data(), v.data() + n);
+        cloud_dirty_ = true;
+        // weighted: the ticks since the previous cast (the sensor's period, 4), at most 8 so a gap does not inflate one cast
+        cast_w_ = cast_weighted_ ? uint32_t(std::clamp<uint64_t>(last_cast_tick_ > 0 ? tick - last_cast_tick_ : 4, 1, 8)) : 1;
+        last_cast_tick_ = tick;
+    }
     if (int(vox_.size()) >= max_voxels_) return;
     double d = yaw - anchor_yaw_;
     while (d > kPi) d -= 2.0 * kPi;
@@ -511,8 +550,8 @@ void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, ui
             vv.first = tick;
             if (hz >= break_lo_ && hz < break_hi_) ++break_vox_;
         }
-        ++vv.hits;
-        vv.zsum += float(hz);
+        vv.hits += cast_w_;
+        vv.zsum += float(cast_w_) * float(hz);
         vv.last = tick;
         cast_vox_.push_back(ix); cast_vox_.push_back(iy); cast_vox_.push_back(iz);
         cast_vox_.push_back(int32_t(std::lround(1000.0 * double(vv.zsum) / double(vv.hits))));
@@ -594,6 +633,7 @@ void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, ui
 }
 
 void CloudMap::file_cloud(uint64_t tick) {
+    cloud_dirty_ = true;
     open_ = false;
     just_closed_ = true;
     filed_walking_ = walking_cloud_;
@@ -671,6 +711,8 @@ void CloudMap::tick(uint64_t tick_id) {
     if (!pt || pt->values.size() < 3) return;
     if (pt->values.size() < 5) return;
     last_tick_ = tick_id;
+    double cur[kStages] = {}; double t0 = prof_ ? prof_now() : 0.0;
+    const auto mark = [&](int st) { if (!prof_) return; const double n = prof_now(); cur[st] += n - t0; t0 = n; };
     const bool still = pt->values[0] > 0.5f;
     const double yaw = double(pt->values[1]);
     const double trunk_z = double(pt->values[2]);
@@ -686,14 +728,14 @@ void CloudMap::tick(uint64_t tick_id) {
         else if (open_ && walking_cloud_ && still_run_ >= still_ticks_) { file_cloud(tick_id); open_cloud(yaw, ox, oy, tick_id); walking_cloud_ = false; }
         else if (open_ && walking_cloud_ && std::hypot(ox - anchor_x_, oy - anchor_y_) > walk_reset_m_) { file_cloud(tick_id); open_cloud(yaw, ox, oy, tick_id); walking_cloud_ = true; }
         else if (!open_) { open_cloud(yaw, ox, oy, tick_id); walking_cloud_ = still_run_ < still_ticks_; }
-        add_cast(pt->values, yaw, trunk_z, tick_id);
+        mark(kStRest); add_cast(pt->values, yaw, trunk_z, tick_id); mark(kStAddCast);
     } else {
         if (!open_ && still_run_ >= still_ticks_) open_cloud(yaw, ox, oy, tick_id);
         if (open_ && move_run_ >= move_ticks_) { file_cloud(tick_id); publish_bearing(tick_id); return; }
         if (!open_) { publish_bearing(tick_id); return; }
         // a twitch does not end the cloud, but nor does it contribute: the de-rotation's premise is a
         // still trunk, so a moving tick is simply skipped and the sweep resumes when the body settles.
-        if (still) add_cast(pt->values, yaw, trunk_z, tick_id);
+        if (still) { mark(kStRest); add_cast(pt->values, yaw, trunk_z, tick_id); mark(kStAddCast); }
     }
 
     // the place, for the cache key: count every tick's winner while the cloud is open
@@ -702,6 +744,7 @@ void CloudMap::tick(uint64_t tick_id) {
             if (rt->winner_id >= 0) ++winner_hist_[rt->winner_id];
 
     // change WITHIN the sweep: of the voxels touched lately, how many are new
+    mark(kStRest);
     {
         const uint64_t lo = tick_id > uint64_t(new_window_) ? tick_id - uint64_t(new_window_) : 0;
         int touched = 0, fresh = 0;
@@ -713,6 +756,7 @@ void CloudMap::tick(uint64_t tick_id) {
         }
         new_frac_ = touched ? double(fresh) / double(touched) : 0.0;
     }
+    mark(kStNewFrac);
     // The revisit judgement is made at FILE time, on a finished cloud — see file_cloud.
 
     if (things_on_ && !walk_things_ && open_ && walking_cloud_) {
@@ -720,7 +764,7 @@ void CloudMap::tick(uint64_t tick_id) {
         things_.clear(); attended_ = -1; bearing_ = {0.0f, 0.0f, 0.0f};
         publish_bearing(tick_id);
     } else if (things_on_) {
-        if (tick_id % uint64_t(things_every_) == 0) update_things(yaw);
+        if (tick_id % uint64_t(things_every_) == 0) { mark(kStRest); update_things(yaw); mark(kStThings); }
         else if (attended_ >= 0) update_bearing(yaw);   // the body's yaw drifts between recomputes
         if (!things_topic_.empty() && attended_ >= 0) {
             auto out = std::make_shared<ProprioToken>();
@@ -743,18 +787,21 @@ void CloudMap::tick(uint64_t tick_id) {
         publish_bearing(tick_id);
     }
     if (!mover_topic_.empty()) {
-        if (tick_id % uint64_t(things_every_) == 0) update_movers(yaw, tick_id);
+        if (tick_id % uint64_t(things_every_) == 0) { mark(kStRest); update_movers(yaw, tick_id); mark(kStMovers); }
         else if (mover_ >= 0) mover_bearing_ = bearing_of(recent_[size_t(mover_)], yaw);
         publish_mover(tick_id);
     }
-    if (!target_tall_topic_.empty()) publish_target_tall(yaw, tick_id);
+    if (!target_tall_topic_.empty()) { mark(kStRest); publish_target_tall(yaw, tick_id); mark(kStTall); }
 
     if (!output_topic_.empty()) {
         auto out = std::make_shared<ProprioToken>();
         out->tick_id = tick_id;
         out->producer_id = std::string(id());
         out->sensor = "cloud";
-        const auto p = profile();
+        mark(kStRest);
+        if (!cast_once_ || cloud_dirty_ || profile_cache_.empty()) { profile_cache_ = profile(); cloud_dirty_ = false; }
+        const auto& p = profile_cache_;
+        mark(kStProfile);
         out->values = Eigen::VectorXf::Map(p.data(), long(p.size()));
         bus_->publish(output_topic_, out);
     }
@@ -768,6 +815,11 @@ void CloudMap::tick(uint64_t tick_id) {
         out->values[1] = float(revisit_change_);
         bus_->publish(change_topic_, out);
     }
+    if (prof_) {
+        mark(kStRest);
+        for (int i = 0; i < kStages; ++i) { prof_us_[i] += cur[i]; prof_max_[i] = std::max(prof_max_[i], cur[i]); }
+        ++prof_n_;
+    }
 }
 
 // The stack rule (design doc §17.31), as cloud_objects.py scores it offline, on the live voxels.
@@ -776,6 +828,8 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things() const { return cluster_t
 std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const {
     std::vector<Thing> out;
     if (vox_.empty()) return out;
+    double pt0 = prof_ ? prof_now() : 0.0;
+    const auto pmark = [&](int i) { if (!prof_) return; const double n = prof_now(); prof_cl_[i] += n - pt0; pt0 = n; };
     struct Col { std::vector<std::pair<double, uint32_t>> hs; bool seed = false; int n = 0, fresh = 0; double age = 0.0, agew = 0.0, nhits = 0.0; };
     std::unordered_map<int64_t, Col> cols;   // keyed by (ix, iy, 0)
     for (auto const& [k, vv] : vox_) {
@@ -791,6 +845,7 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
         c.age += double(vv.last - vv.first);
         c.agew += double(vv.hits) * double(vv.last - vv.first); c.nhits += double(vv.hits);
     }
+    pmark(0);
     // THE LINE (S1b): the tall footprint and its dilation, built once per call on the first cluster that needs it
     std::unordered_set<int64_t> tall_cols, dilated;
     bool line_built = false;
@@ -824,6 +879,20 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
         for (auto [dx, dy] : disc(close_r(x, y)))
             if (!dilated.count(key_of(x + dx, y + dy, 0))) return false;
         return true;
+    };
+    // THE TALL INDEX (2026-10-04, the resource push): the count of voxels at or above iso_height per column, built once per
+    // call -- each cluster's tall_near then reads the columns of its window instead of walking the whole cloud (it was
+    // clusters x voxels: the 4 ms spikes).  Every voxel of a column shares the column's centre, so the count is identical.
+    std::unordered_map<int64_t, int> tall_count;
+    bool tall_built = false;
+    const auto build_tall = [&]() {
+        tall_built = true;
+        for (auto const& [k, vv] : vox_) {
+            const double h = double(vv.zsum) / double(std::max<uint32_t>(1, vv.hits));
+            if (h < iso_height_) continue;
+            int ix, iy, iz; unkey(k, ix, iy, iz);
+            ++tall_count[key_of(ix, iy, 0)];
+        }
     };
     std::unordered_map<int64_t, bool> seen;
     for (auto const& [k0, c0] : cols) {
@@ -877,17 +946,18 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
             // foot of a wall knows the wall above it
             const int r = int(std::ceil(iso_radius_ / voxel_m_)) + 1;
             const int cx0 = int(std::floor(t.cx / voxel_m_)), cy0 = int(std::floor(t.cy / voxel_m_));
-            for (auto const& [k, vv] : vox_) {
-                int ix, iy, iz; unkey(k, ix, iy, iz);
-                if (std::abs(ix - cx0) > r || std::abs(iy - cy0) > r) continue;
-                const double h = double(vv.zsum) / double(std::max<uint32_t>(1, vv.hits));
-                if (h < iso_height_) continue;
-                if (std::hypot((ix + 0.5) * voxel_m_ - t.cx, (iy + 0.5) * voxel_m_ - t.cy) <= iso_radius_) ++t.tall_near;
-            }
+            if (!tall_built) build_tall();
+            for (int ix = cx0 - r; ix <= cx0 + r; ++ix)
+                for (int iy = cy0 - r; iy <= cy0 + r; ++iy) {
+                    auto it = tall_count.find(key_of(ix, iy, 0));
+                    if (it == tall_count.end()) continue;
+                    if (std::hypot((ix + 0.5) * voxel_m_ - t.cx, (iy + 0.5) * voxel_m_ - t.cy) <= iso_radius_) t.tall_near += it->second;
+                }
         }
         t.rng = std::hypot(t.cx, t.cy);
         const double ex = xmax - xmin + voxel_m_, ey = ymax - ymin + voxel_m_;
         t.ext = std::max(ex, ey); t.ext_min = std::min(ex, ey);
+        pmark(1);
         // the chain: every height over the DILATED footprint, climbed from lo while each step is within the gap
         const double gap = std::max(gap_min_, gap_k_ * t.rng);
         std::vector<double> heights;
@@ -920,8 +990,9 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
             }
             if (small_needs_top_ && t.seen_above < t.top + voxel_m_) t.small = false;   // its top was never seen
         }
+        pmark(2);
         if ((line_tol_k_ > 0.0 || !context_topic_.empty()) && t.small) {
-            if (!line_built) build_line();
+            if (!line_built) { build_line(); pmark(3); }
             const double tk = line_tol_k_ > 0.0 ? line_tol_k_ : 0.5 * line_close_k_;
             const auto tol = disc(std::max(1.0, tk * t.rng / voxel_m_));
             int on = 0;
@@ -945,6 +1016,7 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
             }
             if (line_tol_k_ > 0.0 && 2 * on >= int(comp.size())) t.small = false;   // a fragment of the line, not a thing
         }
+        pmark(4);
         out.push_back(t);
     }
     std::sort(out.begin(), out.end(), [](const Thing& a, const Thing& b) { return a.rng < b.rng; });
