@@ -6240,3 +6240,55 @@ But every reset is a 3 s interruption. Options:
 **Scale of the claim.** "Sim2real validated" here is the operator's direct observation of behaviour
 plus the parity table — a strong signal at this stage, not a seed-averaged finding. The finding-level
 version needs a distance/heading measure on the robot and n ≥ 20 runs, which power currently caps.
+
+### ★★ 2026-10-04 — POWER BUDGET S0: SERVO CURRENT FOLLOWS LOAD, NOT MOTION (instrument built; analysis of the 2026-10-03 runs)
+
+**Built (instrument only, consumed by nothing):** benchd puts servo-branch current (`i_a`, INA219,
+~68 ms average) on its 50 Hz state feed; ogma_host publishes it as `sense.servo_current` and dumps
+it with the brain inputs. It is under sense.*, not reality.proprio.*, because NeurochemState and
+WhiskerAversionReflex subscribe to that whole prefix.
+
+**Analysis** (`brainrun/current_analysis.py`, `current_by_foot.py`; 7116 brain-driven 10 Hz frames,
+12 benchd records, a mix of configs and lag settings):
+
+| correlate of current | r |
+|---|---|
+| feet in contact (FSR > 200) | **+0.40** |
+| FSR sum | **+0.39** |
+| per foot: phys FR / RL / FL / RR | +0.38 / +0.33 / +0.25 / +0.03 |
+| channels moving ≥ 60 µs per frame | +0.12 |
+| total slew | +0.09 |
+| commanded past the range limit | +0.07 |
+| "stalled" (at limit, not moving) | −0.07 |
+
+| feet loaded | current mean | p95 |
+|---|---|---|
+| 0–1 (belly down) | 0.61–0.67 A | 1.4–1.9 A |
+| **2–3** | **1.44–1.48 A** | **2.87–2.88 A** |
+| 4 | 1.24 A | 2.37 A |
+
+**Reading.** The brownout-zone current is servos HOLDING THE BODY on two or three legs, a stall
+against the ground, not legs moving fast or pressing past their calibrated range. Four feet
+sharing the load draw less. Per-leg attribution is available without per-servo current: the FSRs
+say which feet carry the weight. Consequences for the plan:
+- (S1) the sim's current model should be torque/load-driven, and the table above is its parity
+  target;
+- (S2) a reflex that reverses motion would not touch load-driven current. What lowers it is more
+  feet sharing the load or a lower stance;
+- (S3) "one leg at a time" keeps three feet loaded, which this table puts in the high band, so the
+  budget prior should be allowed to find load sharing (four-foot support, lower stance), not one
+  particular gait.
+
+**Caveats:**
+- 10 Hz frames with a 68 ms current average: reversal thrash at 50 Hz is invisible here;
+- correlations are modest (load explains ~16 % of variance);
+- the RR FSR reads a high, near-constant count (creep), which flattens its correlation;
+- runs mixed configs and lag on/off.
+
+The 50 Hz feed fixes the first caveat for new runs.
+
+**Also found:** the ICM-20948 IMU stopped answering on SPI (WHO_AM_I and PWR_MGMT_1 read 0x00 in
+both SPI modes, even after a reset command). It answered at the 13:39 boot and intermittently
+failed restarts on 2026-10-03, so a loose connector or cable on the HAT's 7-pin SPI header is the
+lead. benchd now retries the probe 4 times; that does not help a silent chip. Without the IMU,
+dash runs are refused (tilt guard blind) and ogma_host cannot run brain inputs.
