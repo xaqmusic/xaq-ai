@@ -167,3 +167,9 @@ with a livelier head: the candidate for the eye (preset beside T11). A 120° fie
 case for camera access** is outreach plan §9 (the camera buffer is not in Pollen's API). Next: the operator's eye on LA1;
 the camera request travels with or after PR-2, the operator's call.
 **★ LA1 PROMOTED 2026-10-03** on the operator's eye (novelty in the behaviour): T11 + `--look-around 0.9 2.0`.
+
+**★ F5 PROMOTED 2026-10-04** (design doc §17.108–17.109): ★ LA1 + four correctness fixes found while documenting the brain —
+the escapes and the stop sweep had mirrored signs, the place map baked unchecked on walks, its pose range clamped at ±1.2 m.
+n = 24: every number leans right, none beyond the noise; the operator's eye: "smarter short-term decisions (not turning the
+wrong way into a wall), more accurate object interactions." ★ F5 is the demo configuration; the companion document "Inside
+the MicroDuck Brain" describes it.

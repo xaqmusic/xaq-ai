@@ -7047,3 +7047,9 @@ first minute 19/24 (★ LA1 17/24), skills 11.9 a run (Δ +1.7, CI [−0.2, +3.6
 target in view at arrival 50.7 % (Δ +17.9, CI [+9.5, +26.3]), map 36 nodes and 6.4 walk bakes. **Verdict: `PARTIAL`, no
 regression.** Every mechanism lands and every behaviour number leans the right way, none beyond the noise at n = 24: a
 correctness stack, not a capability. Preset "F5 · the four fixes" beside ★ LA1 for the operator's eye.
+
+**★ F5 PROMOTED on the operator's eye (2026-10-04):** "the subtle effects of the fixes are notable: the robot seems smarter
+during short-term decisions (not turning the wrong way into a wall), and seems more accurate during object interactions." The
+eye sees what n = 24 could not resolve (the walls and skill-contact leans, the sweep on the target's side). ★ F5 is the demo
+configuration for Pollen: config `a1v2_la1_f4_map_wide` + ★ LA1's host args + `--fix-escape-sign --fix-sweep-sign
+--map-bake-honest` (launcher preset, second row).

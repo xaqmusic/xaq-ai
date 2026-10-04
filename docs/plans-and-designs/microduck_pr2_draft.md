@@ -10,8 +10,8 @@ does that the way REPORTS.md §6 allows a report to: the term is named once, def
 claim after it is stated in their terms as well, so a reviewer who does not care about the framework still reads a client
 that works. Every other internal term (EPM, TLE, Markov blanket, precision, free energy) stays out.
 
-**Facts behind the numbers:** ★ LA1 (`a1v2_t11_not_target` + `--look-around 0.9 2.0`), n = 18 seeds × 600 s, the train
-playroom, noise 0.05; design doc §17.107 and the ten-minutes phase page. Who drives what in the demo: the walk is their
+**Facts behind the numbers:** ★ F5 (`a1v2_la1_f4_map_wide` + ★ LA1's host args + `--fix-escape-sign --fix-sweep-sign --map-bake-honest`), n = 24 seeds × 600 s, the train
+playroom, noise 0.05; design doc §17.109 and the ten-minutes phase page. Who drives what in the demo: the walk is their
 `alpha_walking` policy driven by our twist; peck and kick are their skill policies, phase-driven as their daemon drives them;
 the head is our head loop on the four head joints (`--head-joints`, the outreach plan §8 ask); during a stop the legs are held
 by our joint-level standing loop (`--stop-brain`, R19). The last two are not reachable through their API today and the draft
@@ -151,17 +151,17 @@ heading, and fall recovery by the shipped standing policy. Replacing them is par
 ## 5. What it does
 
 In simulation, on this repository's MJCF with the shipped walking and skill policies, in a 4 m square playroom with blocks, balls,
-furniture and a toy train on a track; 18 runs of ten minutes, each a different seed. A *boring* second is one spent staring at
+furniture and a toy train on a track; 24 runs of ten minutes, each a different seed. A *boring* second is one spent staring at
 a wall or furniture, pressed against it, or walking toward a wall or nothing; an *interesting* second is one spent running a
 skill, chasing something that moves, standing at a movable thing, or walking toward one.  However, "interesting" also includes the robot looking around, vocalizing, getting into and out of goofy situations, falling, and generally being a menace.  This is why human observation is always required to promote a new behavioral loop or improvement.   
 
-- **Interesting 46 % of the time, boring 23 %.** At the start of this work the same measure read 43 % boring; the wall-staring
+- **Interesting 48 % of the time, boring 21 %.** At the start of this work the same measure read 43 % boring; the wall-staring
   it found was fixed by teaching the duck that structure does not answer a kick (it learns that, per context) and by having
   it look up when it is impeded.
-- **It goes to things and acts on them:** about 12 arrivals at a thing per run, and 30 % of its skills touched one. In 13 of
-  18 runs it touched the green block that stands 1.4 m in front of it at the start, within the first minute.
-- **It chases the train** about 11 s per run while the train is moving, making contact 2.4 times per run.
-- **It falls** 2.4 times per ten-minute run, recovered by handing the body to the shipped standing policy
+- **It goes to things and acts on them:** about 13 arrivals at a thing per run, and 37 % of its skills touched one. In 19 of
+  24 runs it touched the green block that stands 1.4 m in front of it at the start, within the first minute.
+- **It chases the train** about 13 s per run while the train is moving, making contact 3.7 times per run.
+- **It falls** 2.8 times per ten-minute run, recovered by handing the body to the shipped standing policy
   until it is up. This is the number that most needs work before
   hardware.
 
@@ -193,8 +193,8 @@ change in an afternoon. The same documents would serve anyone here who wants to 
 ## 8. Not claimed
 
 - Nothing has run on hardware. Every number is simulation, on this MJCF. The sensors there are exact; the only randomness is a small random offset of every joint at the start (standard deviation 0.05 rad) and the seed of each learner.
-- 18 seeds separates a large effect from a small one; it is not a precise measurement, and run-to-run spread is wide (boring
-  5–64 % per run).
+- 24 seeds separates a large effect from a small one; it is not a precise measurement, and run-to-run spread is wide (boring
+  5–38 % per run).
 - No comparison with the runtime's state machine has been made.
 - The brain is not a formal active inference agent: it has no single generative model inverted by variational inference,
   and its action selection looks one step ahead.
@@ -226,8 +226,8 @@ in a playroom.
 
 **What this changes:** one new file under `docs/design/`. No code, no configuration, nothing in the build.
 
-**What it shows, and what it does not:** 18 ten-minute runs in a 4 m playroom in simulation: interesting 46 % of the time and boring 23 %, by
-the measures in §5; arrivals at things, skills that touch them, a chase of a moving toy. Nothing on hardware; it falls 2.4
+**What it shows, and what it does not:** 24 ten-minute runs in a 4 m playroom in simulation: interesting 48 % of the time and boring 21 %, by
+the measures in §5; arrivals at things, skills that touch them, a chase of a moving toy. Nothing on hardware; it falls 2.8
 times per run; two capabilities it uses (the head joints, a stand during a stop) are not in your API, and are named in §4 as
 questions, not requests. Narrated videos: [links].
 
