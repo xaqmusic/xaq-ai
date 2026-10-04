@@ -6187,3 +6187,56 @@ The earlier 60 s belly-up run drew 1.2–1.6 A mean without a reset, so the marg
 depends on what the brain does. Options are hardware (a servo supply that is not the HAT's
 regulator), a current-aware reflex in benchd (a safety envelope like the low-battery limp, not a
 behaviour), or both.
+
+### ★★★★ 2026-10-04 — MILESTONE: THE SIM-TRAINED BRAIN WALKS THE REAL PICRAWLER (operator: "we have validated sim2real")
+
+**What runs.** P-e·h0, frozen gains, unchanged from the sim, on the Pi
+(`ogma_host --imu --brain-inputs --actuate`). It is fed only what the robot can publish:
+- joints from the servo forward model of the commanded pulse;
+- heading, stride and distress from the IMU and odometry;
+- foot contact and load from the FSRs;
+- belly clearance from the boom ToF.
+
+It drives 12 servos through benchd with the servo output lag at 0.2, and it is launched from
+`picrawler-dash`.
+
+**Operator verdict (2026-10-04, after watching P-e·h0 runs):** "P-e·h0 is working well … the gait is
+working well with our FSRs and looks very much like the sim. Overall this is a big milestone and
+we have validated sim2real." Earlier: "the lag/smoothing run looked good"; the 60 s stand-start run
+kept the belly up the whole time.
+
+**Measured parity (each a hardware signal, n=1–4 short runs; there is no distance sensor on the
+robot, so gait distance and straightness are not measured):**
+
+| quantity | sim (P-e·h0) | robot | entry |
+|---|---|---|---|
+| belly clearance, median | 14–26 mm | 31 mm (60 s, 97 % > 10 mm) | 2026-10-03 "60 s FROM stand" |
+| hip2 centre | +0.04 rad | +0.02…+0.04 rad (from `stand`) | "START POSE IS THE ROBOT'S hip2 CENTRE" |
+| knee centre | −0.71 rad | −0.65…−0.78 rad | same |
+| joint speed vs command | 0.40–0.56 | 0.30–0.36 at lag 0.2 | "SERVO OUTPUT LAG α 0.2" |
+| attitude filter | — | within 0.35° of accel after every run (225 Hz) | "ogma_host's IMU on a 225 Hz thread" |
+| posture over a run | steady | tilt median 10.8° → 4–5° within 60 s | "60 s FROM stand" |
+
+**Known gaps, each with its entry:**
+- the robot stands 15–25 mm taller than the sim at the same angles (stiff servos against the sim's
+  soft stance PD);
+- it cannot yet stand up from the floor: from the rescue pose hip2 parks at −0.7 rad, because the
+  sim always spawns standing;
+- the brain sometimes pins a hip1 at its limit, and the robot circles.
+
+**The blocker for agility is power, not the brain.** Agile moves draw 2.4–3.0 A peaks on the servo
+branch, against a ~1.9 A budget on the HAT's 5 V / 3 A regulator, and the HAT's MCU resets: about 1
+every 10–40 s in the runs of 2026-10-03. That is now fail-safe and recovered:
+- servos disarm instead of being driven to their stops;
+- they re-arm one at a time and ramp to the start pose;
+- the brain resumes with its learning intact, in about 3 s.
+
+But every reset is a 3 s interruption. Options:
+- (1) a dedicated servo supply, which removes the cause;
+- (2) a current envelope in benchd, a safety limit with A/B;
+- (3) servo current as an interoceptive brain input — the doctrine's "reflex plus a learned layer
+  that keeps it quiet", a real lever for later.
+
+**Scale of the claim.** "Sim2real validated" here is the operator's direct observation of behaviour
+plus the parity table — a strong signal at this stage, not a seed-averaged finding. The finding-level
+version needs a distance/heading measure on the robot and n ≥ 20 runs, which power currently caps.

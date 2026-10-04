@@ -42,6 +42,41 @@ I²C is retried 3× per transaction in `LinuxI2cBus`; a NACK that survives the r
 counted (`bus_errors` in telemetry, logged every 50th) and never fatal — the first daemon died
 on one such error mid-calibration and took the session with it.
 
+## Running a brain on the robot (2026-10-03)
+
+**On battery only.** On the bench supply the Pi reset the moment the brain took the servos.
+
+benchd's service starts it with the brain command path (`--state-pub 5592 --cmd-port 5594
+--ctl-port 5593 --servo-lag-alpha 0.2`). Nothing changes in `bench` mode, which it always starts in.
+The command and control sockets are bound to 127.0.0.1, so only a process on the Pi can drive the
+servos or set the run mode (port doc SPEC §1.1, amended 2026-10-03).
+
+**From the robot's console:** `picrawler-dash`, then **C** — pick a config (robot-faithful ones
+first; P-e·h0 is the validated one), confirm, and after a **10 s countdown** (any key aborts,
+nothing is sent before it ends) the robot stands and the brain gets the servos in `autonomous`
+mode.
+
+| key | does |
+|---|---|
+| SPACE | STOP (freeze every servo where it is, brain paused) / resume |
+| R | stop, return to the start pose, stay stopped (brain paused, not reset) |
+| E | end the run: brain off, `bench`, rescue pose |
+| Ctrl-C | ends a live run before the dash exits |
+
+**HAT resets** (servo current above ~2.4 A browns out the HAT's MCU) are recovered automatically:
+- benchd disarms all servos and pauses the brain;
+- once the HAT answers again, it re-arms one servo at a time and ramps to the start pose;
+- the brain resumes. Expect about 3 s, with a ⚠ warning on the dash; three in 60 s and it waits.
+
+To move the robot by hand mid-run: **SPACE → HAT off → move it → HAT on → SPACE**.
+
+Every run leaves `pi_host/log/dashrun_<stamp>.events` (each step) and `dashrun_<stamp>_<cfg>.log`
+(ogma_host, with input dumps). benchd's record has `hat_reset` / `hat_recovered` / `stop` /
+`resume`.
+
+- `pi_host/tools/ogma_ctl.py` speaks the control socket by hand.
+- `pi_host/tools/brainrun/arm.sh` is the scripted harness behind the 2026-10-03 ledger numbers.
+
 **Bench-verified 2026-08-28** (pyzmq client from the laptop): telemetry under `ZMQ_CONFLATE`
 (which is why frames are single-part), `servo.set` clamp + slew, one-at-a-time, deadman trip
 after 1 s of silence, widen/restore audit, `cal.map`/`save`/`load` with the sim-name mirror.

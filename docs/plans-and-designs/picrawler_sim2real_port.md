@@ -1897,3 +1897,20 @@ run. Open:
 - `ogma_host`'s attitude filter ending 117° from the accelerometer.
 
 Ledger 2026-10-03 "FIRST BRAIN-DRIVEN RUN".
+
+### Status 2026-10-04 — sim-to-real validated by the operator; power is the next blocker
+
+**The P-e·h0 brain, trained in the sim with frozen gains, walks the real robot.** The operator
+watched it: the gait with the FSR feet "looks very much like the sim". The full chain is built and
+in use:
+- `picrawler-dash` (C: run config, 10 s countdown, SPACE / R / E);
+- benchd `autonomous` mode, with the loopback command and control sockets;
+- `ogma_host --actuate`, servo output lag 0.2, the IMU on a 225 Hz thread;
+- automatic HAT-reset recovery to the start pose.
+
+Measured parity and known gaps: ledger 2026-10-04 "MILESTONE".
+
+**Next blocker: servo power.** Agile moves draw 2.4–3.0 A against a ~1.9 A budget on the HAT's
+regulator, and its MCU resets about every 10–40 s. Software now makes that safe and recovers in
+~3 s; agility needs the cause removed, most directly a dedicated servo supply. Then the
+finding-level evidence: a distance/heading measure on the robot and many runs.
