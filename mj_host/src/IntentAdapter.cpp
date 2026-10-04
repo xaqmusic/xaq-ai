@@ -1,3 +1,4 @@
+#include "BrainTape.hpp"
 #include "IntentAdapter.hpp"
 #include "HeadAdapter.hpp"
 
@@ -90,6 +91,7 @@ IntentAdapter::IntentAdapter(const std::string& graph_path, uint64_t seed) {
         throw std::invalid_argument("IntentAdapter: the map EPM on reality.proprio.place_in declares proprio_state_dims "
                                     + std::to_string(place_dims_) + "; the host builds 12 (pose + 8 column ranges), 13 (pose + head yaw + 8 column ranges), 68 (pose + 64 zone ranges) or 4 + a depth EPM's projection_dim");
     }
+    if (g_brain_tape) g_brain_tape->config(0, cfg.to_json());
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg), std::make_unique<ogma::InProcessBus>());
     inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, graph_path, 0, "intent");
 }
@@ -112,6 +114,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         p->values.resize(int(values.size()));
         for (size_t i = 0; i < values.size(); ++i) p->values[int(i)] = values[i];
         bus->publish(std::string("reality.proprio.") + sensor, p);
+        if (g_brain_tape) g_brain_tape->token(0, tick_id_, std::string("reality.proprio.") + sensor, sensor, "host", values.data(), uint32_t(values.size()));
     };
     const auto unit = [](double v) { return float(std::clamp(v, -1.0, 1.0)); };
     // The heading, unwrapped.  A wrapped angle is not one linear row — its slope flips
@@ -220,7 +223,11 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     publish("vel_ego", {unit(vel_body[1] / kTwistRangeVy), unit(vel_body[0] / kTwistRangeVx)});
     publish("tof", {tof[0], tof[1], tof[2], tof[3]});   // the ToF summary on its own topic (an avoidance LOOP reads it)
 
+    if (g_brain_tape) g_brain_tape->tick(0, tick_id_);
+
     instance_->tick();
+
+    if (g_brain_tape) g_brain_tape->actions(0, *instance_);
     inspector_->publish_tick(tick_id_);
     if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(bus->last_value("reality.proprio.place"))) {
         map_tle_ = rt->tle; map_novel_ = rt->is_novel; map_winner_ = rt->winner_id; map_baked_now_ = rt->just_baked;
@@ -402,6 +409,7 @@ void IntentAdapter::on_reset() {
     ev->name = "reset";
     ev->intensity = 1.0f;
     instance_->bus()->publish("events.reset", ev);
+    if (g_brain_tape) g_brain_tape->event(0, tick_id_, "events.reset", "reset", "host", 1.0f);
     last_twist_ = {0.0, 0.0, 0.0};
 }
 
@@ -427,9 +435,9 @@ void IntentAdapter::set_learning(bool on) {
                 if (auto d = std::get_if<double>(&it->second)) v = *d;
                 else if (auto i = std::get_if<int64_t>(&it->second)) v = double(*i);
                 frozen_rates_[key] = v;
-                module->on_param_change(rate, ogma::ParamValue{0.0});
+                tape_param(0, module, rate, ogma::ParamValue{0.0});
             } else if (frozen_rates_.count(key)) {
-                module->on_param_change(rate, ogma::ParamValue{frozen_rates_[key]});
+                tape_param(0, module, rate, ogma::ParamValue{frozen_rates_[key]});
             }
         }
     }
@@ -441,18 +449,18 @@ void IntentAdapter::set_map_learning(bool on) {
     for (auto* module : instance_->modules()) {
         if (std::string(module->id()) != map_module_id_) continue;
         if (map_frozen_) {
-            module->on_param_change("min_insertion_error", ogma::ParamValue{1e9});
-            module->on_param_change("epsilon_b",           ogma::ParamValue{0.0});
-            module->on_param_change("epsilon_n",           ogma::ParamValue{0.0});
-            module->on_param_change("stale_prune_enabled", ogma::ParamValue{false});
+            tape_param(0, module, "min_insertion_error", ogma::ParamValue{1e9});
+            tape_param(0, module, "epsilon_b",           ogma::ParamValue{0.0});
+            tape_param(0, module, "epsilon_n",           ogma::ParamValue{0.0});
+            tape_param(0, module, "stale_prune_enabled", ogma::ParamValue{false});
             // --map-bake-honest (§17.108): the bake check keeps the configured gate while insertion is shut
-            if (map_bake_honest_) module->on_param_change("bake_gate", ogma::ParamValue{map_saved_["min_insertion_error"]});
+            if (map_bake_honest_) tape_param(0, module, "bake_gate", ogma::ParamValue{map_saved_["min_insertion_error"]});
         } else {
-            module->on_param_change("min_insertion_error", ogma::ParamValue{map_saved_["min_insertion_error"]});
-            module->on_param_change("epsilon_b",           ogma::ParamValue{map_saved_["epsilon_b"]});
-            module->on_param_change("epsilon_n",           ogma::ParamValue{map_saved_["epsilon_n"]});
-            module->on_param_change("stale_prune_enabled", ogma::ParamValue{map_saved_["stale_prune_enabled"] != 0.0});
-            if (map_bake_honest_) module->on_param_change("bake_gate", ogma::ParamValue{0.0});
+            tape_param(0, module, "min_insertion_error", ogma::ParamValue{map_saved_["min_insertion_error"]});
+            tape_param(0, module, "epsilon_b",           ogma::ParamValue{map_saved_["epsilon_b"]});
+            tape_param(0, module, "epsilon_n",           ogma::ParamValue{map_saved_["epsilon_n"]});
+            tape_param(0, module, "stale_prune_enabled", ogma::ParamValue{map_saved_["stale_prune_enabled"] != 0.0});
+            if (map_bake_honest_) tape_param(0, module, "bake_gate", ogma::ParamValue{0.0});
         }
     }
 }
@@ -524,8 +532,19 @@ int    IntentAdapter::yield_drops() const { auto* q = find_seek(*instance_); ret
 int    IntentAdapter::static_yielded() const { auto* q = find_seek(*instance_); return q ? q->static_yielded() : 0; }
 int    IntentAdapter::static_yield_drops() const { auto* q = find_seek(*instance_); return q ? q->static_yield_drops() : 0; }
 int    IntentAdapter::progress_forgets() const { auto* q = find_seek(*instance_); return q ? q->progress_forgets() : 0; }
-void   IntentAdapter::forget_seek_target() { if (auto* q = const_cast<ogma::BearingSeekLoop*>(find_seek(*instance_))) q->forget_target(); }
-void IntentAdapter::rebabble(int ticks) { for (auto* m : instance_->modules()) if (auto* w = dynamic_cast<ogma::MotorEPMv2*>(const_cast<ogma::Module*>(m))) w->rebabble(ticks); }
+void   IntentAdapter::forget_seek_target() {
+    if (auto* q = const_cast<ogma::BearingSeekLoop*>(find_seek(*instance_))) {
+        if (g_brain_tape) g_brain_tape->call(0, std::string(q->id()), "forget_target", 0.0);
+        q->forget_target();
+    }
+}
+void IntentAdapter::rebabble(int ticks) {
+    for (auto* m : instance_->modules())
+        if (auto* w = dynamic_cast<ogma::MotorEPMv2*>(const_cast<ogma::Module*>(m))) {
+            if (g_brain_tape) g_brain_tape->call(0, std::string(w->id()), "rebabble", double(ticks));
+            w->rebabble(ticks);
+        }
+}
 std::array<double, 4> IntentAdapter::tof_authority() const {
     for (auto* m : instance_->modules()) if (auto* w = dynamic_cast<const ogma::MotorEPMv2*>(m))
         return {w->wb_authority_from_end(3), w->wb_authority_from_end(2), w->wb_authority_from_end(1), w->wb_authority_from_end(0)};
@@ -566,7 +585,7 @@ int    IntentAdapter::seek_lead_option() const { auto* q = find_seek(*instance_)
 int    IntentAdapter::seek_lead_node()   const { auto* q = find_seek(*instance_); return q ? q->lead_node() : 0; }
 bool   IntentAdapter::chase_coasting() const { auto* q = find_seek(*instance_); return q && q->coasting(); }
 int    IntentAdapter::chases_reacquired() const { auto* q = find_seek(*instance_); return q ? q->chases_reacquired() : 0; }
-void   IntentAdapter::restore_brain_state(nlohmann::json const& s) { instance_->restore_state(s); }
+void   IntentAdapter::restore_brain_state(nlohmann::json const& s) { if (g_brain_tape) g_brain_tape->restore(0, s.dump()); instance_->restore_state(s); }
 bool   IntentAdapter::chase_lost_now() const { auto* q = find_seek(*instance_); return q && q->chase_lost_now(); }
 double IntentAdapter::chase_lost_ego() const { auto* q = find_seek(*instance_); return q ? q->chase_lost_ego() : 0.0; }
 double IntentAdapter::chase_lost_range() const { auto* q = find_seek(*instance_); return q ? q->chase_lost_range() : 0.0; }

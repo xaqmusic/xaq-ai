@@ -7079,3 +7079,28 @@ host repeats each cast for 4 ticks and it was re-added each time), the profile 2
 - **O2b `cast_once 2` (weighted by the ticks a cast stood for) — behaviour `NULL` (ties every measure, boring 20.9 → 18.6 %),
   cost unresolved:** a whole-run profile follows the run's own path (seed 1's weighted run built larger clouds and every stage,
   related or not, cost ~2×). Cost A/Bs of the cloud need the SAME inputs: the replay benchmark (§17.111).
+
+### 17.111 The replay benchmark (2026-10-04)
+
+**Built:** host `--record-brains FILE` writes a tape of everything the host does to the three brains, in call order — each
+brain's final config (after seeding), checkpoint restores, every host token and reset event, every param change (the learning
+switches, through `tape_param`), every direct module call (`forget_target`, `rebabble`), every tick, and after each tick the
+action outputs plus a digest of EVERY output the brain published. `mj_host/build/ogma_brain_replay TAPE [--set
+B:module.key=JSON] [--only B] [--repeat N]` rebuilds the brains from the tape alone (no MuJoCo, no ONNX — it builds wherever
+ogma_core builds), replays it, times each tick in thread CPU, and checks fidelity tick by tick. **Streaming** (the operator:
+big replay files have caused OOM): the writer appends through a 1 MB buffer, the reader returns one record at a time; a 600 s
+tape is 95 MB and the replay's whole process peaks at **24 MB resident**. Run with `ulimit -v` as a guard.
+
+**Fidelity, the instrument's own test:** recording does not perturb the run (★ F5 seed 1 byte-identical with the tape on), and
+the replay reproduces every output of all three brains for all 600 s. Two lessons on the way: the actions alone are blind in
+open loop (the walker's inputs are all recorded host data, so a cloud variant cannot change them — the all-outputs digest is
+what sees it); and the first tape missed a direct module call (`impeded:wall` → `forget_seek_target` at 138 s), which the
+digest caught at exactly that tick.
+
+**The numbers for Pollen (desktop, Intel Core Ultra 7 265F, ★ F5 seed 1, 600 s):** intent 199 µs a tick (1.0 % of a core at
+50 Hz; p99 1.6 ms, max 2.9 ms), head 8 µs (0.04 %), stop 31 µs (0.15 %, while standing); the whole brains-only process 24 MB
+resident, ~0.6 MB heap. The Radxa Zero 3W's A55 is an estimated 10–15× slower: still to be measured — the replay runs there.
+
+**O2b settled:** on the same inputs, `cast_once 2` (weighted) costs 158 µs a tick against ★ F5's 199 (−21 %; p99 1.58 →
+1.37 ms, max 2.9 → 2.3 ms), the same as the unweighted form; with its n = 24 behaviour tie (§17.110) it is a candidate for the
+stack — the operator's eye decides.

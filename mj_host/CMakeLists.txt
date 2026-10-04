@@ -105,6 +105,7 @@ add_executable(ogma_mjhost
   src/Policy.cpp
   src/Recovery.cpp
   src/OgmaBrainAdapter.cpp
+  src/BrainTape.cpp
 )
 target_link_libraries(ogma_mjhost PRIVATE mujoco onnxruntime)
 target_compile_options(ogma_mjhost PRIVATE -Wall -Wextra)
@@ -113,6 +114,15 @@ if(MJ_HOST_WITH_BRAIN)
   target_link_libraries(ogma_mjhost PRIVATE ogma_core ogma_infra)
   target_include_directories(ogma_mjhost PRIVATE ../cpp_core/include)
   target_compile_definitions(ogma_mjhost PRIVATE MJ_HOST_WITH_BRAIN=1)
+endif()
+
+# THE REPLAY BENCHMARK (2026-10-04, design doc §17.111): the brains alone, driven by a tape the host recorded
+# (--record-brains): no MuJoCo, no ONNX -- it builds wherever ogma_core builds (the Pi 5, Pollen's Radxa Zero 3W).
+if(MJ_HOST_WITH_BRAIN)
+  add_executable(ogma_brain_replay tools/brain_replay.cpp src/BrainTape.cpp)
+  target_link_libraries(ogma_brain_replay PRIVATE ogma_core ogma_infra)
+  target_include_directories(ogma_brain_replay PRIVATE ../cpp_core/include src)
+  target_compile_options(ogma_brain_replay PRIVATE -Wall -Wextra)
 endif()
 
 # Where the vendored body lives, so `--load-only` needs no argument and no cwd.

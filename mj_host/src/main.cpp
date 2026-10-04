@@ -43,6 +43,7 @@
 #include "Observation.hpp"
 #include "Odometry.hpp"
 #include "IntentAdapter.hpp"
+#include "BrainTape.hpp"
 #include "HeadAdapter.hpp"
 #include "Tof.hpp"
 #include "Policy.hpp"
@@ -1347,6 +1348,8 @@ void profile_rss(const char* where) {
 //     as a head yaw (+ = left) with the sign turned;
 //   --map-bake-honest: the place map's walk freeze keeps its bake check at the configured gate (the EPM's bake_gate).
 bool g_fix_escape_sign = false, g_fix_sweep_sign = false, g_map_bake_honest = false;
+// --record-brains FILE (2026-10-04, §17.111): a tape of everything the host does to the three brains, for the replay benchmark
+std::string g_record_brains;
 // --gaze-no-candidate: the cloud's UNCONFIRMED mover candidate does not take the attention (measured: 15 % of ticks, mostly
 // young static clusters -- the head glanced at noise on the walk; §17.102)
 bool g_gaze_no_cand = false;
@@ -1632,6 +1635,16 @@ std::string g_stop_brain, g_stop_load;
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
                bool emit, const PushPlan& pushes = {}, const std::array<double, 3>* open_loop = nullptr,
                double reset_noise = 0.0) {
+    struct TapeGuard {
+        std::unique_ptr<BrainTapeWriter> w;
+        ~TapeGuard() { if (w) { std::fprintf(stderr, "brain tape: %.1f MB written\n", double(w->bytes()) / 1e6); g_brain_tape = nullptr; } }
+    } tape_guard;
+    if (!g_record_brains.empty()) {
+        tape_guard.w = std::make_unique<BrainTapeWriter>(g_record_brains);
+        if (!tape_guard.w->ok()) throw std::runtime_error("--record-brains: cannot open " + g_record_brains);
+        g_brain_tape = tape_guard.w.get();
+        std::fprintf(stderr, "recording the brains' inputs to %s (the replay benchmark's tape)\n", g_record_brains.c_str());
+    }
     DuckBody body(scene);
     Policy scaffold(kStandScaffold);
     Policy walker(kWalkScaffold);
@@ -3620,6 +3633,8 @@ int main(int argc, char** argv) {
             g_gaze_motion = true;
         } else if (a == "--gaze-no-candidate") {
             g_gaze_no_cand = true;
+        } else if (a == "--record-brains") {
+            g_record_brains = next("--record-brains");
         } else if (a == "--fix-escape-sign") {
             g_fix_escape_sign = true;
         } else if (a == "--fix-sweep-sign") {

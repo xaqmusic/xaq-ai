@@ -173,3 +173,15 @@ the escapes and the stop sweep had mirrored signs, the place map baked unchecked
 n = 24: every number leans right, none beyond the noise; the operator's eye: "smarter short-term decisions (not turning the
 wrong way into a wall), more accurate object interactions." ★ F5 is the demo configuration; the companion document "Inside
 the MicroDuck Brain" describes it.
+
+## The resource push (2026-10-04) — resume here for the ARM measurements
+
+Design doc §17.110–17.111. The question: would Pollen read the brain as too heavy for the Radxa Zero 3W (RK3566, 4× A55)?
+Measured on the desktop: intent 199 µs a tick (1.0 % of a core), head 8 µs, stop 31 µs; the brains-only process 24 MB
+resident. The cloud map is the one heavy module (tall index landed, exact; weighted cast-once −21 %, behaviour tie, awaiting the
+eye). **Next, in a fresh context on a machine with sudo over ssh to the Pi 5:** record a tape here
+(`ogma_mjhost --level2 … --record-brains f5_s1.tape`, ★ F5's preset argv), copy `cpp_core/`, `mj_host/src/BrainTape.*`,
+`mj_host/tools/brain_replay.cpp` and the tape to the Pi, build `ogma_brain_replay` against ogma_core there (the picrawler-dev
+branch's Pi build notes: `-j2`, ~10 min for cpp_core), and run `ogma_brain_replay f5_s1.tape --repeat 3` under `ulimit -v`, plus
+SoC temperature over the replay. Then a Radxa Zero 3W for Pollen's own numbers. After that: the cloud map's dense-grid rewrite
+(exact) and the pipelined clustering (behaviour-tested), both measured on the replay.

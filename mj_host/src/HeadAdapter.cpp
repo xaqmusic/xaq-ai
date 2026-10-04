@@ -1,3 +1,4 @@
+#include "BrainTape.hpp"
 #include "HeadAdapter.hpp"
 
 #include <algorithm>
@@ -41,6 +42,7 @@ HeadAdapter::HeadAdapter(const std::string& graph_path, uint64_t seed) {
         if (auto i = std::get_if<int64_t>(&it->second)) babble_ticks_ = uint64_t(std::max<int64_t>(0, *i));
         else if (auto d = std::get_if<double>(&it->second)) babble_ticks_ = uint64_t(std::max(0.0, *d));
     }
+    if (g_brain_tape) g_brain_tape->config(1, cfg.to_json());
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg), std::make_unique<ogma::InProcessBus>());
     // Its own inspector surface at +2 (7402/7403, 2026-10-02): the walker's brain keeps 7400; the inspector reaches
     // the head brain by pointing its host field at :7402.  Its diagnostics also reach the log through diagnostics().
@@ -65,6 +67,7 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
         p->values.resize(int(values.size()));
         for (size_t i = 0; i < values.size(); ++i) p->values[int(i)] = values[i];
         bus->publish(std::string("reality.proprio.") + sensor, p);
+        if (g_brain_tape) g_brain_tape->token(1, tick_id_, std::string("reality.proprio.") + sensor, sensor, "host", values.data(), uint32_t(values.size()));
     };
     const auto unit = [](double v) { return float(std::clamp(v, -1.0, 1.0)); };
 
@@ -87,7 +90,11 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
                            float(g[0]), float(g[1]), unit(0.3 * w[0]), unit(0.3 * w[1]), unit(0.3 * w[2]),
                            gaze_sense_ ? unit(gaze_err_ / kHeadRange[2]) : 0.0f});   // 11: the gaze error (--head-gaze-sense), else spare
 
+    if (g_brain_tape) g_brain_tape->tick(1, tick_id_);
+
     instance_->tick();
+
+    if (g_brain_tape) g_brain_tape->actions(1, *instance_);
     if (inspector_) inspector_->publish_tick(tick_id_);
 
     static const char* const kActions[4] = {"action.neck_pitch", "action.head_pitch", "action.head_yaw", "action.head_roll"};
@@ -200,6 +207,7 @@ void HeadAdapter::on_reset() {
     ev->name = "reset";
     ev->intensity = 1.0f;
     instance_->bus()->publish("events.reset", ev);
+    if (g_brain_tape) g_brain_tape->event(1, tick_id_, "events.reset", "reset", "host", 1.0f);
     last_cmd_ = {0.0, 0.0, 0.0, 0.0};
     vor_state_ = 0.0;
     rate_state_ = 0.0;
@@ -225,9 +233,9 @@ void HeadAdapter::set_learning(bool on) {
                 if (auto d = std::get_if<double>(&it->second)) v = *d;
                 else if (auto i = std::get_if<int64_t>(&it->second)) v = double(*i);
                 frozen_rates_[key] = v;
-                module->on_param_change(rate, ogma::ParamValue{0.0});
+                tape_param(1, module, rate, ogma::ParamValue{0.0});
             } else if (frozen_rates_.count(key)) {
-                module->on_param_change(rate, ogma::ParamValue{frozen_rates_[key]});
+                tape_param(1, module, rate, ogma::ParamValue{frozen_rates_[key]});
             }
         }
     }
@@ -251,7 +259,7 @@ std::vector<std::string> HeadAdapter::phase_report() const {
 }
 
 nlohmann::json HeadAdapter::brain_state() const { return instance_->snapshot_state(); }
-void HeadAdapter::restore_brain_state(const nlohmann::json& s) {
+void HeadAdapter::restore_brain_state(const nlohmann::json& s) { if (g_brain_tape) g_brain_tape->restore(1, s.dump());
     std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
     instance_->restore_state(s);
 }
