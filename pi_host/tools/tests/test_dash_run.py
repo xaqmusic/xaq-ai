@@ -4,6 +4,7 @@ Run:  .venv/bin/python -m pytest pi_host/tools/tests/test_dash_run.py -q
 A fake robot records every call, so the ORDER of what reaches the robot is checked, and the
 property that matters most: nothing is sent before the countdown ends.
 """
+import json
 import sys
 import threading
 import time
@@ -110,6 +111,22 @@ class FakeRobot:
         return {"ok": True}
 
     # RobotIo surface
+    def start_audio(self, path):
+        self.log("audio_start")
+        robot = self
+        class H:
+            def stop(self_inner):
+                robot.log("audio_stop"); return 30.0
+        return H()
+
+    def start_feed(self, path):
+        self.log("feed_start")
+        robot = self
+        class H:
+            def stop(self_inner):
+                robot.log("feed_stop"); return 1500
+        return H()
+
     def new_ctl(self):
         return FakeRpc(self, "ctl")
 
@@ -350,3 +367,21 @@ def test_ending_during_an_outage_waits_for_the_hat_before_the_rescue_pose(tmp_pa
     robot.hat.update(outage=False)
     ctrl.join(10)
     assert "limp" in robot.calls and ctrl.st.phase == "done"
+
+
+def test_the_run_is_recorded_from_before_the_first_motion_until_after_the_rescue(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"})
+    ctrl.end(); ctrl.join(10)
+    c = robot.calls
+    assert c.index("audio_start") < c.index("pose.set")              # the pose move is on the recording
+    taps = [i for i, x in enumerate(c) if x == "servo.set"]
+    assert len(taps) == 6                                              # 3 taps, out and back
+    assert c.index("pose.set") < taps[0] and taps[-1] < c.index("mode.set=autonomous")   # in bench, before the brain
+    assert c.index("limp") < c.index("audio_stop")                     # the rescue is on the recording
+    assert c.index("audio_stop") < c.index("systemctl start ogma-host")   # the mic is free before the service takes it
+    meta = json.loads((ctrl.rec_dir / "meta.json").read_text())
+    assert meta["audio"]["seconds"] == 30.0 and meta["feed_frames"] == 1500
+    kinds = [json.loads(l)["kind"] for l in open(ctrl.rec_dir / "events.jsonl")]
+    assert kinds.count("sync_tap") == 6 and "audio_started" in kinds and "audio_stop" in kinds

@@ -6295,6 +6295,11 @@ dash runs are refused (tilt guard blind) and ogma_host cannot run brain inputs.
 
 ### ★ 2026-10-04 — STALL PROBE #1 (FR leg, on the stand): CURRENT SEPARATES A STALL CLEANLY; AUDIO DOES NOT, YET
 
+> **⚠ CORRECTED the same day — the audio half of this entry measured the analysis, not the robot.**
+> Its alignment came from one broadband onset (+85 ms, 1 of 9 moves). That put the labels of short
+> moves AFTER the moves (a 100 µs move lasts ~50 ms), so "free_motion" was largely mislabelled.
+> The corrected numbers are in the entry below. The current half stands.
+
 **Probe:** `stall_probe.py --leg FR`: 27 free single-joint moves (100/200/400 µs) and 6 pushes into
 the operator's block (≤ 1 s), 124 s of audio on the same clock as benchd's 50 Hz feed. Analysis:
 `brainrun/stall_audio_analysis.py`, whose audio features are an exact twin of FrozenSTFTEncoder
@@ -6323,3 +6328,35 @@ over the 1024-sample windows ogma_host hands the EPM.
 - mic placement and capture gain were not set.
 
 Re-use context: audio recorded during real brain motion.
+
+
+### ★★ 2026-10-04 — STALL PROBE #1 RE-ANALYSED: A MOVING SERVO WHINES IN 4–8 kHz, A STALLED ONE SOUNDS LIKE SILENCE
+
+**Alignment, measured properly:** a moving servo raises the 4–8 kHz band from −76 dB (the room) to
+about −35 dB, ~40 dB, for exactly the move's duration. Onset +20 ms after the commanded start
+(IQR 20–30 ms), from the 18 moves that start from quiet.
+
+| class | level | 4–8 kHz share | current mean / peak |
+|---|---|---|---|
+| silence | −44.2 dBFS | 0.24 | 0.27 / 1.24 A |
+| free hold | −43.3 | 0.07 | 0.10 / 0.16 |
+| free motion | −36.0 | **0.46** | 0.10 / 0.18 |
+| blocked push | −42.9 | **0.08** | **0.68 / 1.30** |
+
+- **The operator's prediction holds for hip1 and hip2.** Moving: −33 / −35 dB with the whine.
+  Blocked: −42 / −46 dB without it.
+- **The knee breaks it:** −48.5 dB moving, near the floor, so a quiet knee is not a stalled knee.
+  Its mechanical noise barely reaches the mic.
+- **Through the brain's encoder:** a blocked push is most often classified as SILENCE (190 / 318).
+  On audio alone a stall is indistinguishable from rest; only the motor intent separates them. Given
+  a commanded move, moving vs stalled scores 0.66 per window (blocked 0.86, free motion 0.48: the
+  quiet knee and move tails). At event level with window means it is chance (31/60).
+
+**So:** audio is a real but partial stall witness. It works where the joint is audible, it needs the
+intent (the sensorimotor contingency, as proposed), and it is weakest exactly where current is
+also weakest (the knee: 0.27 A blocked). Current remains the clean witness.
+
+**Open:**
+- these were single-joint taps on the stand; run recordings now capture brain motion;
+- mic placement relative to the knees;
+- the silence class still includes handling noise around the blocked trials.

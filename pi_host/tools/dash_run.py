@@ -165,6 +165,53 @@ class RobotIo:
         return subprocess.run(["sudo", "-n", "true"], stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL, timeout=10).returncode == 0
 
+    # ---- run recording: the mic and the 50 Hz state feed, on CLOCK_MONOTONIC --------------
+    def start_audio(self, path: Path):
+        """arecord on the robot's USB mic (the device ogma_host's AudioCapture uses).  Returns
+        a handle with stop() -> seconds recorded, or None if the mic could not be opened."""
+        p = subprocess.Popen(["arecord", "-q", "-D", "plughw:CARD=Device,DEV=0", "-c", "1", "-f", "S16_LE",
+                              "-r", "48000", str(path)], stderr=subprocess.PIPE)
+        time.sleep(0.3)
+        if p.poll() is not None:                      # exited at once: busy or absent
+            return None
+
+        class H:
+            def stop(self_inner) -> float:
+                p.send_signal(signal.SIGINT)          # arecord finalises the WAV header on SIGINT
+                try:
+                    p.wait(5)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                return max(0.0, (path.stat().st_size - 44) / (2 * 48000)) if path.exists() else 0.0
+        return H()
+
+    def start_feed(self, path: Path):
+        """benchd's 50 Hz state feed -> JSONL.  Returns a handle with stop() -> frames."""
+        if not zmq:
+            return None
+        run = threading.Event(); run.set()
+        count = [0]
+        f = open(path, "w")
+
+        def loop():
+            sub = zmq.Context.instance().socket(zmq.SUB)
+            sub.setsockopt(zmq.RCVTIMEO, 300); sub.setsockopt_string(zmq.SUBSCRIBE, "state ")
+            sub.connect("tcp://127.0.0.1:5592")
+            while run.is_set():
+                try:
+                    m = sub.recv_string()
+                except zmq.Again:
+                    continue
+                f.write(m[6:] + "\n"); count[0] += 1
+            sub.close(0)
+        t = threading.Thread(target=loop, daemon=True); t.start()
+
+        class H:
+            def stop(self_inner) -> int:
+                run.clear(); t.join(2); f.close()
+                return count[0]
+        return H()
+
     def host_exists(self) -> bool:
         return OGMA_HOST.exists()
 
@@ -276,7 +323,15 @@ class RunController:
         self._cleanup_started = False
         # ⚠ EVERY STEP IS WRITTEN TO DISK.  The first dash-launched run (2026-10-03) ignored E
         # and nothing recorded what the controller was doing, so it could not be diagnosed.
-        self.events_path = LOG_DIR / f"dashrun_{time.strftime('%Y%m%d_%H%M%S')}.events"
+        stamp = time.strftime('%Y%m%d_%H%M%S')
+        self.events_path = LOG_DIR / f"dashrun_{stamp}.events"
+        # RUN RECORDING (operator, 2026-10-04: "record the audio during our tests"): the mic and
+        # the 50 Hz state feed, on the same clock as the events, for the stall witnesses and
+        # the sim's servo sounds.  Short single-joint probe taps did not sound like the brain.
+        self.record = True
+        self.rec_dir = LOG_DIR / f"dashrun_{stamp}"
+        self._audio = None
+        self._feed = None
 
     # ---- operator actions (UI thread) ----
     def start(self) -> None:
@@ -401,6 +456,18 @@ class RunController:
             if not self.io.systemctl("stop", "ogma-host"):
                 self._ev("could not stop ogma-host — not starting")
                 return False
+        # ---- recording starts the moment the mic is free, so the pose move is on it too ----
+        if self.record:
+            try:
+                self.rec_dir.mkdir(parents=True, exist_ok=True)
+                self._feed = self.io.start_feed(self.rec_dir / "feed.jsonl")
+                self._ev_rec("audio_start_request")
+                self._audio = self.io.start_audio(self.rec_dir / "audio.wav")
+                self._ev_rec("audio_started" if self._audio else "audio_FAILED")
+                self._ev(f"recording audio + 50 Hz feed -> {self.rec_dir}" if self._audio
+                         else "⚠ could not open the mic — recording the feed only")
+            except Exception as e:
+                self._ev(f"⚠ recording not started: {e!r}")
         # ---- pose: the first motion ----
         us = (self.io.bench.call("pose.get", name=self.pose) or {}).get("us")
         r = self.io.bench.call("pose.set", us=us) if us else None
@@ -416,6 +483,9 @@ class RunController:
         if not landed:
             self._ev("pose did not land" if landed is False else "aborted while posing")
             return False
+        if self.record and self._audio is not None:
+            if self._sync_taps(us) is None:
+                return False
         # ---- brain mode, latched STOP, then the brain ----
         m = self.io.ctl.call("mode.set", mode=self.run_mode)
         if not m or not m.get("ok"):
@@ -504,6 +574,61 @@ class RunController:
                 self._ev(f"brain exited (code {self._host.returncode}) — benchd freezes the robot; E ends")
             self.io.sleep(0.2)
 
+    # ---- run recording helpers ----
+    def _ev_rec(self, kind: str, **kw) -> None:
+        """A machine-readable event on CLOCK_MONOTONIC for the recording's alignment."""
+        try:
+            self.rec_dir.mkdir(parents=True, exist_ok=True)
+            with open(self.rec_dir / "events.jsonl", "a") as f:
+                f.write(json.dumps({"mono_ms": round(time.monotonic() * 1000.0, 2), "kind": kind, **kw}) + "\n")
+        except OSError:
+            pass
+
+    SYNC_PHYS_LEG, SYNC_JOINT, SYNC_US, SYNC_N = "FR", "hip1", 150, 3
+
+    def _sync_taps(self, pose_us) -> Optional[bool]:
+        """Three audible hip1 taps, timestamped: the audio is aligned to the commands by
+        measurement (motion whines in 4-8 kHz, stall_probe #1), not by arecord's latency."""
+        try:
+            smap = json.loads((REPO / "pi_host/calib/servo_map.json").read_text())
+            sim = {"FL": "fr", "FR": "fl", "RL": "rr", "RR": "rl"}[self.SYNC_PHYS_LEG]
+            ch = next(s["ch"] for s in smap["servos"] if s.get("sim_leg") == sim and s.get("joint") == self.SYNC_JOINT)
+        except (OSError, StopIteration, ValueError, KeyError):
+            self._ev("⚠ sync taps skipped: no servo map entry")
+            return True
+        base = int(pose_us[ch])
+        for k in range(self.SYNC_N):
+            for to in (base + self.SYNC_US, base):
+                r = self.io.bench.call("servo.set", ch=ch, us=to)
+                if not r or not r.get("ok"):
+                    self._ev(f"⚠ sync tap refused: {(r or {}).get('error', 'no reply')}")
+                    return True
+                self._ev_rec("sync_tap", ch=ch, to_us=to, base_us=base, k=k)
+                if self._wait(lambda: False, 0.35, ping=True) is None:
+                    return None
+        self._ev(f"{self.SYNC_N} sync taps on {self.SYNC_PHYS_LEG} {self.SYNC_JOINT} recorded")
+        return True
+
+    def _stop_recording(self) -> None:
+        secs = frames = 0
+        if self._audio is not None:
+            secs = self._audio.stop(); self._audio = None
+            self._ev_rec("audio_stop")
+        if self._feed is not None:
+            frames = self._feed.stop(); self._feed = None
+        if self.record and self.rec_dir.exists():
+            meta = {"config": self.cfg.file, "name": self.cfg.name, "pose": self.pose, "run_mode": self.run_mode,
+                    "audio": {"device": "plughw:CARD=Device,DEV=0", "rate": 48000, "seconds": round(secs, 1)},
+                    "feed_frames": frames, "hat_resets": self.st.hat_resets,
+                    "brain_seconds": round(self.io.now() - self.st.started_at, 1) if self.st.started_at else 0.0,
+                    "sync": {"leg": self.SYNC_PHYS_LEG, "joint": self.SYNC_JOINT, "us": self.SYNC_US, "n": self.SYNC_N}}
+            try:
+                (self.rec_dir / "meta.json").write_text(json.dumps(meta, indent=1))
+            except OSError:
+                pass
+            self._ev(f"recorded {secs:.0f} s of audio, {frames} feed frames -> {self.rec_dir}"
+                     + ("" if secs > 1 and frames > 0 else "  ⚠ A CHANNEL RECORDED NOTHING"))
+
     def _cleanup(self) -> None:
         with self._cleanup_lock:
             if self._cleanup_started:
@@ -528,6 +653,7 @@ class RunController:
         r = self.io.bench.call("limp")
         self._ev("rescue pose commanded" if r and r.get("ok") else "rescue pose: no reply")
         self._wait(lambda: not self._status().get("rescue_active"), 20.0, ping=True, abortable=False)
+        self._stop_recording()                 # after the rescue landed: the end is on the recording
         if self._svc_was_active:
             ok = self.io.systemctl("start", "ogma-host")
             self._ev("ogma-host service restarted" if ok else "⚠ could not restart ogma-host")
