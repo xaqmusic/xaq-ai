@@ -584,6 +584,8 @@ int main(int argc, char** argv) {
         ogma::hw::brain::TickInputs bi_in;
         constexpr long kStateStaleTicks = 10;   // 200 ms at 50 Hz with no new frame -> withhold
         bool bi_stopped = false;                // benchd's STOP, from the state feed
+        double bi_servo_i = 0.0;                // servo-branch current from the feed (A), instrument
+        long bi_current_pub = 0;
         long bi_paused = 0;                     // ticks the graph did not run because benchd was STOPPED
         // Actuation accounting (all zero without --actuate).
         std::array<double, 12> act_u{};
@@ -778,6 +780,20 @@ int main(int argc, char** argv) {
                         for (int k = 0; k < 4; ++k)  bi_in.fsr[size_t(k)] = fs[size_t(k)].get<int>();
                         bi_in.fsr_ok = f.value("fsr_ok", false);
                         bi_stopped = f.value("stopped", false);
+                        // S0 (power budget): servo-branch current, INSTRUMENT ONLY.  Published as
+                        // sense.* on purpose: NeurochemState and WhiskerAversionReflex subscribe to
+                        // the whole reality.proprio.* prefix, so a reality.proprio topic would
+                        // silently become an input to any config that has them.
+                        if (f.contains("i_a") && f["i_a"].is_number()) {
+                            bi_servo_i = f["i_a"].get<double>();
+                            auto ci = std::make_shared<ogma::ProprioToken>();
+                            ci->tick_id = uint64_t(ticks); ci->producer_id = "host";
+                            ci->sensor = "servo_current";
+                            ci->values.resize(1);
+                            ci->values[0] = float(bi_servo_i);
+                            bus->publish("sense.servo_current", ci);
+                            ++bi_current_pub;
+                        }
                         const uint64_t seq = f.value("seq", uint64_t(0));
                         if (bi_last_seq && seq != bi_last_seq + 1) ++bi_seq_gaps;
                         bi_last_seq = seq;
@@ -852,7 +868,7 @@ int main(int argc, char** argv) {
                             {"foot_contact", v(t.foot_contact.data(), 4)},
                             {"foot_load", v(t.foot_load.data(), 4)},
                             {"feet_y", v(t.feet_y_gravity_cmd_imu.data(), 4)},
-                            {"distress", t.distress}, {"upright", t.upright},
+                            {"distress", t.distress}, {"upright", t.upright}, {"servo_i", bi_servo_i},
                             {"fsr_raw", bi_in.fsr}, {"us", bi_in.us}};
                         std::printf("%s\n", d.dump().c_str());
                     }
@@ -1011,6 +1027,7 @@ int main(int argc, char** argv) {
                         bi_published, ticks, bi_no_imu, bi_stale, bi_uncommanded, bi_frames,
                         (unsigned long long)bi_seq_gaps, bi_bad, bi_fsr_stale, bi_tof_pub);
             std::printf("ogma_host: STOP — %ld ticks paused (graph held, not reset) while benchd was STOPPED\n", bi_paused);
+            std::printf("ogma_host: servo current — %ld sense.servo_current samples published (instrument, no consumer)\n", bi_current_pub);
         }
         if (cmd_pub) {
             std::printf("ogma_host: actuation — %ld commands sent, %ld dropped at the socket; not sent: %ld ticks before "

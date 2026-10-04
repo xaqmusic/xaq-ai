@@ -1255,6 +1255,11 @@ void tick_thread(State& S) {
         // status read.  Only with the state feed on; otherwise byte-identical.
         if (want_state) {
             timespec a0, a1; clock_gettime(CLOCK_MONOTONIC, &a0);
+            // S0 of the power-budget work (2026-10-04): servo-branch current at the tick rate
+            // for the brain's instrument topic.  The INA219 keeps its 128-sample telemetry
+            // averaging (~68 ms), so this sees a 300-500 ms stall spike, not a 10 ms one; the
+            // window rides in the frame (`ina_window_ms`) so nobody reads it as instantaneous.
+            S.sample_ina();
             S.sample_tof();
             clock_gettime(CLOCK_MONOTONIC, &a1);
             S.sp_tof_w.add((a1.tv_sec - a0.tv_sec) * 1e6 + (a1.tv_nsec - a0.tv_nsec) / 1e3);
@@ -1300,6 +1305,7 @@ void tick_thread(State& S) {
                 // is frozen, instead of letting it learn that its actions do nothing.
                 const json f = {{"seq", ++g_state_seq}, {"t", ms}, {"us", us}, {"armed", armed},
                                 {"out", out},
+                                {"i_a", S.ina_ok ? json(S.ina_i) : json(nullptr)}, {"ina_window_ms", 68},
                                 {"mode", ogma::hw::brain::mode_name(S.mode)}, {"stopped", S.stopped},
                                 {"fsr", fsr}, {"fsr_ok", fsr_ok},
                                 {"tof_m", S.tof_m}, {"tof_valid", S.tof_ok && S.tof_valid},
