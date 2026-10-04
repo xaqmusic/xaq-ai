@@ -1,5 +1,6 @@
 {
  "metadata": {
+  "body_manifest": "microduck_head",
   "name": "H2/3 the learned gaze, yaw last, precision 1.0",
   "description": "H2/3 the LEARNED GAZE (yaw last, head3o_gaze_h1_s2_nohold): the level priors on head pitch and roll only (state_prior_motors 2: the cross-coupled level tonic had run the yaw to its rail), the gaze error -> 0 as a pure reach (feedback descent off) at precision 1.0, the yaw's identity hold released",
   "launcher_rank": 0

@@ -44,6 +44,7 @@ from .skill_outcome_inspector      import SkillOutcomeInspector
 from .loop_competence_inspector    import LoopCompetenceInspector
 from .joint_bridge_inspector       import JointBridgeInspector
 from .motor_epm_v2_inspector       import MotorEpmV2Inspector
+from .motion_field_inspector       import MotionFieldInspector
 
 
 WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
@@ -107,6 +108,7 @@ WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
     "BearingSeekLoop":      BearingSeekInspector,
     "SkillOutcomeLoop":     SkillOutcomeInspector,
     "LoopCompetence":       LoopCompetenceInspector,
+    "MotionField":          MotionFieldInspector,
     "JointSensorimotorBridge": JointBridgeInspector,
     # Generic reflex / detector widget — auto-discovers fields from the
     # snapshot, so one ReflexInspector suffices for every reflex type

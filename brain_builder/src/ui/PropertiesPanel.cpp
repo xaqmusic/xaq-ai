@@ -356,6 +356,7 @@ void draw_validation(AppState& st) {
         if (r.constructed && ImGui::TreeNode("dry run detail")) {
             for (auto const& f : r.fed) ImGui::TextDisabled("fed      %s", f.c_str());
             for (auto const& a : r.actions_missing) ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "no value  %s (body sink)", a.c_str());
+            for (auto const& a : r.actions_idle) ImGui::TextDisabled("idle      %s (optional body sink)", a.c_str());
             for (auto const& t : r.silent) ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "silent    %s", t.c_str());
             for (auto const& t : r.published) ImGui::TextDisabled("published %s", t.c_str());
             ImGui::TreePop();

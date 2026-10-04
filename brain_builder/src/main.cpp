@@ -220,6 +220,7 @@ int main(int argc, char** argv) {
             for (auto const& t : r.silent)          std::cout << "  SILENT    " << t << "\n";
             for (auto const& t : r.actions_seen)    std::cout << "  driven    " << t << "\n";
             for (auto const& t : r.actions_missing) std::cout << "  NO VALUE  " << t << " (body sink)\n";
+            for (auto const& t : r.actions_idle)    std::cout << "  idle      " << t << " (optional body sink)\n";
             return r.error.empty() ? 0 : 1;
         }
         return (validate && w.errors) ? 1 : 0;

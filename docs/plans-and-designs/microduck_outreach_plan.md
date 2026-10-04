@@ -60,6 +60,11 @@ precision-weighted, active inference. What replaces them: "a self-model learned 
 "the error between what it expected to feel and what it felt", "the boundary between the brain
 and the rest of the robot", "which behaviour wins is decided by how badly each is surprised".
 
+**2026-10-03, the operator's decision: PR-2 leads with active inference, named once, as a design pattern for autonomous
+agents, plus the brain-building principles and how the repo's documents serve AI coding agents.** This supersedes the
+"does not name the framework" line above for PR-2 only; every other internal term stays out. First draft:
+[`microduck_pr2_draft.md`](microduck_pr2_draft.md) (the design doc and the PR description; the operator rewrites it).
+
 ## 4. Risks, and the sentence that answers each
 
 | risk | the answer, said early |
@@ -207,36 +212,43 @@ that requires our daemon to exist.
 ## 9. The camera: what to take to Pollen (2026-10-03)
 
 The second thing measured on their duck that needs something from their daemon (the first is §8's head joints). Written here
-in our terms; PR-2 and any follow-up carry it in theirs. Evidence: design doc §17.104–17.107.
+in our terms; PR-2 and any follow-up carry it in theirs. Evidence: design doc §17.104–17.107. **Checked against their tree at
+`ded2f7c` (2026-10-03).**
+
+**What their tree already has.** `media.frame` (#241, merged): one fresh raw frame per call on `mediad`'s local socket
+(`/run/mediad/media.sock`, group-readable), ~1.8 MiB of UYVY at 1280×720, plus `media.video` carrying the intrinsics
+(IMX219, ~62° horizontal on the 1080p crop; their own note: reading 720p off the sensor would narrow it to 27°). It is built
+for snapshots (16 connections, 5 s each), not for a 12.5 Hz stream: pulling and downsampling 1.8 MiB at 12.5 Hz is ~23 MiB/s
+through a socket on an RK3566. And their own direction for perception (`docs/project/npu-bringup.md`, "What is still
+missing"): **a worker beside the camera, on the raw tee, that publishes features on the state stream rather than shipping
+pixels** — the same shape as `tofd` and `pet-detect`. Their duck-detector idea (`docs/ideas/autonomous_behavior.md`) is that
+shape for one class.
 
 **The situation, in their terms.** A client that wants the robot to notice things that move (a toy train, a rolling ball, a
-person walking past) has one sensor it can read: the head's 8×8 depth array, a 45° cone. The camera already on the head is
-carried by the media pipeline for remote sessions, and its frames do not reach a client. Everything a client builds on the
-depth array, however good, can only react to what is inside those 45°.
+person walking past) reads the head's 8×8 depth array: a 45° cone, useful to about 2 m. Everything built on it, however good,
+reacts only to what is inside that cone and that range.
 
-**The measurement that says what would help.** Ten-minute sessions in a simulated playroom on their MJCF, a toy train circling
-on a track, 18 seeds per arm:
+**The measurement.** Ten-minute sessions in a simulated playroom on their MJCF, a toy train circling, 18 seeds per arm:
 
-1. **The narrow cone is the limit, not the behaviour behind it.** With the train moving and within 1.5 m, it was inside the
-   depth array's cone 14–15 % of the time in every arm we built: a better motion detector on the depth frames, longer memory so
-   the head can glance away, the head turning toward detected motion, a learned choice of where to aim the chase, and the head
-   looking around on its own while walking. Each changed what the robot did after it saw the train; none changed how often it
-   saw it, because each of them needs the train in the cone first.
-2. **A wider field changes it in proportion.** Re-scoring the same sessions as if the sensor's field were wider: 45° 15 % ·
-   60° 19 % · 90° 27 % · 120° 36 % · 160° 47 %. A 120° view used only to notice motion would see the train 2.4× as often,
-   before the head does anything.
-3. **What it needs is small.** Motion detection by frame difference works on a 64 × 48 grey frame at the depth sensor's
-   12.5 Hz: about 3 KB a frame, 38 KB/s. No colour, no full resolution, no recording, nothing leaves the robot.
+1. **The depth array's field is the limit, not the behaviour behind it.** With the train moving and within 1.5 m it was in the
+   cone 14–15 % of the time in every arm built: a better motion detector on the depth frames, longer memory so the head can
+   glance away, the head turning toward detected motion, a learned choice of where to aim the chase, the head looking around
+   on its own. Each changed what the robot did after it saw the train; none changed how often it saw it.
+2. **Their camera, used only to notice motion, sees the train 2.4× as often** — over all the train's moving time, the depth
+   array has it 8 % of the time (45°, under 2 m), a 62° view at any range 19 % (the train's distance: median 1.8 m, p90
+   2.9 m). The gain is range more than width: on the near train alone, 60° buys 19 % against 15 %.
+3. **What it needs is small.** Frame differencing on a downsampled grey frame (64 × 48) at ~12 Hz: a few kilobytes a frame, a
+   small fraction of one core, and only the result — where in the picture something moved — has to leave the worker.
 
-**The ask, one thing.** A way for a local client to read camera frames: a subscribable stream of small grey frames (or the
-pipeline's own frames, with the client downsampling), alongside the depth frames the runtime already publishes. Off unless
-a client subscribes. If privacy is the reason it is closed today, a frame size small enough that it is a motion sense and not
-a picture (64 × 48) is a natural line to draw; the robot's owner opts in.
+**The ask, one thing, in their shape.** A motion feature beside the camera: a worker on `mediad`'s raw tee (or inside it)
+that publishes, a few to a dozen times a second, where in the frame something moved (a coarse grid of motion energy, or the
+strongest blob's bearing and size), on the state stream, off unless subscribed. It is their own "features, not pixels"
+direction with the simplest possible feature, needs no model and no NPU, and is useful beyond us (a startle on motion, the
+runtime's contrast-based startle has the same input). The fallback, if they prefer us to own the worker: a small-frame
+variant of `media.frame` that can be polled at ~12 Hz (downsampled grey in the tee), and we run the differencing ourselves.
 
-**How it travels.** After PR-2 (the design document names the camera as the third seam, after the twist and the head joints),
-as an issue or a Discussion first, not a PR: we do not know their camera pipeline's constraints, and the shape of the stream is
-theirs to choose. With the video demonstrations of the ten-minute behaviour set as the reason it matters. Opening it is the
-operator's call (REPORTS.md §9.6).
+**How it travels.** PR-2 (the design document) names it once, as the third seam after the twist and the head joints. Then
+an issue or a Discussion, not a PR: the worker's place in their media pipeline is theirs to choose. The video demonstrations
+of the ten-minute behaviour set are the reason it matters. Opening it is the operator's call (REPORTS.md §9.6).
 
-**Open for the operator:** the lens's field of view on the real duck (their MJCF marks the camera's pose, not its field) —
-it decides where on the curve above the robot would sit; and whether the request goes with PR-2 or after it.
+**Open for the operator:** whether the camera goes in PR-2 or after it.

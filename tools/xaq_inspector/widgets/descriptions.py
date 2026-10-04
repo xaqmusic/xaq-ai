@@ -1066,6 +1066,25 @@ DOCS["LoopCompetence"] = ModuleDoc(
     ),
 )
 
+DOCS["MotionField"] = ModuleDoc(
+    title="Motion field — something is now where the world was just empty",
+    summary=(
+        "The duck's always-on motion sense. It remembers the distance sensor's rays for a second and a half. When a new "
+        "return lands where, a moment ago, a ray passed straight through and kept going, something has moved into "
+        "that space: a wall cannot do that, because a ray that reached past it went through it. A few such points "
+        "close together are a <b>blob</b>; a blob seen again in the next cast, near where it was, is a <b>track</b> "
+        "with a velocity. A track is published only after it has lasted a few casts (and, if set, travelled), and "
+        "edges the sensor has hit for a while are ignored as background. It sees only inside the sensor's 45° cone."
+    ),
+    formulas=(
+        "<code>evidence: return p with a remembered ray r, |p − r| &lt; near_m, r continuing ≥ beyond_m past p</code><br>"
+        "<code>blob: ≥ min_points evidence points within cluster_m, one cast</code>; "
+        "<code>track: blobs within gate_m cast to cast; published after persist_casts</code><br>"
+        "Background (bg_m): a return near a remembered return 1–10 s old is the static world, not motion.<br>"
+        "Output: <code>[bearing x, bearing y, proximity, salience, casts, cast tick, world vx, world vy]</code>."
+    ),
+)
+
 DOCS["JointSensorimotorBridge"] = ModuleDoc(
     title="Sensorimotor bridge — exactly what a motor brain gets to feel",
     summary=(

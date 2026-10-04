@@ -6981,3 +6981,26 @@ The case for camera access, in Pollen's terms: outreach plan §9.
 **★ LA1 PROMOTED on the operator's eye (2026-10-03):** "the robot actually looks quite interesting when it's looking around at
 areas that it hasn't seen before; it's novelty to the behaviour, and it is definitely moving in a direction that we want." The
 stack is now ★ LA1 = T11 (config `a1v2_t11_not_target`) + host `--look-around 0.9 2.0` (launcher preset, second row).
+
+**Correction, the same day (checked against Pollen's tree at `ded2f7c`):** the duck's camera is an IMX219 at ~62° horizontal,
+not a 120° lens, and `media.frame` (one raw frame per call on `mediad`'s socket) already exists. Re-scored over ALL the train's
+moving time (not only near it), the ToF has it 8 % (45°, under 2 m) and a 62° camera at any range 19 % (T11, n = 18; LA1 7 vs
+16 %): still 2.4×, from range more than width. The ask is reshaped to their own "features, not pixels" direction: outreach plan §9.
+
+### 17.108 Defects found while documenting ★ LA1 (2026-10-04, open)
+
+A file:line fact sheet of the three ★ LA1 brains (for the companion document to PR-2) turned up these; each fix is a lever
+(guarded, n = 18, the eye), none is applied yet.
+- **The escapes are mirrored (confirmed).** `CloudMap::view()` numbers sector 0 on the RIGHT (az + = left, `CloudMap.cpp:1188-1205`);
+  `main.cpp:2474` and `:2488` map sector k to `-64 + (k + 0.5)·16` deg and call it "+ = right", so `set_ref_hold` heads for the
+  mirror image of the freest sector — the stuck escape and the impeded look's wall escape (★ T4) alike.
+- **The stop sweep's centre is mirrored (confirmed).** `sweep_yc` takes `seek_ego()`, `lost_ego` and `thing_ego()` (all + = right)
+  as a head-yaw offset (+ = left) at `main.cpp:2228`, `:2232`, `:2236`; the gaze code elsewhere negates (`want = -seek_ego`).
+- **`--map-on-stop` bakes on walks.** The walk freeze sets `min_insertion_error` 1e9, and the bake gate compares against the same
+  value (`gng.cpp:291`), so any place node reaching 20 visits on a walk bakes without the consistency check (probe: 4 of 7).
+- **The place map's pose clamps at ±1.2 m** (`dim_min/max` ±0.6 on x/2, y/2) in a 4 m room: 61 % of ticks at the clamp in a 120 s probe.
+- **Suspected, unconfirmed:** each ToF cast re-added to the cloud ~4× (republished every tick between casts); `comp_seek` counting
+  stop-time windows as failures; `regime_epm`'s restore resetting `max_nodes` 2000 / `health_death_spares_baked` false.
+- **Inert:** `object_epm` and `thing_epm` outputs unread by any loop; PlayLoop's value not in the precision score.
+Fact sheet (2,980 lines, every claim anchored): [`microduck_la1_fact_sheet.md`](microduck_la1_fact_sheet.md); companion document
+"Inside the MicroDuck Brain" (Claude Docs).
