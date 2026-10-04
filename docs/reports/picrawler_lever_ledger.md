@@ -6360,3 +6360,49 @@ also weakest (the knee: 0.27 A blocked). Current remains the clean witness.
 - these were single-joint taps on the stand; run recordings now capture brain motion;
 - mic placement relative to the knees;
 - the silence class still includes handling noise around the blocked trials.
+
+### ★★ 2026-10-04 — TWO RECORDED BRAIN RUNS: IN REAL GAIT THE SERVOS NEVER GO QUIET, SO "STALLED = SILENT" HAS NOTHING TO CONTRAST WITH
+
+**Runs:** P-e·h0 from picrawler-dash, battery, 317 s and 321 s of brain control, audio and the 50 Hz
+feed recorded (`brainrun/run_audio_analysis.py`).
+
+**Alignment works because it was measured.** arecord's first sample lands ~383 ms after the request,
+which an assumed latency would have missed by ~0.4 s. The six sync taps rise a median 26–30 dB in
+4–8 kHz at +20 ms.
+
+**Audio in gait:**
+- commanded motion is non-zero in 99.98 % of brain-driven frames (mean ~170 µs per 20 ms frame
+  across the 12 channels: the brain's command thrash);
+- the 4–8 kHz whine sits at −31…−34 dB the whole time, against −76 dB in the quiet room (probe #1);
+- commanded motion predicts it at r = +0.04…+0.06 (best lag +90…+130 ms), with no joint type
+  standing out (|r| ≤ 0.06);
+- the whine barely changes between "some" and "a lot" of commanded motion (−32.8 vs −31.8 dB).
+
+A stalled servo among eleven whining ones cannot be heard as silence. The single-servo probe cue
+does not survive brain gait in this form. This is a statement about THIS gait, which moves almost
+every servo almost every frame; a calmer gait (smaller, fewer simultaneous moves, which the power
+budget wants anyway) would restore contrast. Untested: per-servo pitch differences within the
+128-band spectrum.
+
+**Current vs feet loaded at 50 Hz confirms the 10 Hz table:**
+
+| feet loaded | run 1 mean / p95 | run 2 mean / p95 |
+|---|---|---|
+| 0 | 0.52 / 1.23 A | 0.40 / 0.71 A |
+| 1 | 0.93 / 2.37 | 1.00 / 2.24 |
+| 2 | **1.56 / 2.88** | **1.72 / 2.98** |
+| 3 | 1.53 / 2.82 | 1.64 / 2.82 |
+| 4 | 1.33 / 2.37 | 1.45 / 2.58 |
+
+**Events:**
+- three HAT resets, each auto-recovered to `stand` in 2.2–2.5 s. The second before each: current
+  peak 2.4–3.0 A, 2.1–3.4 feet loaded, 155–180 µs/frame of commanded motion;
+- run 1's roll past 80° (the tilt guard read 141°) followed the most vigorous second of either run:
+  current mean 2.07 A (peak 3.04), 2.2 feet loaded, 203 µs/frame.
+
+**Reading:** the brain's continuous all-servo motion is one root behind three of today's problems:
+- it drives the 2–3-feet-loaded current peaks;
+- it drowns the audio stall cue;
+- the roll came after its most vigorous second.
+
+The power-budget prior (S3) and the jitter levers (2026-10-02) target the same thing from two sides.
