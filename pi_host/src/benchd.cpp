@@ -1856,9 +1856,22 @@ int main(int argc, char** argv) {
     // begin() includes the WHO_AM_I check, so a bad bus fails HERE, loudly, instead of
     // producing plausible numbers that only look wrong after someone trusts them.
     {
+        // ⚠ RETRIED: the probe intermittently reads WHO_AM_I = 0x00 on a restart (seen
+        // 2026-10-03 and 2026-10-04) and the daemon then runs the whole session with no
+        // attitude — which blinds the dash's tilt guard.  A second try after a pause has
+        // been enough every time it was tried by hand.
         auto probe = std::make_unique<Icm20948>();
         std::string why;
-        if (probe->begin(&why)) {
+        bool imu_up = false;
+        for (int attempt = 1; attempt <= 4 && !imu_up; ++attempt) {
+            imu_up = probe->begin(&why);
+            if (!imu_up && attempt < 4) {
+                std::fprintf(stderr, "benchd: ICM-20948 probe %d failed (%s) — retrying\n", attempt, why.c_str());
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                probe = std::make_unique<Icm20948>();
+            }
+        }
+        if (imu_up) {
             S.imu = std::move(probe);
             std::printf("ogma_benchd: ICM-20948 SPI CE0, WHO_AM_I 0x%02X (instrument only)\n",
                         S.imu->who_am_i());
