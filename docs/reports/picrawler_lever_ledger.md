@@ -6292,3 +6292,34 @@ both SPI modes, even after a reset command). It answered at the 13:39 boot and i
 failed restarts on 2026-10-03, so a loose connector or cable on the HAT's 7-pin SPI header is the
 lead. benchd now retries the probe 4 times; that does not help a silent chip. Without the IMU,
 dash runs are refused (tilt guard blind) and ogma_host cannot run brain inputs.
+
+### ★ 2026-10-04 — STALL PROBE #1 (FR leg, on the stand): CURRENT SEPARATES A STALL CLEANLY; AUDIO DOES NOT, YET
+
+**Probe:** `stall_probe.py --leg FR`: 27 free single-joint moves (100/200/400 µs) and 6 pushes into
+the operator's block (≤ 1 s), 124 s of audio on the same clock as benchd's 50 Hz feed. Analysis:
+`brainrun/stall_audio_analysis.py`, whose audio features are an exact twin of FrozenSTFTEncoder
+over the 1024-sample windows ogma_host hands the EPM.
+
+| class | level | servo current mean / peak | energy <1k / 1–4k / 4–8k kHz |
+|---|---|---|---|
+| silence | −45.6 dBFS | 0.27 / 1.24 A | 0.76 / 0.15 / 0.08 |
+| free hold | −41.9 | 0.10 / 0.16 | 0.51 / 0.25 / 0.22 |
+| free motion | −37.2 | 0.10 / 0.18 | 0.43 / 0.14 / **0.40** |
+| blocked push | −42.3 | **0.68 / 1.30** | 0.62 / 0.22 / 0.15 |
+
+- **Current is the clean stall witness:** a blocked push draws 7× the free-motion mean.
+- **Audio, as the operator predicted:** a moving servo whines in 4–8 kHz, and a stalled one is
+  quieter (hip1/hip2 motion −35 dB, blocked −41/−45 dB). But the knee's free motion was nearly
+  inaudible (−49 dB).
+- **Through the brain's encoder the classes barely separate:** free-motion vs blocked centroid
+  cosine 0.971; nearest-centroid recall 0.35 / 0.18 (chance 0.25), whole events held out.
+
+**Why this is not a verdict on audio (§3.1):**
+- the moves were 50–200 ms single-joint taps on an unloaded leg, unlike the brain's continuous
+  12-servo motion under load (operator: "the short movements may not be sufficient for the type
+  of movements caused by the brain");
+- only one move passed the onset detector, so the +85 ms alignment is weak;
+- the "silence" class picked up handling noise around the blocked trials (its 1.24 A peak);
+- mic placement and capture gain were not set.
+
+Re-use context: audio recorded during real brain motion.
