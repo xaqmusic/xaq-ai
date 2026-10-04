@@ -1325,6 +1325,13 @@ bool g_gaze_motion = false;
 // was last inside the sensor's 45 deg cone -- the stalest within MAX_YAW of the body's axis, if older than STALE_S; else
 // straight ahead.  A target for the head brain's learned gaze, not a sweep: a sector seen is fresh, so the look moves on.
 double g_look_around = 0.0, g_look_stale_s = 2.0;
+// THE SIGN FIXES (2026-10-04, design doc §17.108), each a lever:
+//   --fix-escape-sign: the stuck and wall escapes head for the freest sector of the cloud view (sector 0 is on the RIGHT, its
+//     azimuth + = left), not its mirror image;
+//   --fix-sweep-sign: a stop's sweep centred on the target / the lost mover / the kicked thing takes their bearings (+ = right)
+//     as a head yaw (+ = left) with the sign turned;
+//   --map-bake-honest: the place map's walk freeze keeps its bake check at the configured gate (the EPM's bake_gate).
+bool g_fix_escape_sign = false, g_fix_sweep_sign = false, g_map_bake_honest = false;
 // --gaze-no-candidate: the cloud's UNCONFIRMED mover candidate does not take the attention (measured: 15 % of ticks, mostly
 // young static clusters -- the head glanced at noise on the walk; §17.102)
 bool g_gaze_no_cand = false;
@@ -1636,6 +1643,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_tell_head) std::fprintf(stderr, "  tell head: while the head brain owns the joints, the policy's head command is the head's own targets as offsets from home (it balances for the head it carries)\n");
     if (g_head_rate > 0.0) std::fprintf(stderr, "  head slew: the head's joint targets and the walker's head command slew at most %.2f rad/s (the hand-offs between the head brain and the intent)\n", g_head_rate);
     if (g_head_gaze_sense) std::fprintf(stderr, "  head gaze sense: the head brain's 12th sense slot carries the gaze error (the seek target's bearing while seek steers, else straight ahead, minus the head's yaw)\n");
+    if (g_fix_escape_sign) std::fprintf(stderr, "  fix: the escapes head for the freest sector, not its mirror image\n");
+    if (g_fix_sweep_sign) std::fprintf(stderr, "  fix: a stop's sweep is centred on its target's side, not the mirror image\n");
+    if (g_map_bake_honest) { brain.set_map_bake_honest(true); std::fprintf(stderr, "  fix: the place map's walk freeze keeps its bake check (bake_gate)\n"); }
     if (g_look_around > 0.0) std::fprintf(stderr, "  look around: on the walk, with nothing else holding the gaze, the head's target is the bearing least recently seen within %.2f rad, if older than %.1f s\n", g_look_around, g_look_stale_s);
     if (g_freeze_walker) { brain.freeze_walker(); std::fprintf(stderr, "  walker frozen: its MotorEPM learning is off for the whole run\n"); }
     if (g_mover_sense) { brain.set_mover_sense(true); std::fprintf(stderr, "  intent mover sense: the chased mover's velocity (body frame, forward and left, /0.6 m/s) follows the range slot in the walker's sense\n"); }
@@ -2225,15 +2235,15 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                             std::fill(sweep_count.begin(), sweep_count.end(), 0); sweep_have_target = false;
                             if (g_stop.gaze_at_thing && stop_is_arrive) {
                                 const double centre = std::clamp(std::atan2(0.2, std::max(0.05, brain.seek_range()) + 0.15), 0.2, 0.55);
-                                sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp(brain.seek_ego(), -0.5, 0.5);
+                                sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp((g_fix_sweep_sign ? -1.0 : 1.0) * brain.seek_ego(), -0.5, 0.5);
                             } else if (stop_is_lost) {
                                 // the look after a lost chase: the sweep centred on where the thing was last predicted
                                 const double centre = std::clamp(std::atan2(0.2, std::max(0.05, lost_range) + 0.15), 0.2, 0.55);
-                                sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp(lost_ego, -0.5, 0.5);
+                                sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp((g_fix_sweep_sign ? -1.0 : 1.0) * lost_ego, -0.5, 0.5);
                             } else if (g_skill_unwind_aim > 0.0 && stop_is_look && brain.thing_pos_present()) {
                                 // the look stop after an unwind: the sweep's yaw is centred on the kicked thing's
                                 // remembered bearing (the pitch band stays: T3's pitch cost the stand, §17.40)
-                                sweep_p_lo = sweep_p_lo0; sweep_p_hi = sweep_p_hi0; sweep_yc = std::clamp(brain.thing_ego(), -0.5, 0.5); ++look_aimed;
+                                sweep_p_lo = sweep_p_lo0; sweep_p_hi = sweep_p_hi0; sweep_yc = std::clamp((g_fix_sweep_sign ? -1.0 : 1.0) * brain.thing_ego(), -0.5, 0.5); ++look_aimed;
                             } else { sweep_p_lo = sweep_p_lo0; sweep_p_hi = sweep_p_hi0; sweep_yc = 0.0; }
                             sweep_wp = (sweep_p_hi - sweep_p_lo) / sweep_np;
                         }
@@ -2471,7 +2481,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (view.size() == 8) {
                             int best = -1; double bv = -1.0;
                             for (int k = 0; k < 8; ++k) { const double v = view[size_t(k)] - 0.01 * std::fabs(k - 3.5); if (v > bv) { bv = v; best = k; } }
-                            const double bearing = (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;   // + = right, as the loops' bearings
+                            const double bearing = (g_fix_escape_sign ? -1.0 : 1.0) * (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;   // + = right, as the loops' bearings (the sector's azimuth is + = left: --fix-escape-sign)
                             brain.set_ref_hold(bearing, int(g_stuck_escape_s * kBrainHz)); ++escapes; stop_event = "stop:escape";
                         }
                         stop_is_stuck = false;
@@ -2485,7 +2495,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                             if (view.size() == 8) {
                                 int best = -1; double bv = -1.0;
                                 for (int k = 0; k < 8; ++k) { const double v = view[size_t(k)] - 0.01 * std::fabs(k - 3.5); if (v > bv) { bv = v; best = k; } }
-                                const double bearing = (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;
+                                const double bearing = (g_fix_escape_sign ? -1.0 : 1.0) * (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;
                                 brain.set_ref_hold(bearing, int((g_stuck_escape_s > 0.0 ? g_stuck_escape_s : 6.0) * kBrainHz)); ++escapes;
                             }
                             stop_event = "impeded:wall";
@@ -3581,6 +3591,12 @@ int main(int argc, char** argv) {
             g_gaze_motion = true;
         } else if (a == "--gaze-no-candidate") {
             g_gaze_no_cand = true;
+        } else if (a == "--fix-escape-sign") {
+            g_fix_escape_sign = true;
+        } else if (a == "--fix-sweep-sign") {
+            g_fix_sweep_sign = true;
+        } else if (a == "--map-bake-honest") {
+            g_map_bake_honest = true;
         } else if (a == "--look-around") {
             g_look_around = std::stod(next("--look-around")); g_look_stale_s = std::stod(next("--look-around"));
         } else if (a == "--freeze-walker") {

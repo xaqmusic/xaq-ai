@@ -445,11 +445,14 @@ void IntentAdapter::set_map_learning(bool on) {
             module->on_param_change("epsilon_b",           ogma::ParamValue{0.0});
             module->on_param_change("epsilon_n",           ogma::ParamValue{0.0});
             module->on_param_change("stale_prune_enabled", ogma::ParamValue{false});
+            // --map-bake-honest (§17.108): the bake check keeps the configured gate while insertion is shut
+            if (map_bake_honest_) module->on_param_change("bake_gate", ogma::ParamValue{map_saved_["min_insertion_error"]});
         } else {
             module->on_param_change("min_insertion_error", ogma::ParamValue{map_saved_["min_insertion_error"]});
             module->on_param_change("epsilon_b",           ogma::ParamValue{map_saved_["epsilon_b"]});
             module->on_param_change("epsilon_n",           ogma::ParamValue{map_saved_["epsilon_n"]});
             module->on_param_change("stale_prune_enabled", ogma::ParamValue{map_saved_["stale_prune_enabled"] != 0.0});
+            if (map_bake_honest_) module->on_param_change("bake_gate", ogma::ParamValue{0.0});
         }
     }
 }

@@ -88,6 +88,11 @@ public:
         float beta                = 0.0005f;
         int   baking_threshold    = 100;
         float min_insertion_error = 0.02f;
+        // THE BAKE GATE (2026-10-04, design doc §17.108): > 0 = the consistency gate a node must pass to bake, apart from
+        // the insertion floor.  A host that freezes insertion by raising min_insertion_error (the duck's --map-on-stop)
+        // otherwise opens the bake check too: every node reaching baking_threshold bakes unchecked.  0 = the insertion
+        // floor, as before (byte-identical).
+        float bake_gate = 0.0f;
 
         // ---------------------------------------------------------------------
         // Ecological self-tuning of the insertion gate
@@ -311,6 +316,7 @@ public:
     void set_lambda_new(int l)                 { cfg_.lambda_new = l; }
     void set_max_age(int a)                    { cfg_.max_age = a; }
     void set_baking_threshold(int t)           { cfg_.baking_threshold = t; }
+    void set_bake_gate(float g)                { cfg_.bake_gate = g; }
     void set_mitosis_enabled(bool e)           { cfg_.mitosis_enabled = e; }
     void set_mitosis_error_threshold(float t)  { cfg_.mitosis_error_threshold = t; }
     void set_mitosis_check_interval(int n)     { cfg_.mitosis_check_interval = n; }

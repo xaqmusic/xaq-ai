@@ -7004,3 +7004,46 @@ A file:line fact sheet of the three ★ LA1 brains (for the companion document t
 - **Inert:** `object_epm` and `thing_epm` outputs unread by any loop; PlayLoop's value not in the precision score.
 Fact sheet (2,980 lines, every claim anchored): [`microduck_la1_fact_sheet.md`](microduck_la1_fact_sheet.md); companion document
 "Inside the MicroDuck Brain" (Claude Docs).
+
+### 17.109 The §17.108 fixes, measured (2026-10-04)
+
+**The operator:** "run the powered studies on the fixes you proposed; let's find out if they have meaningful impact on
+behaviour." Four levers on ★ LA1, each alone, guard byte-identical (all off = ★ LA1 seed 5): **F1** `--fix-escape-sign`;
+**F2** `--fix-sweep-sign`; **F3** `--map-bake-honest` (new GNG/EPM `bake_gate`; unit test
+`BakeGateKeepsTheConsistencyCheckWhenInsertionIsFrozen`); **F4** config `a1v2_la1_f4_map_wide` (the map's pose slots ±2.2 m).
+n = 24 seeds (1–24) per arm, 600 s, the train playroom, a fresh ★ LA1 base (`log/ten/fx0`–`fx4`). Instrument:
+`mj_host/tools/fx_study.py` (paired by seed; 95 % CI; the detectable difference at 80 % power). Seed pairing barely cuts the
+variance (runs diverge), so the detectable differences are wide: boring ±7–9 points, walls ±9–14 /min.
+
+| | ★ LA1 | F1 escape | F2 sweep | F3 bake | F4 map wide |
+|---|---|---|---|---|---|
+| boring · interesting % | 22.1 · 46.9 | 22.2 · 45.6 | 21.5 · 48.0 | 23.1 · 45.5 | 20.9 · 50.0 |
+| walls/min (sd) | 16.2 (14.6) | 18.8 (28.4) | 15.9 (12.5) | 13.9 (9.5) | 10.7 (7.5) |
+| falls | 2.58 | 2.38 | 3.42 | 2.88 | 1.96 |
+| block touched in the first minute | 17/24 | 18/24 | 16/24 | 16/24 | 18/24 |
+| skills touching % | 30.0 | 30.9 | 32.1 | **37.7** (Δ +7.6, CI [0.0, 15.2]) | 32.9 |
+| arrival stop: target in the ToF's view | 32.8 % | 35.1 % | **51.4 %** (Δ +18.6, CI [+9.4, +27.9]) | 34.5 % | 35.0 % |
+| outcomes observed % | 63.6 | 68.7 | 70.0 (Δ +6.4, CI [−0.7, +13.6]) | 64.3 | 65.7 |
+| map nodes · baked on walks | 41.9 · 15.6 | 40.9 · 14.4 | 42.6 · 15.3 | **35.6 · 6.1** | 41.0 · 14.0 |
+| after an escape: displacement 10 s · wall % | 0.47 m · 3.2 | 0.47 m · 3.6 | — | — | — |
+
+**Verdicts (n = 24, one scene).**
+- **F1 `NULL`.** The escape now heads for the freest sector, and nothing downstream moves. Escapes are rare (~2.3 a run) and
+  last 6 s; the walker's own avoidance and the loops take over within seconds either way. Correct the sign on correctness
+  grounds; it is not a behaviour lever at this rate.
+- **F2 `WORKING` on its mechanism, `NULL` on behaviour.** The arrival stop's sweep now covers the target: in view 33 → 51 %, the
+  one loud effect of the five arms. The outcome loop sees more of its kicks (+6.4 points, CI just crosses 0); boring, skills
+  and the first minute do not move. Falls 3.42 vs 2.58 is inside the noise (CI [−0.5, +2.2]); watch it.
+- **F3 `PARTIAL`.** The map now bakes on walks only what passes the check: 15.6 → 6.1 walk bakes, 6 fewer nodes (the walk
+  bakes were noise). Skills touching +7.6 points at the edge of significance; nothing regresses.
+- **F4 `NULL`, a lean.** Walls/min 16.2 → 10.7 and falls 2.58 → 1.96 with half the spread; neither difference clears the
+  noise at this n. The map does not grow (41 nodes either way).
+**Reading:** the four defects were real and fixing them costs nothing measurable, but none of them is what ★ LA1's behaviour
+rests on; the stack of all four is measured next (`log/ten/fx5`).
+
+**The four together** (F5: F4's config + F1–F3's flags; `log/ten/fx5`, n = 24, against the same ★ LA1 base): boring 20.9 %
+(Δ −1.2), interesting 48.2 %, walls 11.5 /min (Δ −4.7, CI [−11.0, +1.5]), falls 2.75 (Δ +0.17), the block touched in the
+first minute 19/24 (★ LA1 17/24), skills 11.9 a run (Δ +1.7, CI [−0.2, +3.6]), skills touching 35.0 %, train contacts 3.7,
+target in view at arrival 50.7 % (Δ +17.9, CI [+9.5, +26.3]), map 36 nodes and 6.4 walk bakes. **Verdict: `PARTIAL`, no
+regression.** Every mechanism lands and every behaviour number leans the right way, none beyond the noise at n = 24: a
+correctness stack, not a capability. Preset "F5 · the four fixes" beside ★ LA1 for the operator's eye.

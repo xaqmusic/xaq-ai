@@ -48,6 +48,30 @@
   }
  },
  {
+  "name": "F5 · ★ LA1 + the four §17.108 fixes (escape and sweep signs, honest map baking, the map covers the room)",
+  "hint": "§17.109 (2026-10-04): F1 --fix-escape-sign, F2 --fix-sweep-sign, F3 --map-bake-honest, F4 config a1v2_la1_f4_map_wide. n = 24 against ★ LA1: target in view at an arrival stop 33 -> 51 %, map 42 -> 36 nodes (walk bakes 15.6 -> 6.4); walls 16.2 -> 11.5/min, first minute 19/24 vs 17/24, skills 10.3 -> 11.9, boring 22.1 -> 20.9, falls 2.6 -> 2.8 -- all inside the noise; no regression. WATCH an arrival stop: the head's sweep should now sit on the thing's side. Seeds 1 and 2060249272.",
+  "state": {
+   "config": "a1v2_la1_f4_map_wide.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
   "name": "★ T4 · the STACK (promoted 2026-10-02): a seen top, the stop is still, the line, structure does not answer, the impeded look",
   "hint": "PROMOTED on the operator's eye (2026-10-02). The ten-minutes phase (2026-10-02): T1 (a small thing needs a seen top) + the stop is still + the line on a seen wall + the outcome loop's learned pull by kind x context (things standing on walls do not answer) + the impeded look (back off, look up, a wall is forgotten and escaped). n = 18: boring 22.3 % (★ TURN 43, the base 30.5), interesting 48 %, worst run 41 %, walls 14.5/min, falls 2.7. Ties the line alone on the mean; tighter tail. WATCH seed 1 and the chase seed 2060249272.",
   "state": {
