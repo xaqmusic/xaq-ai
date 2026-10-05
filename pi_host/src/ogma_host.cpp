@@ -794,6 +794,15 @@ int main(int argc, char** argv) {
                             bus->publish("sense.servo_current", ci);
                             ++bi_current_pub;
                         }
+                        // The HAT's 3.3 V rail estimate (benchd: 3.3 x INA pack V / A4), instrument only.
+                        if (f.contains("rail_v") && f["rail_v"].is_number()) {
+                            auto rv = std::make_shared<ogma::ProprioToken>();
+                            rv->tick_id = uint64_t(ticks); rv->producer_id = "host";
+                            rv->sensor = "hat_rail";
+                            rv->values.resize(1);
+                            rv->values[0] = float(f["rail_v"].get<double>());
+                            bus->publish("sense.hat_rail", rv);
+                        }
                         const uint64_t seq = f.value("seq", uint64_t(0));
                         if (bi_last_seq && seq != bi_last_seq + 1) ++bi_seq_gaps;
                         bi_last_seq = seq;

@@ -46,6 +46,7 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <mutex>
 #include <utility>
@@ -683,6 +684,29 @@ struct State {
     void note_bus_ok(int64_t t) { bus_burst.ok(t); }
     BusBurst bus_burst;                 // a HUNG MCU vs sporadic errors (HatHealth.hpp)
     int      hat_glitches = 0;          // garbage reads the re-reads did not confirm
+    // ---- THE HAT's 3.3 V RAIL, estimated (2026-10-05) -----------------------------------
+    // The HAT's ADC measures the battery divider (A4) against its OWN 3.3 V rail; the INA219
+    // measures the same pack against its internal reference.  So
+    //     rail ~= 3.3 * INA pack V / (A4 read as if the reference were 3.3 V)
+    // and a sagging rail shows as A4 reading HIGH — the "garbage" 9-11 V battery reads were this
+    // (ledger 2026-10-05 evening).  Instrument only.  Valid while the INA219 itself is powered
+    // (it shares the rail: a deep enough sag kills both, which is itself the answer).
+    double   rail_v = 0.0, rail_min_1s = 0.0, rail_min_all = 9.9;
+    int64_t  rail_win_start = 0;
+    double   rail_win_min = 9.9;
+    long     rail_below_3v0 = 0, rail_samples = 0;
+    std::optional<double> rail_from(int a4_raw) const {
+        if (!ina_ok || ina_v < 5.0 || a4_raw <= 0) return std::nullopt;
+        const double a4_v = a4_raw * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
+        return 3.3 * ina_v / a4_v;
+    }
+    void note_rail(double v, int64_t t) {
+        rail_v = v; ++rail_samples;
+        if (v < 3.0) ++rail_below_3v0;
+        rail_min_all = std::min(rail_min_all, v);
+        if (t - rail_win_start >= 1000) { rail_min_1s = rail_win_min; rail_win_min = 9.9; rail_win_start = t; }
+        rail_win_min = std::min(rail_win_min, v);
+    }
     bool hat_healthy(int64_t now) const { return now - std::max(last_bus_err_ms, last_garbage_ms) > 500; }
     int  outages_last_60s(int64_t now) const {
         int n = 0; for (int64_t t : outage_starts) if (now - t <= 60000) ++n; return n;
@@ -1007,6 +1031,9 @@ struct State {
                 {"stopped_ms", stopped ? now - stopped_at_ms : 0}, {"stops", stops},
                 {"brain", brain}, {"cal_stream_refused", cal_guard.refused()},
                 {"servo_lag_alpha", driver.output_lag()}, {"hat_resets", hat_resets}, {"hat_glitches", hat_glitches},
+                {"rail", rail_samples ? json{{"v", rail_v}, {"min_1s", rail_min_1s}, {"min_all", rail_min_all},
+                                             {"below_3v0", rail_below_3v0}, {"samples", rail_samples},
+                                             {"how", "3.3 x INA pack V / A4 reading"}} : json(nullptr)},
                 {"ina_capture", cap_mode ? json{{"mode", cap_mode == 1 ? "inrush" : "sag"}, {"file", cap_file},
                                                 {"samples", cap_samples}, {"peak_a", cap_peak_a},
                                                 {"min_v", cap_mode == 2 ? json(cap_min_v) : json(nullptr)},
@@ -1324,10 +1351,16 @@ void tick_thread(State& S) {
             if (want_fast) S.adc_fast_next_ms = ms + g_adc_poll_ms;
             json a = json::array();
             bool fsr_ok = true;
+            int tick_a4 = -1; double tick_rail = -1.0;
             try {
                 timespec r0, r1;
                 clock_gettime(CLOCK_MONOTONIC, &r0);
                 for (int c = 0; c < 4; ++c) a.push_back(S.hat.adc_raw(c));   // A0-A3, the feet
+                if (want_state) {                                            // A4: the 3.3 V rail estimate
+                    const int a4 = S.hat.adc_raw(4);
+                    tick_a4 = a4;
+                    if (auto r = S.rail_from(a4)) { tick_rail = *r; S.note_rail(*r, ms); }
+                }
                 clock_gettime(CLOCK_MONOTONIC, &r1);
                 S.sp_adc_w.add((r1.tv_sec - r0.tv_sec) * 1e6 + (r1.tv_nsec - r0.tv_nsec) / 1e3);
                 if (want_fast)
@@ -1362,6 +1395,7 @@ void tick_thread(State& S) {
                 const json f = {{"seq", ++g_state_seq}, {"t", ms}, {"us", us}, {"armed", armed},
                                 {"out", out},
                                 {"i_a", S.ina_ok ? json(S.ina_i) : json(nullptr)}, {"ina_window_ms", 68},
+                                {"a4", tick_a4}, {"rail_v", tick_rail > 0 ? json(std::round(tick_rail * 1000) / 1000) : json(nullptr)},
                                 {"mode", ogma::hw::brain::mode_name(S.mode)}, {"stopped", S.stopped},
                                 {"fsr", fsr}, {"fsr_ok", fsr_ok},
                                 {"tof_m", S.tof_m}, {"tof_valid", S.tof_ok && S.tof_valid},
@@ -1443,7 +1477,7 @@ void ina_capture_thread(State& S) {
             if (f) {
                 std::lock_guard<std::mutex> lk(S.m);
                 std::fprintf(f, "# ina219 %s capture: r_shunt %.6f ohm, pga full scale %.3f V, conv_us %d, clock CLOCK_MONOTONIC us\n"
-                                "t_us,shunt_raw,bus_raw\n", mode == 1 ? "inrush" : "sag", S.ina->r_shunt(),
+                                "t_us,shunt_raw,bus_raw,a4_raw\n", mode == 1 ? "inrush" : "sag", S.ina->r_shunt(),
                              Ina219::pga_full_scale_v(S.ina->pga()), mode == 1 ? 532 : 1064);
             }
             next = std::chrono::steady_clock::now();
@@ -1463,12 +1497,18 @@ void ina_capture_thread(State& S) {
             if (f) { std::fclose(f); f = nullptr; }
             continue;
         }
-        int16_t sh = 0; uint16_t bu = 0; bool okr = true;
+        int16_t sh = 0; uint16_t bu = 0; bool okr = true; int a4 = -1;
+        static long cap_k = 0;
         {
             std::lock_guard<std::mutex> lk(S.m);
             try {
                 if (mode == 1) sh = S.ina->read_shunt_raw();
                 else { const auto smp = S.ina->read(); sh = smp.shunt_raw; bu = smp.bus_raw; }
+                // the 3.3 V rail: A4 on every 4th sample (~235 Hz in sag mode), so a reset's droop
+                // is resolved in milliseconds without halving the current rate
+                if (mode == 2 && (++cap_k % 4) == 0) {
+                    try { a4 = S.hat.adc_raw(4); } catch (const std::exception&) { a4 = -2; }
+                }
                 ++S.cap_samples;
                 const double ia = S.ina->shunt_to_amps(sh);
                 S.cap_peak_a = std::max(S.cap_peak_a, ia);
@@ -1478,7 +1518,7 @@ void ina_capture_thread(State& S) {
         }
         if (okr && f) {
             timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-            std::fprintf(f, "%lld,%d,%u\n", (long long)ts.tv_sec * 1000000LL + ts.tv_nsec / 1000, int(sh), unsigned(bu));
+            std::fprintf(f, "%lld,%d,%u,%d\n", (long long)ts.tv_sec * 1000000LL + ts.tv_nsec / 1000, int(sh), unsigned(bu), a4);
         }
         next += period;
         const auto now_tp = std::chrono::steady_clock::now();

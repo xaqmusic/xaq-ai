@@ -21,6 +21,12 @@ rows = np.loadtxt(cap_path, delimiter=",", comments="#", skiprows=2, dtype=np.in
 t_ms = rows[:, 0] / 1000.0
 amps = rows[:, 1] * 10e-6 / 0.01                    # shunt LSB 10 uV over 10 mOhm
 volts = (rows[:, 2] >> 3) * 4e-3
+# The HAT's 3.3 V rail (captures from 2026-10-05 evening on carry an A4 column, every 4th sample):
+# rail ~= 3.3 * INA pack V / (A4 read as if the reference were 3.3 V)
+a4 = rows[:, 3] if rows.shape[1] > 3 else np.full(len(rows), -1)
+has_a4 = (a4 > 0) & (volts > 5.0)
+rail = np.full(len(rows), np.nan)
+rail[has_a4] = 3.3 * volts[has_a4] / (a4[has_a4] * 3.3 / 4095 * 3.0)
 ev = [json.loads(l) for l in open(ev_path)]
 feed = [json.loads(l) for l in open(feed_path)]
 ft = np.array([f["t"] for f in feed], float)
@@ -75,6 +81,14 @@ for e in in_cap:
           f"{np.nanmin(a_[:, 1]):.2f}")
     print("     last 200 ms, 10 ms max A: " + " ".join(f"{x:.1f}" for x in a_[-20:, 0]))
     print("     last 200 ms, 10 ms min V: " + " ".join(f"{x:.2f}" for x in a_[-20:, 1]))
+    rw = (t_ms > td - 600) & (t_ms <= td) & np.isfinite(rail)
+    if rw.any():
+        rb = []
+        for s_ in range(-300, 0, 20):
+            m = rw & (t_ms >= td + s_) & (t_ms < td + s_ + 20)
+            rb.append(np.nanmin(rail[m]) if m.any() else np.nan)
+        print(f"     3.3 V rail, last 300 ms before benchd's detection (20 ms min): "
+              + " ".join(f"{x:.2f}" for x in rb) + f"   lowest {np.nanmin(rail[rw]):.2f} V")
     print(f"     at the break: feet loaded {(fsr[i] > 200).sum()}, channels at the slew cap {(sl >= 35).sum()}, "
           f"belly {tof[i] * 1000 if np.isfinite(tof[i]) else float('nan'):.0f} mm")
 
@@ -106,6 +120,10 @@ for th in (3.0, 4.0, 5.0):
     lens = np.array(lens) if lens else np.array([0])
     print(f"   excursions above {th:.0f} A: {len(starts)} ({len(starts) / secs * 60:.1f} per min), duration median "
           f"{np.median(lens):.0f} ms, p95 {np.percentile(lens, 95):.0f}, max {lens.max():.0f} ms")
+if np.isfinite(rail[ok]).any():
+    rr = rail[ok][np.isfinite(rail[ok])]
+    print(f"   3.3 V rail (gait, away from resets): p0.1 {np.percentile(rr, 0.1):.2f}  p1 {np.percentile(rr, 1):.2f}  "
+          f"p50 {np.median(rr):.2f} V; below 3.0 V {np.mean(rr < 3.0) * 100:.2f} % of {len(rr)} samples")
 vv = bmin_v[np.isfinite(bmin_v)]
 print(f"   10 ms min pack V: p1 {np.percentile(vv, 1):.2f}  p0.1 {np.percentile(vv, 0.1):.2f}  min {vv.min():.2f} V")
 
