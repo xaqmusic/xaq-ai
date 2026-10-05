@@ -6627,3 +6627,55 @@ That lag was chosen to give the robot the plant lag the sim ALREADY has (entry "
 - a brain retuned on a capped body.
 
 The cap stays default-off. The power model's next step is the shape, not the rail.
+
+### ★★ 2026-10-05 (late) — SCALE PROBE: an MG90S holds a load almost for free, drives into one at ~1 A, and cuts its own drive after ~3.3 s
+
+**Probe:** `scale_probe.py --leg FL` (ch 4), robot on its stand, operator poses `toes_up` →
+`torque_check` (leg straight, knee ~2 mm above a kitchen scale). hip2 pushes in 40 µs steps past
+that point; each push is held ~7 s, then the leg rests 2 s. Current is benchd's 50 Hz INA219 (whole
+HAT, battery side, base ~0.10 A). Operator: the scale reading **peaked, then settled**, and the
+SETTLED value was entered. Separately, back-driving a held servo by hand took ~1.2 kg on the same
+arm (~0.63 N m).
+
+| push past contact | settled reading | settled torque (53.6 mm arm) | current while driving (0.25–3.3 s) | current settled (4.5–7 s) |
+|---|---|---|---|---|
+| 40 µs | 130 g | 0.07 N m | 0.11 A (= base) | 0.11 A |
+| 80 µs | 228 g | 0.12 N m | 0.10 A (= base) | 0.10 A |
+| 120 µs | 320 g | 0.17 N m | 0.83–0.93 A | 0.21 A |
+| 160 µs | 387 g | 0.20 N m | 0.79–0.88 A | 0.21 A |
+| 200 µs | 475 g | 0.25 N m | 0.95–1.08 A | 0.21 A |
+| 240–440 µs | 475–480 g | 0.25 N m | 0.73–0.84 A | 0.20–0.21 A |
+
+The commanded pulse was constant through every hold (benchd's `out` = target, all other channels
+unchanged), so everything below happened inside the servo.
+
+- **Holding is nearly free.** At 40–80 µs the leg reached its target (stand and scale compliance
+  absorbed the few mm) and held 0.07–0.12 N m with no current above base. After the drive phase, it
+  held 0.25 N m at 0.11 A. Gear friction carries a static load: the back-drive force is ~0.63 N m.
+- **Driving into a load is a step to ~0.7–1.0 A** (battery side, one servo) once the target is out of
+  reach. That level barely depends on how far out of reach (120–440 µs): the servo saturates.
+- **The servo cuts its own drive after ~3.3 s.** At every push from 120 µs on, the current falls from
+  ~0.8–1.0 A to 0.21 A between 3.3 and 4.5 s, on the same timing every time, with the pulse
+  unchanged. A thermal fold-back would not reset in the 2 s rest, so this looks like the servo IC's
+  stall protection. The scale's "peak then settle" is the force following that current.
+- **Not measured: the drive torque.** The peak force during the drive phase was not entered, so
+  amps per N m while driving is still open. The settled 475 g plateau over 200–440 µs may be a
+  holding limit, or the robot lifting on its stand; which one is unknown.
+
+**What it changes:**
+- **The sim's current model (S1).** A linear current-per-torque model is the wrong shape. A real
+  servo is close to bimodal: ~0 A while holding, even at 0.25 N m, and ~1 A while driving against a
+  load. That is exactly why the robot's current swings at gait timescale and its mean sits below
+  the linear model's: the sim's stance torques are mostly holding. The next model is two-state
+  (holding at H_HOLD ≈ 0, driving at a saturated level), with the 3.3 s stall cut-off as a third.
+- **The honest torque cap.** A symmetric 0.18 N m cap is wrong in both directions. The real servo
+  resists back-driving up to ~0.63 N m and drives at ≥ 0.25 N m. A cap that gives way at 0.18 under a
+  stance load models a servo that does not exist, which explains part of the dose-curve `REGRESSION`.
+  The faithful cap is asymmetric: drive ≥ 0.25 N m, hold ~0.6 N m.
+- **The robot's stuck leg.** A snagged leg draws stall current for ~3.3 s and then limits itself.
+  Rail dips from a stall are bounded in time by the servo itself.
+
+**Re-use / next:**
+- re-run with the scale display FILMED, aligned on the 12 pushes, for the peak (drive) torque per step;
+- one more servo, to see whether the 3.3 s cut-off is this unit or the model;
+- note whether the robot rises off its stand at the plateau.
