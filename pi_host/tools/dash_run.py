@@ -469,7 +469,7 @@ class RunController:
                          else "⚠ could not open the mic — recording the feed only")
                 # Fast current + pack voltage (~940 Hz, benchd ina.capture sag): the 140 ms
                 # telemetry average cannot see what browns the HAT out.
-                rc = self.io.bench.call("ina.capture", mode="sag", seconds=900)
+                rc = self.io.bench.call("ina.capture", mode="sag", seconds=3600)
                 self._inacap = (rc or {}).get("file") if rc and rc.get("ok") else None
                 self._ev_rec("ina_capture_start", file=self._inacap)
                 if not self._inacap:

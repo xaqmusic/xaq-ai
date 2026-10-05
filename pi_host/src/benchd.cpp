@@ -328,7 +328,8 @@ struct State {
     // looked exactly like the 5 that preceded one.  The reset is a faster transient than the
     // instrument.  `ina.capture` switches the part to single 12-bit conversions — sag mode,
     // current AND pack voltage, ~940 Hz; inrush mode, current only, ~1.9 kHz — and a thread
-    // writes every raw sample to pi_host/log/inacap_<stamp>_<mode>.csv on CLOCK_MONOTONIC us
+    // writes every raw sample (auto-stop at most 3600 s; the first cap, 900 s, cut a 19 min run) to
+    // pi_host/log/inacap_<stamp>_<mode>.csv on CLOCK_MONOTONIC us
     // (the clock the state feed and the run recordings use).  Instrument only.
     int     cap_mode = 0;                 // 0 off, 1 inrush, 2 sag
     int64_t cap_until_ms = 0;
@@ -1487,7 +1488,7 @@ json handle(State& S, const json& req) {   // caller holds m
         if (m == "off") { S.cap_until_ms = 0; return ok({{"stopping", S.cap_mode != 0}}); }   // the thread closes the file
         if (m != "sag" && m != "inrush") return err("mode must be sag, inrush or off");
         if (S.cap_mode) return err("a capture is already running: " + S.cap_file);
-        const double secs = std::clamp(req.value("seconds", 60.0), 1.0, 900.0);
+        const double secs = std::clamp(req.value("seconds", 60.0), 1.0, 3600.0);   // an hour: ~70 MB of sag CSV
         S.cap_mode = m == "inrush" ? 1 : 2;
         S.cap_file = g_log_dir + "/inacap_" + stamp_now() + "_" + m + ".csv";
         S.cap_samples = S.cap_clipped = 0; S.cap_peak_a = 0.0; S.cap_min_v = 99.0;
