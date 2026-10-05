@@ -92,6 +92,20 @@ GNG::NearestResult GNG::find_two_nearest(const Eigen::VectorXf& x) const {
 // ---------------------------------------------------------------------------
 
 std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
+    // Inference-only: answer the query, change nothing learned.  The winner and
+    // distance are what the learning path below reports (it also takes them
+    // from find_two_nearest before any update).  Before bootstrap the input is
+    // NOT buffered: a frozen GNG must not be seeded by the input it is judging.
+    // last_x_ is left alone too, since it places the next baked-q insertion.
+    if (!cfg_.learning_enabled) {
+        last_pruned_ids_.clear();
+        last_step_baked_ = false;
+        if (!bootstrapped_) return {0, 0.0f};
+        auto r = find_two_nearest(x);
+        if (r.s1_id < 0) return {0, 0.0f};
+        return {r.s1_id, r.d1};
+    }
+
     // Bootstrap: collect first 2 real inputs before running normal GNG
     if (!bootstrapped_) {
         bootstrap_buf_.push_back(x);
@@ -507,6 +521,7 @@ bool GNG::is_crystallised(int node_id) const {
 }
 
 bool GNG::boost_visits(int node_id, int amount) {
+    if (!cfg_.learning_enabled) return false;   // inference-only: visits are learned state
     auto it = nodes_.find(node_id);
     if (it == nodes_.end()) return false;
     auto& node = it->second;
@@ -557,6 +572,7 @@ void GNG::reset_topology() {
 // ---------------------------------------------------------------------------
 
 bool GNG::maybe_mitosis(int winner_id, const Eigen::VectorXf& x) {
+    if (!cfg_.learning_enabled) return false;   // inference-only: no split, no drift, no window reset
     if (!cfg_.mitosis_enabled) return false;
     if (node_count() >= cfg_.max_nodes - 1) return false;
 

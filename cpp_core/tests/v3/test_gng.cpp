@@ -460,3 +460,205 @@ TEST(GNG, BakeGateKeepsTheConsistencyCheckWhenInsertionIsFrozen) {
     EXPECT_GT(run(0.0f), 0) << "the defect: with the gate at the frozen floor every visited node bakes";
     EXPECT_EQ(run(0.06f), 0) << "noise this wide never passes a 0.06 consistency gate";
 }
+
+// ---------------------------------------------------------------------------
+// Inference-only mode (Config::learning_enabled = false)
+// ---------------------------------------------------------------------------
+//
+// A frozen GNG must answer "which node is nearest, and how far" exactly as the
+// learning path would, and change nothing it has learned.  The trained fixture
+// turns on every optional state path (autotune history, drift residual sums,
+// Kalman p) so the to_json() comparison covers them too.
+
+namespace {
+
+// Clustered unit-ish inputs: 6 centres, small noise, so the GNG grows, bakes
+// and carries post-bake state by the end of training.
+struct ClusterStream {
+    std::mt19937 rng;
+    std::vector<Eigen::VectorXf> centres;
+    int dim;
+    ClusterStream(unsigned seed, int dim_) : rng(seed), dim(dim_) {
+        for (int c = 0; c < 6; ++c) centres.push_back(random_unit(rng, dim));
+    }
+    Eigen::VectorXf next() {
+        std::uniform_int_distribution<int> pick(0, int(centres.size()) - 1);
+        std::normal_distribution<float> noise(0.0f, 0.05f);
+        Eigen::VectorXf v = centres[size_t(pick(rng))];
+        for (int i = 0; i < dim; ++i) v(i) += noise(rng);
+        return v;
+    }
+};
+
+GNG::Config freeze_cfg(GainKind kind) {
+    GNG::Config cfg;
+    cfg.dim                 = 16;
+    cfg.baking_threshold    = 20;
+    cfg.lambda_new          = 10;
+    cfg.min_insertion_error = 0.02f;
+    cfg.insertion_autotune  = true;
+    cfg.drift_ratio         = 0.5f;
+    cfg.gain_kind           = kind;
+    cfg.stale_window_factor = 300.0f;
+    cfg.health_death_min_nodes = 2;
+    return cfg;
+}
+
+GNG trained_gng(GainKind kind, unsigned seed = 7) {
+    GNG gng(freeze_cfg(kind));
+    ClusterStream s(seed, 16);
+    for (int t = 0; t < 3000; ++t) {
+        auto x = s.next();
+        auto [w, d] = gng.step(x);
+        gng.maybe_mitosis(w, x);
+    }
+    return gng;
+}
+
+// last_step_baked is a per-step flag, not learned state: a frozen step clears
+// it, which is what "no bake happened this step" means.  Compare the rest.
+nlohmann::json learned_state(GNG const& g) {
+    auto j = g.to_json();
+    j.erase("last_step_baked");
+    return j;
+}
+
+} // namespace
+
+TEST(GNGFreeze, DefaultIsLearning) {
+    GNG::Config cfg;
+    EXPECT_TRUE(cfg.learning_enabled);
+    GNG g(cfg);
+    EXPECT_TRUE(g.learning_enabled());
+    g.set_learning_enabled(false);
+    EXPECT_FALSE(g.learning_enabled());
+}
+
+TEST(GNGFreeze, FrozenRunLeavesLearnedStateUntouched) {
+    for (GainKind kind : {GainKind::Linear, GainKind::Kalman}) {
+        GNG gng = trained_gng(kind);
+        ASSERT_GT(gng.node_count(), 2);
+        ASSERT_GT(gng.baked_count(), 0) << "fixture must exercise post-bake state";
+        const auto before      = learned_state(gng);
+        const int  step_before = gng.step_count();
+
+        gng.set_learning_enabled(false);
+        ClusterStream held_out(1234, 16);
+        std::mt19937 rng(99);
+        for (int t = 0; t < 2000; ++t) {
+            // Mix in-distribution and far-off inputs: novelty must not grow nodes.
+            Eigen::VectorXf x = (t % 3 == 0) ? Eigen::VectorXf(3.0f * random_unit(rng, 16))
+                                             : held_out.next();
+            auto [w, d] = gng.step(x);
+            EXPECT_FALSE(gng.maybe_mitosis(w, x));
+            EXPECT_FALSE(gng.boost_visits(w, 50));
+            EXPECT_FALSE(gng.last_step_baked());
+            EXPECT_TRUE(gng.last_pruned_ids().empty());
+        }
+        EXPECT_EQ(gng.step_count(), step_before);
+        EXPECT_EQ(learned_state(gng), before);
+    }
+}
+
+TEST(GNGFreeze, FrozenWinnerIsBruteForceNearestAndMatchesLearningPath) {
+    GNG gng = trained_gng(GainKind::Linear);
+    gng.set_learning_enabled(false);
+    const auto j = gng.to_json();
+
+    std::mt19937 rng(5);
+    ClusterStream held_out(77, 16);
+    for (int t = 0; t < 500; ++t) {
+        Eigen::VectorXf x = (t % 2) ? held_out.next() : Eigen::VectorXf(random_unit(rng, 16));
+
+        int   best_id = -1;
+        float best_d  = std::numeric_limits<float>::infinity();
+        for (auto const& n : j["nodes"]) {
+            auto pv = n["prototype"].get<std::vector<float>>();
+            Eigen::Map<const Eigen::VectorXf> p(pv.data(), Eigen::Index(pv.size()));
+            float d = (p - x).norm();
+            if (d < best_d) { best_d = d; best_id = n["id"].get<int>(); }
+        }
+        auto [w, d] = gng.step(x);
+        EXPECT_EQ(w, best_id);
+        EXPECT_FLOAT_EQ(d, best_d);
+
+        // The learning path reports the same pair for the same input.
+        GNG learner = gng;
+        learner.set_learning_enabled(true);
+        auto [wl, dl] = learner.step(x);
+        EXPECT_EQ(wl, w);
+        EXPECT_EQ(dl, d);
+    }
+}
+
+TEST(GNGFreeze, FrozenBeforeBootstrapDoesNotBufferInput) {
+    GNG gng(freeze_cfg(GainKind::Linear));
+    gng.set_learning_enabled(false);
+    std::mt19937 rng(3);
+    for (int t = 0; t < 10; ++t) {
+        auto [w, d] = gng.step(random_unit(rng, 16));
+        EXPECT_EQ(w, 0);
+        EXPECT_EQ(d, 0.0f);
+    }
+    EXPECT_EQ(gng.node_count(), 0);
+    // Resuming bootstraps from the next two inputs, not from frozen ones.
+    gng.set_learning_enabled(true);
+    auto a = make_vec(0.3f, 16), b = random_unit(rng, 16);
+    gng.step(a);
+    EXPECT_EQ(gng.node_count(), 0);
+    gng.step(b);
+    ASSERT_EQ(gng.node_count(), 2);
+    EXPECT_TRUE(gng.get_prototype(0)->isApprox(a));
+    EXPECT_TRUE(gng.get_prototype(1)->isApprox(b));
+}
+
+TEST(GNGFreeze, MitosisGateIsClosedWhileFrozen) {
+    // Settings under which the gatekeeper splits on the first post-bake check.
+    GNG::Config cfg = freeze_cfg(GainKind::Linear);
+    cfg.drift_ratio             = 0.0f;
+    cfg.mitosis_error_threshold = 0.0f;
+    cfg.mitosis_check_interval  = 1;
+    cfg.min_insertion_error     = 10.0f;   // everything bakes; nothing inserts
+    cfg.baking_threshold        = 5;
+    GNG gng(cfg);
+    auto x = make_vec(0.5f, 16);
+    for (int t = 0; t < 20; ++t) gng.step(x);
+    auto [w, d] = gng.step(x);
+
+    GNG control = gng;
+    EXPECT_TRUE(control.maybe_mitosis(w, x)) << "control must split, or the test proves nothing";
+
+    gng.set_learning_enabled(false);
+    const auto before = learned_state(gng);
+    EXPECT_FALSE(gng.maybe_mitosis(w, x));
+    EXPECT_EQ(gng.mitosis_count(), 0);
+    EXPECT_EQ(learned_state(gng), before);
+}
+
+TEST(GNGFreeze, UnfreezingResumesLearning) {
+    GNG gng = trained_gng(GainKind::Linear);
+    gng.set_learning_enabled(false);
+    ClusterStream s(4321, 16);
+    for (int t = 0; t < 200; ++t) gng.step(s.next());
+    const auto frozen = learned_state(gng);
+    const int  step_frozen = gng.step_count();
+
+    gng.set_learning_enabled(true);
+    for (int t = 0; t < 200; ++t) gng.step(s.next());
+    EXPECT_EQ(gng.step_count(), step_frozen + 200);
+    EXPECT_NE(learned_state(gng), frozen);
+}
+
+TEST(GNGFreeze, LearningOnIsUnchangedByTheFlag) {
+    // Two GNGs, one of which toggles the flag off and on without stepping in
+    // between, must stay identical: the switch itself carries no state.
+    GNG a(freeze_cfg(GainKind::Linear)), b(freeze_cfg(GainKind::Linear));
+    ClusterStream sa(11, 16), sb(11, 16);
+    for (int t = 0; t < 1500; ++t) {
+        if (t % 100 == 0) { b.set_learning_enabled(false); b.set_learning_enabled(true); }
+        auto xa = sa.next(), xb = sb.next();
+        auto ra = a.step(xa); auto rb = b.step(xb);
+        EXPECT_EQ(ra, rb);
+    }
+    EXPECT_EQ(a.to_json(), b.to_json());
+}
