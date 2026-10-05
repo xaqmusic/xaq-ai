@@ -23,6 +23,7 @@
 // mode, and it refuses a brain-rate command stream outright.  PROTOCOL.md "Run modes".
 #include "ogma/hw/ServoDriver.hpp"
 #include "ogma/hw/Actuation.hpp"
+#include "ogma/hw/HatHealth.hpp"
 #include "ogma/hw/ResourceMonitor.hpp"
 #include "ogma/hw/McuReset.hpp"
 #include "ogma/hw/Ina219.hpp"
@@ -678,7 +679,10 @@ struct State {
         return "";
     }
 
-    void note_bus_error() { ++bus_errors; last_bus_err_ms = mono_ms(); }
+    void note_bus_error() { ++bus_errors; last_bus_err_ms = mono_ms(); bus_burst.error(last_bus_err_ms); }
+    void note_bus_ok(int64_t t) { bus_burst.ok(t); }
+    BusBurst bus_burst;                 // a HUNG MCU vs sporadic errors (HatHealth.hpp)
+    int      hat_glitches = 0;          // garbage reads the re-reads did not confirm
     bool hat_healthy(int64_t now) const { return now - std::max(last_bus_err_ms, last_garbage_ms) > 500; }
     int  outages_last_60s(int64_t now) const {
         int n = 0; for (int64_t t : outage_starts) if (now - t <= 60000) ++n; return n;
@@ -858,11 +862,33 @@ struct State {
             for (int c = 0; c < RobotHat::N_ADC; ++c) adc.push_back(hat.adc_raw(c));
             const double v = adc[4].get<int>() * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
             if (v > 9.0) {                                                // post-reset / HAT-off garbage
-                last_garbage_ms = mono_ms();
-                if (!hat_outage) record("adc_garbage", {{"vbat", v}});
-                adc = last_adc; on_hat_reset("adc garbage (post-reset signature)");
-            }   // post-reset garbage
-            else last_adc = adc;
+                adc = last_adc;
+                if (hat_outage) {
+                    last_garbage_ms = mono_ms();                          // still out: extend it
+                } else {
+                    // ⚠ CONFIRM BEFORE DISARMING (HatHealth.hpp).  Three re-reads, 2 ms apart, under
+                    // the lock (~6 ms once per event, inside the tick's budget).  A rebooting MCU
+                    // answers garbage or NACKs every time; a corrupted transaction does not.
+                    int bad = 0; json rr = json::array();
+                    for (int k = 0; k < 3; ++k) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                        try {
+                            const double v2 = hat.adc_raw(4) * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
+                            rr.push_back(std::round(v2 * 100) / 100);
+                            if (v2 > 9.0 || v2 < 1.0) ++bad;
+                        } catch (const std::exception&) { ++bad; rr.push_back(nullptr); note_bus_error(); }
+                    }
+                    if (garbage_confirmed(bad)) {
+                        last_garbage_ms = mono_ms();
+                        record("adc_garbage", {{"vbat", v}, {"rereads", rr}, {"confirmed", true}});
+                        on_hat_reset("adc garbage, confirmed by re-reads");
+                    } else {
+                        ++hat_glitches;
+                        record("hat_glitch", {{"vbat", v}, {"rereads", rr}, {"bad", bad}, {"count", hat_glitches}});
+                    }
+                }
+            }
+            else { last_adc = adc; note_bus_ok(mono_ms()); }
         } catch (const std::exception& e) {
             note_bus_error(); adc = last_adc;                      // keep the last good reading
             if (bus_errors % 50 == 1) record("bus_error", {{"where", "adc"}, {"what", e.what()}, {"count", bus_errors}});
@@ -980,7 +1006,7 @@ struct State {
                 {"stopped", stopped}, {"stop_why", stopped ? json(stop_why) : json(nullptr)},
                 {"stopped_ms", stopped ? now - stopped_at_ms : 0}, {"stops", stops},
                 {"brain", brain}, {"cal_stream_refused", cal_guard.refused()},
-                {"servo_lag_alpha", driver.output_lag()}, {"hat_resets", hat_resets},
+                {"servo_lag_alpha", driver.output_lag()}, {"hat_resets", hat_resets}, {"hat_glitches", hat_glitches},
                 {"ina_capture", cap_mode ? json{{"mode", cap_mode == 1 ? "inrush" : "sag"}, {"file", cap_file},
                                                 {"samples", cap_samples}, {"peak_a", cap_peak_a},
                                                 {"min_v", cap_mode == 2 ? json(cap_min_v) : json(nullptr)},
@@ -1241,6 +1267,7 @@ void tick_thread(State& S) {
             if (S.cal_ch >= 0 && ms > S.cal_until_ms) S.end_cal("timeout");
             { timespec a0, a1; clock_gettime(CLOCK_MONOTONIC, &a0);
               S.driver.tick();
+              S.note_bus_ok(ms);              // the servo writes went through
               clock_gettime(CLOCK_MONOTONIC, &a1);
               S.sp_servo_w.add((a1.tv_sec - a0.tv_sec) * 1e6 + (a1.tv_nsec - a0.tv_nsec) / 1e3); }
         } catch (const std::exception& e) {
@@ -1252,11 +1279,17 @@ void tick_thread(State& S) {
             // SunFounder's own recovery for a stuck MCU.  ⚠ RATE-LIMITED to one per 5 s: it fired
             // every 20 bus errors, and during a brownout (2026-10-03) that was ~20 resets in 4 s,
             // each restarting an MCU that was still coming up.
-            if (S.bus_errors % 20 == 0 && S.mcu && S.mcu->ok() && ms - S.last_mcu_reset_ms >= 5000) {
+            // ⚠ A BURST WITH NOTHING GETTING THROUGH, not a running count (HatHealth.hpp): the old
+            // rule fired on every 20th cumulative error and turned ~600 sporadic NACKs over a run
+            // into three self-inflicted resets (2026-10-05).
+            if (S.mcu && S.mcu->ok() && S.bus_burst.should_reset(ms)) {
+                S.bus_burst.did_reset(ms);
                 S.last_mcu_reset_ms = ms;
                 S.mcu->reset();
-                S.record("mcu_reset", {{"why", "persistent bus errors"}, {"count", S.bus_errors}});
-                S.on_hat_reset("benchd reset the MCU after persistent bus errors");
+                S.record("mcu_reset", {{"why", "HAT unresponsive: a burst of bus errors, nothing getting through"},
+                                       {"count", S.bus_errors}, {"errors_1s", S.bus_burst.errors_in_window(ms)},
+                                       {"since_ok_ms", S.bus_burst.since_ok(ms)}});
+                S.on_hat_reset("benchd reset the MCU: HAT unresponsive");
             }
         }
         // ---- fast ADC sampling ------------------------------------------------

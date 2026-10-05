@@ -906,3 +906,46 @@ TEST(RailGuard, ASecondDistinctBitIsASecondEvent) {
     EXPECT_EQ(g.update(0x50000u), 0x40000u);
     EXPECT_EQ(g.update(0x50000u), 0u);
 }
+
+// ---- HatHealth: a reset vs a glitch (robot, 2026-10-05) ----
+#include "ogma/hw/HatHealth.hpp"
+
+TEST(HatHealth, OneBadReadOfThreeIsAGlitchTwoAreAReset) {
+    EXPECT_FALSE(garbage_confirmed(0));
+    EXPECT_FALSE(garbage_confirmed(1));
+    EXPECT_TRUE(garbage_confirmed(2));
+    EXPECT_TRUE(garbage_confirmed(3));
+}
+
+TEST(HatHealth, SporadicErrorsOverARunNeverResetTheMcu) {
+    // The 2026-10-05 run: ~600 NACKs spread over 19 minutes, with transactions succeeding
+    // in between.  The old rule (every 20th cumulative error) reset the MCU three times.
+    BusBurst b;
+    int resets = 0;
+    for (int64_t t = 0; t < 19 * 60 * 1000; t += 20) {      // the 50 Hz tick
+        if (t % 1900 == 0) b.error(t);                       // ~600 errors over the run
+        else b.ok(t);
+        if (b.should_reset(t)) { ++resets; b.did_reset(t); }
+    }
+    EXPECT_EQ(resets, 0);
+}
+
+TEST(HatHealth, AHungMcuIsResetOnceThenRateLimited) {
+    BusBurst b;
+    b.ok(0);
+    int resets = 0;
+    for (int64_t t = 1000; t < 7000; t += 20) {              // every transaction fails for 6 s
+        b.error(t);
+        if (b.should_reset(t)) { ++resets; b.did_reset(t); }
+    }
+    EXPECT_EQ(resets, 2);                                     // at ~1.5 s, then >= 5 s later
+}
+
+TEST(HatHealth, ABurstWithSuccessesInBetweenIsNotAHang) {
+    BusBurst b;
+    for (int64_t t = 0; t < 1000; t += 20) {                 // 50 errors in 1 s, but ...
+        b.error(t);
+        b.ok(t + 5);                                          // ... the bus keeps answering
+        EXPECT_FALSE(b.should_reset(t + 5));
+    }
+}
