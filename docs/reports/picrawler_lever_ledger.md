@@ -6409,6 +6409,10 @@ The power-budget prior (S3) and the jitter levers (2026-10-02) target the same t
 
 ### ★★★ 2026-10-05 — FAST CURRENT DURING A 19-MIN RUN: THE HAT RESETS ARE NOT TRIGGERED BY CURRENT — AND SOME MAY NOT BE RESETS
 
+> **⚠ CORRECTED the same day (next entry):** the "garbage" battery reads were the HAT's 3.3 V rail
+> drooping, not corrupted transactions. The resets are real brownouts. The current finding stands:
+> battery-side current does not predict them. The "some may not be resets" reading does not.
+
 **Run:** P-e·h0 from picrawler-dash, 1154 s of brain control, including the operator's textured
 mat. The sag capture (current + pack voltage, ~940 Hz) covered the first 900 s; the cap is now an
 hour. 8 HAT resets in the record, 4 inside the capture. Lifted periods excluded by belly ToF
@@ -6448,3 +6452,43 @@ then A/B resets per minute.
 **For servo speed:** this run does not rule out a faster slew on power grounds (no current-related
 reset; catch-up at the slew cap was fine). The sim-first rule and the earlier speed table
 (2026-09-13: 4.59 rad/s was the best-behaved setting on an older config) still apply.
+
+
+### ★★★ 2026-10-05 (evening) — THE HAT's 3.3 V RAIL IS BROWNING OUT; BATTERY-SIDE CURRENT IS CAPPED, SO IT CANNOT SEE WHY
+
+**Run:** P-e·h0, 418 s of brain control, with reset confirmation and the burst-only MCU reset
+deployed (0d452653), the fast capture covering the whole run. **9 resets (1.15 / min, against 0.4 / min
+in the 19-min run)**: 6 confirmed by re-reads, 3 by benchd's burst rule (57–64 errors in 1 s, nothing
+through for ≥ 500 ms). 4 garbage reads were unconfirmed and logged as `hat_glitch`; before the fix,
+each would have cost a ~3 s recovery.
+
+**The "garbage" is a measurement.** The HAT's ADC measures the battery divider against its own 3.3 V
+rail. The garbage values climb smoothly as that reference falls, rather than scattering:
+- confirmed resets: first read 9.59, re-reads 9.07 / 9.11 / 9.22; first read 9.10, re-reads
+  9.00 / 9.13 / 9.31;
+- pinned at the top of the range: 11.19 ×3;
+- no answer at all: None ×3;
+- unconfirmed glitches: 8.2–9.5 V recovering to 7.7.
+
+A true pack of ~7.4 V read as 9.2 V implies a 3.3 V rail near 2.65 V, where an MCU browns out. In two
+resets (#5, #7) the INA219, powered from the same rail, read 0 V: it died too. The 10 Hz telemetry
+estimate of the rail (3.3 × INA pack V ÷ A4 reading) sits at 3.31 V median, with p1 3.12 and p0.1
+2.79. It droops, briefly, mostly too fast for 10 Hz, and benchd's frame replaces any reading above
+9 V with the last good one, so the deepest dips are filtered out of that record.
+
+**Why battery current cannot see it.** Battery-side current hits a hard ceiling in every run:
+- maximum 3.53–3.58 A, never above 4 A;
+- above 3 A 70–75 times a minute (median 40 ms, up to 1.4 s) with no reset;
+- before resets, a peak of only 2.6–3.5 A.
+
+A flat ceiling is what a current-limited supply produces, so this looks like the HAT's 5 V regulator
+at its limit. Demand above it shows up as 5 V rail sag, not as more input current, and a deep enough
+sag drops the 3.3 V rail out. Hypothesis, consistent with every number so far.
+
+**Consequences:**
+- no battery-side current threshold can predict a reset;
+- the 3.3 V rail itself is the precursor worth instrumenting (added the same day, next entry);
+- faster servos would likely add demand above the limit (hold);
+- the real fix is to move the servo load off the HAT regulator. The PCB cannot be modified, so the
+  proposal is a servo power-injection harness: an extension per servo with its V+ cut on the HAT
+  side and fed from a separate high-current BEC, ground common, signal untouched.
