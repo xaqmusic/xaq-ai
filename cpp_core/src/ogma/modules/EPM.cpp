@@ -147,6 +147,14 @@ ParamSchema EPM::params_schema() const {
             ParamValue{0.0}},
         {"mitosis_drift_gain",      ParamMutability::HotMutable, "Fraction of the mean residual applied as the drift correction (1 = jump to the corrected mean).", ParamValue{1.0}},
         {"stale_prune_enabled",     ParamMutability::HotMutable, "GNG stale-prune",             ParamValue{true}},
+        {"learning_enabled",        ParamMutability::HotMutable,
+            "Inference-only switch.  false = the EPM keeps answering (winner, quant_error, TLE, novelty, tokens) "
+            "but learns nothing: the GNG step is a pure nearest-node query (no prototype moves, insertion, "
+            "pruning, deaths, baking or mitosis; its step counter does not advance), transition counts are not "
+            "updated, the commissioning window does not advance and the residual RMS scale is held.  For "
+            "evaluating a learned vocabulary on held-out input without the evaluation changing it.  The TLE "
+            "EMA, novelty threshold and winner histogram keep running: they measure, they do not learn.  "
+            "true (default) = byte-identical.", ParamValue{true}},
         {"health_death_spares_baked", ParamMutability::HotMutable,
          "Exempt BAKED nodes from the GNG health-death sweep (2026-09-01).  The health system "
          "silently removed baked-immunity: a long perturbation starves an earned node of "
@@ -306,6 +314,8 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "mitosis_drift_ratio",     [&](auto const& v){ gng_cfg.drift_ratio             = float(get_double(v, "mitosis_drift_ratio")); });
     apply_param(params, "mitosis_drift_gain",      [&](auto const& v){ gng_cfg.drift_gain              = float(get_double(v, "mitosis_drift_gain")); });
     apply_param(params, "stale_prune_enabled",     [&](auto const& v){ gng_cfg.stale_prune_enabled     = get_bool(v, "stale_prune_enabled"); });
+    apply_param(params, "learning_enabled",        [&](auto const& v){ learning_enabled_ = get_bool(v, "learning_enabled"); });
+    gng_cfg.learning_enabled = learning_enabled_;
     apply_param(params, "health_death_spares_baked", [&](auto const& v){ gng_cfg.health_death_spares_baked = get_bool(v, "health_death_spares_baked"); });
     apply_param(params, "stale_window_factor",     [&](auto const& v){ gng_cfg.stale_window_factor     = float(get_double(v, "stale_window_factor")); });
     apply_param(params, "insertion_autotune",          [&](auto const& v){ gng_cfg.insertion_autotune          = get_bool(v, "insertion_autotune"); });
@@ -456,6 +466,7 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "mitosis_drift_ratio")     gng_->set_drift_ratio(float(get_double(value, k)));
     else if (k == "mitosis_drift_gain")      gng_->set_drift_gain(float(get_double(value, k)));
     else if (k == "stale_prune_enabled")     gng_->set_stale_prune_enabled(get_bool(value, k));
+    else if (k == "learning_enabled")        { learning_enabled_ = get_bool(value, k); gng_->set_learning_enabled(learning_enabled_); }
     else if (k == "health_death_spares_baked") gng_->set_health_death_spares_baked(get_bool(value, k));
     else if (k == "stale_window_factor")     gng_->set_stale_window_factor(float(get_double(value, k)));
     else if (k == "kalman_q")                gng_->set_kalman_q(float(get_double(value, k)));
@@ -806,7 +817,9 @@ void EPM::tick(uint64_t tick_id) {
 
     // Commissioning window: observe the RAW input, before conditioning, so the
     // measured range describes the sensor rather than the current mapping of it.
-    if (dim_autocal_ticks_ > 0 && !dim_autocal_done_ &&
+    // Frozen (learning_enabled = false): the window neither observes nor
+    // finalises, since finalising rescales the input space and resets the GNG.
+    if (learning_enabled_ && dim_autocal_ticks_ > 0 && !dim_autocal_done_ &&
         pending_proprio_ && pending_proprio_->values.size() > 0) {
         dim_autocal_observe(pending_proprio_->values.data(),
                             int(pending_proprio_->values.size()));
@@ -846,10 +859,14 @@ void EPM::tick(uint64_t tick_id) {
         // residual's own running RMS (§5: adapt, don't tune) so the GNG tiles
         // DIRECTION at unit scale.  Off = byte-identical (B v1 behavior).
         if (normalize_residual_) {
-            const float nrm = latent.norm();
-            residual_rms_ = residual_rms_ <= 0.0f
-                                ? std::max(nrm, 1e-6f)
-                                : 0.99f * residual_rms_ + 0.01f * nrm;
+            // Frozen: apply the scale as learned, do not adapt it to the input
+            // under evaluation (it is the GNG's coordinate system).
+            if (learning_enabled_) {
+                const float nrm = latent.norm();
+                residual_rms_ = residual_rms_ <= 0.0f
+                                    ? std::max(nrm, 1e-6f)
+                                    : 0.99f * residual_rms_ + 0.01f * nrm;
+            }
             if (residual_rms_ > 1e-6f) latent *= (1.0f / residual_rms_);
         }
     }
@@ -891,7 +908,10 @@ void EPM::tick(uint64_t tick_id) {
     // Stage 3 (K2): score the move against the table as it stood BEFORE this step.
     const float logprob_surp = transition_logprob_
         ? transition_logprob_surprise(prev_winner_id_for_transitions_, winner_id) : -1.0f;
-    if (prev_winner_id_for_transitions_ >= 0 &&
+    // Frozen: the transition table is learned sequence structure and is held;
+    // the previous winner is still tracked so resuming counts from a real move.
+    if (learning_enabled_ &&
+        prev_winner_id_for_transitions_ >= 0 &&
         prev_winner_id_for_transitions_ != winner_id) {
         ++transition_counts_[prev_winner_id_for_transitions_][winner_id];
     }
@@ -902,7 +922,7 @@ void EPM::tick(uint64_t tick_id) {
 
     // Stage 4: the Mitosis Gatekeeper (with the innovation-mean drift test inside it).
     last_just_mitosis_ = false;
-    if (mitosis_gatekeeper_) last_just_mitosis_ = gng_->maybe_mitosis(winner_id, latent);
+    if (mitosis_gatekeeper_ && learning_enabled_) last_just_mitosis_ = gng_->maybe_mitosis(winner_id, latent);
     last_tle_         = tle;
     last_quant_error_ = quant_error;
 
@@ -945,6 +965,7 @@ nlohmann::json EPM::diag_lite() const {
         j["drift_count"]   = gng_->drift_count();
         j["baked_now"]     = gng_->last_step_baked();   // a node earned its place THIS step
     }
+    j["learning_enabled"] = learning_enabled_;
     // Stage 0.4 instruments — normalised innovation and innovation whiteness.
     j["tle_norm"] = last_tle_ / std::max(ema_tle_, 1e-6f);
     {
@@ -952,6 +973,14 @@ nlohmann::json EPM::diag_lite() const {
         const float cov = qe_lag1_ema_ - qe_mean_ema_ * qe_mean_ema_;
         j["qe_lag1"] = var > 1e-12f ? std::clamp(cov / var, -1.0f, 1.0f) : 0.0f;
     }
+    return j;
+}
+
+// The diag stream's full payload: the clone-ready snapshot plus the learning
+// switch, which is a param and so deliberately absent from snapshot_state().
+nlohmann::json EPM::diag_snapshot() const {
+    nlohmann::json j = snapshot_state();
+    j["learning_enabled"] = learning_enabled_;
     return j;
 }
 
@@ -1029,6 +1058,10 @@ void EPM::restore_state(nlohmann::json const& s) {
     }
     if (gng_ && s.contains("gng") && !s["gng"].is_null()) {
         *gng_ = ami_ogma::v3::GNG::from_json(s["gng"]);
+        // from_json builds a fresh Config; the learning switch is this
+        // instance's param, not snapshot state, so re-apply it.  Without this a
+        // restore (or clone) of a frozen EPM would silently resume learning.
+        gng_->set_learning_enabled(learning_enabled_);
     }
     has_prev_prototype_ = s.value("has_prev_prototype", false);
     if (has_prev_prototype_ && s.contains("prev_winner_prototype") &&

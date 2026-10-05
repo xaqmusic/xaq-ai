@@ -56,6 +56,7 @@ public:
     int   node_count()      const { return gng_ ? gng_->node_count() : 0; }
     int   baked_count()     const { return gng_ ? gng_->baked_count() : 0; }
     int   mitosis_count()   const { return gng_ ? gng_->mitosis_count() : 0; }
+    bool  learning_enabled() const { return learning_enabled_; }
     float ema_tle()         const { return ema_tle_; }
     float novelty_thresh()  const { return novelty_threshold_now_; }
     // v5.4.L Diagnostic B — winner-id histogram for GNG saturation check.
@@ -222,6 +223,12 @@ private:
     bool mitosis_gatekeeper_ = false;
     bool last_just_mitosis_  = false;
 
+    // Inference-only switch (param learning_enabled; mirrored into the GNG).
+    // false = tokens keep flowing from a vocabulary that does not change: the
+    // GNG is a pure query, transition_counts_ is held, the commissioning window
+    // and the residual RMS scale do not advance.  A param, not snapshot state.
+    bool learning_enabled_   = true;
+
     // v5.4.L Diagnostic B — per-winner-id histogram across all ticks.
     // Identifies premature GNG saturation: if 1-2 winner_ids account
     // for >90% of ticks, the encoder is severely under-discriminating
@@ -254,6 +261,7 @@ private:
 
 public:
     nlohmann::json snapshot_state() const override;
+    nlohmann::json diag_snapshot() const override;
     nlohmann::json diag_lite() const override;
     void           restore_state(nlohmann::json const&) override;
 };

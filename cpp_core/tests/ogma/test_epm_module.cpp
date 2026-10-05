@@ -865,3 +865,167 @@ TEST(EpmModule, LogprobTransitionSurpriseSeparatesExpectedFromTeleport) {
     EXPECT_GT(exp_disp, 0.0f);
     EXPECT_GT(tel_disp, 0.0f);
 }
+
+// -- Inference-only mode (learning_enabled) ---------------------------------
+//
+// An operator evaluating a learned vocabulary on held-out input needs the
+// evaluation not to change the vocabulary.  learning_enabled=false must keep
+// tokens flowing with valid winners while the GNG, the transition table and
+// every other learned quantity stay exactly where they were.
+
+namespace {
+
+ogma::ParamMap freeze_params() {
+    auto p = rbf_params();
+    p["mitosis_gatekeeper"]       = true;     // exercise the gatekeeper path too
+    p["transition_surprise_kind"] = std::string("logprob");
+    return p;
+}
+
+// A learning stream (phase walk) and a held-out stream (different frequencies
+// and offsets) over the same 6 channels.
+std::shared_ptr<ogma::ProprioToken> train_frame(int t) {
+    const float ph = float(t) * 0.1f;
+    return make_proprio6(std::sin(ph), std::cos(ph), 0.5f, -0.5f,
+                         0.2f * float(t % 5), 0.3f * float((t + 1) % 3));
+}
+std::shared_ptr<ogma::ProprioToken> held_out_frame(int t) {
+    const float ph = float(t) * 0.37f + 1.0f;
+    return make_proprio6(0.9f * std::cos(ph), std::sin(2.0f * ph), -0.4f, 0.6f,
+                         0.15f * float(t % 7), -0.25f * float(t % 4));
+}
+
+template <class Frame>
+void drive(EpmFixture& f, int t0, int n, Frame frame) {
+    for (int t = t0; t < t0 + n; ++t) {
+        f.bus.begin_tick(uint64_t(t));
+        f.bus.publish("reality.proprio.imu", frame(t));
+        f.epm.tick(uint64_t(t));
+        f.bus.end_tick();
+    }
+}
+
+nlohmann::json gng_state(ogma::EPM const& e) {
+    auto g = e.snapshot_state()["gng"];
+    g.erase("last_step_baked");   // a per-step flag; a frozen step clears it
+    return g;
+}
+
+int total_winner_counts(ogma::EPM const& e) {
+    int n = 0;
+    for (auto const& [id, c] : e.winner_counts()) n += c;
+    return n;
+}
+
+} // namespace
+
+TEST(EPMFreeze, SchemaDeclaresHotMutableDefaultTrue) {
+    EpmFixture f(rbf_params());
+    bool found = false;
+    for (auto const& ps : f.epm.params_schema()) {
+        if (ps.key != "learning_enabled") continue;
+        found = true;
+        EXPECT_EQ(ps.mutability, ogma::ParamMutability::HotMutable);
+        ASSERT_TRUE(ps.default_value.has_value());
+        EXPECT_EQ(*ps.default_value, ogma::ParamValue{true});
+    }
+    EXPECT_TRUE(found);
+    EXPECT_TRUE(f.epm.learning_enabled());
+    EXPECT_TRUE(f.epm.diag_lite()["learning_enabled"].get<bool>());
+    EXPECT_TRUE(f.epm.diag_snapshot()["learning_enabled"].get<bool>());
+    EXPECT_FALSE(f.epm.snapshot_state().contains("learning_enabled"))
+        << "a param, not snapshot state: snapshots stay byte-identical";
+}
+
+TEST(EPMFreeze, ExplicitTrueIsByteIdenticalToDefault) {
+    auto p = freeze_params();
+    EpmFixture a(p);
+    p["learning_enabled"] = true;
+    EpmFixture b(p);
+    drive(a, 0, 400, train_frame);
+    drive(b, 0, 400, train_frame);
+    EXPECT_EQ(a.epm.snapshot_state(), b.epm.snapshot_state());
+}
+
+TEST(EPMFreeze, FrozenEpmPublishesButLearnsNothing) {
+    EpmFixture f(freeze_params());
+    drive(f, 0, 600, train_frame);
+    ASSERT_GT(f.epm.node_count(), 2);
+
+    f.epm.on_param_change("learning_enabled", ogma::ParamValue{false});
+    EXPECT_FALSE(f.epm.learning_enabled());
+    EXPECT_FALSE(f.epm.diag_lite()["learning_enabled"].get<bool>());
+    EXPECT_FALSE(f.epm.diag_snapshot()["learning_enabled"].get<bool>());
+
+    const auto snap0        = f.epm.snapshot_state();
+    const auto gng0         = gng_state(f.epm);
+    const int  nodes0       = f.epm.node_count();
+    const int  baked0       = f.epm.baked_count();
+    const int  wins0        = total_winner_counts(f.epm);
+    std::set<int> ids;
+    for (auto const& n : gng0["nodes"]) ids.insert(n["id"].get<int>());
+
+    const int n_frozen = 400;
+    for (int t = 600; t < 600 + n_frozen; ++t) {
+        drive(f, t, 1, held_out_frame);
+        auto tok = f.last_token("reality.proprio.imu");
+        ASSERT_NE(tok, nullptr);
+        ASSERT_EQ(tok->tick_id, uint64_t(t));
+        EXPECT_TRUE(ids.count(tok->winner_id)) << "winner must be an existing node";
+        EXPECT_EQ(tok->winner_prototype.size(), 64);
+        EXPECT_GE(tok->quant_error, 0.0f);
+        EXPECT_FALSE(tok->just_baked);
+        EXPECT_FALSE(tok->just_pruned);
+        EXPECT_FALSE(tok->just_mitosis);
+        EXPECT_EQ(tok->node_count, nodes0);
+    }
+
+    auto snap1 = f.epm.snapshot_state();
+    EXPECT_EQ(f.epm.node_count(),  nodes0);
+    EXPECT_EQ(f.epm.baked_count(), baked0);
+    EXPECT_EQ(gng_state(f.epm),    gng0);
+    EXPECT_EQ(snap1["transition_counts"], snap0["transition_counts"]);
+    // Measurement keeps running: the winner histogram and the TLE EMA move.
+    EXPECT_EQ(total_winner_counts(f.epm), wins0 + n_frozen);
+    EXPECT_NE(snap1["ema_tle"], snap0["ema_tle"]);
+
+    // Resuming learns again from the next input.
+    f.epm.on_param_change("learning_enabled", ogma::ParamValue{true});
+    drive(f, 600 + n_frozen, 200, held_out_frame);
+    EXPECT_NE(gng_state(f.epm), gng0);
+    EXPECT_NE(f.epm.snapshot_state()["transition_counts"], snap0["transition_counts"]);
+}
+
+TEST(EPMFreeze, FrozenAtConstructionNeverBootstraps) {
+    auto p = rbf_params();
+    p["learning_enabled"] = false;
+    EpmFixture f(p);
+    EXPECT_FALSE(f.epm.learning_enabled());
+    drive(f, 0, 50, train_frame);
+    EXPECT_EQ(f.epm.node_count(), 0);
+    auto tok = f.last_token("reality.proprio.imu");
+    ASSERT_NE(tok, nullptr);
+    EXPECT_EQ(tok->winner_id, -1) << "an empty frozen vocabulary publishes the placeholder";
+}
+
+TEST(EPMFreeze, RestoreKeepsTheEpmFrozen) {
+    EpmFixture f(freeze_params());
+    drive(f, 0, 400, train_frame);
+    f.epm.on_param_change("learning_enabled", ogma::ParamValue{false});
+    const auto snap = f.epm.snapshot_state();
+    // GNG::from_json builds a fresh Config; the EPM must re-apply its switch.
+    f.epm.restore_state(snap);
+    const auto gng0 = gng_state(f.epm);
+    drive(f, 400, 200, held_out_frame);
+    EXPECT_EQ(gng_state(f.epm), gng0);
+}
+
+TEST(EPMFreeze, CommissioningWindowDoesNotAdvanceWhileFrozen) {
+    auto p = autocal_params(60);
+    p["learning_enabled"] = false;
+    EpmFixture f(p);
+    drive_tiny(f, 100, 0.03f);
+    auto dac = f.epm.snapshot_state()["dim_autocal"];
+    EXPECT_EQ(dac["seen"].get<uint64_t>(), 0u);
+    EXPECT_FALSE(dac["done"].get<bool>());
+}
