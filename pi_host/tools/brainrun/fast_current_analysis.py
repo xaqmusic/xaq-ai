@@ -163,3 +163,24 @@ for e in resumes:
               f"{capped.mean():.1f}, max {capped.max()}; feet loaded {np.mean((fsr[i0:i1] > 200).sum(1)):.1f}")
     else:
         print(f"   t={tr / 1000:.0f}s: outside the capture")
+
+# ---- 5. the 3.3 V rail's dips: depth, duration, current, outcome (captures with the A4 column) ----
+if np.isfinite(rail).any():
+    mr = np.isfinite(rail)
+    tr_, rv = t_ms[mr], rail[mr]
+    resets_t = [e["t_mono_ms"] for e in ev if e["kind"] == "hat_reset"]
+    glitch_t = [e["t_mono_ms"] for e in ev if e["kind"] == "hat_glitch"]
+    eps = []
+    for k in np.where(rv < 3.15)[0]:
+        if eps and tr_[k] - eps[-1][1] < 30:
+            eps[-1][1] = tr_[k]; eps[-1][2] = min(eps[-1][2], rv[k])
+        else:
+            eps.append([tr_[k], tr_[k], rv[k]])
+    print(f"\n5. 3.3 V rail dips below 3.15 V: {len(eps)} ({len(eps) / ((t_ms[-1] - t_ms[0]) / 60000):.0f} per min); "
+          f"below 3.0 V {sum(e[2] < 3.0 for e in eps)}, below 2.8 V {sum(e[2] < 2.8 for e in eps)}")
+    print("   deepest 10:  min V   dur ms   current max (+-50 ms)   outcome")
+    for s0, s1, mn in sorted(eps, key=lambda x: x[2])[:10]:
+        w = (t_ms > s0 - 50) & (t_ms < s1 + 50)
+        out = ("RESET" if any(0 <= r - s0 < 500 for r in resets_t)
+               else "glitch logged" if any(0 <= g - s0 < 500 for g in glitch_t) else "recovered")
+        print(f"               {mn:5.2f}   {s1 - s0 + 4:6.0f}   {amps[w].max():5.2f} A               {out}")

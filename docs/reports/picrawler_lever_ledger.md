@@ -6492,3 +6492,36 @@ sag drops the 3.3 V rail out. Hypothesis, consistent with every number so far.
 - the real fix is to move the servo load off the HAT regulator. The PCB cannot be modified, so the
   proposal is a servo power-injection harness: an extension per servo with its V+ cut on the HAT
   side and fed from a separate high-current BEC, ground common, signal untouched.
+
+### ★★★ 2026-10-05 (night) — THE 3.3 V RAIL IS THE GRADED PRECURSOR: 444 DIPS, 15 BELOW 3.0 V, ONE FATAL AT 2.51 V
+
+**Run:** P-e·h0, 599 s of brain control, with the rail estimate (3.3 × INA pack V ÷ A4) in the fast
+capture at 232 Hz. **1 HAT reset (0.1 / min, against 1.15 / min the run before and 0.4 / min the run
+before that)**, 1 hat_glitch; ended by the tilt guard at 85°. The reset rate varies by an order of
+magnitude between runs; nothing here says why (battery, surface or brain behaviour), so treat it as
+a property of the run, not of the build.
+
+**The rail, in gait:** median 3.31 V, p1 3.23, p0.1 3.05; below 3.0 V 0.06 % of 126 628 samples.
+
+| dip minimum | count in 10 min | outcome |
+|---|---|---|
+| < 3.15 V | 444 | all recovered |
+| < 3.0 V | 15 | all recovered |
+| < 2.8 V | 6 | 5 recovered (to 2.65–2.68 V, 22–91 ms); 1 = the hat_glitch (2.65 V, 85 ms) |
+| **2.51 V**, 68 ms | 1 | **RESET** |
+
+- **The cliff is fast:** before the reset, the rail sat at 3.28–3.30 V until ~60 ms before benchd
+  detected it, then went 3.24 → 3.18 → 2.72 → 2.58 V (20 ms minima). Dips last 20–90 ms.
+- **The MCU survives ~2.65 V and dies by ~2.5 V.**
+- **Every deep dip came with battery current at its ceiling** (3.04–3.42 A within ±50 ms). That
+  supports the regulator-limit reading: being at the current cap is necessary for a dip, the depth
+  is what varies, and the INA219 cannot see the depth. The rail can.
+
+**Why this matters:**
+- **For the brain (S3):** the rail's dip depth is a GRADED, egocentric signal that rises toward the
+  fatal event: 444 small dips for every fatal one, the gradient the memory "fatal events have no
+  gradient" asks for. It is a better power-budget term than current, which saturates at the cap.
+- **For a reflex (S2):** a dip below ~2.9 V is a candidate trigger to unload briefly, but the window
+  is 20–60 ms against a 20 ms tick. Untested.
+- **For the injection harness:** a clean before/after. With the servo load off the HAT regulator, the
+  dips should vanish.
