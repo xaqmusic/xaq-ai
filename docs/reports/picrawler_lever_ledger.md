@@ -6406,3 +6406,45 @@ budget wants anyway) would restore contrast. Untested: per-servo pitch differenc
 - the roll came after its most vigorous second.
 
 The power-budget prior (S3) and the jitter levers (2026-10-02) target the same thing from two sides.
+
+### ★★★ 2026-10-05 — FAST CURRENT DURING A 19-MIN RUN: THE HAT RESETS ARE NOT TRIGGERED BY CURRENT — AND SOME MAY NOT BE RESETS
+
+**Run:** P-e·h0 from picrawler-dash, 1154 s of brain control, including the operator's textured
+mat. The sag capture (current + pack voltage, ~940 Hz) covered the first 900 s; the cap is now an
+hour. 8 HAT resets in the record, 4 inside the capture. Lifted periods excluded by belly ToF
+> 100 mm (4.3 % of frames). Analysis: `brainrun/fast_current_analysis.py`.
+
+**Current is not the trigger at ~1 kHz:**
+- in the 500 ms before each captured reset the current peaked at 3.03 / 1.65 / 3.34 / 3.36 A;
+  before #2 it never passed 1.65 A, and before #1 it fell to 0.7–1 A for the last 100 ms;
+- in 806 s of gait away from resets: 939 excursions above 3 A (70 per minute, median 40 ms, max
+  380 ms) with no reset; the current never reached 4 A (max 3.58);
+- the pack never sagged: 10 ms minimum 6.84 V (p0.1 6.89);
+- the operator's "catch-up" after each recovery, servos slewing at the cap toward the brain's
+  targets, peaked at 3.04–3.45 A and spent up to 415 ms above 3 A without a reset.
+
+**The capture did not break at the resets.** The INA219 kept sampling through all four, so whatever
+reset (or seemed to reset) the HAT's MCU did not take the INA219 down. Around #3 and #4 the INA219's
+bus-voltage readings went IMPLAUSIBLE (8.7–9.5 V from a ~7.1 V pack) for 80–420 ms. That is
+two different chips on the same I²C bus returning garbage at the same time.
+
+**What triggered each "reset":**
+- 5 of 8 (#1, #2, #3, #6, #8): a single implausible battery read (ADC "garbage", 9.07–11.19 V). For
+  #1, #2 and #6 there was no I²C error anywhere in the 2 s before.
+- 3 of 8 (#4, #5, #7): benchd's OWN MCU reset after bus errors. ⚠ That rule fired at every 20th
+  CUMULATIVE bus error (rate-limited to 1 per 5 s). The run accumulated ~600 NACKs, so sporadic,
+  survivable errors added up to deliberate resets. That is self-inflicted.
+
+**Reading:** the evidence points at I²C read corruption (electrical noise or a shared
+supply/ground disturbance during servo activity), with benchd's detector and its recovery turning
+glitches into 3 s interruptions. It does not point at current overload. It is not proven that no
+real MCU reset happened today; on 2026-10-03 real ones drove servos to their stops. The
+discriminating fixes:
+- confirm a "reset" before disarming (garbage persisting across reads);
+- reset the MCU only on a burst of errors with no successful transaction;
+
+then A/B resets per minute.
+
+**For servo speed:** this run does not rule out a faster slew on power grounds (no current-related
+reset; catch-up at the slew cap was fine). The sim-first rule and the earlier speed table
+(2026-09-13: 4.59 rad/s was the best-behaved setting on an older config) still apply.
