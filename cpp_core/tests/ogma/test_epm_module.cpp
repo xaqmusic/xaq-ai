@@ -980,18 +980,28 @@ TEST(EPMFreeze, FrozenEpmPublishesButLearnsNothing) {
         EXPECT_EQ(tok->node_count, nodes0);
     }
 
+    // The diag snapshot keeps reporting the live input as gng.last_x, while
+    // the saved state's last_x stays where learning left it.
+    {
+        const auto before = f.epm.diag_snapshot()["gng"]["last_x"];
+        drive(f, 600 + n_frozen, 1, train_frame);
+        const auto after  = f.epm.diag_snapshot()["gng"]["last_x"];
+        EXPECT_NE(before, after) << "a frozen EPM's diag must follow its input";
+        EXPECT_EQ(f.epm.snapshot_state()["gng"]["last_x"], snap0["gng"]["last_x"]);
+    }
+
     auto snap1 = f.epm.snapshot_state();
     EXPECT_EQ(f.epm.node_count(),  nodes0);
     EXPECT_EQ(f.epm.baked_count(), baked0);
     EXPECT_EQ(gng_state(f.epm),    gng0);
     EXPECT_EQ(snap1["transition_counts"], snap0["transition_counts"]);
     // Measurement keeps running: the winner histogram and the TLE EMA move.
-    EXPECT_EQ(total_winner_counts(f.epm), wins0 + n_frozen);
+    EXPECT_EQ(total_winner_counts(f.epm), wins0 + n_frozen + 1);
     EXPECT_NE(snap1["ema_tle"], snap0["ema_tle"]);
 
     // Resuming learns again from the next input.
     f.epm.on_param_change("learning_enabled", ogma::ParamValue{true});
-    drive(f, 600 + n_frozen, 200, held_out_frame);
+    drive(f, 601 + n_frozen, 200, held_out_frame);
     EXPECT_NE(gng_state(f.epm), gng0);
     EXPECT_NE(f.epm.snapshot_state()["transition_counts"], snap0["transition_counts"]);
 }

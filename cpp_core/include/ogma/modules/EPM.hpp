@@ -228,6 +228,11 @@ private:
     // GNG is a pure query, transition_counts_ is held, the commissioning window
     // and the residual RMS scale do not advance.  A param, not snapshot state.
     bool learning_enabled_   = true;
+    // The latent most recently stepped while frozen.  The frozen GNG leaves its
+    // own last_x untouched (it places the next baked-q insertion and is saved
+    // with the brain), so diag_snapshot() reports this instead: a viewer of
+    // gng.last_x keeps seeing the live input.  Diagnostic only, never saved.
+    Eigen::VectorXf frozen_last_input_;
 
     // v5.4.L Diagnostic B — per-winner-id histogram across all ticks.
     // Identifies premature GNG saturation: if 1-2 winner_ids account

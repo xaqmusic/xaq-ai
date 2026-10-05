@@ -873,6 +873,7 @@ void EPM::tick(uint64_t tick_id) {
 
     apply_neuro_scaling();
 
+    if (!learning_enabled_) frozen_last_input_ = latent;
     auto [winner_id, quant_error] = gng_->step(latent);
 
     // GNG bootstrap: first ~2 ticks return placeholder (winner_id=0, qe=0).
@@ -981,6 +982,11 @@ nlohmann::json EPM::diag_lite() const {
 nlohmann::json EPM::diag_snapshot() const {
     nlohmann::json j = snapshot_state();
     j["learning_enabled"] = learning_enabled_;
+    // Frozen, the GNG's last_x stops at the last learned input; show the live one.
+    if (!learning_enabled_ && frozen_last_input_.size() > 0 && j["gng"].is_object()) {
+        j["gng"]["last_x"] = std::vector<float>(frozen_last_input_.data(),
+                                                frozen_last_input_.data() + frozen_last_input_.size());
+    }
     return j;
 }
 
