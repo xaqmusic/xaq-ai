@@ -2710,6 +2710,66 @@ failure from slew 40 to 2000", "stagger 0 is safe". All of it was a robot at res
 ⚠ The same bug also voided §3.8.9.1(b) from 2026-09-13, which is marked withdrawn rather than
 deleted.
 
+#### 📋 3.8.8.10 Mod D — servo power through a distribution board, downstream of the INA219 — PLANNED 2026-10-05 (operator: parts being sourced)
+
+**Why, in one line:** since Mod A, the HAT's 5 V regulator current limit (§3.8.1, inferred
+2026-09-05) no longer browns out the Pi. It browns out the **HAT's own 3.3 V rail**, and with it
+the servo MCU, during brain gait. Ledger 2026-10-05 has the measurements:
+- **a rail estimate** (3.3 × INA pack V ÷ A4: the HAT's ADC measures the battery divider against
+  that rail) dips below 3.0 V 1.5 times a minute on carpet and 6 times a minute on concrete. The MCU
+  survives ~2.65 V and dies by ~2.5 V, at 0.1 resets per minute on carpet and 1.3 per minute on
+  concrete;
+- **battery-side current is capped** at ~3.5 A in every run (the regulator in limit), so the INA219
+  cannot see how far demand goes over it;
+- **the surface sets the rate:** grip converts motion into work, as §3.9 found for the transitions.
+
+The fix is to take the servo load off the HAT's regulator entirely. The PCB cannot be modified, so
+the servos' V+ comes from an external BEC through a distribution board, and the HAT keeps only its
+logic and the PWM signals.
+
+```
+ 2S pack +──[XT30]──┬──────────────────────────────► Pi BEC (Mod A, unchanged, upstream of the shunt)
+                    │
+                    └─[0.01 Ω shunt, heavy leads]──┬──[fuse 10 A]──[switch]──► UBEC 5.0 V, >= 8-10 A ──┬─► distribution board V+ (12 servos)
+                       (INA219 breakout: sense      │                                                 └── 1000-2200 uF low-ESR bulk cap
+                        lines only)                 └──────────────────────────────► HAT PWR IN (logic + MCU)
+ 2S pack −── star ground ──┬── HAT GND
+                           ├── UBEC GND ── distribution board GND (heavy)
+                           └── Pi BEC GND
+ per servo: HAT header PWM signal + GND ──► distribution board ──► servo; servo V+ from the board, NOT the HAT
+```
+
+**Parts:**
+- servo power distribution board with an external power input (signal and ground pass through, V+
+  from the input);
+- adjustable switching UBEC, **≥ 8–10 A continuous**, set to **5.0 V**. 12 × MG90S stall ≈ 0.7–0.9 A
+  each, and the true gait demand is unmeasured because the regulator has capped it;
+- a 1000–2200 µF low-ESR bulk capacitor (≥ 10 V) at the board's input;
+- an inline fuse (10 A) and a switch on the UBEC input;
+- XT30 and 18–20 AWG for the new high-current path.
+
+**Rules:**
+1. **No servo V+ may still reach the HAT's servo rail:** the UBEC would back-feed the HAT's regulator
+   output. Meter every channel before power-up.
+2. **The INA219 stays in the servo path** (operator's choice: downstream of the shunt, off the pack
+   connector), so it keeps measuring servo current, now uncapped: the first look at the true demand,
+   and the S1 calibration target. The breakout's screw terminals and traces are not rated for 8–10 A.
+   Carry the current on heavy leads soldered across the shunt and use the breakout only for its sense
+   lines. The XH pack contact (3 A, §3) must not carry the new path.
+3. **Common ground; servo return current on its own heavy path** to the star point, not through the
+   HAT's ground traces. Ground bounce through the HAT is a possible contributor to the resets, so
+   this matters.
+4. **5.0 V first:** the voltage the servos run at today, so the only change is a supply that does not
+   collapse. 6.0 V (more torque and speed, a hotter MG90S) is a separate later lever.
+5. **The UBEC is switched,** so "pause → power off → move → power on → SPACE" still cuts servo power.
+   benchd's staggered re-arm prevents a jump on power-up.
+
+**Pass criteria (one run on CONCRETE, the stress case, rail estimate and fast capture on):**
+- rail dips below 3.0 V: ~6 per minute → ~0;
+- HAT resets: ~1.3 per minute → ~0;
+- battery-side current exceeds the old ~3.5 A ceiling for the first time;
+- the HAT's reset detector and rail sensor stay in place as the regression check.
+
 ### ★★★ 3.8.9 THE SOFTWARE GUARD — ✅ BUILT AND DRILLED 2026-09-13
 
 The mods in §3.8.8 are unbuilt. This is what protects the robot until they are, and it is
