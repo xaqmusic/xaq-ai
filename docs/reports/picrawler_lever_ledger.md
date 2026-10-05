@@ -6525,3 +6525,35 @@ a property of the run, not of the build.
   is 20–60 ms against a 20 ms tick. Untested.
 - **For the injection harness:** a clean before/after. With the servo load off the HAT regulator, the
   dips should vanish.
+
+### ★★ 2026-10-05 (night) — SURFACE A/B: CONCRETE DRIVES THE RAIL DEEPER AND RESETS THE HAT ~13× MORE OFTEN THAN CARPET
+
+**Runs:** the same build and brain (P-e·h0, autonomous, lag 0.2), on smooth carpet (599 s) and on
+concrete (283 s). Fast capture with the rail estimate in both. n = 1 per surface: a signal.
+
+| | carpet | concrete |
+|---|---|---|
+| HAT resets | 1 (0.10 / min) | 6 (1.27 / min) |
+| battery current above 3 A | 87 / min | 150 / min |
+| 10 ms peak current, p50 / p90 | 1.56 / 2.76 A | 1.79 / 3.00 A |
+| rail dips < 3.0 V | 1.5 / min | 6.1 / min |
+| rail dips < 2.8 V | 0.6 / min | 4.5 / min |
+| rail p0.1 in gait | 3.05 V | 2.88 V |
+| current ceiling (max) | 3.46 A | 3.50 A |
+
+- **Operator's reading:** concrete "seemed to increase inertial stress on servos holding position".
+  The data agree. On a hard, unyielding surface the same gait spends nearly twice as long at the
+  current ceiling, and the rail dips deeper and far more often. Carpet's compliance absorbs what the
+  servos otherwise have to fight.
+- **The reset mechanism is unchanged:** every concrete reset follows the same cliff, flat at ~3.28 V,
+  then down to 2.45–2.61 V within 20–60 ms. The deepest "dips" (2.0 V for ~1.2 s) are the outages
+  themselves. One reset (#5) was preceded by survivable dips to 2.56 / 2.51 / 2.88 V in the 200 ms
+  before, the only sign of a run-up in any reset so far.
+- **The reset rate is a function of surface.** That explains most of the earlier spread (0.10–1.27 / min).
+  The 1.15 / min run of the same evening was not labelled; if it was on a hard floor, it fits.
+
+**Consequences:**
+- any hardware A/B of resets per minute must hold the surface fixed;
+- concrete is the stress test for the injection harness;
+- a brain-side power term could learn to stand and step more softly on hard ground: the rail dips
+  give it the gradient.
