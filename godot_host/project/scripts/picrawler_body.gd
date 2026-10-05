@@ -2480,6 +2480,18 @@ var _dbg_gc_belly: float = -1.0   # belly-centre truth proxy while tof_boom is o
 #   joint_torque_zero — publish zeros: hobby servos report no torque.
 @export var honest_distress: bool = false
 @export var joint_torque_zero: bool = false
+# Servo power model (power-budget plan S1, 2026-10-05).  INSTRUMENT ONLY: recovers each servo's
+# motor torque from the physics (scripts/servo_power_model.gd, Newton-Euler on the distal
+# subchain), for the servo-current / HAT-rail model to stand on.  Writes nothing to the physics;
+# its one side effect, contact reporting on the coxa and upper segments, exists only when ON.
+#   OGMA_PICRAWLER_POWER_MODEL=1        enable
+#   OGMA_PICRAWLER_POWER_LOG=<path>     per-physics-step CSV (implies enable)
+# off = byte-identical.
+@export var power_model: bool = false
+var _power_log_path: String = ""
+var _power = null
+var _power_log: FileAccess = null
+var _power_steps: int = 0
 @export var honest_upright: bool = false   # upright/tilt from the fused attitude estimate
 @export var honest_joints:  bool = false   # joints from the servo forward model
 @export var honest_imu:     bool = false   # imu from ego_heading / stride_v / body gyro
@@ -3443,7 +3455,8 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_JOINT_TORQUE_ZERO",
 			  "OGMA_PICRAWLER_HONEST_UPRIGHT",
 			  "OGMA_PICRAWLER_HONEST_JOINTS",
-			  "OGMA_PICRAWLER_HONEST_IMU"]:
+			  "OGMA_PICRAWLER_HONEST_IMU",
+			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3474,6 +3487,8 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_HONEST_UPRIGHT":    honest_upright    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_JOINTS":     honest_joints     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_IMU":        honest_imu        = (v != "0" and v != "")
+			"OGMA_PICRAWLER_POWER_MODEL":       power_model       = (v != "0" and v != "")
+			"OGMA_PICRAWLER_POWER_LOG":         _power_log_path = v; power_model = true
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -4807,6 +4822,8 @@ func _build_body() -> void:
 
 	for i in range(4):
 		_build_leg(i)
+	if power_model:
+		_power_setup()
 	# 2026-06-03 — verify G6DOF angular params reached the joints.  Bit-
 	# identical-across-tweaks calibration sweep raised the question of
 	# whether changes are reaching the body — this print is the receipt.
@@ -5941,6 +5958,8 @@ func _physics_process(delta: float) -> void:
 	if brain == null or not brain.is_brain_ready():
 		return
 	_accum_grf()
+	if _power != null:
+		_power_tick()
 	# Apply a deferred teleport (KEY_3 / KEY_4-click / env) HERE in the physics step
 	# so the transform writes stick — input-frame writes get clobbered by the solver.
 	if _pending_teleport != null:
@@ -10887,6 +10906,37 @@ func _accum_grf() -> void:
 		_grf_up[i]  += up_acc[i]
 		_grf_nrm[i] += nrm_acc[i]
 		_foot_load_ema[i] = (1.0 - _FOOT_LOAD_ALPHA) * _foot_load_ema[i] + _FOOT_LOAD_ALPHA * nrm_acc[i]
+
+# Servo power model (S1) — see the power_model @export.  Rebuilt with the body, because it holds
+# the segments by reference and their anchors in the parents' frames.
+func _power_setup() -> void:
+	_power = load("res://scripts/servo_power_model.gd").new()
+	_power.setup(_chassis, _coxas, _uppers, _lowers, _hip1_world_c, _hip2_world_c, _knee_world_c,
+				 _hip2_axes)
+	if _power_log_path != "" and _power_log == null:
+		_power_log = FileAccess.open(_power_log_path, FileAccess.WRITE)
+		var hdr := PackedStringArray(["step", "tick"])
+		for pre in ["tau", "w"]:
+			for k in range(12): hdr.append("%s%d" % [pre, k])
+		for i in range(4): hdr.append("load%d" % i)
+		_power_log.store_line(",".join(hdr))
+	# The solver iteration count the SPACE actually runs: Godot Physics 3D's hinge motor clamps its
+	# impulse on every iteration and never accumulates, so the real torque ceiling is
+	# iterations x MAX_SERVO_TORQUE, and this is the number that sets it.
+	var iters: float = PhysicsServer3D.space_get_param(get_world_3d().space, PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS)
+	print("PicrawlerBody: power_model ON (instrument only)  log=%s  space solver_iterations=%d (hinge motor ceiling %.2f N m)"
+		% [_power_log_path if _power_log_path != "" else "-", int(iters), iters * MAX_SERVO_TORQUE * leg_strength])
+
+func _power_tick() -> void:
+	_power.step(1.0 / float(physics_hz))
+	_power_steps += 1
+	if _power_log != null:
+		var row := PackedStringArray([str(_power_steps), str(tick_counter)])
+		for k in range(12): row.append("%.5f" % _power.tau[k])
+		for k in range(12): row.append("%.4f" % _power.omega[k])
+		var fl: float = _fl_norm()
+		for i in range(4): row.append("%.3f" % (_foot_load_ema[i] / fl))
+		_power_log.store_line(",".join(row))
 
 # The COMMANDED joint angle that the *_cmd foot-height signals run FK on.
 #
