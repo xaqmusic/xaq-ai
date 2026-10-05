@@ -8,9 +8,10 @@ only a known force on a known arm measures TORQUE.  Here the scale is the stop. 
 leaves the servo map, because the scale stops the leg long before the map would.
 
 Sequence (one leg):
-  pose 'stand' (every servo armed; hip2 at its centre, so the femur is about horizontal)
-  -> operator slides the scale under the knee until it just touches, and TARES it
-  -> a 20 us direction check: the operator says whether the knee pressed harder
+  [--pre-pose, e.g. 'toes_up', every servo armed with the legs clear] -> --pose, e.g. 'torque_check'
+  (the leg on test straight, its knee a couple of mm above the scale) -> operator TARES the scale
+  -> pressing direction: the way hip2 moved from the pre-pose (legs up) into the pose (onto the
+     scale), unless --press-sign says otherwise
   -> steps: hip2 target = contact + k * step, held while the operator reads the scale, then back to
      contact to rest.  Current is benchd's 50 Hz INA219 reading (whole HAT, battery side), and the
      baseline is the second before each push
@@ -21,7 +22,7 @@ Torque = scale reading x g x arm.  arm = horizontal distance from the hip2 axis 
 Safety: each push is held for at most --max-hold s (then it backs off, and the reading can still be
 typed), it returns at once above --abort-a, and it rests at contact between pushes.
 
-  python3 pi_host/tools/scale_probe.py --leg FR
+  python3 pi_host/tools/scale_probe.py --leg FL --pre-pose toes_up --pose torque_check
   python3 pi_host/tools/scale_probe.py --leg FR --dry-run      # checks benchd and the feed, nothing moves
 """
 import argparse
@@ -48,7 +49,10 @@ def main():
     ap.add_argument("--rest", type=float, default=2.0, help="s resting at contact between pushes")
     ap.add_argument("--abort-a", type=float, default=2.5, help="return at once above this current")
     ap.add_argument("--arm-mm", type=float, default=53.6)
-    ap.add_argument("--pose", default="stand")
+    ap.add_argument("--pose", default="torque_check", help="the leg on test just above the scale")
+    ap.add_argument("--pre-pose", default="toes_up", help="legs clear of everything first ('' = none)")
+    ap.add_argument("--press-sign", type=int, choices=(-1, 1), default=None,
+                    help="+1/-1 us direction that presses; default: pre-pose -> pose direction")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -62,6 +66,15 @@ def main():
     pose = (bench.call("pose.get", name=a.pose) or {}).get("us")
     if not pose:
         sys.exit(f"no saved pose '{a.pose}'")
+    pre = (bench.call("pose.get", name=a.pre_pose) or {}).get("us") if a.pre_pose else None
+    if a.pre_pose and not pre:
+        sys.exit(f"no saved pose '{a.pre_pose}'")
+    if a.press_sign is not None:
+        sign = a.press_sign
+    elif pre and pre[ch] != pose[ch]:
+        sign = 1 if pose[ch] > pre[ch] else -1
+    else:
+        sys.exit("cannot infer the pressing direction: pass --press-sign")
     out = REPO / "pi_host/log" / f"scaleprobe_{time.strftime('%Y%m%d_%H%M%S')}_{a.leg}"
     out.mkdir(parents=True, exist_ok=True)
     ev = Events(out / "events.jsonl")
@@ -116,34 +129,35 @@ def main():
                     on_timeout()
 
     rows, contact = [], pose[ch]
-    print(f"scale_probe: leg {a.leg}, hip2 = ch {ch} (map {lo}-{hi} us, {a.pose} {pose[ch]} us), arm {a.arm_mm} mm -> {out}")
+    print(f"scale_probe: leg {a.leg}, hip2 = ch {ch} (map {lo}-{hi} us, {a.pose} {pose[ch]} us, pressing "
+          f"{'+' if sign > 0 else '-'}us), arm {a.arm_mm} mm -> {out}")
     try:
         if a.dry_run:
             time.sleep(1.0)
             print(f"  DRY RUN — nothing moved. feed frames {rec.n}, current {rec.i_a:.3f} A")
             return
-        ask(f"  >> Move the scale AWAY from the robot (the legs will move to '{a.pose}'), then press Enter ")
-        r = bench.call("pose.set", us=pose)
-        if not r.get("ok"):
-            raise RuntimeError(f"pose.set {a.pose}: {r.get('error')}")
-        ev("pose_start", pose=a.pose)
-        t0 = time.monotonic()
-        while time.monotonic() - t0 < 3 and not bench.call("status").get("pose_move_active"):
-            time.sleep(0.05)
-        while bench.call("status").get("pose_move_active"):
-            time.sleep(0.1)
-        ev("pose_landed", pose=a.pose)
-        ask(f"  >> Slide the scale under the {a.leg} KNEE until it just touches (reading ~0), TARE it, press Enter ")
-
-        # direction: which way presses the knee down?
-        goto(contact + 20); wait_slew(20); time.sleep(0.5)
-        ans = ask("  >> Did the knee press HARDER into the scale (y) or lift off (n)? ")
-        goto(contact); wait_slew(20)
-        sign = 1 if ans.lower().startswith("y") else -1
-        ev("direction", sign=sign, answer=ans)
-        print(f"  pressing = {'+' if sign > 0 else '-'}us. Type the scale reading in GRAMS at each step "
-              f"(q to stop). Each push holds at most {a.max_hold:.0f} s.")
-        time.sleep(a.rest)
+        def pose_to(name, us):
+            r = bench.call("pose.set", us=us)
+            if not r.get("ok"):
+                raise RuntimeError(f"pose.set {name}: {r.get('error')}")
+            ev("pose_start", pose=name)
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 3 and not bench.call("status").get("pose_move_active"):
+                time.sleep(0.05)
+            while bench.call("status").get("pose_move_active"):
+                time.sleep(0.1)
+            ev("pose_landed", pose=name)
+            print(f"  at '{name}'")
+        if pre:
+            ask(f"  >> Press Enter to move to '{a.pre_pose}' ")
+            pose_to(a.pre_pose, pre)
+            ask(f"  >> Press Enter to move to '{a.pose}' ")
+        pose_to(a.pose, pose)
+        ask(f"  >> Check the {a.leg} knee is just above the scale, TARE it, then press Enter to start "
+            f"pushing (hip2 {'+' if sign > 0 else '-'}{a.step} us per step) ")
+        ev("direction", sign=sign)
+        print(f"  Type the scale reading in GRAMS at each step (q to stop). Each push holds at most "
+              f"{a.max_hold:.0f} s.")
 
         for k in range(1, a.max_steps + 1):
             tgt = contact + sign * k * a.step
@@ -191,6 +205,15 @@ def main():
         time.sleep(1.0)
     finally:
         if not a.dry_run:
+            # Legs clear first: the rescue pose (here, and the deadman's) is not designed around a
+            # scale under one knee.
+            try:
+                if pre:
+                    bench.call("servo.set", ch=ch, us=contact)
+                    pose_to(a.pre_pose, pre)
+                ask("  >> Move the scale away, then press Enter for the rescue pose ")
+            except (KeyboardInterrupt, NameError):
+                pass
             r = bench.call("limp")                      # the rescue pose, deadman still fed
             ev("rescue", ok=r.get("ok"))
             t0 = time.monotonic()
