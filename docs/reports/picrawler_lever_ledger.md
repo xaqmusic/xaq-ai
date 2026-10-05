@@ -6679,3 +6679,20 @@ unchanged), so everything below happened inside the servo.
 - re-run with the scale display FILMED, aligned on the 12 pushes, for the peak (drive) torque per step;
 - one more servo, to see whether the 3.3 s cut-off is this unit or the model;
 - note whether the robot rises off its stand at the plateau.
+
+**Cross-check against SunFounder's published sibling servos (2026-10-05).** No datasheet exists for the
+PiCrawler's own servo (servodatabase lists "PiCrawel", A0000284, with empty fields). The closest
+published siblings are the same 13.5 g SunFounder micro servo. Their specs match the scale probe:
+
+| | SF006PRO (AI Lab kit doc) | SF006FM (PiDog) | scale probe (FL hip2) |
+|---|---|---|---|
+| drive / dynamic load | ≥ 2.2 kgf·cm (0.22 N m) at 5 V | ≥ 1.3–1.4 kgf·cm max | 475 g plateau = 0.25 N m |
+| static stall (holding) | ≥ 5 kgf·cm (0.49 N m) | — | back-drive ~1.2 kg = ~0.63 N m |
+| stall current | ≤ 1.2 A at 5 V | ≤ 0.85 A (4.8 V) / 1.0 A (6 V) | ~0.9 A battery side ≈ 1.1–1.2 A at 5 V |
+| stall cut-off | drops to ≤ 250 mA after 5 s | "power failure protection after 5 s" | drops to ~0.1 A after 3.3 s |
+| deadband | ≤ 6 µs | ≤ 3 µs | — |
+| no-load speed | ≤ 0.17 s/60° (6.2 rad/s) | ≤ 0.18 s/60° | — |
+| clutch | — | slips under external force | operator saw the servo "shifting against its own hinge" |
+
+So the sim's servo should drive at ~0.22–0.25 N m and hold to ~0.5–0.6 N m, draw ~1.2 A at 5 V when
+driving into a load, and limit itself to ≤ 0.25 A after a few seconds of stall.
