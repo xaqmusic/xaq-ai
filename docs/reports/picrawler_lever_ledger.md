@@ -6557,3 +6557,73 @@ concrete (283 s). Fast capture with the rail estimate in both. n = 1 per surface
 - concrete is the stress test for the injection harness;
 - a brain-side power term could learn to stand and step more softly on hard ground: the rail dips
   give it the gradient.
+
+### ★★ 2026-10-05 (night) — SIM POWER MODEL S1, FIRST PASS: the sim servo has a 9.6 N m ceiling; an honest datasheet cap breaks the gait, and the robot steps like the strong servo
+
+**Instrument (`WORKING`, byte-identical).** `scripts/servo_power_model.gd` recovers each servo's
+motor torque from Newton-Euler on the segments beyond it: angular-momentum change about the moving
+anchor, minus gravity, contacts on every leg segment and body damping, projected on the joint axis.
+Godot Physics 3D does not expose a joint motor's impulse, so this is the only route.
+`OGMA_PICRAWLER_POWER_LOG=<csv>` writes it at 240 Hz. A 3000-tick trace is byte-identical with the
+instrument on and off. Static stand reads hip2 0.12–0.15 N m and knee 0.07 N m, which matches
+statics (body weight ÷ 4 × the horizontal lever).
+
+**Finding: the "0.15 N m" servo has really had a 9.6 N m ceiling.** Godot 4.6's
+`GodotHingeJoint3D::solve()` clamps the motor impulse on every solver iteration and keeps no
+accumulated total, and the space runs `solver_iterations` = 64 (read back from the server). The
+instrument confirms it: P-e·h0 stance hip2 carries 0.18 N m on average, joints sit past an MG90S's
+datasheet stall (0.18 N m) ~25 % of the time, and the tail runs smoothly to 2 N m with no ceiling.
+
+**Lever: `OGMA_PICRAWLER_HONEST_TORQUE_CAP=<N m>`.** It divides the per-call impulse by the iteration
+count, so one physics step can never exceed the cap (hinge backend; gain-0 verified byte-identical).
+P-e·h0, arena 0.3, n=6 × 12000, seeds 1–6, `arenaavg.py`:
+
+| cap | net_disp | steps | contact duty | belly (mm) | belly min | tilt_sd | falls |
+|---|---|---|---|---|---|---|---|
+| legacy (9.6) | 10.42 ± 1.07 | 84.5 ± 24.4 | 0.80 | 39.2 | 14.5 | 0.091 | 0 |
+| 0.35 | 10.02 ± 2.01 | 32.3 ± 21.3 | 0.81 | 35.8 | 10.6 | 0.108 | 0.17 |
+| 0.25 | 10.21 ± 1.66 | 12.0 ± 6.5 | 0.85 | 32.9 | 2.8 | 0.067 | 0 |
+| 0.18 (MG90S datasheet) | 8.20 ± 2.03 | 6.8 ± 8.4 | 0.92 | 27.8 | 3.1 | 0.072 | 0 |
+
+**Verdict: `REGRESSION` (signal, n=6), monotonic in the cap.** A weaker servo plants its feet
+(duty 0.80 → 0.92), stops stepping, and slides with the belly scraping (min 3 mm). It still drifts
+8 m. The context matters: the brain's frozen gains were settled on the 9.6 N m body.
+
+**The robot says the strong servo is closer to the truth.** From its FSRs (> 200, brain-driven, on
+the floor), the robot runs at contact duty 0.70, 200–270 swings ≥ 4 ticks per minute, and swing
+median 10–13 ticks. The legacy sim runs at 0.80, ~270 per minute and 6 ticks. The robot steps at
+least as much as the uncapped sim, and every cap moves the sim away from it.
+
+**Current model (`pi_host/tools/brainrun/power_calib.py`).** Per servo, I = idle + running +
+min(I_stall, K · g · |τ|). g is 1 when the servo does work and H_HOLD when holding or back-driven
+(gear friction carries part of the load). τ comes from the instrument. With datasheet K
+(0.75 A ÷ 0.18 N m) and any H, the sim predicts 2.3–2.9 A battery-side against the robot's 1.55
+(carpet). Fitting K alone to the robot's mean gives 2.1–2.5 A/N m. At the stall-probe current
+(0.75 A), that is an effective stall torque of ~0.3–0.36 N m. The cap dose curve independently
+needs > 0.35 N m to step. **Two estimates agree that the robot's servos act about twice as strong as
+the MG90S datasheet, or that its stance loads are about half the sim's.** The robot stands taller
+than the sim, which would point at the second.
+
+**What does not fit yet: the shape.** With the mean matched, the sim's 10 ms peaks are too narrow:
+
+| | p90 | p99 | above 3 A |
+|---|---|---|---|
+| sim | 2.0 A | 2.4 A | ~0 / min |
+| robot | 2.76 A | 3.26 A | 87 / min |
+
+So the sim never reaches the regulator limit, and the rail model cannot be fit. The robot's extra
+variance is at gait timescale: 85 % of its current spectrum is below 5 Hz, and there is no 50 Hz
+line, so a synchronized servo drive pulse is refuted as the cause. Two ideas remain:
+- the robot's longer swings concentrate the load on fewer legs;
+- a hobby servo's deadband: near-free inside it, a stall current once a load pushes it out.
+
+**Also reverted the same session:** mirroring the robot's servo output lag (α 0.2) into the sim.
+That lag was chosen to give the robot the plant lag the sim ALREADY has (entry "SERVO OUTPUT LAG
+α 0.2 ON THE ROBOT"), so adding it to the sim would have lagged it twice.
+
+**Re-use context for the cap:**
+- a MEASURED stall torque: one MG90S at 5 V with a weight on a known arm (operator bench test);
+- geometry and stand-height parity first, if the loads are what differ;
+- a brain retuned on a capped body.
+
+The cap stays default-off. The power model's next step is the shape, not the rail.

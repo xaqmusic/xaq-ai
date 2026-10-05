@@ -2488,6 +2488,18 @@ var _dbg_gc_belly: float = -1.0   # belly-centre truth proxy while tof_boom is o
 #   OGMA_PICRAWLER_POWER_LOG=<path>     per-physics-step CSV (implies enable)
 # off = byte-identical.
 @export var power_model: bool = false
+# HONEST TORQUE CAP (2026-10-05).  Godot Physics 3D's HingeJoint3D motor clamps its impulse on
+# EVERY solver iteration and never accumulates (godot_hinge_joint_3d.cpp, 4.6), and the space runs
+# solver_iterations = 64, so the "0.15 N m" servo has really had a ceiling of 64 x 0.15 = 9.6 N m.
+# The power instrument measured what that buys: stance hip2 at 0.18 N m on average and joints
+# past an MG90S's stall ~25 % of the time.  A real servo stalls there; the sim's never can, so the
+# sim has never met the event that browns the robot out.
+# >0 sets the servo's stall torque (N m) and divides the per-call impulse by the iteration count,
+# so one physics step's motor impulse can never exceed cap / physics_hz.  The other scalings
+# (leg_strength, lesions, servo_ki, motor test) keep their ratio to MAX_SERVO_TORQUE.
+#   OGMA_PICRAWLER_HONEST_TORQUE_CAP  N m; 0 = off = byte-identical.  MG90S at 5 V ~0.18
+@export var honest_torque_cap: float = 0.0
+var _motor_impulse_scale: float = 1.0      # set in _build_body when the cap is on
 var _power_log_path: String = ""
 var _power = null
 var _power_log: FileAccess = null
@@ -3456,7 +3468,8 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_UPRIGHT",
 			  "OGMA_PICRAWLER_HONEST_JOINTS",
 			  "OGMA_PICRAWLER_HONEST_IMU",
-			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG"]:
+			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
+			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3489,6 +3502,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_HONEST_IMU":        honest_imu        = (v != "0" and v != "")
 			"OGMA_PICRAWLER_POWER_MODEL":       power_model       = (v != "0" and v != "")
 			"OGMA_PICRAWLER_POWER_LOG":         _power_log_path = v; power_model = true
+			"OGMA_PICRAWLER_HONEST_TORQUE_CAP": honest_torque_cap = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -4822,6 +4836,12 @@ func _build_body() -> void:
 
 	for i in range(4):
 		_build_leg(i)
+	if honest_torque_cap > 0.0:
+		var iters: float = PhysicsServer3D.space_get_param(get_world_3d().space, PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS)
+		_motor_impulse_scale = (honest_torque_cap / MAX_SERVO_TORQUE) / maxf(1.0, iters)
+		print("PicrawlerBody: HONEST TORQUE CAP %.3f N m (solver_iterations %d; the legacy ceiling was %.2f N m)%s"
+			% [honest_torque_cap, int(iters), iters * MAX_SERVO_TORQUE,
+			   "" if joint_backend == "hinge" else "  ⚠ hinge backend only — g6dof unchanged"])
 	if power_model:
 		_power_setup()
 	# 2026-06-03 — verify G6DOF angular params reached the joints.  Bit-
@@ -5381,7 +5401,7 @@ func _apply_g6dof_default_preset() -> void:
 func _set_motor_vf(j: Object, vel: float, force: float) -> void:
 	if j is HingeJoint3D:
 		(j as HingeJoint3D).set_param(HingeJoint3D.PARAM_MOTOR_TARGET_VELOCITY, vel)
-		(j as HingeJoint3D).set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, force / float(physics_hz))
+		(j as HingeJoint3D).set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, force / float(physics_hz) * _motor_impulse_scale)
 	else:
 		# G6DOF: hinge axis remapped to local +X (twist) in _make_g6dof_joint.
 		(j as Generic6DOFJoint3D).set_param_x(Generic6DOFJoint3D.PARAM_ANGULAR_MOTOR_TARGET_VELOCITY, vel)

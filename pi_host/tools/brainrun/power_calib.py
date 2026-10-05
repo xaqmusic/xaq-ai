@@ -43,11 +43,15 @@ P = dict(
     I_IDLE=0.010,      # A per servo, holding with no load
     I_NL=0.15,         # A per servo, running free at W_NL
     W_NL=10.5,         # rad/s, MG90S no-load speed (0.1 s / 60 deg)
-    I_STALL=0.70,      # A per servo at stall
+    I_STALL=0.75,      # A per servo at stall (stall probe #1: a blocked FR push, ~0.58 A battery-side)
+    K=None,            # A per N m of delivered torque; None = I_STALL / TAU_STALL (datasheet).  The
+                       # one constant FIT to the robot (carpet mean current), see fit()
     TAU_STALL=0.18,    # N m, MG90S stall torque (1.8 kg cm)
     H_HOLD=0.30,       # holding / back-driven current share (2 eta - 1); FIT to the robot's means
     P_BLEND=0.02,      # W, mechanical power over which holding blends into motoring
     TAU_MECH=0.05,     # s, the timescale motoring is judged on (servo loop + gear backlash)
+    TAU_TQ=0.0,        # s, servo torque bandwidth: the solver's step-to-step contact jitter is not
+                       # a motor current (0 = raw torque)
     TAU_BUS=0.004,     # s, motor + bus smoothing of the summed current
     ETA=0.85,          # 5 V regulator efficiency
     V_PACK=7.6,        # V, 2S pack under load
@@ -143,10 +147,12 @@ def ema(x, tc, dt):
 def electrical(tau, w, dt, p=P):
     """Per-step battery current and rail from per-joint torque (N m) and speed (rad/s)."""
     ts, ws = ema(tau, p["TAU_MECH"], dt), ema(w, p["TAU_MECH"], dt)
+    tq = ema(tau, p["TAU_TQ"], dt) if p["TAU_TQ"] > 0 else tau
+    k = p["K"] if p["K"] is not None else p["I_STALL"] / p["TAU_STALL"]
     x = np.clip(ts * ws / p["P_BLEND"], 0.0, 1.0)
     g = p["H_HOLD"] + (1.0 - p["H_HOLD"]) * x * x * (3.0 - 2.0 * x)
     i_servo = (p["I_IDLE"] + p["I_NL"] * np.minimum(1.0, np.abs(w) / p["W_NL"])
-               + p["I_STALL"] * np.minimum(1.0, g * np.abs(tau) / p["TAU_STALL"]))
+               + np.minimum(p["I_STALL"], k * g * np.abs(tq)))
     i5_raw = i_servo.sum(1)
     i5 = ema(i5_raw, p["TAU_BUS"], dt)
     i5_del = np.minimum(i5, p["I5_LIM"])
