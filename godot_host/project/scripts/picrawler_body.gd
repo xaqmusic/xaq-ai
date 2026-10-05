@@ -2500,6 +2500,29 @@ var _dbg_gc_belly: float = -1.0   # belly-centre truth proxy while tof_boom is o
 #   OGMA_PICRAWLER_HONEST_TORQUE_CAP  N m; 0 = off = byte-identical.  MG90S at 5 V ~0.18
 @export var honest_torque_cap: float = 0.0
 var _motor_impulse_scale: float = 1.0      # set in _build_body when the cap is on
+# ASYMMETRIC CAP: the HOLD side (2026-10-05).  A geared hobby servo resists being back-driven far
+# harder than it can drive: SunFounder's SF006PRO lists >= 2.2 kgf cm dynamic but >= 5 kgf cm
+# static, and the scale probe measured ~0.25 N m driving against ~0.63 N m to back-drive by hand.
+# The extra is gear friction, which is PASSIVE: it can stop motion but never cause it.  So every
+# physics step, a joint that is being pushed back (moving against its command), or has no
+# command to move, gets a BRAKE: target velocity 0, impulse capped at honest_hold_cap.  A braked
+# joint returns to driving at honest_torque_cap only when the motor can WIN: when the torque the
+# brake is holding against, in the commanded direction, is below the drive cap.  That torque is
+# read from the power instrument (servo_power_model.gd), which this switches on.
+# ⚠ First build (2026-10-05) released the brake every step instead.  Under a stance load between
+# the two caps, each drive step slipped and the brake only stopped it: the stance CREPT down (belly
+# 33 -> 20 mm vs the symmetric cap).  Static friction holds without creep; that needs the load test.
+# Hinge backend, and only with honest_torque_cap > 0.
+#   OGMA_PICRAWLER_HONEST_HOLD_CAP  N m; 0 = off (symmetric cap, byte-identical to it)
+@export var honest_hold_cap: float = 0.0
+const HOLD_CMD_EPS: float = 0.02           # rad/s: a command slower than this is "hold still"
+var _motor_cmd: Dictionary = {}             # joint instance id -> Vector2(vel, force) last commanded
+var _brake_steps: int = 0
+var _braked: PackedByteArray = PackedByteArray()
+var _brake_tau: PackedFloat32Array = PackedFloat32Array()   # smoothed instrument torque, per joint
+const BRAKE_TAU_S: float = 0.01            # s, smoothing of the torque the release test reads
+const BRAKE_OMEGA_EPS: float = 0.01        # rad/s, back-drive threshold (solver noise below it)
+var _brake_checks: int = 0
 var _power_log_path: String = ""
 var _power = null
 var _power_log: FileAccess = null
@@ -3469,7 +3492,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_JOINTS",
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
-			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP"]:
+			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3503,6 +3526,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_POWER_MODEL":       power_model       = (v != "0" and v != "")
 			"OGMA_PICRAWLER_POWER_LOG":         _power_log_path = v; power_model = true
 			"OGMA_PICRAWLER_HONEST_TORQUE_CAP": honest_torque_cap = maxf(0.0, v.to_float())
+			"OGMA_PICRAWLER_HONEST_HOLD_CAP":   honest_hold_cap   = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -4839,10 +4863,11 @@ func _build_body() -> void:
 	if honest_torque_cap > 0.0:
 		var iters: float = PhysicsServer3D.space_get_param(get_world_3d().space, PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS)
 		_motor_impulse_scale = (honest_torque_cap / MAX_SERVO_TORQUE) / maxf(1.0, iters)
-		print("PicrawlerBody: HONEST TORQUE CAP %.3f N m (solver_iterations %d; the legacy ceiling was %.2f N m)%s"
-			% [honest_torque_cap, int(iters), iters * MAX_SERVO_TORQUE,
+		print("PicrawlerBody: HONEST TORQUE CAP %.3f N m drive%s (solver_iterations %d; the legacy ceiling was %.2f N m)%s"
+			% [honest_torque_cap, (", %.3f N m hold (passive brake)" % honest_hold_cap) if honest_hold_cap > 0.0 else "",
+			   int(iters), iters * MAX_SERVO_TORQUE,
 			   "" if joint_backend == "hinge" else "  ⚠ hinge backend only — g6dof unchanged"])
-	if power_model:
+	if power_model or (honest_hold_cap > 0.0 and honest_torque_cap > 0.0):
 		_power_setup()
 	# 2026-06-03 — verify G6DOF angular params reached the joints.  Bit-
 	# identical-across-tweaks calibration sweep raised the question of
@@ -5399,6 +5424,8 @@ func _apply_g6dof_default_preset() -> void:
 # 2026-06-03 — Backend-aware per-tick motor setter.  Caller always
 # passes torque (Nm); helper does the per-backend unit conversion.
 func _set_motor_vf(j: Object, vel: float, force: float) -> void:
+	if honest_hold_cap > 0.0:
+		_motor_cmd[j.get_instance_id()] = Vector2(vel, force)
 	if j is HingeJoint3D:
 		(j as HingeJoint3D).set_param(HingeJoint3D.PARAM_MOTOR_TARGET_VELOCITY, vel)
 		(j as HingeJoint3D).set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, force / float(physics_hz) * _motor_impulse_scale)
@@ -6004,6 +6031,8 @@ func _physics_process(delta: float) -> void:
 			var saved: String = _save_brain_state(save_name)
 			if saved != "":
 				print("PicrawlerBody: SAVE_STATE_AT_EXIT → %s" % saved)
+		if _brake_checks > 0:
+			print("PicrawlerBody: hold brake engaged on %.1f %% of %d joint-steps" % [100.0 * _brake_steps / _brake_checks, _brake_checks])
 		print("PicrawlerBody: quitting (done=%s, tick=%d, budget=%d)"
 				% [_done, tick_counter, _quit_after_ticks])
 		get_tree().quit()
@@ -6018,6 +6047,51 @@ func _physics_process(delta: float) -> void:
 		_accum -= TAU
 		if _done: return
 		_step_one()
+	if honest_hold_cap > 0.0 and _motor_impulse_scale != 1.0:
+		_hold_brakes()
+
+# The passive side of the asymmetric cap — see honest_hold_cap.  Runs every physics step, after
+# the 50 Hz motor block, so the decision tracks the joint at the solver's rate.
+func _hold_brakes() -> void:
+	if _power == null:
+		return
+	var hold_ratio: float = honest_hold_cap / honest_torque_cap
+	if _braked.size() != 12:
+		_braked.resize(12); _braked.fill(0)
+		_brake_tau.resize(12); _brake_tau.fill(0.0)
+	var dt: float = 1.0 / float(physics_hz)
+	var a_s: float = dt / (BRAKE_TAU_S + dt)
+	for i in range(_hip1_joints.size()):
+		var js: Array = [_hip1_joints[i], _hip2_joints[i], _knee_joints[i]]
+		for jt in range(3):
+			var j = js[jt]
+			if not (j is HingeJoint3D):
+				continue
+			var k: int = i * 3 + jt
+			_brake_tau[k] += a_s * (_power.tau[k] - _brake_tau[k])
+			var c: Vector2 = _motor_cmd.get(j.get_instance_id(), Vector2.ZERO)
+			if c.y <= 0.0:
+				_braked[k] = 0
+				continue                         # released (freeplay, DEAD, detached): no gear to brake
+			var cmd: float = -c.x                # the motor's velocity sign is inverted vs the angle frame
+			var brake: bool
+			if absf(cmd) < HOLD_CMD_EPS:
+				brake = true                     # holding still: friction carries the load
+			elif _braked[k] != 0:
+				# stay braked unless the drive can beat what the brake is holding against
+				brake = _brake_tau[k] * signf(cmd) >= honest_torque_cap
+			else:
+				brake = _power.omega[k] * signf(cmd) < -BRAKE_OMEGA_EPS
+			_braked[k] = 1 if brake else 0
+			_brake_checks += 1
+			var hj := j as HingeJoint3D
+			if brake:
+				_brake_steps += 1
+				hj.set_param(HingeJoint3D.PARAM_MOTOR_TARGET_VELOCITY, 0.0)
+				hj.set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, c.y * dt * _motor_impulse_scale * hold_ratio)
+			else:
+				hj.set_param(HingeJoint3D.PARAM_MOTOR_TARGET_VELOCITY, c.x)
+				hj.set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, c.y * dt * _motor_impulse_scale)
 
 # ---------------------------------------------------------------------------
 # IMU substep — runs at the PHYSICS rate (physics_hz, default 240), NOT at the

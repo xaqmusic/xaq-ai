@@ -6696,3 +6696,53 @@ published siblings are the same 13.5 g SunFounder micro servo. Their specs match
 
 So the sim's servo should drive at ~0.22–0.25 N m and hold to ~0.5–0.6 N m, draw ~1.2 A at 5 V when
 driving into a load, and limit itself to ≤ 0.25 A after a few seconds of stall.
+
+### ★ 2026-10-05 (late) — ASYMMETRIC TORQUE CAP (drive 0.25 / hold 0.6 N m): ties legacy on distance, still a quarter of the steps (`PARTIAL`, signal n=6)
+
+**Lever:** `OGMA_PICRAWLER_HONEST_HOLD_CAP=<N m>`, on top of `HONEST_TORQUE_CAP`. Gear friction is modelled
+as a passive brake. Every physics step, a joint pushed back against its command (or told to hold
+still) gets target velocity 0 at the hold cap. A braked joint drives again only when the torque it
+is holding against, in the commanded direction (read from the power instrument), is below the
+drive cap. Values from the scale probe and SunFounder's SF006PRO (dynamic ≥ 0.22, static
+≥ 0.49 N m). Gain-0: legacy and the symmetric cap are both byte-identical with it at 0. The brake
+engaged on 13.5–14.1 % of joint-steps in every seed.
+
+**First build: `REGRESSION`, a faithfulness bug, not a verdict.** It released the brake every step.
+Under a stance load between the caps, each drive step slipped, and the brake stopped the joint but
+never recovered the lost ground. The stance crept down: belly 19.8 mm, net_disp 8.61. Real static
+friction holds without creep, which is why the release now needs the load test.
+
+P-e·h0, arena 0.3, n=6 × 12000, seeds 1–6, `arenaavg.py`:
+
+| | legacy (9.6 N m) | symmetric 0.25 | **asymmetric 0.25 / 0.6** | symmetric 0.18 |
+|---|---|---|---|---|
+| net_disp | 10.42 ± 1.07 | 10.21 ± 1.66 | **9.94 ± 0.07** | 8.20 ± 2.03 |
+| straight | 0.69 | 0.67 | 0.69 | 0.71 |
+| steps | 84.5 ± 24.4 | 12.0 ± 6.5 | **20.7 ± 13.3** | 6.8 ± 8.4 |
+| step_bal | 0.22 | 0.00 | 0.13 | 0.04 |
+| contact duty | 0.80 | 0.85 | 0.87 | 0.92 |
+| belly (mm) | 39.2 | 32.9 | 33.0 | 27.8 |
+| belly min (mm) | 14.5 | 2.8 | 4.2 | 3.1 |
+| tilt_sd | 0.091 | 0.067 | 0.078 | 0.072 |
+| falls | 0 | 0 | 0 | 0 |
+
+**Verdict: `PARTIAL` (signal, n=6).**
+- **Against legacy:** distance and heading tie (9.94 vs 10.42, straight 0.69 both), with no falls.
+  But steps fall by three quarters and the belly drops 6 mm: the measured servo still plants its
+  feet more than the 9.6 N m one.
+- **Against the symmetric 0.25 cap:** the hold side adds little in this context. Belly is equal, the
+  steps difference is inside noise (21 ± 13 vs 12 ± 6), and net_disp is much tighter across seeds
+  (± 0.07 vs ± 1.66).
+- **Context:** the brain's gains were frozen on the 9.6 N m body.
+
+**The robot still steps more than any capped sim** (FSR duty 0.70, swings 10–13 ticks). So either the
+drive cap is low, or the robot's stance loads are lower than the sim's. On the cap: 0.25 N m is the
+SETTLED scale reading; the operator saw a higher peak that was not recorded, and the SF006PRO's
+2.2 kgf·cm is a minimum. On the loads: the robot stands taller.
+
+**Re-use / next:**
+- the drive cap from the recorded PEAK (film the scale), then re-run this arm;
+- stance-height parity, if the loads differ;
+- this body for the S1 current fit (its torques are the faithful ones).
+
+Default off.
