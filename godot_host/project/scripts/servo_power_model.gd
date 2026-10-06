@@ -141,3 +141,80 @@ func step(dt: float) -> void:
 ## The momentum memory spans one step; after a teleport or reset it is meaningless.
 func invalidate() -> void:
 	_have_prev = false
+
+
+# ---------------------------------------------------------------------------------------------
+# ELECTRICAL MODEL — servo current, pack voltage and the HAT's 3.3 V rail, from the torques above.
+#
+# A STEP-FOR-STEP PORT of electrical() in pi_host/tools/brainrun/power_calib.py, which holds the
+# fit and its provenance (2026-10-06: K fitted to the robot's carpet mean; holding ~free, 1.2 A
+# stall and the 3.3 s stall cut-off from the scale probe and SunFounder's SF006PRO).  Change both
+# together; tools/power_parity.py checks them against each other on a power log.
+# Shape caveat, from the fit: the sim's current is NARROWER than the robot's (p90 2.2 vs 2.8 A).
+# ---------------------------------------------------------------------------------------------
+const E_I_IDLE := 0.005
+const E_I_NL := 0.05
+const E_W_NL := 6.2
+const E_I_STALL := 1.2
+const E_K := 2.49
+const E_H_HOLD := 0.0
+const E_P_BLEND := 0.02
+const E_TAU_MECH := 0.05
+const E_TAU_TQ := 0.02
+const E_STALL_CUT_S := 3.3
+const E_I_CUT := 0.25
+const E_TAU_BUS := 0.004
+const E_ETA := 0.85
+const E_V_REST := 7.86
+const E_R_PACK := 0.245
+const E_I_LOGIC := 0.10
+const E_I5_LIM := 4.05
+const E_GAMMA := 1.0
+const E_LDO_DROP := 0.25
+
+var i_servo := PackedFloat32Array()  # per servo, A at 5 V
+var i5 := 0.0                        # servo bus demand, A at 5 V
+var i_bat := 0.0                     # battery-side HAT current, A (what the INA219 reads)
+var v_pack := E_V_REST               # pack voltage, V
+var v_rail := 3.3                    # the HAT's 3.3 V rail, V
+var stalled := PackedByteArray()     # per servo: saturated long enough to cut its own drive
+var _e_init := false
+var _ts := PackedFloat32Array()
+var _ws := PackedFloat32Array()
+var _tq := PackedFloat32Array()
+var _stall_run := PackedFloat32Array()
+
+
+func electrical_step(dt: float) -> void:
+	if not enabled:
+		return
+	if not _e_init:
+		_ts = tau.duplicate(); _ws = omega.duplicate(); _tq = tau.duplicate()
+		_stall_run.resize(N_JOINTS); _stall_run.fill(0.0)
+		i_servo.resize(N_JOINTS); stalled.resize(N_JOINTS); stalled.fill(0)
+	var a_m: float = dt / (E_TAU_MECH + dt)
+	var a_t: float = dt / (E_TAU_TQ + dt)
+	var raw := 0.0
+	for k in range(N_JOINTS):
+		if _e_init:
+			_ts[k] += a_m * (tau[k] - _ts[k])
+			_ws[k] += a_m * (omega[k] - _ws[k])
+			_tq[k] += a_t * (tau[k] - _tq[k])
+		var x: float = clampf(_ts[k] * _ws[k] / E_P_BLEND, 0.0, 1.0)
+		var g: float = E_H_HOLD + (1.0 - E_H_HOLD) * x * x * (3.0 - 2.0 * x)
+		var drive: float = minf(E_I_STALL, E_K * g * absf(_tq[k]))
+		_stall_run[k] = (_stall_run[k] + dt) if drive >= 0.9 * E_I_STALL else 0.0
+		stalled[k] = 1 if _stall_run[k] > E_STALL_CUT_S else 0
+		if stalled[k] != 0:
+			drive = minf(drive, E_I_CUT)
+		i_servo[k] = E_I_IDLE + E_I_NL * minf(1.0, absf(omega[k]) / E_W_NL) + drive
+		raw += i_servo[k]
+	if not _e_init:
+		i5 = raw
+		_e_init = true
+	else:
+		i5 += dt / (E_TAU_BUS + dt) * (raw - i5)
+	i_bat = minf(i5, E_I5_LIM) * 5.0 / (E_ETA * v_pack) + E_I_LOGIC
+	v_pack = E_V_REST - E_R_PACK * i_bat
+	var v5: float = 5.0 * pow(E_I5_LIM / maxf(i5, 1e-9), E_GAMMA) if i5 > E_I5_LIM else 5.0
+	v_rail = minf(3.3, v5 - E_LDO_DROP)

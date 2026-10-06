@@ -6560,6 +6560,13 @@ concrete (283 s). Fast capture with the rail estimate in both. n = 1 per surface
 
 ### ★★ 2026-10-05 (night) — SIM POWER MODEL S1, FIRST PASS: the sim servo has a 9.6 N m ceiling; an honest datasheet cap breaks the gait, and the robot steps like the strong servo
 
+> **⚠ CONTEXT CORRECTION (2026-10-06): every sim run in this entry ran on the DEFAULT body, not
+> P-e·h0's.** `arenaavg.py` (and the direct launches) never applied the config's `metadata.body_env`;
+> only the launcher did. So these runs had servo speed 6.0 (not 3.668), a ghost chassis, and raw
+> joints, IMU, upright and distress. The arms are consistent with each other, so the comparisons stand
+> as comparisons, but on a different body. Re-measured on the faithful body: entry "BODY_ENV
+> CONFOUND" below.
+
 **Instrument (`WORKING`, byte-identical).** `scripts/servo_power_model.gd` recovers each servo's
 motor torque from Newton-Euler on the segments beyond it: angular-momentum change about the moving
 anchor, minus gravity, contacts on every leg segment and body damping, projected on the joint axis.
@@ -6699,6 +6706,13 @@ driving into a load, and limit itself to ≤ 0.25 A after a few seconds of stall
 
 ### ★ 2026-10-05 (late) — ASYMMETRIC TORQUE CAP (drive 0.25 / hold 0.6 N m): ties legacy on distance, still a quarter of the steps (`PARTIAL`, signal n=6)
 
+> **⚠ CONTEXT CORRECTION (2026-10-06): every sim run in this entry ran on the DEFAULT body, not
+> P-e·h0's.** `arenaavg.py` (and the direct launches) never applied the config's `metadata.body_env`;
+> only the launcher did. So these runs had servo speed 6.0 (not 3.668), a ghost chassis, and raw
+> joints, IMU, upright and distress. The arms are consistent with each other, so the comparisons stand
+> as comparisons, but on a different body. Re-measured on the faithful body: entry "BODY_ENV
+> CONFOUND" below.
+
 **Lever:** `OGMA_PICRAWLER_HONEST_HOLD_CAP=<N m>`, on top of `HONEST_TORQUE_CAP`. Gear friction is modelled
 as a passive brake. Every physics step, a joint pushed back against its command (or told to hold
 still) gets target velocity 0 at the hold cap. A braked joint drives again only when the torque it
@@ -6746,3 +6760,49 @@ SETTLED scale reading; the operator saw a higher peak that was not recorded, and
 - this body for the S1 current fit (its torques are the faithful ones).
 
 Default off.
+
+### ★★ 2026-10-06 — BODY_ENV CONFOUND: the headless harness never loaded P-e·h0's body; re-measured, the asymmetric cap is a `REGRESSION` on the faithful body
+
+**The confound (§3.2 #7, "did the arm you think you ran actually load?").** P-e·h0 declares its
+robot-faithful body in `metadata.body_env`: solid chassis, honest joints / IMU / upright / distress,
+the boom ToF, 3.668 rad/s, joint_torque_zero. Only `launcher.gd` applied it. `arenaavg.py`,
+`seedavg.py` and direct `OGMA_PICRAWLER_CONFIG` launches did not. Every sim run of 2026-10-05
+(power instrument, cap dose curve, asymmetric cap, the power fit) therefore ran on the default body:
+6.0 rad/s, ghost chassis, raw joints. The run logs said so (`max_servo_speed = 6.000`), and nothing
+read them. **Fixed:** both harnesses now apply `body_env` as the launcher does (an exported variable
+or a `K=V` argument still wins), and `arenaavg.py` prints a body_env receipt per arm. **Worth
+checking:** any earlier seedavg/arenaavg result for a config that declares `body_env`.
+
+**Re-measured on the faithful body** (P-e·h0, arena 0.3, n=6 × 12000, seeds 1–6, receipt
+printed on both arms):
+
+| | legacy servo (9.6 N m) | asymmetric 0.25 / 0.6 N m |
+|---|---|---|
+| net_disp | 9.40 ± 0.91 | 7.38 ± 1.98 |
+| straight | 0.74 | 0.59 ± 0.22 |
+| steps | 26.3 ± 14.0 | 21.8 ± 17.2 |
+| contact duty | 0.83 | 0.88 |
+| belly (mm) | 29.9 | 22.4 |
+| belly min (mm) | 3.9 | 0.2 |
+| tilt_sd | 0.082 | 0.141 |
+| falls | 0 | 0.33 |
+
+**Verdict: `REGRESSION` (signal, n=6), on the faithful body.** The faithful body already steps far
+less than the default one (26 vs 84.5), so the cap's step loss is small here (inside noise). What it
+costs instead is posture and stability: the belly drops 8 mm and scrapes (min 0.2 mm), tilt nearly
+doubles, straightness falls, and falls appear (0.33). Context: the brain's gains were settled on the
+9.6 N m servo. **Re-use:** the drive cap from the recorded PEAK torque (the 0.25 used here is the
+settled reading); a brain whose gains are settled on the capped body; stance-height parity.
+
+**Power model refit on this body** (`power_calib.py`, the same constants in the sim): K 2.39 → 2.49
+A/N m (the default-body fit transferred within 4 %). Carpet mean 1.55 A matched; shape still narrow
+(p90 2.22 vs 2.76 A, p99 2.81 vs 3.26, > 3 A 8 vs 87 per minute). The sim port reproduces the Python
+model to 1.4e-4 A over 9602 steps (`power_parity.py`). The rail fold-back branch is not exercised by
+that check, because the model never reached the regulator limit.
+
+**HUD:** windowed sim runs now show a POWER panel (bottom right; `[T]` hides it). It holds the bench
+dashboard's `current_graph.gd` fed at the INA219's 10 Hz with its 68 ms averaging, the
+picrawler-dash power and slow lines, the modelled pack and 3.3 V rail, and a joint line speed (10 Hz,
+mean |Δangle|/s over 12 joints). picrawler-dash gained the same line speed (from benchd's 50 Hz
+`out` pulses, over exact 100 ms spans) and the rail estimate. **Launch through the launcher**, so
+P-e·h0's body_env applies; a direct scene launch gets the default body.

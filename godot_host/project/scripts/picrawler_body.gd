@@ -2527,6 +2527,27 @@ var _power_log_path: String = ""
 var _power = null
 var _power_log: FileAccess = null
 var _power_steps: int = 0
+var _shot_tick: int = -1
+var _shot_path: String = ""
+# HUD power panel (2026-10-06): the bench dashboard's current graph (current_graph.gd) and the
+# picrawler-dash power lines, fed by the sim's electrical model, so the sim and the robot can be
+# read side by side.  Sampled like the robot: benchd publishes the INA219 at 10 Hz, each reading
+# averaged over its ~68 ms conversion window (state feed `ina_window_ms`).
+var _pw_panel: VBoxContainer = null
+var _pw_graph: Control = null
+var _pw_lbl: Array = []
+var _pw_ring := PackedFloat32Array()
+var _pw_ring_i: int = 0
+var _pw_hist := PackedFloat32Array()      # 10 Hz readings, the last 60 s (peak60)
+var _pw_ema30: float = 0.0
+var _pw_max: float = 0.0
+var _pw_charge: float = 0.0
+var _pw_rail_min1s: float = 3.3
+var _pw_rail_win := PackedFloat32Array()
+var _pw_prev_ang := PackedFloat32Array()
+var _pw_sat_any: bool = false
+const PW_INA_WINDOW_S: float = 0.068
+const PW_SAMPLE_S: float = 0.1
 @export var honest_upright: bool = false   # upright/tilt from the fused attitude estimate
 @export var honest_joints:  bool = false   # joints from the servo forward model
 @export var honest_imu:     bool = false   # imu from ego_heading / stride_v / body gyro
@@ -2964,6 +2985,11 @@ func _ready() -> void:
 		servo_signs[k]   = 1.0
 		servo_origins[k] = 0.0
 	_resolve_env()
+	# The power instrument is byte-identical (trace cmp, 2026-10-05), so a WINDOWED run turns it on
+	# for the HUD's power panel; OGMA_PICRAWLER_POWER_MODEL=0 keeps it off.  Headless runs are
+	# unchanged: they opt in through the env, as before.
+	if DisplayServer.get_name() != "headless" and OS.get_environment("OGMA_PICRAWLER_POWER_MODEL") != "0":
+		power_model = true
 
 	# Curriculum: load file if env var or ExperimentConfig points to one,
 	# then subscribe to stage_changed so future transitions apply their
@@ -5824,7 +5850,7 @@ func _input(event: InputEvent) -> void:
 		# re-press T to bring them back.  HUD hint line displays current state.
 		# (2026-07-18 — reward / trainer / curriculum panels removed as RL cruft.)
 		_panels_hidden = not _panels_hidden
-		for panel_name in ["MotorEpmPanel"]:
+		for panel_name in ["MotorEpmPanel", "PowerPanel"]:
 			var p: Node = get_tree().get_root().find_child(panel_name, true, false)
 			if p != null and p is Control:
 				(p as Control).visible = not _panels_hidden
@@ -6049,6 +6075,16 @@ func _physics_process(delta: float) -> void:
 		_step_one()
 	if honest_hold_cap > 0.0 and _motor_impulse_scale != 1.0:
 		_hold_brakes()
+	# OGMA_SCREENSHOT=<tick>:<path.png> — one viewport capture at that brain tick (windowed runs),
+	# so a HUD change can be checked without someone at the screen.
+	if _shot_tick < 0:
+		var sh: String = OS.get_environment("OGMA_SCREENSHOT")
+		_shot_tick = sh.get_slice(":", 0).to_int() if sh != "" else 0x7FFFFFFF
+		_shot_path = sh.substr(sh.find(":") + 1) if sh != "" else ""
+	if tick_counter == _shot_tick and _shot_path != "":
+		get_viewport().get_texture().get_image().save_png(_shot_path)
+		print("PicrawlerBody: screenshot -> %s" % _shot_path)
+		_shot_path = ""
 
 # The passive side of the asymmetric cap — see honest_hold_cap.  Runs every physics step, after
 # the 50 Hz motor block, so the decision tracks the joint at the solver's rate.
@@ -11013,6 +11049,7 @@ func _power_setup() -> void:
 		for pre in ["tau", "w"]:
 			for k in range(12): hdr.append("%s%d" % [pre, k])
 		for i in range(4): hdr.append("load%d" % i)
+		hdr.append_array(["i_bat", "v_pack", "v_rail", "i5"])
 		_power_log.store_line(",".join(hdr))
 	# The solver iteration count the SPACE actually runs: Godot Physics 3D's hinge motor clamps its
 	# impulse on every iteration and never accumulates, so the real torque ceiling is
@@ -11023,6 +11060,9 @@ func _power_setup() -> void:
 
 func _power_tick() -> void:
 	_power.step(1.0 / float(physics_hz))
+	_power.electrical_step(1.0 / float(physics_hz))
+	if DisplayServer.get_name() != "headless":
+		_power_hud_step()
 	_power_steps += 1
 	if _power_log != null:
 		var row := PackedStringArray([str(_power_steps), str(tick_counter)])
@@ -11030,7 +11070,104 @@ func _power_tick() -> void:
 		for k in range(12): row.append("%.4f" % _power.omega[k])
 		var fl: float = _fl_norm()
 		for i in range(4): row.append("%.3f" % (_foot_load_ema[i] / fl))
+		row.append_array(["%.4f" % _power.i_bat, "%.4f" % _power.v_pack, "%.4f" % _power.v_rail, "%.4f" % _power.i5])
 		_power_log.store_line(",".join(row))
+
+# One physics step of the HUD's INA219 emulation; a 10 Hz reading every PW_SAMPLE_S of sim time.
+func _power_hud_step() -> void:
+	var n_ring: int = maxi(1, int(round(PW_INA_WINDOW_S * physics_hz)))
+	if _pw_ring.size() != n_ring:
+		_pw_ring.resize(n_ring); _pw_ring.fill(_power.i_bat)
+	_pw_ring[_pw_ring_i % n_ring] = _power.i_bat
+	_pw_ring_i += 1
+	_pw_rail_win.append(_power.v_rail)
+	for k in range(12):
+		if _power.i_servo[k] >= 0.9 * 1.2: _pw_sat_any = true
+	var every: int = maxi(1, int(round(PW_SAMPLE_S * physics_hz)))
+	if _power_steps % every == 0:
+		_power_hud_sample()
+
+func _power_hud_sample() -> void:
+	var amps: float = 0.0
+	for v in _pw_ring: amps += v
+	amps /= float(_pw_ring.size())
+	_pw_ema30 = amps if _pw_hist.is_empty() else _pw_ema30 + (PW_SAMPLE_S / 30.0) * (amps - _pw_ema30)
+	_pw_hist.append(amps)
+	if _pw_hist.size() > int(60.0 / PW_SAMPLE_S):
+		_pw_hist = _pw_hist.slice(_pw_hist.size() - int(60.0 / PW_SAMPLE_S))
+	var peak60: float = 0.0
+	for v in _pw_hist: peak60 = maxf(peak60, v)
+	_pw_max = maxf(_pw_max, amps)
+	_pw_charge += amps * PW_SAMPLE_S
+	var rmin: float = 3.3
+	for v in _pw_rail_win: rmin = minf(rmin, v)
+	_pw_rail_win.clear()
+	_pw_rail_min1s = rmin if _pw_hist.size() % 10 == 1 else minf(_pw_rail_min1s, rmin)
+	# Joint line speed, measured the way picrawler-dash measures the robot: the joint angle sampled
+	# at 10 Hz, mean |change| per second over the 12 joints.  On the robot that is the pulse on the
+	# line (benchd out_us); here it is the joint itself.  Reversals inside 100 ms do not show in
+	# either, so the two are comparable with each other, not with the brain's own command rate.
+	var ang := PackedFloat32Array(); ang.resize(12)
+	for i in range(4):
+		ang[i * 3] = _relative_angle_world_axis(_chassis, _coxas[i], Vector3.UP)
+		ang[i * 3 + 1] = _relative_angle_world_axis(_coxas[i], _uppers[i], _hip2_axes[i])
+		ang[i * 3 + 2] = _relative_angle_world_axis(_uppers[i], _lowers[i], _knee_axes[i])
+	var spd: float = 0.0
+	var spd_max: float = 0.0
+	if _pw_prev_ang.size() == 12:
+		for k in range(12):
+			var v: float = absf(ang[k] - _pw_prev_ang[k]) / PW_SAMPLE_S
+			spd += v / 12.0
+			spd_max = maxf(spd_max, v)
+	_pw_prev_ang = ang
+	var n_stalled: int = 0
+	for k in range(12): n_stalled += int(_power.stalled[k])
+	_power_hud_draw(amps, peak60, spd, spd_max, n_stalled)
+	_pw_sat_any = false
+
+func _power_hud_draw(amps: float, peak60: float, spd: float, spd_max: float, n_stalled: int) -> void:
+	if _pw_panel == null:
+		var hud := get_tree().get_root().find_child("HUD", true, false)
+		if hud == null:
+			return
+		var mono := SystemFont.new()
+		mono.font_names = PackedStringArray(["DejaVu Sans Mono", "Liberation Mono", "Monospace"])
+		_pw_panel = VBoxContainer.new()
+		_pw_panel.name = "PowerPanel"
+		_pw_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		_pw_panel.custom_minimum_size = Vector2(560, 0)
+		_pw_panel.position = Vector2(-574, -178)
+		_pw_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud.add_child(_pw_panel)
+		var title := Label.new()
+		title.text = "POWER — sim model (K fitted to the robot's carpet mean; narrower than the robot)"
+		title.add_theme_font_size_override("font_size", 11)
+		title.add_theme_color_override("font_color", Color(0.7, 0.7, 0.75))
+		_pw_panel.add_child(title)
+		for _k in range(3):
+			var l := Label.new()
+			l.add_theme_font_size_override("font_size", 12)
+			l.add_theme_font_override("font", mono)
+			_pw_panel.add_child(l)
+			_pw_lbl.append(l)
+		_pw_graph = (load("res://scripts/current_graph.gd") as Script).new()
+		_pw_graph.custom_minimum_size = Vector2(560, 76)
+		_pw_panel.add_child(_pw_graph)
+		_pw_panel.visible = not _panels_hidden
+	# Same lines, same formats as picrawler-dash's power rows.
+	_pw_lbl[0].text = "power %+6.3f A   pack %5.3f V   rail %4.2f V (min1s %4.2f)" % [
+		amps, _power.v_pack, _power.v_rail, _pw_rail_min1s]
+	_pw_lbl[1].text = "slow  ema30 %+6.3f A   peak60 %5.3f   max %5.3f   spent %+7.1f A·s" % [
+		_pw_ema30, peak60, _pw_max, _pw_charge]
+	_pw_lbl[2].text = "joints  line speed %4.2f rad/s mean, %4.2f max (10 Hz)   stalled %d" % [
+		spd, spd_max, n_stalled]
+	var col := Color(0.9, 0.9, 0.9)
+	if amps >= 2.7: col = Color(1, 0.3, 0.3)
+	elif amps >= 2.0: col = Color(1, 0.85, 0.4)
+	_pw_lbl[0].add_theme_color_override("font_color", col)
+	# The band along the graph's bottom: on the bench it marks pose moves; here, a servo at its
+	# stall current (driving into a load it cannot move), which is what the spikes are made of.
+	_pw_graph.push(amps, _pw_ema30, peak60, false, _pw_sat_any)
 
 # The COMMANDED joint angle that the *_cmd foot-height signals run FK on.
 #

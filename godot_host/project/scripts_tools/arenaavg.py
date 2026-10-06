@@ -40,6 +40,21 @@ STANCE_TH = float(os.environ.get("OGMA_PICRAWLER_STANCE_Y_THRESHOLD", 0.04))
 ARENA_SAFE_R = float(os.environ.get("ARENAAVG_SAFE_R", 8.0))
 
 
+def config_body_env(cfg):
+    """The config's declared body env (metadata.body_env), applied as the launcher applies it.
+
+    ⚠ 2026-10-06: this harness used to IGNORE it.  Only the launcher applied body_env, so every
+    headless run of a robot-faithful config (P-e·h0 declares a solid chassis, honest joints / IMU /
+    upright / distress, the boom ToF and 3.668 rad/s) ran on the DEFAULT body instead: 6.0 rad/s,
+    ghost chassis, raw joints.  An env var already exported, or passed as K=V, still wins."""
+    try:
+        meta = json.load(open(f"{PROJ}/addons/ami_ogma/configs/{cfg}")).get("metadata", {})
+        benv = meta.get("body_env", {})
+        return {str(k): str(v) for k, v in benv.items()} if isinstance(benv, dict) else {}
+    except Exception:
+        return {}
+
+
 def run_one(cfg, seed, max_steps, difficulty, extra):
     out = f"{SP}/ar_{os.path.splitext(cfg)[0]}_s{seed}.log"
     env = dict(os.environ, OGMA_PICRAWLER_GYM="arena", OGMA_SEED=str(seed),
@@ -47,6 +62,9 @@ def run_one(cfg, seed, max_steps, difficulty, extra):
                OGMA_PICRAWLER_GYM_DIFFICULTY=str(difficulty),
                OGMA_PICRAWLER_CONFIG=f"res://addons/ami_ogma/configs/{cfg}",
                OGMA_RESET_MODE="continuous", OGMA_PICRAWLER_MAX_STEPS=str(max_steps))
+    for k, v in config_body_env(cfg).items():
+        if k not in os.environ:
+            env[k] = v
     for kv in extra:
         k, _, v = kv.partition("=")
         env[k] = v
@@ -210,6 +228,8 @@ if __name__ == "__main__":
     crashed = [i + 1 for i, r in enumerate(res) if r and r.get("_crashed")]
     ok = [r for r in res if r and not r.get("_crashed")]
     print(f"\n{cfg}  [ARENA]  (n={len(ok)}/{n} seeds, {steps} ticks, diff {diff})")
+    _be = {k: (os.environ[k] + " (env)" if k in os.environ else v) for k, v in config_body_env(cfg).items()}
+    print("  body_env: " + (", ".join(f"{k.replace('OGMA_PICRAWLER_', '')}={v}" for k, v in _be.items()) or "none declared"))
     if crashed:
         print(f"  !! {len(crashed)}/{n} RUNS CRASHED (seeds {crashed}) — fix the build "
               f"before comparing")

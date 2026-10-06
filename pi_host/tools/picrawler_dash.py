@@ -47,6 +47,58 @@ except ImportError:                      # bench metrics need it; the brain half
 
 # --------------------------------------------------------------------------- transports
 
+class LineSpeed:
+    """Joint line speed from benchd's 50 Hz state feed: the pulse on the line (out_us), sampled
+    over exact 100 ms spans, mean |change| per second over the armed channels, in rad/s.
+
+    The sim's HUD power panel measures its joints the same way (10 Hz, mean over 12), so the two
+    numbers are comparable with each other.  Neither sees reversals inside 100 ms, so neither is
+    the brain's own command rate.  The feed is loopback-only on the Pi, so this reads it where
+    benchd runs and is quietly absent elsewhere.
+    """
+
+    def __init__(self, port: int = 5592):
+        self.speed: Optional[float] = None
+        self.speed_max: Optional[float] = None
+        self.t_last = 0.0
+        try:
+            cal = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                              "..", "calib", "sensors.json")))
+            self.us_per_rad = float(cal["servo"]["us_per_rad"])
+        except Exception:
+            self.us_per_rad = 545.2
+        if zmq is not None:
+            threading.Thread(target=self._loop, args=(port,), daemon=True).start()
+
+    def _loop(self, port: int) -> None:
+        s = zmq.Context.instance().socket(zmq.SUB)
+        s.setsockopt(zmq.RCVTIMEO, 500)
+        s.setsockopt_string(zmq.SUBSCRIBE, "state ")
+        s.connect(f"tcp://127.0.0.1:{port}")
+        hist: list = []                                       # (t_ms, out[12], armed bitmask)
+        while True:
+            try:
+                d = json.loads(s.recv_string()[6:])
+            except Exception:
+                continue
+            out, t = d.get("out"), float(d.get("t", 0))
+            if not out:
+                continue
+            hist.append((t, out, int(d.get("armed", 0))))
+            while hist and t - hist[0][0] > 400:
+                hist.pop(0)
+            old = next((h for h in hist if t - h[0] >= 100), None)
+            if old is None or t - old[0] > 140:
+                continue
+            dt = (t - old[0]) / 1000.0
+            v = [abs(out[c] - old[1][c]) / dt / self.us_per_rad
+                 for c in range(len(out)) if (hist[-1][2] >> c) & 1 and out[c] > 0 and old[1][c] > 0]
+            if v:
+                self.speed, self.speed_max, self.t_last = sum(v) / len(v), max(v), time.time()
+
+    def fresh(self) -> bool:
+        return self.speed is not None and time.time() - self.t_last < 1.0
+
 class Control:
     """Plain-TCP newline-JSON client for ogma_host's ControlServer. No dependencies."""
 
@@ -205,6 +257,7 @@ class Dash:
         self.st: Optional[dict] = None
         self.info: Optional[dict] = None      # host_info: fetched once, it is static
         self.t0 = time.time()
+        self.line = LineSpeed()
 
     def known_stopped(self) -> bool:
         """Is the robot KNOWN to be stopped right now?  Only fresh evidence counts; when it
@@ -496,9 +549,12 @@ class Dash:
                 cur = float(ina.get("i_a", 0.0))
                 charging = bool(ina.get("charging"))
                 icol = DIM if charging else (BAD if cur > 2.7 else WARN if cur > 2.0 else OK)
+                rail = f.get("rail") or {}
+                rail_txt = (f"   rail {float(rail.get('v', 0.0)):4.2f} V (min1s {float(rail.get('min_1s', 0.0)):4.2f})"
+                            if rail.get("v") else "")
                 self._line(scr, y, 3,
                            f"power {cur:+6.3f} A [{bar(cur / 3.0, 16)}]"
-                           f"   ina {float(ina.get('v', 0.0)):5.3f} V"
+                           f"   ina {float(ina.get('v', 0.0)):5.3f} V" + rail_txt
                            + ("   CHARGING — energy numbers are confounded" if charging else ""),
                            C(icol))
                 y += 1
@@ -511,6 +567,11 @@ class Dash:
                            f"   spent {float(ina.get('energy_j', 0.0)) / 1000.0:+7.3f} kJ"
                            f" / {float(ina.get('charge_as', 0.0)):+7.1f} A·s", C(DIM))
                 y += 1
+                # The same measure as the sim HUD's "joints" line, for the faster-than-sim check.
+                if self.line.fresh():
+                    self._line(scr, y, 3, f"joints line speed {self.line.speed:4.2f} rad/s mean, "
+                                          f"{self.line.speed_max:4.2f} max (10 Hz, pulse on the line)", C(DIM))
+                    y += 1
             elif ina:
                 self._line(scr, y, 3, f"power  INA219 not reading (errors {ina.get('errors', '?')})", C(BAD))
                 y += 1

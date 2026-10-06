@@ -16,7 +16,8 @@ Robot side: brain-driven frames only, robot on the floor (belly ToF <= 100 mm), 
 and 4 s after every HAT reset excluded, as in fast_current_analysis.py §2.
 
 Sim side, the electrical model (power-budget plan S1, 2026-10-05):
-  per servo   I = I_IDLE + I_NL * min(1, |w| / W_NL) + I_STALL * min(1, g * |tau| / TAU_STALL)
+  per servo   I = I_IDLE + I_NL * min(1, |w| / W_NL) + min(I_STALL, K * g * |tau|), cut to I_CUT after
+              STALL_CUT_S saturated
               A DC motor's current follows its torque, and a real MG90S cannot deliver more than
               its stall torque, so demand above it is read as a stall at I_STALL.
               g is the gear train's share.  MOTORING (tau * w > 0, the servo doing work) g = 1, the
@@ -27,7 +28,7 @@ Sim side, the electrical model (power-budget plan S1, 2026-10-05):
               backlash, does not turn the motor, so it is not work.
               H_HOLD is the one fitted constant of the servo layer.
   servo bus   I5 = sum over 12 servos, smoothed by the motor and bus capacitance (TAU_BUS)
-  battery     I_bat = I5 * 5.0 / (ETA * V_PACK) + I_LOGIC, capped at the regulator limit
+  battery     I_bat = min(I5, I5_LIM) * 5.0 / (ETA * V_pack) + I_LOGIC, V_pack = V_REST - R_PACK * I_bat
   rail        once I5 exceeds the regulator limit I5_LIM, the 5 V output folds back:
               V5 = 5.0 * (I5_LIM / I5) ** GAMMA, and the 3.3 V LDO follows it,
               rail = min(3.3, V5 - LDO_DROP)
@@ -38,25 +39,34 @@ from pathlib import Path
 
 import numpy as np
 
-# ---- electrical model parameters (MG90S datasheet class at 5 V; the rest are fit targets) ----
+# ---- electrical model parameters ----
+# FIT 2026-10-06 on the asymmetric-cap body (OGMA_PICRAWLER_HONEST_TORQUE_CAP=0.25, _HOLD_CAP=0.6)
+# with P-e·h0's full body_env (3.668 rad/s, solid chassis, honest joints/IMU), arena 0.3, 4 seeds x
+# 12000, against the robot's carpet run (runrail, 391 s).  Anchors from the scale probe and
+# SunFounder's SF006PRO: I_STALL 1.2 A at 5 V, holding ~free (H_HOLD 0), stall cut-off to <= 0.25 A
+# after ~3.3 s.  The ONE fitted constant is K: the physical 1.2 A / 0.25 N m = 4.8 A/N m predicts
+# ~2.7 A mean against the robot's 1.55, so K = 2.49 is fitted to the mean and the shape is the test:
+# p90 2.22 vs 2.76 A, p99 2.81 vs 3.26, > 3 A 8 vs 87 per minute.  Too narrow.
+# The sim port (scripts/servo_power_model.gd) mirrors THIS function step for step; change both.
 P = dict(
-    I_IDLE=0.010,      # A per servo, holding with no load
-    I_NL=0.15,         # A per servo, running free at W_NL
-    W_NL=10.5,         # rad/s, MG90S no-load speed (0.1 s / 60 deg)
-    I_STALL=0.75,      # A per servo at stall (stall probe #1: a blocked FR push, ~0.58 A battery-side)
-    K=None,            # A per N m of delivered torque; None = I_STALL / TAU_STALL (datasheet).  The
-                       # one constant FIT to the robot (carpet mean current), see fit()
-    TAU_STALL=0.18,    # N m, MG90S stall torque (1.8 kg cm)
-    H_HOLD=0.30,       # holding / back-driven current share (2 eta - 1); FIT to the robot's means
-    P_BLEND=0.02,      # W, mechanical power over which holding blends into motoring
-    TAU_MECH=0.05,     # s, the timescale motoring is judged on (servo loop + gear backlash)
-    TAU_TQ=0.0,        # s, servo torque bandwidth: the solver's step-to-step contact jitter is not
-                       # a motor current (0 = raw torque)
+    I_IDLE=0.005,      # A per servo, standby (SF006PRO <= 5 mA)
+    I_NL=0.05,         # A per servo running free at W_NL (fit; SF006PRO peak no-load <= 0.35)
+    W_NL=6.2,          # rad/s, SF006PRO no-load speed (0.17 s / 60 deg)
+    I_STALL=1.2,       # A per servo, driving into a load it cannot move (scale probe; SF006PRO <= 1.2)
+    K=2.49,            # A per N m of torque while driving (FIT, see above)
+    H_HOLD=0.0,        # holding / back-driven share of K (scale probe: 0.12 N m held at no current)
+    P_BLEND=0.02,      # W, mechanical power over which holding blends into driving
+    TAU_MECH=0.05,     # s, the timescale driving vs holding is judged on
+    TAU_TQ=0.02,       # s, servo torque bandwidth (the solver's step jitter is not a motor current)
+    STALL_CUT_S=3.3,   # s saturated before the servo cuts its own drive (scale probe)
+    I_CUT=0.25,        # A per servo after the cut (SF006PRO <= 250 mA)
     TAU_BUS=0.004,     # s, motor + bus smoothing of the summed current
     ETA=0.85,          # 5 V regulator efficiency
-    V_PACK=7.6,        # V, 2S pack under load
-    I_LOGIC=0.10,      # A battery-side, HAT MCU + peripherals
-    I5_LIM=4.4,        # A at 5 V: the regulator limit (~3.5 A battery-side at 7.6 V, ETA 0.85)
+    V_REST=7.86,       # V, charged pack at zero HAT current (runrail, Pi included upstream)
+    R_PACK=0.245,      # ohm, pack + wiring per amp of HAT current (runrail 0.247, runconc 0.239)
+    I_LOGIC=0.10,      # A battery-side, HAT MCU + peripherals (robot idle reading)
+    I5_LIM=4.05,       # A at 5 V: the regulator limit; puts the battery-side ceiling at the robot's
+                       # ~3.5 A with the pack sagged to ~7.0 V
     GAMMA=1.0,         # fold-back steepness above the limit
     LDO_DROP=0.25,     # V
 )
@@ -145,18 +155,23 @@ def ema(x, tc, dt):
 
 
 def electrical(tau, w, dt, p=P):
-    """Per-step battery current and rail from per-joint torque (N m) and speed (rad/s)."""
+    """Per-step battery current, 3.3 V rail and servo-bus demand from per-joint torque (N m) and speed (rad/s)."""
     ts, ws = ema(tau, p["TAU_MECH"], dt), ema(w, p["TAU_MECH"], dt)
     tq = ema(tau, p["TAU_TQ"], dt) if p["TAU_TQ"] > 0 else tau
-    k = p["K"] if p["K"] is not None else p["I_STALL"] / p["TAU_STALL"]
     x = np.clip(ts * ws / p["P_BLEND"], 0.0, 1.0)
     g = p["H_HOLD"] + (1.0 - p["H_HOLD"]) * x * x * (3.0 - 2.0 * x)
-    i_servo = (p["I_IDLE"] + p["I_NL"] * np.minimum(1.0, np.abs(w) / p["W_NL"])
-               + np.minimum(p["I_STALL"], k * g * np.abs(tq)))
-    i5_raw = i_servo.sum(1)
-    i5 = ema(i5_raw, p["TAU_BUS"], dt)
-    i5_del = np.minimum(i5, p["I5_LIM"])
-    i_bat = i5_del * 5.0 / (p["ETA"] * p["V_PACK"]) + p["I_LOGIC"]
+    i_drive = np.minimum(p["I_STALL"], p["K"] * g * np.abs(tq))
+    run = np.zeros(tau.shape[1])
+    for k in range(len(i_drive)):                       # the servo's own stall cut-off
+        run = np.where(i_drive[k] >= 0.9 * p["I_STALL"], run + dt, 0.0)
+        i_drive[k] = np.where(run > p["STALL_CUT_S"], np.minimum(i_drive[k], p["I_CUT"]), i_drive[k])
+    i_servo = p["I_IDLE"] + p["I_NL"] * np.minimum(1.0, np.abs(w) / p["W_NL"]) + i_drive
+    i5 = ema(i_servo.sum(1), p["TAU_BUS"], dt)
+    i_bat = np.empty_like(i5)
+    v = p["V_REST"]
+    for k in range(len(i5)):                            # pack sag, one step behind (as the sim does)
+        i_bat[k] = min(i5[k], p["I5_LIM"]) * 5.0 / (p["ETA"] * v) + p["I_LOGIC"]
+        v = p["V_REST"] - p["R_PACK"] * i_bat[k]
     v5 = np.where(i5 > p["I5_LIM"], 5.0 * (p["I5_LIM"] / np.maximum(i5, 1e-9)) ** p["GAMMA"], 5.0)
     rail = np.minimum(3.3, v5 - p["LDO_DROP"])
     return i_bat, rail, i5
@@ -172,8 +187,7 @@ def sim(csv: Path, hz=240.0, p=P):
     t_ms = np.arange(m.sum()) * 1000.0 / hz
     # feet loaded: the sim's normalised foot load against the FSR's ~0.1-of-weight threshold
     report(f"sim {csv.name}", m.sum() / hz, t_ms, i_bat, t_ms, rail, (load[m] > 0.10).sum(1), i_bat)
-    print(f"  servo-bus demand I5: mean {i5.mean():.2f} p99 {np.percentile(i5, 99):.2f} max {i5.max():.2f} A; "
-          f"servo torque beyond MG90S stall {np.mean(np.abs(tau[m]) > p['TAU_STALL']) * 100:.1f} % of joint-steps")
+    print(f"  servo-bus demand I5: mean {i5.mean():.2f} p99 {np.percentile(i5, 99):.2f} max {i5.max():.2f} A")
     return i_bat, rail, i5
 
 
