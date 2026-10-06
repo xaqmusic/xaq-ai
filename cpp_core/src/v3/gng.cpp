@@ -698,6 +698,35 @@ nlohmann::json GNG::to_json() const {
         j["kalman_q"]        = cfg_.kalman_q;
         j["kalman_gain_cap"] = cfg_.kalman_gain_cap;
     }
+    // Retention settings: emitted only when any differs from the default, so a default GNG
+    // serialises byte-identically to the pre-feature form.  Without them a restored GNG
+    // silently ran with the default forgetting rules (from_json rebuilds the config).
+    {
+        const Config d{};
+        const bool custom =
+               cfg_.health_death_spares_baked != d.health_death_spares_baked
+            || cfg_.health_boost           != d.health_boost
+            || cfg_.health_base_decay      != d.health_base_decay
+            || cfg_.health_resilience_k    != d.health_resilience_k
+            || cfg_.health_death_threshold != d.health_death_threshold
+            || cfg_.health_death_min_nodes != d.health_death_min_nodes
+            || cfg_.death_cooldown_steps   != d.death_cooldown_steps
+            || cfg_.max_deaths_per_tick    != d.max_deaths_per_tick
+            || cfg_.near_baked_fraction    != d.near_baked_fraction;
+        if (custom) {
+            j["health"] = {
+                {"spares_baked",    cfg_.health_death_spares_baked},
+                {"boost",           cfg_.health_boost},
+                {"base_decay",      cfg_.health_base_decay},
+                {"resilience_k",    cfg_.health_resilience_k},
+                {"death_threshold", cfg_.health_death_threshold},
+                {"death_min_nodes", cfg_.health_death_min_nodes},
+                {"death_cooldown",  cfg_.death_cooldown_steps},
+                {"max_deaths",      cfg_.max_deaths_per_tick},
+                {"near_baked",      cfg_.near_baked_fraction},
+            };
+        }
+    }
     j["last_step_baked"]     = last_step_baked_;
     j["last_death_step"]     = last_death_step_;
     j["history"]             = history_;
@@ -772,6 +801,19 @@ GNG GNG::from_json(const nlohmann::json& j) {
     gng.cfg_.drift_gain  = j.value("drift_gain",  1.0f);
     gng.drift_count_     = j.value("drift_count", 0);
     gng.autotune_value_ = j.value("autotune_value", -1.0f);
+    if (j.contains("health") && j["health"].is_object()) {
+        auto const& h = j["health"];
+        Config d{};
+        gng.cfg_.health_death_spares_baked = h.value("spares_baked",    d.health_death_spares_baked);
+        gng.cfg_.health_boost              = h.value("boost",           d.health_boost);
+        gng.cfg_.health_base_decay         = h.value("base_decay",      d.health_base_decay);
+        gng.cfg_.health_resilience_k       = h.value("resilience_k",    d.health_resilience_k);
+        gng.cfg_.health_death_threshold    = h.value("death_threshold", d.health_death_threshold);
+        gng.cfg_.health_death_min_nodes    = h.value("death_min_nodes", d.health_death_min_nodes);
+        gng.cfg_.death_cooldown_steps      = h.value("death_cooldown",  d.death_cooldown_steps);
+        gng.cfg_.max_deaths_per_tick       = h.value("max_deaths",      d.max_deaths_per_tick);
+        gng.cfg_.near_baked_fraction       = h.value("near_baked",      d.near_baked_fraction);
+    }
     if (j.contains("autotune_hist") && j["autotune_hist"].is_array()) {
         auto h = j["autotune_hist"].get<std::vector<double>>();
         gng.autotune_hist_.assign(h.begin(), h.end());

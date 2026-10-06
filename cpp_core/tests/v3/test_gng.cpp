@@ -662,3 +662,83 @@ TEST(GNGFreeze, LearningOnIsUnchangedByTheFlag) {
     }
     EXPECT_EQ(a.to_json(), b.to_json());
 }
+
+// ---------------------------------------------------------------------------
+// Retention: the health model is configurable and survives serialisation
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Cluster A for `a_steps`, then only cluster B for `b_steps`; returns how many nodes still sit
+// nearer A than B.  Baking and stale-prune are out of the way, so health is the only killer.
+int a_nodes_left(float base_decay, int a_steps = 800, int b_steps = 4000) {
+    GNG::Config cfg;
+    cfg.dim = 16;
+    cfg.baking_threshold = 100000;
+    cfg.stale_prune_enabled = false;
+    cfg.health_death_min_nodes = 0;
+    cfg.health_base_decay = base_decay;
+    GNG gng(cfg);
+    std::mt19937 rng(7);
+    Eigen::VectorXf a = Eigen::VectorXf::Zero(16), b = Eigen::VectorXf::Zero(16);
+    a(0) = 1.0f; b(1) = 1.0f;
+    for (int t = 0; t < a_steps; ++t) gng.step(a + 0.05f * random_unit(rng, 16));
+    for (int t = 0; t < b_steps; ++t) gng.step(b + 0.05f * random_unit(rng, 16));
+    const auto j = gng.to_json();
+    int left = 0;
+    for (auto const& n : j["nodes"]) {
+        auto p = n["prototype"].get<std::vector<float>>();
+        left += p[0] > p[1];
+    }
+    return left;
+}
+
+}  // namespace
+
+TEST(GNGRetention, DefaultsSerialiseByteIdentically) {
+    GNG gng(GNG::Config{});
+    std::mt19937 rng(3);
+    for (int t = 0; t < 300; ++t) gng.step(random_unit(rng));
+    EXPECT_FALSE(gng.to_json().contains("health")) << "default settings add nothing to a snapshot";
+}
+
+TEST(GNGRetention, CustomSettingsRoundTrip) {
+    GNG::Config cfg;
+    cfg.health_base_decay = 0.9999f;
+    cfg.health_boost = 2.0f;
+    cfg.health_resilience_k = 0.5f;
+    cfg.health_death_threshold = 0.001f;
+    cfg.health_death_min_nodes = 4;
+    cfg.death_cooldown_steps = 100;
+    cfg.max_deaths_per_tick = 3;
+    cfg.near_baked_fraction = 0.3f;
+    cfg.health_death_spares_baked = true;
+    GNG gng(cfg);
+    std::mt19937 rng(5);
+    for (int t = 0; t < 300; ++t) gng.step(random_unit(rng));
+    const auto j = gng.to_json();
+    ASSERT_TRUE(j.contains("health"));
+    const GNG back = GNG::from_json(j);
+    const auto& c = back.config();
+    EXPECT_FLOAT_EQ(c.health_base_decay, 0.9999f);
+    EXPECT_FLOAT_EQ(c.health_boost, 2.0f);
+    EXPECT_FLOAT_EQ(c.health_resilience_k, 0.5f);
+    EXPECT_FLOAT_EQ(c.health_death_threshold, 0.001f);
+    EXPECT_EQ(c.health_death_min_nodes, 4);
+    EXPECT_EQ(c.death_cooldown_steps, 100);
+    EXPECT_EQ(c.max_deaths_per_tick, 3);
+    EXPECT_FLOAT_EQ(c.near_baked_fraction, 0.3f);
+    EXPECT_TRUE(c.health_death_spares_baked) << "was lost on every restore before";
+    // Whole-document equality would also compare edge order, which follows unordered-container
+    // iteration and is not preserved by a restore; the settings and the nodes are what matter here.
+    EXPECT_EQ(back.to_json()["health"], j["health"]);
+    EXPECT_EQ(back.node_count(), gng.node_count());
+}
+
+TEST(GNGRetention, BaseDecaySetsHowLongAnUnvisitedRegionIsRemembered) {
+    const int forgetting = a_nodes_left(0.995f);   // the historical default
+    const int remembering = a_nodes_left(1.0f);    // no decay
+    EXPECT_GT(remembering, 0);
+    EXPECT_LT(forgetting, remembering) << "4000 steps away is ~29 half-lives at 0.995";
+    EXPECT_EQ(forgetting, 0);
+}

@@ -302,6 +302,20 @@ public:
 
     void set_stale_prune_enabled(bool enabled) { cfg_.stale_prune_enabled = enabled; }
     void set_health_death_spares_baked(bool v) { cfg_.health_death_spares_baked = v; }
+
+    // Health model (Config "Biological health model").  These set how long an unvisited node
+    // is remembered, which is a property of the world's timescale, not of the clusterer: a
+    // short-term motor vocabulary wants fast forgetting, a vocabulary of rare events (or any
+    // long-term memory) wants slow.  Defaults are the historical constants.
+    void set_health_boost(float v)            { cfg_.health_boost = v; }
+    void set_health_base_decay(float v)       { cfg_.health_base_decay = v; }
+    void set_health_resilience_k(float v)     { cfg_.health_resilience_k = v; }
+    void set_health_death_threshold(float v)  { cfg_.health_death_threshold = v; }
+    void set_health_death_min_nodes(int v)    { cfg_.health_death_min_nodes = v; }
+    void set_death_cooldown_steps(int v)      { cfg_.death_cooldown_steps = v; }
+    void set_max_deaths_per_tick(int v)       { cfg_.max_deaths_per_tick = v; }
+    void set_near_baked_fraction(float v)     { cfg_.near_baked_fraction = v; }
+    void set_max_nodes(int v)                 { cfg_.max_nodes = v; }
     void set_stale_window_factor(float factor) { cfg_.stale_window_factor = factor; }
     void set_min_insertion_error(float e)      { cfg_.min_insertion_error = e; }
 
