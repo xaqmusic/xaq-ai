@@ -1039,3 +1039,55 @@ TEST(EPMFreeze, CommissioningWindowDoesNotAdvanceWhileFrozen) {
     EXPECT_EQ(dac["seen"].get<uint64_t>(), 0u);
     EXPECT_FALSE(dac["done"].get<bool>());
 }
+
+// -- Retention settings ---------------------------------------------------------
+
+TEST(EPMRetention, SchemaDefaultsAreTheGngsOwn) {
+    EpmFixture f(rbf_params());
+    const ami_ogma::v3::GNG::Config d{};
+    std::map<std::string, double> expect = {
+        {"health_boost", d.health_boost}, {"health_base_decay", d.health_base_decay},
+        {"health_resilience_k", d.health_resilience_k}, {"health_death_threshold", d.health_death_threshold},
+        {"health_death_min_nodes", d.health_death_min_nodes}, {"death_cooldown_steps", d.death_cooldown_steps},
+        {"max_deaths_per_tick", d.max_deaths_per_tick}, {"near_baked_fraction", d.near_baked_fraction}};
+    int found = 0;
+    for (auto const& ps : f.epm.params_schema()) {
+        auto it = expect.find(ps.key);
+        if (it == expect.end()) continue;
+        ++found;
+        EXPECT_EQ(ps.mutability, ogma::ParamMutability::HotMutable) << ps.key;
+        ASSERT_TRUE(ps.default_value.has_value()) << ps.key;
+        const double v = std::holds_alternative<double>(*ps.default_value) ? std::get<double>(*ps.default_value)
+                                                                           : double(std::get<int64_t>(*ps.default_value));
+        EXPECT_NEAR(v, it->second, 1e-6) << ps.key << ": the schema must advertise what the GNG does";
+    }
+    EXPECT_EQ(found, 8);
+}
+
+TEST(EPMRetention, SettingsApplyLiveAndAtConstructionAndSurviveRestore) {
+    auto p = rbf_params();
+    p["health_base_decay"] = 0.9999;
+    p["health_death_spares_baked"] = true;
+    EpmFixture f(p);
+    auto h = f.epm.snapshot_state()["gng"]["health"];
+    EXPECT_NEAR(h["base_decay"].get<double>(), 0.9999, 1e-6);
+    EXPECT_TRUE(h["spares_baked"].get<bool>());
+
+    f.epm.on_param_change("health_boost", ogma::ParamValue{3.0});
+    f.epm.on_param_change("death_cooldown_steps", ogma::ParamValue{int64_t{200}});
+    h = f.epm.snapshot_state()["gng"]["health"];
+    EXPECT_NEAR(h["boost"].get<double>(), 3.0, 1e-6);
+    EXPECT_EQ(h["death_cooldown"].get<int>(), 200);
+
+    EpmFixture fresh(rbf_params());           // default settings
+    fresh.epm.restore_state(f.epm.snapshot_state());
+    EXPECT_EQ(fresh.epm.snapshot_state()["gng"]["health"], h) << "a restored EPM keeps its retention settings";
+
+    EXPECT_THROW(f.epm.on_param_change("health_base_decay", ogma::ParamValue{1.5}), std::invalid_argument);
+    EXPECT_THROW(f.epm.on_param_change("near_baked_fraction", ogma::ParamValue{-0.1}), std::invalid_argument);
+}
+
+TEST(EPMRetention, MaxNodesIsHotAsDeclared) {
+    EpmFixture f(rbf_params());
+    EXPECT_NO_THROW(f.epm.on_param_change("max_nodes", ogma::ParamValue{int64_t{500}}));
+}

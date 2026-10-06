@@ -15,6 +15,13 @@ namespace ogma {
 
 namespace {
 
+double checked_range(double v, double lo, double hi, std::string const& key) {
+    if (!(v >= lo && v <= hi))
+        throw std::invalid_argument("EPM param '" + key + "' = " + std::to_string(v) + " is outside [" +
+                                    std::to_string(lo) + ", " + std::to_string(hi) + "]");
+    return v;
+}
+
 template <typename T>
 T clamp01(T v) { return std::clamp(v, T{0}, T{1}); }
 
@@ -165,6 +172,41 @@ ParamSchema EPM::params_schema() const {
          "permanent facts about the body — earned nodes should not be forgotten for a long "
          "absence.  false = legacy, byte-identical.", ParamValue{false}},
         {"stale_window_factor",     ParamMutability::HotMutable, "Stale prune window",          ParamValue{12000.0}},
+        // ---- Retention: the GNG's health model -------------------------------------------
+        // How long an unvisited node is remembered.  That is a property of the world's own
+        // timescale, not of the clusterer: a short-term motor vocabulary wants fast forgetting,
+        // a vocabulary of rare events or any long-term memory wants slow.  Health rises by
+        // health_boost per visit and decays every step by health_base_decay^(1/(1 + health *
+        // health_resilience_k)), so a young node is volatile and a well-used one resists; a node
+        // below health_death_threshold is culled (one per step at most, max_deaths_per_tick,
+        // death_cooldown_steps apart, never below health_death_min_nodes).  Defaults are the
+        // historical constants: byte-identical.
+        {"health_boost",            ParamMutability::HotMutable,
+            "Health gained per visit (activity-dependent potentiation).",
+            ParamValue{0.5}, ParamValue{0.0}, ParamValue{100.0}},
+        {"health_base_decay",       ParamMutability::HotMutable,
+            "Per-step health decay factor at health 0 (the youngest node's).  0.995 = half-life of "
+            "~138 steps; 1.0 = no decay (nothing is forgotten).  Older nodes decay more slowly "
+            "through health_resilience_k.",
+            ParamValue{0.995}, ParamValue{0.5}, ParamValue{1.0}},
+        {"health_resilience_k",     ParamMutability::HotMutable,
+            "How fast health turns into resistance to decay: the decay exponent is "
+            "1 / (1 + health * k).",
+            ParamValue{0.08}, ParamValue{0.0}, ParamValue{10.0}},
+        {"health_death_threshold",  ParamMutability::HotMutable,
+            "Health below which a node is culled.", ParamValue{0.01}, ParamValue{0.0}, ParamValue{100.0}},
+        {"health_death_min_nodes",  ParamMutability::HotMutable,
+            "No health deaths while the vocabulary is at or below this size.",
+            ParamValue{int64_t{16}}, ParamValue{int64_t{0}}, ParamValue{int64_t{1000000}}},
+        {"death_cooldown_steps",    ParamMutability::HotMutable,
+            "Minimum steps between two health deaths.",
+            ParamValue{int64_t{25}}, ParamValue{int64_t{0}}, ParamValue{int64_t{100000000}}},
+        {"max_deaths_per_tick",     ParamMutability::HotMutable,
+            "Health deaths allowed per step.", ParamValue{int64_t{1}}, ParamValue{int64_t{0}}, ParamValue{int64_t{1000}}},
+        {"near_baked_fraction",     ParamMutability::HotMutable,
+            "Fraction of baking_threshold above which a node is near-baked: half-speed health decay "
+            "and immune to isolation and stale pruning.",
+            ParamValue{0.6}, ParamValue{0.0}, ParamValue{1.0}},
         {"subtract_descending_prediction", ParamMutability::HotMutable, "Subtract prediction.<m>", ParamValue{true}},
         {"normalize_residual", ParamMutability::ConstructionOnly,
          "B v2 (2026-08-14): running-RMS normalize the post-subtraction residual before the GNG, "
@@ -318,6 +360,14 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     gng_cfg.learning_enabled = learning_enabled_;
     apply_param(params, "health_death_spares_baked", [&](auto const& v){ gng_cfg.health_death_spares_baked = get_bool(v, "health_death_spares_baked"); });
     apply_param(params, "stale_window_factor",     [&](auto const& v){ gng_cfg.stale_window_factor     = float(get_double(v, "stale_window_factor")); });
+    apply_param(params, "health_boost",            [&](auto const& v){ gng_cfg.health_boost            = float(checked_range(get_double(v, "health_boost"), 0.0, 100.0, "health_boost")); });
+    apply_param(params, "health_base_decay",       [&](auto const& v){ gng_cfg.health_base_decay       = float(checked_range(get_double(v, "health_base_decay"), 0.5, 1.0, "health_base_decay")); });
+    apply_param(params, "health_resilience_k",     [&](auto const& v){ gng_cfg.health_resilience_k     = float(checked_range(get_double(v, "health_resilience_k"), 0.0, 10.0, "health_resilience_k")); });
+    apply_param(params, "health_death_threshold",  [&](auto const& v){ gng_cfg.health_death_threshold  = float(checked_range(get_double(v, "health_death_threshold"), 0.0, 100.0, "health_death_threshold")); });
+    apply_param(params, "health_death_min_nodes",  [&](auto const& v){ gng_cfg.health_death_min_nodes  = int(checked_range(double(get_int(v, "health_death_min_nodes")), 0.0, 1e6, "health_death_min_nodes")); });
+    apply_param(params, "death_cooldown_steps",    [&](auto const& v){ gng_cfg.death_cooldown_steps    = int(checked_range(double(get_int(v, "death_cooldown_steps")), 0.0, 1e8, "death_cooldown_steps")); });
+    apply_param(params, "max_deaths_per_tick",     [&](auto const& v){ gng_cfg.max_deaths_per_tick     = int(checked_range(double(get_int(v, "max_deaths_per_tick")), 0.0, 1000.0, "max_deaths_per_tick")); });
+    apply_param(params, "near_baked_fraction",     [&](auto const& v){ gng_cfg.near_baked_fraction     = float(checked_range(get_double(v, "near_baked_fraction"), 0.0, 1.0, "near_baked_fraction")); });
     apply_param(params, "insertion_autotune",          [&](auto const& v){ gng_cfg.insertion_autotune          = get_bool(v, "insertion_autotune"); });
     apply_param(params, "insertion_autotune_quantile", [&](auto const& v){ gng_cfg.insertion_autotune_quantile = float(get_double(v, "insertion_autotune_quantile")); });
     insertion_autotune_ = gng_cfg.insertion_autotune;
@@ -469,6 +519,15 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "learning_enabled")        { learning_enabled_ = get_bool(value, k); gng_->set_learning_enabled(learning_enabled_); }
     else if (k == "health_death_spares_baked") gng_->set_health_death_spares_baked(get_bool(value, k));
     else if (k == "stale_window_factor")     gng_->set_stale_window_factor(float(get_double(value, k)));
+    else if (k == "max_nodes")               gng_->set_max_nodes(int(get_int(value, k)));   // declared hot; was refused live
+    else if (k == "health_boost")            gng_->set_health_boost(float(checked_range(get_double(value, k), 0.0, 100.0, k)));
+    else if (k == "health_base_decay")       gng_->set_health_base_decay(float(checked_range(get_double(value, k), 0.5, 1.0, k)));
+    else if (k == "health_resilience_k")     gng_->set_health_resilience_k(float(checked_range(get_double(value, k), 0.0, 10.0, k)));
+    else if (k == "health_death_threshold")  gng_->set_health_death_threshold(float(checked_range(get_double(value, k), 0.0, 100.0, k)));
+    else if (k == "health_death_min_nodes")  gng_->set_health_death_min_nodes(int(checked_range(double(get_int(value, k)), 0.0, 1e6, k)));
+    else if (k == "death_cooldown_steps")    gng_->set_death_cooldown_steps(int(checked_range(double(get_int(value, k)), 0.0, 1e8, k)));
+    else if (k == "max_deaths_per_tick")     gng_->set_max_deaths_per_tick(int(checked_range(double(get_int(value, k)), 0.0, 1000.0, k)));
+    else if (k == "near_baked_fraction")     gng_->set_near_baked_fraction(float(checked_range(get_double(value, k), 0.0, 1.0, k)));
     else if (k == "kalman_q")                gng_->set_kalman_q(float(get_double(value, k)));
     else if (k == "kalman_gain_cap")         gng_->set_kalman_gain_cap(float(get_double(value, k)));
     else if (k == "modality_group" || k == "modality_name" || k == "encoder_kind"
