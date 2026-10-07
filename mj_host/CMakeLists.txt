@@ -8,7 +8,7 @@ project(ogma_mj_host LANGUAGES CXX)
 # host is the anticipated shape rather than a new one: it holds an OgmaInstance in
 # plain C++ and never touches OgmaBrain's Godot Variant marshalling.
 #
-# Plan: docs/plans-and-designs/microduck_port_plan.md  (phase S0).
+# Plan: docs/plans-and-designs/microduck/port_plan.md  (phase S0).
 # Body:  models/microduck/  — vendored from pollen-robotics/microduck_rl, unmodified.
 
 set(CMAKE_CXX_STANDARD 17)

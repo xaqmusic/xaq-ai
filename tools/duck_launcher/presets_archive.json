@@ -805,7 +805,7 @@
  {
   "name": "R57 · THINGS: the stack rule runs in CloudMap, the nearest small cluster is attended, and a thing EPM earns a vocabulary over it (passive)",
   "series": 57,
-  "hint": "PASSIVE: the ★ CLOUD walk is byte-identical (md5 guard); this adds the things reduction and its EPM and logs them. WATCH (seed 3, fast-forward through 600 s): nothing in the body changes yet -- read the cloud panel's things / small / attended counts at each stop. n=6: the module's clusters agree with the offline rule on 583/583; the attended thing is a real object on 73 % of ticks (misses: wall bases and chair legs seen as one column); the thing EPM's 35 nodes follow the sweep's fill-in state, not the object (purity 0.56, each object under 4+ winners). Compare R58: a two-column footprint floor and a shape-only descriptor. Things phase T1 (microduck_things_phase.md).",
+  "hint": "PASSIVE: the ★ CLOUD walk is byte-identical (md5 guard); this adds the things reduction and its EPM and logs them. WATCH (seed 3, fast-forward through 600 s): nothing in the body changes yet -- read the cloud panel's things / small / attended counts at each stop. n=6: the module's clusters agree with the offline rule on 583/583; the attended thing is a real object on 73 % of ticks (misses: wall bases and chair legs seen as one column); the thing EPM's 35 nodes follow the sweep's fill-in state, not the object (purity 0.56, each object under 4+ winners). Compare R58: a two-column footprint floor and a shape-only descriptor. Things phase T1 (microduck/things_phase.md).",
   "state": {
    "config": "a1v2_r57_things.json",
    "mode": "level2",
@@ -829,7 +829,7 @@
  {
   "name": "R58 · THINGS with a two-column footprint floor and a SHAPE-ONLY descriptor (sampling out of the vocabulary)",
   "series": 58,
-  "hint": "MEASURED (n=6): two levers bundled, and they disagree. The two-column footprint floor raises attention precision 0.73 -> 0.82 (5+/1-: seeds 1,2,4,5,6 up, seed 3 0.56 -> 0.49) and keeps 82 % of the attended ticks (balls 96 %). The shape-only descriptor LOWERS the thing EPM's per-run purity 0.87 -> 0.83 (purity - chance +0.44 -> +0.30): hits per column is shape (a ball's curved face returns 8 per column, a block's flat face 18). Passive on every seed (md5). Superseded by R59 = the floor alone. Things phase T1 (microduck_things_phase.md; design doc §17.34).",
+  "hint": "MEASURED (n=6): two levers bundled, and they disagree. The two-column footprint floor raises attention precision 0.73 -> 0.82 (5+/1-: seeds 1,2,4,5,6 up, seed 3 0.56 -> 0.49) and keeps 82 % of the attended ticks (balls 96 %). The shape-only descriptor LOWERS the thing EPM's per-run purity 0.87 -> 0.83 (purity - chance +0.44 -> +0.30): hits per column is shape (a ball's curved face returns 8 per column, a block's flat face 18). Passive on every seed (md5). Superseded by R59 = the floor alone. Things phase T1 (microduck/things_phase.md; design doc §17.34).",
   "state": {
    "config": "a1v2_r58_shape.json",
    "mode": "level2",
@@ -853,7 +853,7 @@
  {
   "name": "R59 · THINGS with the two-column footprint floor alone (the full descriptor kept)",
   "series": 59,
-  "hint": "MEASURED (n=6): the T1 config the seek loop builds on. Attention on a real object 0.73 -> 0.82 (5+/1-; seed 3 0.56 -> 0.49), the thing EPM's per-run purity 0.91 +- 0.07 (chance 0.52), 21 nodes a run, blocks and balls under separate nodes. Passive on every seed: the walk is byte-identical to ★ CLOUD, so there is nothing to see in the body yet -- read the cloud panel's things / small / attended at each stop (seed 3, fast-forward through 600 s). Things phase T1 WORKING (microduck_things_phase.md; design doc §17.34).",
+  "hint": "MEASURED (n=6): the T1 config the seek loop builds on. Attention on a real object 0.73 -> 0.82 (5+/1-; seed 3 0.56 -> 0.49), the thing EPM's per-run purity 0.91 +- 0.07 (chance 0.52), 21 nodes a run, blocks and balls under separate nodes. Passive on every seed: the walk is byte-identical to ★ CLOUD, so there is nothing to see in the body yet -- read the cloud panel's things / small / attended at each stop (seed 3, fast-forward through 600 s). Things phase T1 WORKING (microduck/things_phase.md; design doc §17.34).",
   "state": {
    "config": "a1v2_r59_floor.json",
    "mode": "level2",

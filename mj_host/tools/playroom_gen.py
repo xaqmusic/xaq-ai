@@ -4,7 +4,7 @@
     mj_host/tools/playroom_gen.py [--seed 1] [--half 2.0] [--out scene_playroom.xml]
                                   [--balls 2 --blocks 2 --chairs 2] [--train] [--check]
 
-The playroom is the arena for the behaviour set (docs/plans-and-designs/microduck_playroom_plan.md
+The playroom is the arena for the behaviour set (docs/plans-and-designs/microduck/playroom_plan.md
 §5): a room the duck's own size sees as pillars, ceilings and things that answer when pushed.
 Its objects are sorted by the only thing the brain can see — how they change:
 

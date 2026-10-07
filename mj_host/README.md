@@ -6,7 +6,7 @@ The third host, beside [`godot_host/`](../godot_host) (the picrawler, in Godot) 
 anticipated shape rather than a new one: it holds an `OgmaInstance` in plain C++ and never
 touches `OgmaBrain`'s Godot `Variant` marshalling.
 
-Plan and rationale: [`docs/plans-and-designs/microduck_port_plan.md`](../docs/plans-and-designs/microduck_port_plan.md).
+Plan and rationale: [`docs/plans-and-designs/microduck/port_plan.md`](../docs/plans-and-designs/microduck/port_plan.md).
 **Phases S0 and S1 are done. There is no brain in here yet** — that is S2 and S3.
 
 | piece | what it is |

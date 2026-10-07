@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Seed-averaged A/B for the duck's LEVEL 2 -- the harness the rung-2 verdicts lacked.
 
-Every §17 table in docs/plans-and-designs/microduck_rung2_regime_design.md was read at seed 2
+Every §17 table in docs/plans-and-designs/microduck/rung2_regime_design.md was read at seed 2
 only (CLAUDE.md §3 rule 3, §3.7: a single seed is a signal, not a finding).  This runs each
 level-2 config from scratch over N seeds, in parallel, and reports the §17 metrics over the
 CONTROL phase (after the identification babble), paired against the first config by seed.

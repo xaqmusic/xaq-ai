@@ -8,7 +8,7 @@ the point cloud a head babble builds. Run before any of the proposed behaviours,
 that saved the speed question — measure that the signal exists before designing what rides it.*
 
 **Report and figures:** <https://claude.ai/code/artifact/468b1fff-ed27-483b-86a6-ca87d7c5459a>
-**Verdicts:** [`microduck_rung2_regime_design.md`](microduck_rung2_regime_design.md) §17.28.
+**Verdicts:** [`microduck/rung2_regime_design.md`](rung2_regime_design.md) §17.28.
 **Owning register rows:** O36, O38, O40, O41.
 **Corrections (2026-09-13, §17.30):** this study's de-rotation was applied with the wrong sign — its
 "+7 % distinct voxels" was smear and the de-rotated cloud's 45 % detection is withdrawn (41 %, the same

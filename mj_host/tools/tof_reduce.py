@@ -2,7 +2,7 @@
 """tof_reduce.py — reduce the host's full level-2 JSONL to what the ToF studies need.
 
 Usage:  <host ... --log-tof-cloud --log-motor-tle> | python3 tof_reduce.py out.jsonl
-Charter: docs/plans-and-designs/microduck_tof_studies.md §2.
+Charter: docs/plans-and-designs/microduck/tof_studies.md §2.
 Drops qpos (50 floats/tick) but keeps the four free bodies' x,y -- the analysis labels."""
 import json, sys
 FREE = {'obj_ball0': 22, 'obj_ball1': 29, 'obj_block0': 36, 'obj_block1': 43}

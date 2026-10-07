@@ -14,12 +14,11 @@ room does something worth watching for ten minutes.* Every arena change and ever
 this plan is judged against that sentence, and against the doctrine's three loud signs of life
 (`CLAUDE.md` §3.3): it re-corrects when disturbed, it steps, and it feels around what it bumps.
 
-Companions: [`microduck_port_plan.md`](microduck_port_plan.md) (the port; "▶ Resume here"),
-[`microduck_rung2_regime_design.md`](microduck_rung2_regime_design.md) (every measurement so
-far), [`microduck_intent_boundary_design.md`](microduck_intent_boundary_design.md) (levels,
-the parity ladder, the reporting rules), [`microduck_outreach_plan.md`](microduck_outreach_plan.md)
-(PR-1, PR-2), [`loop_and_arbitration_recipe.md`](loop_and_arbitration_recipe.md) (the loop
-unit), [`open_items_register.md`](open_items_register.md) (O25–O29 are this plan's).
+Companions: [`microduck/port_plan.md`](port_plan.md) (the port; "▶ Resume here"),
+[`microduck/rung2_regime_design.md`](rung2_regime_design.md) (every measurement so
+far), [`microduck/intent_boundary_design.md`](intent_boundary_design.md) (levels,
+the parity ladder, the reporting rules), [`loop_and_arbitration_recipe.md`](../loop_and_arbitration_recipe.md) (the loop
+unit), [`open_items_register.md`](../open_items_register.md) (O25–O29 are this plan's).
 
 ---
 
@@ -28,7 +27,7 @@ unit), [`open_items_register.md`](open_items_register.md) (O25–O29 are this pl
 **State on 2026-09-15: the stop's look is built and promoted (`★ CLOUD`, R56).** §12's "a place is a stop"
 now runs on a cloud. The gaze sweeps, the map reads the stop's voxel cloud, and the stop ends when the cloud
 stops growing, after about 10 s. The summary and the next questions (when to stop, O43; seeking small
-things, O44) are in [`microduck_cloud_phase.md`](microduck_cloud_phase.md).
+things, O44) are in [`microduck/cloud_phase.md`](cloud_phase.md).
 
 **State on 2026-09-11, late — the walk-stop-look line is agreed and planned (§12).** The operator's
 read of R26–R38 in the room: the duck always stepping, avoiding and tiling a map is a Roomba, and
@@ -99,7 +98,7 @@ rule and the owner of "the scene changed"), then W5 (§12.7b), W4.** Presets R39
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting
 walking with a slow level prior on a frozen model; level on every seed, the camera steadier
 than the walker's own head (frame difference 12.3 → 9.9), the walk "more birdlike" (the
-operator's eye; design doc §17.9–17.14). The ask to Pollen is written (outreach plan §8) but
+operator's eye; design doc §17.9–17.14). The ask to Pollen is raised as an open question in the design document proposed to them (§4) but
 **PR-2 waits**: the operator wants the behaviour set validated in the simulator first, with
 what exists.
 

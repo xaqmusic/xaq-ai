@@ -3,9 +3,9 @@
 **Status: DRAFT for the operator's review. Nothing here is built.**
 
 **What this decides.** How the brain that stands and catches (R19,
-[`microduck_standing_report.md`](../reports/microduck_standing_report.md)) becomes the
+[`microduck_standing_report.md`](../../reports/microduck_standing_report.md)) becomes the
 autonomous layer of a Microduck without displacing Pollen's stack, and how the two tracks of
-[the port plan](microduck_port_plan.md#two-goals-and-they-put-the-markov-blanket-in-different-places)
+[the port plan](port_plan.md#two-goals-and-they-put-the-markov-blanket-in-different-places)
 run in parallel from one host. The operator's framing, which this document adopts: the community
 stack is *always available*, for rescue and for other behaviours, so the brain can occupy the
 middle between "full xaq, no community stack" and "xaq only as the autonomous layer above the
@@ -161,7 +161,7 @@ shell is cross-compiled in our CI with their target triple; nothing of this ente
   body. Whether that is a MuJoCo backend for `robotd` or a sim harness that speaks their
   protocol is their architectural choice; either helps every client author, not only us.
 - **The autonomous design doc they say nobody owns.** Offering to draft it, in their format and
-  voice, with this architecture as one implementation of it — see the outreach plan.
+  voice, with this architecture as one implementation of it — now the design document proposed to Pollen (`docs/design/autonomous-brain.md` in their repository).
 
 ## 7. Out of scope, for now
 

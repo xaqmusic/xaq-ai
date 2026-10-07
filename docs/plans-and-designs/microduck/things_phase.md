@@ -2,10 +2,10 @@
 
 Status: **closed 2026-09-27; `★ THINGS` = R83** — the R79 stack (the un-mirrored walk, the seek loop, the arrival stop, the kick / peck / push from standing, the outcome loop keyed by the KIND, the aimed unwind, the gaze at the reached thing) with R80's closer arrival, promoted on the operator's eye; lineage `★` R67 (2026-09-22) → R77 → R79 → R83 (all 2026-09-27) · Dates: 2026-09-15 → 2026-09-27 · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §10.**
 
-*The phase after the cloud ([`microduck_cloud_phase.md`](microduck_cloud_phase.md), `★ CLOUD` R56).
+*The phase after the cloud ([`microduck/cloud_phase.md`](cloud_phase.md), `★ CLOUD` R56).
 The operator's direction, restated in the rewrite rule's terms, then the loops that read the voxels at
 three timescales, then the build order. Every verdict goes to the rung-2 design doc §17 and the
-[register](open_items_register.md) (O43, O44, and O45–O50 below), as before. Nothing here is measured
+[register](../open_items_register.md) (O43, O44, and O45–O50 below), as before. Nothing here is measured
 unless a section says so.*
 
 ---

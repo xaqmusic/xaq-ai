@@ -804,7 +804,7 @@ R19 is promoted: `★ STACK` in the launcher, the old R13 → R11 → R12c chain
 
 ## 15. PHASE 0 OF THE INTENT BOUNDARY (2026-09-03) — the step hand-off
 
-The first capability of "the middle" ([intent-boundary design](microduck_intent_boundary_design.md)
+The first capability of "the middle" ([intent-boundary design](intent_boundary_design.md)
 §4, phase 0): when the reflex's in-place catch is about to fail, hand the joints to the walker,
 let it recover, hand back.  Host-only; no brain code changed.
 
@@ -1305,7 +1305,7 @@ shifted scene must be closed before the (d) reading is trusted at power.
 
 ### 17.8 A1 — the playroom: the room is the lever, R27 unchanged (2026-09-10)
 
-The first lever of the [playroom plan](microduck_playroom_plan.md) §9: an arena that can show
+The first lever of the [playroom plan](playroom_plan.md) §9: an arena that can show
 the behaviour set. `mj_host/tools/playroom_gen.py` generates `scene_playroom.xml` from a seed
 — a 4 m × 4 m room, walls 0.3 m, a rug, a table the duck walks under, two chairs, a shelf of
 coloured books, a wall clock whose hand the host turns once per 20 s (`gravcomp` on the hand:
@@ -1684,7 +1684,7 @@ on the picture it is the only arm better than the walker, and it is better on ev
 number with the tour intact. Everything through Pollen's walker command — the level prior
 (R33), the trunk reflex, the head-gyro rate loop, the phase feed-forward — is bounded by two
 facts of their walker: it answers a head command 120–160 ms late, and its own policy jitters
-the head-yaw joint at 1.2 rad/s. That is the case to take to Pollen (outreach plan §8).
+the head-yaw joint at 1.2 rad/s. That is the case to take to Pollen (raised in the design document proposed to them, §4).
 
 **PROMOTED (the operator's eye, 2026-09-11):** "a significant improvement in stability compared
 to R30. While the head is not perfectly still the wobble is tolerable when viewing through the
@@ -2536,7 +2536,7 @@ question needed.
 **Asked for** (the operator, after the W5 verdicts): an EPM on the sensor's full output with its PCA
 visible; several EPMs in different roles off the same sensor; and the point cloud a head babble
 builds, watched for change. Method, tooling and re-run commands are in
-[`microduck_tof_studies.md`](microduck_tof_studies.md); figures and the written report are the
+[`microduck/tof_studies.md`](tof_studies.md); figures and the written report are the
 [study page](https://claude.ai/code/artifact/468b1fff-ed27-483b-86a6-ca87d7c5459a). Everything runs
 the **shipped EPM** over recorded frames (`cpp_core/bench/epm_tof_study`), 4 runs × 1500 s, seeds 6
 and 3, 16 790 distinct casts. World-derived labels judge the vocabularies and reach no brain.
@@ -3107,7 +3107,7 @@ adding glances. Whether the duck should stop more often, and on what, is the nex
 
 **PROMOTED (the operator's eye, 2026-09-15):** R56 at threshold 0.45: "the robot is able to make a very solid
 map in a very short amount of time." R56 is `★ CLOUD` in the launcher, superseding R55. This closes the cloud
-phase. Its summary is [`microduck_cloud_phase.md`](microduck_cloud_phase.md): the promoted run, what the phase
+phase. Its summary is [`microduck/cloud_phase.md`](cloud_phase.md): the promoted run, what the phase
 learned, the tools, the traps, and the open questions for the next one (register O43, when to stop; O44,
 seeking small things).
 
@@ -3115,7 +3115,7 @@ seeking small things).
 
 **The direction.** The operator, on `★ CLOUD`: map-making is not the interesting thing for the duck to be doing;
 it should seek what is smaller than itself, interact with it, and be surprised when it answers. The plan is
-[`microduck_things_phase.md`](microduck_things_phase.md) (register O45–O50); this section is its T1, the
+[`microduck/things_phase.md`](things_phase.md) (register O45–O50); this section is its T1, the
 sensor side, built passive before any loop reads it. Two corrections from the discussion shaped it: a thing does
 not grow on approach (a voxel is world-sized; its sampling grows, so the error an approach reduces is the
 descriptor's precision), and the head should look where the thing is (a gaze error, T3), not tilt on a script.
@@ -4341,14 +4341,14 @@ re-use) would give R83's closeness with R79's arrival count; and the peck from t
 arriving at all. Both belong to the next phase's design, not to a lever tonight.
 
 **The phase closes here.** Entry point for a cold start: the phase page
-[`microduck_things_phase.md`](microduck_things_phase.md) §10–13 — the promoted run, the phase in one table, the
+[`microduck/things_phase.md`](things_phase.md) §10–13 — the promoted run, the phase in one table, the
 findings, and what to carry into the next push, chasing moving things. The launcher's presets were pruned 82 → 13
 (the rest in `tools/duck_launcher/presets_archive.json`, argv intact) and 46 refuted configs lost their rank (files
 kept, names keep their verdicts).
 
 ### 17.53 The chase phase opens: a toy train on a track, and what the walking cloud says about a thing that moves (stage 0, 2026-09-27)
 
-**The operator's direction** (the phase page [`microduck_chase_phase.md`](microduck_chase_phase.md) §1): chase moving
+**The operator's direction** (the phase page [`microduck/chase_phase.md`](chase_phase.md) §1): chase moving
 objects, using the ToF while walking to tell whether part of the cloud is changing relative to the rest; a
 predictable mover for the playroom — "a toy train or car on a track that stops and starts at regular intervals";
 home in on *any* cluster moving relative to the world frame. The design discussion (§2 there) put the error as the
@@ -6456,7 +6456,7 @@ slowed (`--yaw-linearize-below 0.15`). The cold start for the next push is chase
 
 ### 17.96 The ten-minutes phase opens: where ★ TURN's ten minutes go (phase 0, 2026-10-02)
 
-**The operator's direction** (`microduck_ten_minutes_phase.md` §1): ten minutes of interesting behaviour for the plan
+**The operator's direction** (`microduck/ten_minutes_phase.md` §1): ten minutes of interesting behaviour for the plan
 to Pollen; the run is boring when the duck gets stuck in corners and stares at the wall. Two pushes — tall structure
 consolidated as one immovable object, and the phantom (a lost mover held by a slow loop). Before any lever, the
 instrument: `mj_host/tools/ten_minutes.py` sorts every tick into one category (truth labels, scoring only) and traces
@@ -6976,7 +6976,7 @@ view with the same ~15 % probability. Only a wider field changes that.
 **The field of view the case for the camera rests on** — the same T11 logs re-scored as if the sensor's cone were wider
 (the moving train within 1.5 m, ~107 s a run): 45° 15 % · 60° 19 % · 90° 27 % · **120° 36 %** · 160° 47 %. A 120° camera
 used only as a motion detector would put the train in view 2.4× as often as the ToF does, before any gaze helps.
-The case for camera access, in Pollen's terms: outreach plan §9.
+The case for camera access, in Pollen's terms: §6 of the design document proposed to them.
 
 **★ LA1 PROMOTED on the operator's eye (2026-10-03):** "the robot actually looks quite interesting when it's looking around at
 areas that it hasn't seen before; it's novelty to the behaviour, and it is definitely moving in a direction that we want." The
@@ -6985,7 +6985,7 @@ stack is now ★ LA1 = T11 (config `a1v2_t11_not_target`) + host `--look-around 
 **Correction, the same day (checked against Pollen's tree at `ded2f7c`):** the duck's camera is an IMX219 at ~62° horizontal,
 not a 120° lens, and `media.frame` (one raw frame per call on `mediad`'s socket) already exists. Re-scored over ALL the train's
 moving time (not only near it), the ToF has it 8 % (45°, under 2 m) and a 62° camera at any range 19 % (T11, n = 18; LA1 7 vs
-16 %): still 2.4×, from range more than width. The ask is reshaped to their own "features, not pixels" direction: outreach plan §9.
+16 %): still 2.4×, from range more than width. The ask is reshaped to their own "features, not pixels" direction: the design document proposed to Pollen, §6.
 
 ### 17.108 Defects found while documenting ★ LA1 (2026-10-04, open)
 
@@ -7002,7 +7002,7 @@ A file:line fact sheet of the three ★ LA1 brains (for the companion document t
 - **Suspected, unconfirmed:** each ToF cast re-added to the cloud ~4× (republished every tick between casts); `comp_seek` counting
   stop-time windows as failures; `regime_epm`'s restore resetting `max_nodes` 2000 / `health_death_spares_baked` false.
 - **Inert:** `object_epm` and `thing_epm` outputs unread by any loop; PlayLoop's value not in the precision score.
-Fact sheet (2,980 lines, every claim anchored): [`microduck_la1_fact_sheet.md`](microduck_la1_fact_sheet.md); companion document
+Fact sheet (2,980 lines, every claim anchored): [`microduck/la1_fact_sheet.md`](la1_fact_sheet.md); companion document
 "Inside the MicroDuck Brain" (Claude Docs).
 
 ### 17.109 The §17.108 fixes, measured (2026-10-04)
