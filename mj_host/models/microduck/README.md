@@ -6,7 +6,7 @@ at commit `d424a0c899f6b33cbd3daeb279913134349c0b63`**, path
 is recorded in [`THIRD_PARTY_NOTICES.md`](../../../THIRD_PARTY_NOTICES.md).
 
 **Do not edit these files.** Gate G1 of the
-[port plan](../../../docs/plans-and-designs/microduck_port_plan.md) is that the model loads
+[port plan](../../../docs/plans-and-designs/microduck/port_plan.md) is that the model loads
 with zero local changes, so a re-vendor stays a copy rather than a merge. Anything we need
 different goes in an overlay file beside them, named as an overlay.
 

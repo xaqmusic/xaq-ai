@@ -40,7 +40,7 @@ compact stream drops the cloud records, qpos and joint positions.
       unknown answers into "rolled beyond the match radius", "moved a little", "stayed", and "no thing within 0.5 m"
       (a wall base or a leg the cloud attended as a thing, or a dead-reckoned arrival at a place the thing is not).
   cloud_objects.py things LOG...
-      the things phase's T1 (microduck_things_phase.md): the MODULE's stack rule against this file's, cluster by
+      the things phase's T1 (microduck/things_phase.md): the MODULE's stack rule against this file's, cluster by
       cluster on the same filed clouds (faithfulness); what the ATTENDED thing really was, per tick ("thg", labelled
       with the anchor the next "cloudv" carries); and the thing EPM's nodes by object kind ("tepm"): purity, and how
       many poses each real object was attended from under how many winners (the pose-invariance reading O40 could

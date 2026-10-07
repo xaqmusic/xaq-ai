@@ -2,7 +2,7 @@
 
 Status: report · Date: 2026-09-19 · Scope: Pollen Robotics' `microduck` runtime as checked out at commit `b1c2475` (their 0.12 line), read for the things a brain above it needs to know
 
-*A companion to the microduck port plan and to the design record in `microduck_rung2_regime_design.md` §17.39–17.41, where the runner described in §5 is measured. Written for collaborators who will guide what the duck does next and want to know what the robot can already do on its own, and how.*
+*A companion to the microduck port plan and to the design record in `microduck/rung2_regime_design.md` §17.39–17.41, where the runner described in §5 is measured. Written for collaborators who will guide what the duck does next and want to know what the robot can already do on its own, and how.*
 
 ---
 

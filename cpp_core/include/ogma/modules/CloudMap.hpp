@@ -4,7 +4,7 @@
 // CloudMap.hpp  --  the sweep's point cloud, and a cache of them keyed by place
 // =============================================================================
 //
-// Measured motivation (microduck design doc §17.28–17.29, `microduck_tof_studies.md`):
+// Measured motivation (microduck design doc §17.28–17.29, `microduck/tof_studies.md`):
 // a small object is SUB-PIXEL in one ToF cast and multi-point in a sweep.  A 4 cm block at
 // a metre subtends 2.3° against 5.625° zone spacing, so one cast lands 0.058 points on it
 // and a 60 s gaze babble lands 43.  An EPM over single frames therefore cannot hold a node
@@ -71,7 +71,7 @@ public:
     static constexpr int kThing   = 8;                   // the attended thing's FULL descriptor (thing_descriptor)
     static constexpr int kThingShape = 5;                // ...and its SHAPE-ONLY form (things_shape true)
 
-    // THINGS (the things phase, 2026-09-15, `microduck_things_phase.md` T1).  The stack rule of design doc
+    // THINGS (the things phase, 2026-09-15, `microduck/things_phase.md` T1).  The stack rule of design doc
     // §17.31, run on the OPEN cloud: break-band voxels grouped into 8-connected columns; a cluster's stack top
     // is the contiguous chain of heights over its dilated footprint with a gap of max(gap_min, gap_k x range),
     // because the sensor's rows are 5.6 deg apart and the vertical spacing of returns grows with range.  A

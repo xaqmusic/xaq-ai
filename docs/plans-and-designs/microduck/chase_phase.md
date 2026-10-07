@@ -2,10 +2,10 @@
 
 Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §12 (the resting point, 2026-10-02: ★ TURN — the body mechanics; the navigation open), then §11 (★ BIRD) and §10.**
 
-*The phase after the things phase ([`microduck_things_phase.md`](microduck_things_phase.md) §10–13, `★ THINGS`
+*The phase after the things phase ([`microduck/things_phase.md`](things_phase.md) §10–13, `★ THINGS`
 R83). The operator's direction, the design discussion in the rewrite rule's terms, the stimulus built for it, and
 what stage 0 measured. Every verdict goes to the rung-2 design doc §17 (from §17.53) and the
-[register](open_items_register.md) (O63, O64). Nothing here is measured unless a section says so.*
+[register](../open_items_register.md) (O63, O64). Nothing here is measured unless a section says so.*
 
 ---
 

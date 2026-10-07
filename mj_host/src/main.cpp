@@ -2,7 +2,7 @@
 // mj_host — the Microduck MuJoCo host
 // =============================================================================
 //
-// Phase S1 (docs/plans-and-designs/microduck_port_plan.md): the body and a run
+// Phase S1 (docs/plans-and-designs/microduck/port_plan.md): the body and a run
 // loop.  No OgmaInstance, no bus, no learning.  What runs here is the standing
 // SCAFFOLD (models/microduck/scaffolds/), because this body has no passive
 // standing equilibrium and the only honest no-brain baseline is an actively

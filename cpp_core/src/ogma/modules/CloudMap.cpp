@@ -138,7 +138,7 @@ ParamSchema CloudMap::params_schema() const {
          "open cloud whose stack tops out under small_top (the stack rule, design doc §17.31, run in the "
          "module): [top / break_hi, footprint / small_ext, aspect, columns / 25, hits per column / 20, "
          "chain / 5, range / max_range, lowest height / break_hi].  World-sized and without a bearing, so an "
-         "EPM on it earns a vocabulary of THINGS rather than of poses (`microduck_things_phase.md` T1).  "
+         "EPM on it earns a vocabulary of THINGS rather than of poses (`microduck/things_phase.md` T1).  "
          "Published only while a thing is attended.  Empty = not computed.",
          ParamValue{std::string("")}},
         {"thing_bearing_topic", ParamMutability::ConstructionOnly,

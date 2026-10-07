@@ -3,9 +3,9 @@
 Status: closed, R56 promoted · Dates: 2026-09-12 → 2026-09-15 · Branch: `duck-l2` · Simulation only
 
 *This page is the entry point to the phase, not its record. Every number below is derived, with its
-verdict and its caveats, in [`microduck_rung2_regime_design.md`](microduck_rung2_regime_design.md)
-§17.28–17.33; the sensor studies that opened it are in [`microduck_tof_studies.md`](microduck_tof_studies.md).
-Open items live in the [register](open_items_register.md) (O36, O38, O40–O44).*
+verdict and its caveats, in [`microduck/rung2_regime_design.md`](rung2_regime_design.md)
+§17.28–17.33; the sensor studies that opened it are in [`microduck/tof_studies.md`](tof_studies.md).
+Open items live in the [register](../open_items_register.md) (O36, O38, O40–O44).*
 
 ---
 
@@ -154,7 +154,7 @@ Check these before trusting a result.
 
 ## 8. Open for the next phase
 
-Ranked by what the operator has pointed at. **Taken up by [`microduck_things_phase.md`](microduck_things_phase.md) (2026-09-15).**
+Ranked by what the operator has pointed at. **Taken up by [`microduck/things_phase.md`](things_phase.md) (2026-09-15).**
 
 1. **When to stop (O43).** Stops still come on a timer, every 80 s from 600 s, so shorter stops lengthened
    the walks instead of adding glances. What should *start* a stop is the next design question, and by the

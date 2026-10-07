@@ -2,9 +2,9 @@
 
 Status: **opened 2026-10-02; ★ TURN 43 % boring → **★ T4** 22 % (n = 18; design doc §17.96–17.99), promoted on the operator's eye; next: the phantom (§5)** · Branch: `duck-l2` · Simulation only · Base: `★ TURN`
 (chase phase §12). Every verdict goes to the rung-2 design doc §17 (from §17.96) and the
-[register](open_items_register.md) (O68–O70). Nothing here is measured unless a section says so.
+[register](../open_items_register.md) (O68–O70). Nothing here is measured unless a section says so.
 
-*The phase after the chase phase ([`microduck_chase_phase.md`](microduck_chase_phase.md) §12, `★ TURN`). Its end is a
+*The phase after the chase phase ([`microduck/chase_phase.md`](chase_phase.md) §12, `★ TURN`). Its end is a
 behaviour set to put in front of Pollen Robotics as the plan for the duck's autonomous brain: ten minutes of behaviour
 that stays interesting.*
 
@@ -164,7 +164,7 @@ per situation, from its own closing; walker frozen in practice, `--freeze-walker
 outcomes in 20 min. **Coverage is the limit**: the train is in the 45° cone ~15 % of the time it is near, in every arm, because
 every mechanism needs it seen first. **Looking around while walking** (`--look-around 0.9 2.0`, LA1) ties T11 on every number
 with a livelier head: the candidate for the eye (preset beside T11). A 120° field would see the train 2.4× as often: **the
-case for camera access** is outreach plan §9 (the camera buffer is not in Pollen's API). Next: the operator's eye on LA1;
+case for camera access** is §6 of the design document proposed to Pollen (the camera buffer is not in Pollen's API). Next: the operator's eye on LA1;
 the camera request travels with or after PR-2, the operator's call.
 **★ LA1 PROMOTED 2026-10-03** on the operator's eye (novelty in the behaviour): T11 + `--look-around 0.9 2.0`.
 
