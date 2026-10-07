@@ -38,3 +38,20 @@ and the exact physics state (qpos/qvel).
   in two hours, tilt 0.35°, pose 0.036, |u| 0.18, joint motion at the noise
   floor.  Catches 2 N shoves (35/36 across seeds, peak ~2.7°, back in 0.6 s);
   3 N is 13/36.  Resume with the R19 config; no --ident flags.
+
+## Level 2: the walking brain (`--level2 … --load-brain`; pruned 2026-10-01)
+
+The identification-only restore (the walker's model and controller; the map, play field and cache start fresh). The
+launcher's presets name each; the design doc section is the record.
+
+- **`duck_fore_s1.brain.json`** — **★ BIRD** (§17.88): the twist + the head's fore-aft translation
+  (`action.head_fore`), 600 s of babble on the open playroom (`duck_fore_open_s1`) then 600 s in the 2 m room.
+  Configs `a1v2_r113_fore_g10.json` (★, the pace-gated centring), `…_fore`, `…_fore_c03/c10`; host
+  `--intent-head-translate 0.6 --intent-fore-sense`.
+- **`duck_ctrl3_s1.brain.json`** — ★ BIRD's control: the twist alone, identified by the same recipe.
+- **`duck_contact_s1.brain.json`** — R113's contact-babbled identification (§17.85), the still-head reference.
+- **`duck_contact3_s1`**, **`duck_contact6_s1`**, **`duck_contact6h_s1`** (the six-motor lean grown by the head's
+  attitude, §17.87), **`duck_contact7_s1`** — the §17.86–17.87 arms, kept for the archived presets.
+- **`duck_r94_s1.brain.json`** — the campaign's base (§17.60), R94 at 1500 s.
+- **`head2j_h1_s2.json`** — the head brain's identification (H1, the joint track) every level-2 preset loads;
+  `head2_h1_s2.json` its command-track predecessor (archived presets).

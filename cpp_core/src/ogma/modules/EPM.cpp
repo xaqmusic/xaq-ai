@@ -51,7 +51,8 @@ EPM::EncoderKind parse_encoder_kind(std::string const& s) {
     if (s == "stft" || s == "audio") return EPM::EncoderKind::STFT;
     if (s == "rbf"     ) return EPM::EncoderKind::RBF;
     if (s == "identity") return EPM::EncoderKind::Identity;
-    throw std::invalid_argument("EPM: unknown encoder_kind '" + s + "' (expected jl/stft/rbf/identity)");
+    if (s == "jl_state") return EPM::EncoderKind::JLState;
+    throw std::invalid_argument("EPM: unknown encoder_kind '" + s + "' (expected jl/stft/rbf/identity/jl_state)");
 }
 
 } // namespace
@@ -72,6 +73,7 @@ std::vector<TopicSpec> EPM::input_topics() const {
             specs.push_back(TopicSpec{input_topic_, std::type_index(typeid(RawAudioFrame))});
             break;
         case EncoderKind::RBF:
+        case EncoderKind::JLState:
             specs.push_back(TopicSpec{input_topic_, std::type_index(typeid(ProprioToken))});
             break;
         case EncoderKind::Identity:
@@ -100,11 +102,12 @@ ParamSchema EPM::params_schema() const {
     return {
         {"modality_group", ParamMutability::ConstructionOnly, "video|audio|proprio|consensus", std::nullopt},
         {"modality_name",  ParamMutability::ConstructionOnly, "Trailing component of output topic", std::nullopt},
-        {"encoder_kind",   ParamMutability::ConstructionOnly, "jl|stft|rbf|identity", std::nullopt},
+        {"encoder_kind",   ParamMutability::ConstructionOnly, "jl|stft|rbf|identity|jl_state (jl_state: the frozen JL projection over a ProprioToken of proprio_state_dims values, L2-normalised before and after -- for a wide, homogeneous state such as a depth matrix, where the RBF grid's bandwidth in that many dimensions flattens every input to the same activation profile (measured on the duck's 64-zone ToF, 2026-09-11: the raw input spread doubled, the RBF latent spread fell to 0.6x); no per-dim ranges, no auto-derived projection_dim)", std::nullopt},
         {"input_topic",    ParamMutability::ConstructionOnly, "Bus topic to subscribe", std::nullopt},
         {"projection_dim", ParamMutability::ConstructionOnly, "GNG input dim.  When OMITTED and `proprio_state_dims` is provided (RBF encoder), derived as max(48, 8 * proprio_state_dims) so the GNG always has enough random-projection capacity for its input to spread into distinguishable clusters.  Empirical floor at pd=48 + per-dim allowance of 8x — phase 7.2-EPM Stage 2 showed pd=24 with 3-D input collapses cluster discrimination (chassis_y -50%, falls 10x), while pd=48 recovers.  Explicit values in config still honoured.", ParamValue{int64_t{128}}},
         {"baking_threshold",        ParamMutability::HotMutable, "GNG baking visit count",      ParamValue{int64_t{50}}},
         {"min_insertion_error",     ParamMutability::HotMutable, "GNG min_insertion_error",     ParamValue{0.02}},
+        {"bake_gate",               ParamMutability::HotMutable, "The consistency gate a node must pass to bake (squared-error EMA); 0 = min_insertion_error, as before. A host freezing insertion by raising min_insertion_error sets this to keep the bake check honest.", ParamValue{0.0}},
         {"lambda_new",              ParamMutability::HotMutable, "GNG lambda_new",              ParamValue{int64_t{25}}},
         {"max_age",                 ParamMutability::HotMutable, "GNG edge max_age",            ParamValue{int64_t{88}}},
         {"epsilon_b",               ParamMutability::HotMutable, "GNG winner LR",               ParamValue{0.05}},
@@ -288,6 +291,7 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     gng_cfg.dim                 = projection_dim_;
     apply_param(params, "baking_threshold",        [&](auto const& v){ gng_cfg.baking_threshold        = int(get_int(v, "baking_threshold")); });
     apply_param(params, "min_insertion_error",     [&](auto const& v){ gng_cfg.min_insertion_error     = float(get_double(v, "min_insertion_error")); });
+    apply_param(params, "bake_gate",               [&](auto const& v){ gng_cfg.bake_gate               = float(get_double(v, "bake_gate")); });
     apply_param(params, "lambda_new",              [&](auto const& v){ gng_cfg.lambda_new              = int(get_int(v, "lambda_new")); });
     apply_param(params, "max_age",                 [&](auto const& v){ gng_cfg.max_age                 = int(get_int(v, "max_age")); });
     apply_param(params, "epsilon_b",               [&](auto const& v){ gng_cfg.epsilon_b               = float(get_double(v, "epsilon_b")); });
@@ -377,6 +381,16 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
             }
             break;
         }
+        case EncoderKind::JLState: {
+            // The JL projection over a state vector: distance-preserving for any input width
+            // (FrozenJLEncoder::make_state_encoder), which is what the RBF grid is not past ~12 dims.
+            if (!proprio_state_dims_seen_flag)
+                throw std::invalid_argument("EPM: encoder_kind='jl_state' needs proprio_state_dims (the input vector's width)");
+            if (params.count("dim_min") || params.count("dim_max"))
+                throw std::invalid_argument("EPM: encoder_kind='jl_state' takes no dim_min/dim_max (homogeneous dims; condition the vector at the source)");
+            enc_jl_ = ami_ogma::v3::FrozenJLEncoder::make_state_encoder(modality_name_, projection_dim_, proprio_state_dims_seen);
+            break;
+        }
         case EncoderKind::Identity:
             // No encoder.  GNG receives input vectors directly.
             break;
@@ -430,6 +444,7 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     // GNG hot-mutable params route into the underlying GNG.
     else if (k == "epsilon_b")        { base_epsilon_b_ = float(get_double(value, k)); gng_->set_epsilon_b(base_epsilon_b_ * epsilon_b_scale_); }
     else if (k == "epsilon_n")        gng_->set_epsilon_n(float(get_double(value, k)));
+    else if (k == "bake_gate") gng_->set_bake_gate(float(get_double(value, k)));
     else if (k == "min_insertion_error") { base_min_insertion_error_ = float(get_double(value, k)); gng_->set_min_insertion_error(base_min_insertion_error_ * min_insertion_error_scale_); }
     else if (k == "baking_threshold") gng_->set_baking_threshold(int(get_int(value, k)));
     else if (k == "max_age")          gng_->set_max_age(int(get_int(value, k)));
@@ -465,6 +480,7 @@ void EPM::handle_input(std::string_view /*topic*/, MessagePtr payload) {
             pending_audio_   = std::dynamic_pointer_cast<const RawAudioFrame>(payload);
             break;
         case EncoderKind::RBF:
+        case EncoderKind::JLState:
             pending_proprio_ = std::dynamic_pointer_cast<const ProprioToken>(payload);
             break;
         case EncoderKind::Identity:
@@ -591,6 +607,11 @@ bool EPM::encode_pending_input(Eigen::VectorXf& out) {
         case EncoderKind::RBF: {
             if (!pending_proprio_ || pending_proprio_->values.size() == 0) return false;
             out = enc_rbf_->encode(pending_proprio_->values.data(), int(pending_proprio_->values.size()));
+            return out.size() == projection_dim_;
+        }
+        case EncoderKind::JLState: {
+            if (!pending_proprio_ || pending_proprio_->values.size() == 0) return false;
+            out = enc_jl_->encode_state(pending_proprio_->values.data(), int(pending_proprio_->values.size()));
             return out.size() == projection_dim_;
         }
         case EncoderKind::Identity: {

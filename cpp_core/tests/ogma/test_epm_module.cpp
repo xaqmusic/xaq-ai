@@ -126,6 +126,62 @@ TEST(EPM, FirstTickProducesBootstrapToken) {
     EXPECT_EQ(tok->latent.size(), 64);   // projection_dim from params
 }
 
+// -- JL state-vector path (2026-09-11) ---------------------------------------
+ogma::ParamMap jl_state_params() {
+    return {
+        {"modality_group",     std::string("proprio")},
+        {"modality_name",      std::string("depth")},
+        {"encoder_kind",       std::string("jl_state")},
+        {"input_topic",        std::string("reality.proprio.depth_in")},
+        {"projection_dim",     int64_t{32}},
+        {"proprio_state_dims", int64_t{64}},
+        {"baking_threshold",   int64_t{10}},
+        {"min_insertion_error", 0.001},
+        {"subtract_descending_prediction", false},
+    };
+}
+TEST(EPM, JlStateModeProjectsAWideVector) {
+    // A 64-wide state (a depth matrix) through the JL projection: unit-norm latents of
+    // projection_dim, and two distinct input patterns become distinct nodes -- the case the
+    // RBF grid flattens (its bandwidth in 64 dims makes every input the same activation profile).
+    EpmFixture f(jl_state_params());
+    EXPECT_EQ(f.epm.input_topics()[0].name, "reality.proprio.depth_in");
+    for (uint64_t t = 0; t < 60; ++t) {
+        f.bus.begin_tick(t);
+        auto p = std::make_shared<ogma::ProprioToken>();
+        p->sensor = "depth_in";
+        p->values.resize(64);
+        for (int i = 0; i < 64; ++i)
+            p->values[i] = ((t / 10) % 2 == 0 ? (i < 32 ? 0.5f : -0.5f) : (i % 2 ? 0.5f : -0.5f))
+                         + 0.01f * float((t * 7 + i * 3) % 11);
+        f.bus.publish("reality.proprio.depth_in", p);
+        f.epm.tick(t);
+        f.bus.end_tick();
+    }
+    auto tok = f.last_token("reality.proprio.depth");
+    ASSERT_NE(tok, nullptr);
+    EXPECT_EQ(tok->latent.size(), 32);
+    EXPECT_NEAR(tok->latent.norm(), 1.0f, 1e-3f);
+    EXPECT_GE(tok->winner_id, 0);
+    EXPECT_GT(f.epm.node_count(), 1);
+}
+TEST(EPM, JlStateRejectsPerDimRanges) {
+    auto params = jl_state_params();
+    params["dim_min"] = std::vector<double>(64, 0.0);
+    params["dim_max"] = std::vector<double>(64, 1.0);
+    ogma::InProcessBus bus;
+    ogma::EPM epm;
+    epm.set_id("epm_test");
+    EXPECT_THROW(epm.on_setup(&bus, params), std::invalid_argument);
+}
+TEST(EPM, JlStateNeedsTheInputWidth) {
+    auto params = jl_state_params();
+    params.erase("proprio_state_dims");
+    ogma::InProcessBus bus;
+    ogma::EPM epm;
+    epm.set_id("epm_test");
+    EXPECT_THROW(epm.on_setup(&bus, params), std::invalid_argument);
+}
 // -- RBF encoder path ------------------------------------------------------
 
 TEST(EPM, RbfModeProducesValidTokenAfterBootstrap) {

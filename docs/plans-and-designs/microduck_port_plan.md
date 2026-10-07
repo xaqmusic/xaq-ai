@@ -20,88 +20,28 @@
 
 ## ▶ Resume here
 
-**State on 2026-09-02.** Branch **`microduck-lean-prior`**, committed through the (d) push test.
-Simulation only — no hardware. Upstream lives *outside* this repo, on purpose:
-`/home/xaqmusic/microduck` (`590b986`) and `/home/xaqmusic/microduck_rl` (`d424a0c`).
+**2026-10-02 (later): the ten-minutes phase opened** — [`microduck_ten_minutes_phase.md`](microduck_ten_minutes_phase.md):
+the goal is ten minutes of interesting behaviour for the plan to Pollen. The instrument (`ten_minutes.py`) measured ★ TURN
+43 % boring; the fragments it walked to were clusters whose top was never seen, and "small needs a seen top" (preset
+"T1 · TOP SEEN") halves the walls; **★ T4** (+ the stop is still, the line, the learned "structure does not answer", the
+impeded look) takes boring to 22 % and was promoted on the operator's eye. Next: the phantom (a tunnel on the track).
 
-**THE DUCK STANDS ON EVERY SEED, AND CATCHES (R19, 2026-09-03, design doc §14).** Six of six seeds
-consolidate inside 15 minutes from scratch, stand at 0.35° tilt with joint motion at the noise
-floor, and catch 2 N shoves 35/36. The lever was the identification schedule: a settle before
-every babble pulse window. Checkpoint `duck_r19_s2.json`; the launcher's `R19 · watch the catch`
-preset shoves it live. Earlier state, kept for the record:
+**2026-10-02: ★ TURN (chase phase §12 — the cold start).** The body mechanics promoted: ★ BIRD's walker (the head slides
+fore-aft, the view level) with the learned gaze, a speed target that turns before it arrives, and the policy's in-place yaw
+deadband compensated when slowed. The operator judges the first minute. The next push is the NAVIGATION — the open items
+are listed at the end of §12.
 
-**THE DUCK STANDS — tall, still, and self-recovering.** Three measured hours: ZERO falls,
-0.083–0.090 mrad/tick joint motion (the consolidated slump's own stillness), upright 1.00,
-pose-distance 0.068 from the calibrated stand pose, |u| 0.34. The authoritative record of
-how is [`microduck_rung2_regime_design.md`](microduck_rung2_regime_design.md) **§7–§10**;
-the one-glance state and resume commands live in the `microduck-frontier` memory.
-
-```sh
-./mj_host/run.sh gates                     # G1/G2/G3/G4, non-zero exit on any failure
-mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json \
-    --secs 1800 --seed 2 --load-brain mj_host/checkpoints/duck_controlled_brain_s2.json
-                                           # the controlled stand, resumed (no --ident flags)
-# from nothing (design doc §12.6): find → hunt → rest, three stages, ~3 min wall
-mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r13_tax001.json --secs 7200 --seed 2 \
-    --ident-every 12 --ident-until 3000 --save-brain find.json
-mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r11_hunt.json   --secs 1800 --seed 2 --load-brain find.json --save-brain hunt.json
-mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json --secs 1800 --seed 2 --load-brain hunt.json --save-brain rest.json
-```
-
-| phase | state |
-|---|---|
-| S0 vendor + build | ✅ MuJoCo 3.12.0 pinned by hash; G1/G3/G4 pass |
-| S1 body + run loop | ✅ G2 passes; cross-checks exactly against an independent Python implementation |
-| A2 recovery harness | ✅ built *before* A1 with a stub brain, since it needs a brain that fails |
-| observation path | ✅ `run.sh` + `tools/duck_viewer`; the viewer draws the host's `qpos` and never simulates |
-| A1 / A1-v2 state prior | ✅ superseded by the rung-2 line (§"A1-v2" below is the history) |
-| **rung-2: slump standing** | ✅ **3/6 seeds permanent (`a1v2_r3_consol.json`, `4f7b0c2`)** |
-| **tall standing** | ✅ **seed 2 permanent (`a1v2_r8_tall.json`, `c647d02`); other seeds hover tall, lose the race** |
-| **controlled standing** | ✅ **3 h zero-fall stillness (`a1v2_r12c_whole.json` + checkpoint, `9cd982e`)** |
-| **(d) push-test** | ✅ **measured** (design doc §11): the consolidation loop re-infers — c collapses on a fall, the stance is re-found and re-earned in 38 s, 20/20 cycles, 4/6 full re-inferences after destruction. The stance itself has **no active catch**: knocked over at 0.15–0.2 N·s (the scaffold at ~0.7), identically at 5–10× gain |
-| **a catch (balance reflex)** | ✅ **R19 catches** (§14, 2026-09-03): a settle before every identification pulse window (`--ident-every 6`, head hold 6) — the right leg and the head had been identified from a moving body and their lean rows had the wrong sign. Now **6/6 seeds stand inside 15 min** (2–3 rescues in 2 h, tilt 0.35°, \|u\| 0.18) and **catch 2 N 35/36** (3 N 13/36; the scaffold catches 3–5 N). Checkpoint `duck_r19_s2.json`. Wind NULL (§12.4), attitude weight REGRESSION (§13), pulse horizon REGRESSION (§14.1); the §13.3 model reading was a layout error, corrected |
-| **from-scratch pipeline** | ✅ **superseded by R19** (§14.5): from nothing to a consolidated, still, catching stand on every seed in 15 min — no hunt or rest needed for stillness. The R13 → R11 → R12c chain below remains the record of how the old stance was made. ✅ repaired (§12.3): ratchet v3's per-fall tax had silently broken the race since `6fac760`; `a1v2_r13_tax001.json` (R8 + `consolidate_down_rate` 0.001) stands seed 2 permanently from 30 min again. **End to end (§12.6): find R13 2 h → hunt R11 30 min → rest R12c = zero falls, 0.1 mrad/tick, from nothing.** The direct R13→R12c hand-over fails; the hunt is load-bearing. Checkpoint `duck_pipeline_s2.json` |
-| seed-robustness | ✅ **6/6 under R19** (§14.5) — the race-variance gap was one-sided identification |
-| **the intent boundary, phase 1** | ✅ **closed** (§16, 2026-09-03): 1a the hand-off fires on the brain's own attitude error; 1b a walk on request drives Pollen's `alpha_walking` as their runtime does (vendored by `scripts/fetch_scaffolds.sh`); 1c Pollen's contact odometry ported (`Odometry.*`, 4–6 % of distance); 1e the level-2 brain (`--level2`, `a1v2_r20_l2_ident.json`, `IntentAdapter`) identifies which twist moves the body which way — a positive dominant diagonal at every pulse length, failing only inside the walker's standing regime. Next: the first level-2 prior (walk straight) |
-| **level-2 control: heading regulation** | ✅ **LOUD** (§16.5–16.6, 2026-09-03): a prior on the sensed forward speed and on the heading (the odometry yaw's deviation from its own slow running average) walks at the walker's top speed and, shoved 2 N every 40 s, is back within 3° of its heading 20 s later, 20/20, no rescues; the open-loop walker ends 109° off. Homeokinetic learning at this level spins the body (the efference limit cycle one level up) — the prior alone is the controller. `a1v2_r22_l2_heading.json` |
-| **phase 1d, the ToF** | ✅ (§17.1): the 8×8 depth matrix cast with MuJoCo rays against world geometry, Pollen's classifier ported, gated on a wall ahead and the arena; beams drawn in the viewer; `scene_arena.xml` |
-| **phase 2, Wander/Chill** | ⚙ **the arbitration fork** (§17.2–17.4): avoidance priors give 0 wall contacts but an orbit (R23); the map EPM learns the arena (34 nodes ≈ 33 cells) but a surprise prior has no gradient (R24, NULL); heading + avoidance in one linear pull rides the walls at 297 contacts/min (R25, REGRESSION). Decide: online identification of the world channels (`babble_owns_a` 0 at level 2) and behaviours as voter-arbitrated loops, before the drive question |
-| **the step (intent boundary phase 0)** | ✅ **the hand-off works** (§15, 2026-09-03): past 6.5° of rising lean the walker takes the joints and staggers through it — 3 N **36/36** upright across six brains (13/36 without), 5 N 6/6 (1/6 without), never fires at 1–2 N, the reflex unchanged after a 20-min soak. `--step-lean`; launcher preset "the step". Twist not load-bearing (default 0). Next: phase 1, the trigger as a brain-published scalar |
-| S2 / S3 / B1–B3 | not started |
-
-### Also parked
-
-A written, tested, **unsubmitted** upstream PR exposing joint velocities and currents on
-`robot.state` — branch `state-velocities-currents` in the microduck clone. Opening it is the
-operator's call (REPORTS.md §9.6).
-
-### Traps a fresh session should not re-learn
-
-- **Every new test config goes through `tools/duck_launcher/newtest.py`** (operator convention,
-  2026-09-03): it takes the next R number, names the config `R<nn> · …` at launcher rank 1000 + nn,
-  and writes its preset, so the launcher lists tests in the order they were made with the newest
-  marked ◀ latest. Milestones are `★`, instruments are `PROBE ·`. At a milestone, prune the refuted
-  tests out of the whitelist (drop the rank; keep the file) and promote the winner to a ★ name.
-- **The from-scratch stage is R13, not R8.** Under ratchet v3 the R8 config plateaus at c ≈ 0.4
-  (§12.3); use `a1v2_r13_tax001.json` to find and consolidate, and the R12c stack to rest.
-- **Run logs are big (~190 MB per sim-hour) and `/tmp` is a quota'd tmpfs.** Write batteries to
-  `mj_host/log/` (gitignored, on the main disk); a full `/tmp` takes the shell down with it.
-- **`--seed` does nothing on `--load-brain`.** The RNG state is restored with the brain, so two
-  resumes at different seeds are byte-identical. Variance on a checkpoint comes only from what
-  you do to it (the push schedule); seed-robustness is a from-scratch question.
-
-- **Picrawler joint indices are baked into MotorEPM's biases.** `height_homeo_gain` applies
-  `y[1] += …` because index 1 is *hip2* on a picrawler; on a duck leg it is `hip_roll`, a lateral
-  joint. Borrowing that homeostat splays the legs sideways and looks fine in the metrics.
-- **The postural reflex defends a joint pose, not a height** — its sibling's docstring says so.
-  On a body already in that pose it can do nothing.
-- **`tilt_deg()` and `trunk_position()` are world-frame instrumentation.** No brain subscribes to
-  them; the recovery harness deliberately uses projected gravity so the same criterion runs on
-  hardware.
-- **Never edit a `cpp_core` module on this branch** (§Coordination). G5 — the picrawler staying
-  byte-identical — is checked at both ends.
-
----
+**State on 2026-09-30 evening: the chase phase's campaign is at a resting point. Start at
+[`microduck_chase_phase.md`](microduck_chase_phase.md) §9 (the cold start: the arms, the numbers, the instruments,
+the open levers in order, the traps), then design doc §17.72–17.86.** The arm on the operator's criterion is
+**★ R113 on the contact brain**: the walk goes where its loops point (the heading reflex with the seek gate, the
+progress forget), the walker turns off walls it learned in a 1 m contact room (the contact regime, §17.85), the
+head still for the ToF. The expressive alternative is the six-motor lean with the head home at stops (§17.86):
+tighter turns and more arrivals for more wall brushes and a busier head; the eye decides. Head yaw as a walker
+motor is refuted four ways. The next lever the operator asked for is looking around while walking: the walker's
+ToF slots into the body frame first, then a head-brain yaw sweep on the walk. Before that, the things phase
+([`microduck_things_phase.md`](microduck_things_phase.md) §10–13) and the chase phase's stages 0–1 (§4–7) stand
+as recorded.
 
 ## Two goals, and they put the Markov blanket in different places
 

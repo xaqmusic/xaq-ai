@@ -170,6 +170,8 @@ add_library(ogma_core
     src/ogma/DiagPublisher.cpp
     src/ogma/modules/NeurochemState.cpp
     src/ogma/modules/EPM.cpp
+    src/ogma/modules/CloudMap.cpp
+    src/ogma/modules/MotionField.cpp
     src/ogma/modules/LateralVoter.cpp
     src/ogma/modules/HomeostaticDrive.cpp
     src/ogma/modules/ActionDecoder.cpp
@@ -206,6 +208,10 @@ add_library(ogma_core
     src/ogma/modules/SaccadeReflex.cpp
     src/ogma/modules/CylinderBuilder.cpp
     src/ogma/modules/PlaceVectorBuilder.cpp
+    src/ogma/modules/LoopCompetence.cpp
+    src/ogma/modules/TofAvoidLoop.cpp
+    src/ogma/modules/BearingSeekLoop.cpp
+    src/ogma/modules/SkillOutcomeLoop.cpp
     src/ogma/modules/ColumnBuilder.cpp
     src/ogma/modules/PlaceGraphPlanner.cpp
     src/ogma/modules/PlayLoop.cpp
@@ -516,6 +522,12 @@ target_link_libraries(test_schema_defaults_effective PRIVATE ogma_core GTest::gt
 add_executable(test_place_vector_builder tests/ogma/test_place_vector_builder.cpp)
 target_link_libraries(test_place_vector_builder PRIVATE ogma_core GTest::gtest_main pthread)
 
+# Cell round 4 -- a loop graded by whether the world moves as it says (register O21)
+add_executable(test_loop_competence tests/ogma/test_loop_competence.cpp)
+target_link_libraries(test_loop_competence PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_tof_avoid_loop tests/ogma/test_tof_avoid_loop.cpp)
+target_link_libraries(test_tof_avoid_loop PRIVATE ogma_core GTest::gtest_main pthread)
+
 # W3.6 — disk-round-trip smoke test.  Serialises snapshot via dump()/parse()
 # through a temp file before restore, catching float-precision losses that
 # the in-memory clone() path can't surface.
@@ -587,6 +599,18 @@ gtest_discover_tests(test_motor_fader_streams)
 gtest_discover_tests(test_motor_epm)
 gtest_discover_tests(test_postural_prior)
 gtest_discover_tests(test_state_prior)
+add_executable(test_skill_outcome_loop tests/ogma/test_skill_outcome_loop.cpp)
+target_link_libraries(test_skill_outcome_loop PRIVATE ogma_core GTest::gtest_main pthread)
+gtest_discover_tests(test_skill_outcome_loop)
+add_executable(test_bearing_seek_loop tests/ogma/test_bearing_seek_loop.cpp)
+target_link_libraries(test_bearing_seek_loop PRIVATE ogma_core GTest::gtest_main pthread)
+gtest_discover_tests(test_bearing_seek_loop)
+add_executable(test_motion_field tests/ogma/test_motion_field.cpp)
+target_link_libraries(test_motion_field PRIVATE ogma_core GTest::gtest_main pthread)
+gtest_discover_tests(test_motion_field)
+add_executable(test_cloud_map tests/ogma/test_cloud_map.cpp)
+target_link_libraries(test_cloud_map PRIVATE ogma_core GTest::gtest_main pthread)
+gtest_discover_tests(test_cloud_map)
 gtest_discover_tests(test_keyframe_gait)
 gtest_discover_tests(test_body_rhythm_tracker)
 gtest_discover_tests(test_gain_evolver)
@@ -623,5 +647,9 @@ gtest_discover_tests(test_keyframe_averager_streams)
 # ---------------------------------------------------------------------------
 add_executable(epm_kalman_bench bench/epm_kalman_bench.cpp)
 target_link_libraries(epm_kalman_bench PRIVATE ogma_core pthread)
+
+# epm_tof_study — the real EPM over recorded duck ToF frames (the ToF studies, 2026-09-12)
+add_executable(epm_tof_study bench/epm_tof_study.cpp)
+target_link_libraries(epm_tof_study PRIVATE ogma_core pthread)
 
 endif() # OGMA_BUILD_TESTS

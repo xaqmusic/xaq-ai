@@ -1,0 +1,116 @@
+{
+ "metadata": {
+  "name": "H2/3 the learned gaze + the per-tick step 0.3",
+  "description": "H2/3 the learned gaze + the MODEL-IMPLIED STEP at gain 0.3 as its proportional term: each tick the least-squares command over the prior's rows of the identified model (level pitch, level roll, the gaze error; weighted by state_prior_weights) is added pre-tanh -- proportional, bounded by the model rather than grown by a descent; the gaze stays a pure reach in its descent, yaw last, the level priors' descent masked to pitch and roll",
+  "launcher_rank": 0
+ },
+ "description": "H2/3 the learned gaze + the MODEL-IMPLIED STEP at gain 0.3 as its proportional term: each tick the least-squares command over the prior's rows of the identified model (level pitch, level roll, the gaze error; weighted by state_prior_weights) is added pre-tanh -- proportional, bounded by the model rather than grown by a descent; the gaze stays a pure reach in its descent, yaw last, the level priors' descent masked to pitch and roll",
+ "modules": [
+  {
+   "id": "head_bridge",
+   "type": "JointSensorimotorBridge",
+   "params": {
+    "proprio_input_topic": "reality.proprio.head",
+    "action_topics": [
+     "action.head_pitch",
+     "action.head_roll",
+     "action.head_yaw"
+    ],
+    "output_topics": [
+     "reality.motor_limb.head"
+    ],
+    "proprio_indices": [
+     1.0,
+     3.0,
+     2.0
+    ],
+    "group_size": 3,
+    "sensor_label_prefix": "motor_limb",
+    "load_topic": "reality.proprio.head_sense",
+    "load_slots": 12
+   }
+  },
+  {
+   "id": "motor_epm_head",
+   "type": "MotorEPMv2",
+   "params": {
+    "proprio_topics": [
+     "reality.motor_limb.head"
+    ],
+    "action_topics": [
+     "action.head_pitch",
+     "action.head_roll",
+     "action.head_yaw"
+    ],
+    "n_legs": 1,
+    "motor_dim": 3,
+    "model_lr": 0.0,
+    "ctrl_lr": 0.0,
+    "bias_lr": 0.0,
+    "reg_eps": 0.01,
+    "max_dctrl": 0.05,
+    "init_scale": 0.01,
+    "seed": 7171,
+    "babble_ticks": 0,
+    "babble_scale": 0.3,
+    "babble_isolate": 1.0,
+    "babble_hold": 25,
+    "babble_owns_a": 0,
+    "sat_lr": 0.0,
+    "c_init": 1.0,
+    "motor_gain": 1.0,
+    "explore_noise": 0.0,
+    "coupling_gain": 0.0,
+    "stroke_gain": 0.0,
+    "balance_gain": 0.0,
+    "heading_gain": 0.0,
+    "nav_gain": 0.0,
+    "postural_gain": 0.0,
+    "amp_homeo_gain": 0.0,
+    "height_homeo_gain": 0.0,
+    "coord_reward_drive": 0.0,
+    "panic_strength": 0.0,
+    "imu_topic": "reality.proprio.imu",
+    "state_model_lr": 0.0,
+    "model_trace": 0.05,
+    "reset_breaks_model_pairing": 1.0,
+    "state_prior_gain": 1.0,
+    "consolidate_gain": 0.0,
+    "state_prior_indices": [
+     9,
+     10,
+     -1
+    ],
+    "state_prior_targets": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "state_prior_lr": 0.02,
+    "consolidate_n": 0,
+    "state_prior_weights": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "state_prior_c_weights": [
+     1.0,
+     1.0,
+     0.0
+    ],
+    "state_prior_motors": [
+     2,
+     2,
+     0
+    ],
+    "state_prior_step_gain": 0.3
+   }
+  }
+ ],
+ "version": 1,
+ "runtime": {
+  "thread_pool": "per_instance",
+  "num_threads": 0
+ },
+ "edges": []
+}

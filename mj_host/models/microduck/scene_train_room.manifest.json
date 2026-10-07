@@ -1,0 +1,79 @@
+{
+ "seed": 1,
+ "half": 1.25,
+ "objects": [
+  {
+   "name": "wall_px",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 1.25
+  },
+  {
+   "name": "wall_nx",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 1.25
+  },
+  {
+   "name": "wall_py",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 1.25
+  },
+  {
+   "name": "wall_ny",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 1.25
+  },
+  {
+   "name": "mov_train0",
+   "cls": "self_moving",
+   "kind": "train",
+   "x": -0.0,
+   "y": 0.875,
+   "z": 0.05,
+   "extent": 0.18,
+   "yaw": 3.142,
+   "path": [
+    0.0,
+    0.0,
+    0.875,
+    0.8,
+    1.5708
+   ],
+   "perimeter": 5.265,
+   "size": [
+    0.18,
+    0.1,
+    0.14
+   ]
+  }
+ ],
+ "xml_sha256": "bb7e0f285d6d1851",
+ "free_bodies": [
+  "mov_train0"
+ ],
+ "hinges": [],
+ "qpos_robot": 21,
+ "qpos_layout": [
+  [
+   "mov_train0",
+   21,
+   7
+  ]
+ ],
+ "nq": 28
+}

@@ -128,7 +128,7 @@ DryRunReport dry_run(Graph const& g, Wiring const& w, Body const* body, int tick
     }
     if (body)
         for (auto const& s : body->sinks)
-            (bus->last_value(s.topic) ? r.actions_seen : r.actions_missing).push_back(s.topic);
+            (bus->last_value(s.topic) ? r.actions_seen : s.optional ? r.actions_idle : r.actions_missing).push_back(s.topic);
     return r;
 }
 

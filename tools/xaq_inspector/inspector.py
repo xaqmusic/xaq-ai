@@ -23,7 +23,7 @@ from PyQt6.QtGui import QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QListWidget, QListWidgetItem, QSplitter,
     QStackedWidget, QStatusBar, QVBoxLayout, QWidget, QLabel,
-    QPushButton, QHBoxLayout, QSpinBox, QMessageBox, QLineEdit,
+    QPushButton, QHBoxLayout, QSpinBox, QMessageBox, QLineEdit, QComboBox,
 )
 
 from .transport import ControlClient, DiagSubscriber, DiagPayload
@@ -130,6 +130,7 @@ class InspectorWindow(QMainWindow):
         header = QLabel("Modules")
         header.setStyleSheet("color:#fff; font-weight:bold; font-size: 13px;")
         left_layout.addWidget(header)
+        self._modules_header = header
 
         self._list = QListWidget()
         self._list.itemActivated.connect(self._on_module_activated)
@@ -153,6 +154,25 @@ class InspectorWindow(QMainWindow):
             row.addWidget(edit, 1)
             setattr(self, attr, edit)
             left_layout.addLayout(row)
+
+        # Which brain (2026-10-02).  The duck's MuJoCo host runs up to three brains, each serving its own pair of
+        # ports from the base (OGMA_INSPECTOR_PORT, default 7400): the walker / intent brain at +0, the head brain at +2,
+        # the stop's stand brain at +4 (diag = control + 1).  Picking one re-points both fields and reconnects.
+        brain_row = QHBoxLayout()
+        lab = QLabel("brain")
+        lab.setMinimumWidth(46)
+        brain_row.addWidget(lab)
+        self._brain = QComboBox()
+        for name, off in (("intent / walker  (+0)", 0), ("head  (+2)", 2), ("stand  (+4)", 4)):
+            self._brain.addItem(name, off)
+        self._brain.setToolTip("the duck host's brains: control port = base + offset, diag = control + 1")
+        # a remembered endpoint at 7402 / 7404 reopens on that brain; any other port is the base itself
+        off = int(self.control.port) - 7400
+        self._brain_offset = off if off in (0, 2, 4) else 0
+        self._brain.setCurrentIndex({0: 0, 2: 1, 4: 2}[self._brain_offset])
+        self._brain.activated.connect(self._on_brain_picked)
+        brain_row.addWidget(self._brain, 1)
+        left_layout.addLayout(brain_row)
 
         # Subscribe rate selector
         rate_row = QHBoxLayout()
@@ -218,6 +238,18 @@ class InspectorWindow(QMainWindow):
 
     # ----- module list / subscription -----
 
+    def _on_brain_picked(self, _index: int) -> None:
+        """Re-point both fields at the picked brain's ports (keeping the host and the base) and reconnect."""
+        c_host, c_port = parse_endpoint(self._ctl_edit.text(), _DEFAULT_HOST, 7400)
+        d_host, _ = parse_endpoint(self._diag_edit.text(), _DEFAULT_HOST, 7401)
+        old_off = getattr(self, "_brain_offset", 0)
+        base = c_port - old_off
+        off = int(self._brain.currentData() or 0)
+        self._brain_offset = off
+        self._ctl_edit.setText(f"{c_host}:{base + off}")
+        self._diag_edit.setText(f"{d_host}:{base + off + 1}")
+        self._refresh_modules()
+
     def _refresh_modules(self) -> None:
         # Force a fresh control-socket connection on every refresh.
         # When Godot relaunches, the prior TCP socket is dead but
@@ -264,6 +296,8 @@ class InspectorWindow(QMainWindow):
             self._current_widget = None
             self._right.setCurrentWidget(self._placeholder)
         self._modules = list(resp.get("modules", []))
+        brain = resp.get("brain")
+        self._modules_header.setText(f"Modules — {brain} brain" if brain else "Modules")
         self._list.clear()
         for m in self._modules:
             item = QListWidgetItem(f"{m.get('id')}   ({m.get('type')})")

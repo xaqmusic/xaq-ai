@@ -8,7 +8,7 @@
 namespace bb {
 
 struct BodySource { std::string name, topic, prefix, payload = "ProprioToken", description; int dims = 0; bool optional = false; };
-struct BodySink   { std::string name, topic, payload = "ActionOut", description; };
+struct BodySink   { std::string name, topic, payload = "ActionOut", description; bool optional = false; };   // optional: driven only by some configs (a host flag)
 struct BodyRead   { std::string name, topic, payload = "RealityToken", description; };
 struct BodyEvent  { std::string name, topic, event_type, description; };
 

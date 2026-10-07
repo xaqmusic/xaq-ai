@@ -1,3 +1,4 @@
+#include "BrainTape.hpp"
 #include "OgmaBrainAdapter.hpp"
 
 #include <algorithm>
@@ -44,9 +45,12 @@ OgmaBrainAdapter::OgmaBrainAdapter(const DuckBody& body, Config config) : c_(std
         }
     }
 
+    if (g_brain_tape) g_brain_tape->config(2, cfg.to_json());
+
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg),
                                                      std::make_unique<ogma::InProcessBus>());
-    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, c_.graph_path);
+    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, c_.graph_path, c_.inspector_offset,
+                                                    c_.inspector_role);
 
     // The action topics this host polls, one per policy joint, named after the
     // joint itself. The graph config must publish exactly these.
@@ -75,6 +79,7 @@ void OgmaBrainAdapter::publish_sensors(const DuckBody& body) {
         p->values.resize(int(values.size()));
         for (size_t i = 0; i < values.size(); ++i) p->values[int(i)] = values[i];
         bus->publish(std::string("reality.proprio.") + sensor, p);
+        if (g_brain_tape) g_brain_tape->token(2, tick_id_, std::string("reality.proprio.") + sensor, sensor, "host", values.data(), uint32_t(values.size()));
     };
 
     // joints — centred on the home pose and scaled by the command amplitude, so
@@ -189,7 +194,11 @@ std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body)
     std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
     publish_sensors(body);
 
+    if (g_brain_tape) g_brain_tape->tick(2, tick_id_);
+
     instance_->tick();
+
+    if (g_brain_tape) g_brain_tape->actions(2, *instance_);
     inspector_->publish_tick(tick_id_);
 
     // Poll AFTER the tick and BEFORE bumping the tick id: modules stamped their
@@ -249,6 +258,7 @@ void OgmaBrainAdapter::on_reset() {
     ev->name = "reset";
     ev->intensity = 1.0f;
     instance_->bus()->publish("events.reset", ev);
+    if (g_brain_tape) g_brain_tape->event(2, tick_id_, "events.reset", "reset", "host", 1.0f);
     last_u_.fill(0.0);
     // The servo filter must RE-SEED at the handback pose, or the first post-rescue
     // commands are dragged toward stale pre-fall targets — the exact step-change
@@ -264,6 +274,26 @@ void OgmaBrainAdapter::set_learning(bool on) {
 void OgmaBrainAdapter::set_regime_learning(bool on) {
     regime_ok_ = on;
     apply_freeze_state();
+}
+
+void OgmaBrainAdapter::freeze_module(const std::string& id) {
+    static const char* const kRates[] = {"model_lr", "ctrl_lr", "bias_lr", "sat_lr",
+                                         "state_prior_lr", "state_prior_h_lr", "state_model_lr"};
+    module_frozen_.insert(id);
+    bool found = false;
+    for (auto* module : instance_->modules()) {
+        if (std::string(module->id()) != id) continue;
+        found = true;
+        const auto params = module->current_params();
+        for (const char* rate : kRates) {
+            auto it = params.find(rate);
+            if (it == params.end()) continue;
+            if (const double* v = std::get_if<double>(&it->second)) frozen_rates_[id + ":" + rate] = *v;
+            tape_param(2, module, rate, ogma::ParamValue{0.0});
+        }
+        std::fprintf(stderr, "  freeze: %s for the rest of the run (its commands are not applied)\n", id.c_str());
+    }
+    if (!found) std::fprintf(stderr, "  !! freeze_module: no module %s in this graph\n", id.c_str());
 }
 
 void OgmaBrainAdapter::apply_freeze_state() {
@@ -299,12 +329,13 @@ void OgmaBrainAdapter::apply_freeze_state() {
                     std::fprintf(stderr, "  freeze: %s %s %.4f -> 0\n", id.c_str(), rate, *v);
             }
             if (on) {
+                if (module_frozen_.count(id)) continue;    // frozen for good (freeze_module)
                 auto saved = frozen_rates_.find(key);
                 if (saved != frozen_rates_.end())
-                    module->on_param_change(rate, ogma::ParamValue{saved->second});
+                    tape_param(2, module, rate, ogma::ParamValue{saved->second});
             } else {
                 if (const double* v = std::get_if<double>(&it->second)) frozen_rates_[key] = *v;
-                module->on_param_change(rate, ogma::ParamValue{0.0});
+                tape_param(2, module, rate, ogma::ParamValue{0.0});
                 reported = true;
             }
         }
@@ -363,6 +394,17 @@ std::vector<double> OgmaBrainAdapter::consolidation() const {
         out.push_back(d.contains("consolidate_c") ? d["consolidate_c"].get<double>() : 0.0);
     }
     return out;
+}
+
+double OgmaBrainAdapter::motor_tle() const {
+    double worst = -1.0;
+    for (auto* m : instance_->modules()) {
+        const std::string type(m->type_name());
+        if (type != "MotorEPM" && type != "MotorEPMv2") continue;
+        const auto d = m->diag_lite();
+        if (d.contains("motor_tle")) worst = std::max(worst, d["motor_tle"].get<double>());
+    }
+    return worst;
 }
 
 std::vector<double> OgmaBrainAdapter::attitude_error() const {
@@ -576,7 +618,7 @@ nlohmann::json OgmaBrainAdapter::brain_state() const {
     return instance_->snapshot_state();
 }
 
-void OgmaBrainAdapter::restore_brain_state(nlohmann::json const& s) {
+void OgmaBrainAdapter::restore_brain_state(nlohmann::json const& s) { if (g_brain_tape) g_brain_tape->restore(2, s.dump());
     instance_->restore_state(s);
 }
 

@@ -440,3 +440,23 @@ TEST(GNG, KalmanStateSerialisation) {
     EXPECT_FALSE(j2.contains("gain_kind"));
     EXPECT_FALSE(j2["nodes"][0].contains("p"));
 }
+
+// THE BAKE GATE (2026-10-04, microduck design doc §17.108): a host that freezes insertion by raising min_insertion_error
+// also opened the bake check -- a noisy node baked unchecked; bake_gate keeps the consistency check at its own value.
+TEST(GNG, BakeGateKeepsTheConsistencyCheckWhenInsertionIsFrozen) {
+    auto run = [](float bake_gate) {
+        GNG::Config cfg;
+        cfg.dim = 16; cfg.baking_threshold = 10; cfg.lambda_new = 100000;
+        cfg.min_insertion_error = 1e9f;     // insertion frozen, as the duck's --map-on-stop does on walks
+        cfg.bake_gate = bake_gate;
+        GNG gng(cfg);
+        std::mt19937 rng(7); std::normal_distribution<float> n(0.0f, 1.0f);
+        for (int i = 0; i < 400; ++i) {
+            Eigen::VectorXf v(16); for (int k = 0; k < 16; ++k) v[k] = n(rng);
+            gng.step(v / v.norm());
+        }
+        return gng.baked_count();
+    };
+    EXPECT_GT(run(0.0f), 0) << "the defect: with the gate at the frozen floor every visited node bakes";
+    EXPECT_EQ(run(0.06f), 0) << "noise this wide never passes a 0.06 consistency gate";
+}

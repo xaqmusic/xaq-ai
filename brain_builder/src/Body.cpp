@@ -35,6 +35,7 @@ Body Body::load(std::string const& path) {
         BodySink x;
         x.name = s.value("name", ""); x.topic = s.value("topic", "");
         x.payload = s.value("payload", "ActionOut"); x.description = s.value("description", "");
+        x.optional = s.value("optional", false);
         b.sinks.push_back(std::move(x));
     }
     for (auto const& s : j.value("reads", nlohmann::json::array())) {

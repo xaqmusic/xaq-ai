@@ -22,6 +22,7 @@ struct DryRunReport {
     std::vector<std::string> silent;           // module outputs never published
     std::vector<std::string> actions_seen;     // body sinks that received a value
     std::vector<std::string> actions_missing;  // body sinks that did not
+    std::vector<std::string> actions_idle;     // optional body sinks this config does not drive
 };
 
 DryRunReport dry_run(Graph const& g, Wiring const& w, Body const* body, int ticks);

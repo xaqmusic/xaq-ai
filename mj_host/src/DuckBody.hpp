@@ -82,6 +82,30 @@ public:
     bool touching_wall() const;
     // Relocate a world geom mid-episode (the (d) test: move a wall and watch the map re-learn).
     void move_geom(const char* name, const std::array<double, 3>& pos);
+    // The playroom's instruments and levers (mj_host/tools/playroom_gen.py). All world-frame,
+    // for the reader; no brain subscribes to any of them.
+    //   touching_object: contact with a movable body (named obj_*).
+    //   n_objects:       how many movable bodies the scene has (0 in the arena: the JSONL
+    //                    then carries no `obj` field, so arena logs stay byte-identical).
+    //   move_body:       relocate a movable (its free joint), a static furniture body, or a
+    //                    world geom, by name, to (x, y) keeping its height and orientation.
+    //   spin_joint:      hold a free hinge (the clock hand) at a constant rate.
+    bool touching_object() const;
+    int  n_objects() const { return n_objects_; }
+    void move_body(const char* name, double x, double y);
+    // A movable placed at (x, y) and set rolling at (vx, vy): the orienting reflex's stimulus (a harness
+    // action, like a shove).  body_xy reads any body's world position (truth, for the harness's metrics).
+    void roll_body(const char* name, double x, double y, double vx, double vy);
+    std::array<double, 2> body_xy(const char* name) const;
+    // THE TRAIN (chasing moving things, 2026-09-27): a free body driven KINEMATICALLY -- its pose and velocity
+    // written every tick, so contacts see a mover that does not yield (a toy train on its track).  A harness
+    // action; no brain reads any of it.  numeric() reads a <custom><numeric> block of the scene (the track's
+    // geometry lives in the model, beside the body it belongs to); empty when the scene has none.
+    void place_free_body(const char* name, double x, double y, double z, double yaw, double vx, double vy, double wz);
+    std::vector<double> numeric(const char* name) const;
+    double trunk_yaw() const;   // the trunk's world yaw (truth; the harness's use only)
+    bool has_joint(const char* name) const { return mj_name2id(m_, mjOBJ_JOINT, name) >= 0; }
+    void spin_joint(const char* name, double rad_per_s);
     // A site's world pose (position and rotation matrix), for casting rays from it.
     void site_world(const char* site, std::array<double, 3>& pos, std::array<double, 9>& mat) const;
     // A site's pose relative to the trunk body frame — forward kinematics, a pure
@@ -113,6 +137,11 @@ public:
     // notes on why each is hardware-computable from the single trunk IMU.
     std::array<double, 3> accel() const;            // imu_accel, m/s^2, gravity included
     std::array<double, 3> head_gravity() const;     // projected gravity IN THE HEAD FRAME
+    // The head IMU's gyro (rad/s, head frame): the `head_gyro` sensor the playroom overlay
+    // adds on the head_imu site (H0). Zeros when the scene has no such sensor (the vendored
+    // model), so nothing else changes. Hardware: the ToF board's IMU.
+    std::array<double, 3> head_gyro() const;
+    bool has_head_gyro() const { return head_gyro_adr_ >= 0; }
     std::array<double, 2> head_com_trunk() const;   // head-subtree CoM offset, trunk frame x/y (m)
 
     // Trunk-frame angular velocity, rad/s, from the model's own gyro sensor.
@@ -128,6 +157,9 @@ public:
 
     // Trunk position in the world frame. Same rule: instrumentation only.
     std::array<double, 3> trunk_position() const;
+    // O36 instrument: the whole robot's centre of mass over the feet -- [forward, left, height] in the trunk's
+    // heading frame, relative to the midpoint of the two sole geoms (truth, for the harness's record)
+    std::array<double, 3> com_over_feet() const;
 
     // Full generalized position, including the trunk's free joint. Not an
     // observation and never published to a brain: it is what a viewer needs in
@@ -151,6 +183,10 @@ private:
     std::array<int, kNumPolicyJoints> qvel_adr_{};   // into d_->qvel
     std::array<int, kNumPolicyJoints> actuator_{};   // into d_->ctrl
     int trunk_body_  = -1;
+    int    n_objects_ = 0;                    // bodies named obj_*
+    int    head_gyro_adr_ = -1;               // sensordata address of head_gyro, or -1
+    bool   robot_contact(int i, int& other_geom) const;   // is contact i the robot's, and with which geom
+    std::vector<char> qpos_is_robot_;         // per qpos index: does the robot own it (reset noise)
     std::array<double, 3> push_{};
     int push_ticks_ = 0;
     int quat_adr_    = -1;   // into d_->sensordata, framequat on the imu site

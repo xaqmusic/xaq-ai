@@ -31,6 +31,7 @@
 
 #include <array>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <utility>
@@ -72,6 +73,10 @@ public:
         // the sense channel publishes deviations FROM this, so the standing pose
         // is the origin of the head-CoM observation too.
         std::vector<double> head_com0;
+        // The inspector surface's port offset and role (2026-10-02): 0 = 7400/7401 (the level-1 brain, or the only
+        // one); the stop's stand brain serves at +4 (7404/7405) so it never contends with the walker's.
+        int inspector_offset = 0;
+        std::string inspector_role;
     };
 
     OgmaBrainAdapter(const DuckBody& body, Config config);
@@ -84,6 +89,9 @@ public:
     void on_reset() override;
     void set_learning(bool on) override;
     void set_regime_learning(bool on);   // the learnable-regime gate (see note above)
+    // Freeze ONE MotorEPM module's learning for the rest of the run (W2: the joint brain's head module
+    // while another brain owns the head — its commands are not applied, so it must not fit the pairing).
+    void freeze_module(const std::string& id);
 
 private:
     void apply_freeze_state();
@@ -104,6 +112,9 @@ public:
     // Each MotorEPM's attitude-prior instant error (the gate subset's |e| mean), in graph
     // order: the brain's own saturation signal for the step hand-off.
     std::vector<double> attitude_error() const;
+    // The joint brain's own forward-model surprise (diag_lite motor_tle), for the body-error
+    // channel §17.28 found missing: nothing predicts the duck's body while the walker drives.
+    double motor_tle() const;
 
     // robotd's deployed joint-target low-pass (head 0.5, legs 0.7). Off = raw
     // commands (legacy, byte-identical).
@@ -152,6 +163,7 @@ private:
     std::vector<std::pair<double, double>> range_;    // per policy joint, from the model
     // Learning rates parked while the scaffold drives, keyed "<module id>:<param>".
     std::map<std::string, double> frozen_rates_;
+    std::set<std::string> module_frozen_;              // never thawed by apply_freeze_state
     bool learning_ = true;        // the scaffold axis (BrainLike::set_learning)
     bool regime_ok_ = true;       // the regime axis
     bool frozen_now_ = false;     // what is actually applied (either axis)

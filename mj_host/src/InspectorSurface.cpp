@@ -16,7 +16,7 @@
 namespace mjhost {
 
 InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_mutex& mtx,
-                                   std::string source_path)
+                                   std::string source_path, int port_offset, std::string role)
     : instance_(instance), mtx_(mtx) {
     live_ = std::make_unique<ogma::LiveGraph>(instance, std::move(source_path));
     uint16_t control_port = 7400;
@@ -25,17 +25,19 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
         if (p == 0) return;                       // disabled on purpose
         if (p > 1024 && p < 65534) control_port = uint16_t(p);
     }
+    control_port = uint16_t(control_port + port_offset);
     const uint16_t diag_port = uint16_t(control_port + 1);
+    const std::string who = role.empty() ? std::string() : (" (" + role + " brain)");
     try {
         diag_ = std::make_unique<ogma::DiagPublisher>(diag_port);
         diag_->set_host_tick_hz(50.0);            // the brain tick; the publisher's rate maths needs it
         if (!diag_->start()) {
-            std::fprintf(stderr, "inspector: diag port %u busy — running without an inspector\n", diag_port);
+            std::fprintf(stderr, "inspector%s: diag port %u busy — running without an inspector\n", who.c_str(), diag_port);
             diag_.reset();
             return;
         }
         control_ = std::make_unique<ami_ogma::control::ControlServer>(control_port);
-        control_->set_command_handler([this](nlohmann::json const& req) -> nlohmann::json {
+        control_->set_command_handler([this, role](nlohmann::json const& req) -> nlohmann::json {
             const std::string verb = req.value("verb", std::string());
             // The brain builder's patch verb.  Parsing and the trial construction
             // of every added module happen BEFORE the instance lock: a large module
@@ -52,7 +54,7 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
                 auto errors = ogma::LiveGraph::validate_offline(batch);
                 if (!errors.empty()) return {{"status", "error"}, {"message", errors.front()}, {"errors", errors}};
                 std::lock_guard<std::recursive_mutex> lk(mtx_);
-                try { return live_->apply(std::move(batch)); }
+                try { auto r = live_->apply(std::move(batch)); events_.push_back("patch:graph"); return r; }
                 catch (const std::exception& e) { return {{"status", "error"}, {"message", e.what()}}; }
             }
             std::lock_guard<std::recursive_mutex> lk(mtx_);
@@ -61,7 +63,8 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
                     nlohmann::json mods = nlohmann::json::array();
                     for (auto* m : instance_.modules())
                         mods.push_back({{"id", std::string(m->id())}, {"type", std::string(m->type_name())}});
-                    return {{"status", "ok"}, {"modules", mods}, {"graph_version", int64_t(live_->version())}};
+                    return {{"status", "ok"}, {"modules", mods}, {"graph_version", int64_t(live_->version())},
+                            {"brain", role.empty() ? std::string("main") : role}};
                 }
                 if (verb == "get_graph")     return live_->get_graph();
                 if (verb == "graph_version") return {{"status", "ok"}, {"graph_version", int64_t(live_->version())},
@@ -102,6 +105,7 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
                     else return {{"status", "error"}, {"message", "set_param: unsupported value type"}};
                     m->on_param_change(key, v);
                     live_->record_set_param(id, key, v);
+                    events_.push_back("patch:" + id + "." + key);
                     return {{"status", "ok"}, {"graph_version", int64_t(live_->version())}};
                 }
                 return {{"status", "error"}, {"message", "unknown verb: " + verb}};
@@ -111,7 +115,7 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
         });
         control_->start();
         active_ = true;
-        std::fprintf(stderr, "inspector: control tcp://127.0.0.1:%u  diag tcp://127.0.0.1:%u\n", control_port, diag_port);
+        std::fprintf(stderr, "inspector%s: control tcp://127.0.0.1:%u  diag tcp://127.0.0.1:%u\n", who.c_str(), control_port, diag_port);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "inspector: %s — running without an inspector\n", e.what());
         control_.reset();
@@ -123,6 +127,12 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
 InspectorSurface::~InspectorSurface() {
     if (control_) control_->stop();
     if (diag_) diag_->stop();
+}
+
+std::vector<std::string> InspectorSurface::take_events() {
+    std::lock_guard<std::recursive_mutex> lk(mtx_);
+    std::vector<std::string> out; out.swap(events_);
+    return out;
 }
 
 void InspectorSurface::publish_tick(uint64_t tick_id) {

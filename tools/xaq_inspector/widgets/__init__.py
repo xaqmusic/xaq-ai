@@ -38,6 +38,13 @@ from .vision_bearing_inspector     import VisualBearingInspector
 from .vision_homing_inspector      import VisualHomingInspector
 from .piano_roll_inspector         import PianoRollInspector
 from .gain_evolver_inspector       import GainEvolverInspector
+from .cloud_map_inspector          import CloudMapInspector
+from .bearing_seek_inspector       import BearingSeekInspector
+from .skill_outcome_inspector      import SkillOutcomeInspector
+from .loop_competence_inspector    import LoopCompetenceInspector
+from .joint_bridge_inspector       import JointBridgeInspector
+from .motor_epm_v2_inspector       import MotorEpmV2Inspector
+from .motion_field_inspector       import MotionFieldInspector
 
 
 WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
@@ -59,7 +66,10 @@ WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
     # commit_prec, gait_coherence, ... — so it reuses the same dashboard rather than
     # forking one.  Without this line a v2 module shows NO panel at all, which is why
     # the picrawler's fwd_v went unreadable the moment the stack moved to v2.
-    "MotorEPMv2":           MotorEpmInspector,
+    # 2026-10-02: v2 opens on the SELF-MODEL tab (A, the state against its prior targets, the output) -- what the
+    # duck's walker and head brains act through -- with the gait dashboard above as the second tab (a legged body
+    # opens on that one).
+    "MotorEPMv2":           MotorEpmV2Inspector,
     "ActionDecoder":        ActionPlanInspector,
     "MotorBus":             MotorBusInspector,
     "HeadingController":    HeadingControllerInspector,
@@ -92,6 +102,14 @@ WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
     # the normalized trajectory, the criterion J, and the weighted term
     # breakdown that shows whether a term is dead.
     "GainEvolver":          GainEvolverInspector,
+    # THE DUCK (2026-10-02): the ToF cloud and its things, the seek loop and its chase, what each intent does to each
+    # kind, each loop's competence, and the sensorimotor vector a motor brain sees.
+    "CloudMap":             CloudMapInspector,
+    "BearingSeekLoop":      BearingSeekInspector,
+    "SkillOutcomeLoop":     SkillOutcomeInspector,
+    "LoopCompetence":       LoopCompetenceInspector,
+    "MotionField":          MotionFieldInspector,
+    "JointSensorimotorBridge": JointBridgeInspector,
     # Generic reflex / detector widget — auto-discovers fields from the
     # snapshot, so one ReflexInspector suffices for every reflex type
     # without per-type bespoke panels.

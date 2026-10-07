@@ -288,7 +288,7 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
     last_step_baked_ = false;
     if (!s1.bake_checked && s1.visits >= cfg_.baking_threshold) {
         s1.bake_checked = true;
-        if (s1.ema_error >= effective_min_insertion_error()) {
+        if (s1.ema_error >= (cfg_.bake_gate > 0.0f ? cfg_.bake_gate : effective_min_insertion_error())) {
             // Demotion: concept not tight enough
             s1.bake_checked = false;  // allow re-check after demotion
             s1.visits     = std::max(0, cfg_.baking_threshold - 3);

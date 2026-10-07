@@ -24,7 +24,7 @@ brain_builder/tests/dryrun.sh               # r19/r25 construct, tick, and drive
 
 | panel | what it does |
 |---|---|
-| **Palette** | the 70 registered types by category, searchable; drag one onto the canvas (or right-click the canvas) |
+| **Palette** | the 77 registered types by category, searchable; drag one onto the canvas (or right-click the canvas) |
 | **Canvas** | nodes tinted by category, pins coloured by payload type, links by topic family. Drag output → input to wire. Delete a link to clear the param. Hover a pin for its topic and the manifest text; hover a red node for its setup error |
 | **Properties** | the selected module's params from its schema: bool / int / float / enum / string / list editors, a topic picker on socket params, filters (required / set / sockets / hot), reset-to-default, unknown keys flagged |
 | **Execution Order** | the modules array, which is the tick order; drag to reorder; "Sort topologically" previews a suggestion and names any cycle it kept |
@@ -61,7 +61,7 @@ topological sort is a suggestion you apply.
 | path | role |
 |---|---|
 | `palette.json` | the catalogue's hand-authored half: category, layer, purpose, id prefix per type — and the generated half: **sockets** (which params name topics, verified by probing), fixed topics, probed kinds, and the schema-required params the constructing baseline tolerates missing. Regenerate the generated half with `./brain_builder/run.sh gen-palette`; review the diff like code |
-| `bodies/*.json` | one manifest per body, hand-authored from the host's own publish/poll code: sources (topic, dims, description), sinks, host reads, events |
+| `bodies/*.json` | one manifest per body, hand-authored from the host's own publish/poll code: sources (topic, dims, description), sinks, host reads, events. A source or sink a host flag turns on is `"optional": true` (the dry run reports an undriven optional sink as idle, not missing). The duck has three: `microduck_joints` (the joint brains), `microduck_intent` (level 2, above the walking policy) and `microduck_head` (the head brain, picked by a config's `metadata.body_manifest`) |
 | `src/Catalogue` | registry → param schemas + palette |
 | `src/PaletteGen` | the probe: set a probe value on each string/list/level param, re-run trial setup, diff the ports |
 | `src/Graph` | the document: ordered JSON, only `modules[]` and `metadata.builder` are the builder's; undo by snapshot |

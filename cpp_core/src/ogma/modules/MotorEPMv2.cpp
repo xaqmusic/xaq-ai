@@ -2,6 +2,7 @@
 #include "ogma/modules/MotorEPMv2.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <random>
 #include <sstream>
@@ -160,6 +161,75 @@ ParamSchema MotorEPMv2::params_schema() const {
          "applied AFTER the keyframe/plan blend, so it wins where indices collide. Per-leg path "
          "only, like the objective sockets (the whole_body_c path carries neither). Empty = off.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_motors", ParamMutability::HotMutable,
+         "THE PRIOR'S MOTOR MASK (2026-09-30, §17.86): parallel to state_prior_indices, the number of LEADING motors "
+         "that prior index may descend through (0 = all). A motor that moves the sensor can satisfy a sensor prior by "
+         "looking away (the seven-motor walker's head pitch carries the largest authority over the ToF's contact "
+         "share); the ToF priors then descend through the twist motors only. Empty = no mask (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_weights", ParamMutability::HotMutable,
+         "THE PRIOR'S PER-INDEX PRECISION (2026-10-01, the lean's settle): parallel to state_prior_indices, a weight on "
+         "that index's descent, C and h alike (1 = as before). Two priors that pull one motor in opposite directions "
+         "settle where their weighted gradients balance, so the weight is the one number the trade between them is "
+         "made in (the six-motor walker's head: the speed prior leans it, a level prior brings it home). Empty = all 1 "
+         "(byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_c_weights", ParamMutability::HotMutable,
+         "THE FEEDBACK HALF'S PER-INDEX WEIGHT (2026-10-01, the learned gaze): parallel to state_prior_indices, a weight on "
+         "the index's C (feedback) descent only; its h (tonic) descent is untouched. The roles this module documents: C "
+         "balances, h reaches a target away from the current state. A reach with a large, step-like error (the head's "
+         "gaze: where the walk is going minus where the head points) grew a feedback gain above one on its own error "
+         "through a lagging servo (+2.41 in 300 s: the yaw thrashed at 2.7 rad/s and the duck fell); 0 here makes that "
+         "index a pure reach. Empty = 1 everywhere (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gated_by", ParamMutability::HotMutable,
+         "THE TARGET'S GATE (2026-10-01, the arrival that faces its thing): parallel to state_prior_indices, the state "
+         "element whose SIZE scales that index's target (>= 9999 = ungated): target x (1 - |x_j| / rms_j) clamped to "
+         "[0, 1], rms_j the element's own running RMS (a 30 s EMA of its square: adapted, not tuned). The use it was built "
+         "for: the walker's forward-speed prior scaled by the heading error -- full speed asked for while the target is "
+         "ahead, none once the error reaches its typical size -- so the walk slows and turns to face a thing instead of "
+         "carrying its turn into the arrival (the kick and peck fire straight ahead). Acts on the descent's error and on "
+         "the model-implied step's. Empty = byte-identical.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gate_cos", ParamMutability::HotMutable,
+         "THE TARGET'S GATE, GEOMETRIC (2026-10-01, the operator: the facing walk shuffles in place): parallel to "
+         "state_prior_indices, > 0 replaces the RMS form of state_prior_target_gated_by for that index with "
+         "max(0, cos(x_j * value))^state_prior_target_gate_pow, value = radians per unit of the gating element (pi for the "
+         "walker's heading slot). For a forward-speed target gated by the heading error this is the speed that CLOSES on "
+         "the target (walking at angle e off the nose closes at v cos e): it cannot tighten itself as the RMS form did "
+         "(the error's RMS shrank 65 -> 35 deg as the walk improved, and the speed halved at 18 deg). Empty = the RMS form.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gate_pow", ParamMutability::HotMutable,
+         "The power on the geometric target gate (1 = the closing speed; 2 = stricter off the nose). Default 1.",
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{8.0}},
+        {"state_prior_target_gate_reach", ParamMutability::HotMutable,
+         "TURN BEFORE YOU ARRIVE (2026-10-01, the walk's dynamic range): parallel to state_prior_indices, the state element "
+         "holding the distance to the target (>= 9999 = none); the target's gate becomes min(the gate above, "
+         "clamp(k * range / |x_j|, 0, 1)) with x_j the gated_by element (the heading error): the time to turn the error "
+         "(|e| / omega) must not exceed the time to arrive (r / v), so far away the walk keeps its speed and curves in, "
+         "and near the thing it slows only as much as the remaining error needs. k = state_prior_target_gate_reach_k. "
+         "Empty = byte-identical.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gate_reach_k", ParamMutability::HotMutable,
+         "k = (range unit x omega) / (heading unit x v): the body's turn rate omega against the speed v the prior asks for, in "
+         "the two elements' units (for the walker: 2 m x 1 rad/s / (pi x 0.3 m/s) = 2.1).",
+         ParamValue{2.0}, ParamValue{0.0}, ParamValue{100.0}},
+        {"state_prior_gated_by", ParamMutability::HotMutable,
+         "THE PACE GATE (2026-10-01, the bird's neck): parallel to state_prior_indices, the state element whose STEADINESS "
+         "gates that index's precision (>= 9999 = ungated). The element's change at the stride's timescale -- its 0.5 s "
+         "EMA minus its 2 s EMA -- is read against that difference's own running RMS (a 30 s EMA: adapted, not tuned), "
+         "and the gate is 1 - |d| / rms clamped to [0, 1]: full precision while the element holds, none while it is "
+         "changing by its typical amount. It multiplies the index's descent and its row in the model-implied step. The "
+         "use it was built for: a centring prior on where the head sits fore-aft, on at a steady pace and off while the "
+         "speed changes, so the head may reach into an acceleration and come home at a cruise. Empty = byte-identical.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_grow_at", ParamMutability::HotMutable,
+         "GROW ON RESTORE (2026-10-01): a restored module whose state arrives WIDER than its snapshot inserts the new "
+         "elements at this index of the new layout -- the model's rows, the controller's columns, the state model's "
+         "rows and columns all zero there (an unidentified sense: no authority, no feedback) -- instead of dropping "
+         "every frame. A second babble (--rebabble) then identifies the new rows while the old ones keep what they "
+         "learned. -1 = off (a wider frame is dropped, as before).",
+         ParamValue{int64_t(-1)}, ParamValue{int64_t(-1)}, ParamValue{int64_t(4096)}},
         {"state_prior_targets", ParamMutability::HotMutable,
          "Target values x* for state_prior_indices, parallel arrays. A mismatch in length "
          "disables the prior (and shows as state_prior_active=false in diag — check it, per §3.2 "
@@ -251,6 +321,43 @@ ParamSchema MotorEPMv2::params_schema() const {
          "the squelch and the L2 brake act on HK's C alone, and Cp grows under the descent's "
          "own self-limiting rule. 0 = legacy shared C, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_isolate", ParamMutability::HotMutable,
+         "LESION (2026-09-12, the W5 fork item (a); design doc §17.17): when 1, the "
+         "controller's columns are held to the prior's OWN indices — after every update, "
+         "C(:, i) (and Cp's, in split mode) is zeroed for every state column i that is not a "
+         "resolved state_prior_indices entry. Measured motivation at the duck's intent boundary: "
+         "part 2's Gauss-Newton step writes the FULL outer product, C(j,:) += g·prev_xᵀ, so an "
+         "error on ONE index deposits content in EVERY column of every motor's row, with no "
+         "objective behind any of it. With the heading reference standing still (R38) the twist "
+         "brain's yaw row let go of the heading error altogether and settled on whatever else "
+         "moved at the gait frequency — the right ToF column at +1.97 against the heading's "
+         "−0.12 — a saturated 2.4 Hz oscillation with |vyaw| at 0.95 of range and the heading "
+         "error parked at 2 rad. This is the DIAGNOSTIC, not the fix: if straightness jumps with "
+         "it on, the swamping is proven and the mechanism is the prior's weight rather than a new "
+         "control law. h is untouched on purpose (h reaches, C balances — the measured role "
+         "dissociation; zeroing it would be a second lever). Per-leg path only, like the prior "
+         "itself. Read back as spIso in diag_lite (columns kept; -1 = off). 0 = off, "
+         "byte-identical (the gain-0 guard).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_step_gain", ParamMutability::HotMutable,
+         "THE MODEL-IMPLIED STEP (2026-09-12, the W5 fork item (b); design doc §17.17, §17.26): "
+         "when > 0, the command gains a term COMPUTED from the identified model instead of "
+         "accumulated into C — the least-squares command that closes the prior's error in one "
+         "step, y* = argmin ||A_p·y − e||² + reg_eps·||y||², where A_p is the rows of A at "
+         "state_prior_indices and e their errors (x* − x). The ridge is the module's own "
+         "reg_eps, so there is no new constant and the gain is still the model's own authority — "
+         "discovered, never wired, exactly the justification part 2's Gauss-Newton descent has. "
+         "Clamped to ±1 per motor and added to the PRE-tanh operating point, so it rides the same "
+         "squash and the same rails as everything else. Measured motivation (§17.26): part 2 "
+         "spreads its aim over every column of C by construction (C(j,:) += g·prev_xᵀ), so the aim "
+         "is an accumulation over the whole state vector rather than a computation — a lesion that "
+         "removed the cross-talk removed the aim with it (68 % → 44 % of ticks opposing the "
+         "heading error). This is the same objective, computed. Independent of state_prior_gain "
+         "on purpose: a config may run the computed step INSTEAD of the descent (gain 0, step 1), "
+         "or both. The step the command carried is stored per leg and added back when the update "
+         "reconstructs its operating point, or G would lie about the rail the body actually ran. "
+         "Read back as spStep in diag_lite (|step|; -1 = off). 0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
         {"consolidate_gain", ParamMutability::HotMutable,
          "EARNED CONSOLIDATION (2026-09-01): anneal ALL learning rates by a factor "
          "(1 − gain·c), where c ∈ [0,1] ramps up (τ ≈ 10 s) while BOTH hold — the state "
@@ -1095,7 +1202,12 @@ ParamMap MotorEPMv2::current_params() const {
     m["intent_yaw_gain"] = intent_yaw_gain_;
     m["lookahead_gain"] = lookahead_gain_;
     m["lookahead_mode"] = lookahead_mode_;
-    m["state_prior_indices"] = state_prior_indices_;
+    m["state_prior_indices"] = state_prior_indices_; m["state_prior_motors"] = state_prior_motors_;
+    m["state_prior_weights"] = state_prior_weights_; m["state_grow_at"] = int64_t(state_grow_at_);
+    m["state_prior_gated_by"] = state_prior_gated_by_; m["state_prior_c_weights"] = state_prior_c_weights_;
+    m["state_prior_target_gated_by"] = state_prior_target_gated_by_;
+    m["state_prior_target_gate_cos"] = state_prior_target_gate_cos_; m["state_prior_target_gate_pow"] = state_prior_target_gate_pow_;
+    m["state_prior_target_gate_reach"] = state_prior_target_gate_reach_; m["state_prior_target_gate_reach_k"] = state_prior_target_gate_reach_k_;
     m["state_prior_targets"] = state_prior_targets_;
     m["state_prior_gain"]    = state_prior_gain_;
     m["state_prior_lr"]      = state_prior_lr_;
@@ -1103,6 +1215,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["state_prior_calm"]    = state_prior_calm_;
     m["state_prior_calm_fixed"] = state_prior_calm_fixed_;
     m["state_prior_split"]   = state_prior_split_;
+    m["state_prior_isolate"] = state_prior_isolate_;
+    m["state_prior_step_gain"] = state_prior_step_gain_;
     m["state_prior_damping"] = state_prior_damping_;
     m["regime_topic"] = regime_topic_;
     m["babble_owns_a"] = babble_owns_a_;
@@ -1284,6 +1398,16 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "lookahead_gain", [&](auto const& v){ lookahead_gain_ = get_double(v, "lookahead_gain"); });
     apply_param(params, "lookahead_mode", [&](auto const& v){ lookahead_mode_ = get_double(v, "lookahead_mode"); });
     apply_param(params, "state_prior_indices", [&](auto const& v){ state_prior_indices_ = get_double_vec(v, "state_prior_indices"); });
+    apply_param(params, "state_prior_motors", [&](auto const& v){ state_prior_motors_ = get_double_vec(v, "state_prior_motors"); });
+    apply_param(params, "state_prior_weights", [&](auto const& v){ state_prior_weights_ = get_double_vec(v, "state_prior_weights"); });
+    apply_param(params, "state_prior_gated_by", [&](auto const& v){ state_prior_gated_by_ = get_double_vec(v, "state_prior_gated_by"); });
+    apply_param(params, "state_prior_c_weights", [&](auto const& v){ state_prior_c_weights_ = get_double_vec(v, "state_prior_c_weights"); });
+    apply_param(params, "state_prior_target_gated_by", [&](auto const& v){ state_prior_target_gated_by_ = get_double_vec(v, "state_prior_target_gated_by"); });
+    apply_param(params, "state_prior_target_gate_cos", [&](auto const& v){ state_prior_target_gate_cos_ = get_double_vec(v, "state_prior_target_gate_cos"); });
+    apply_param(params, "state_prior_target_gate_pow", [&](auto const& v){ state_prior_target_gate_pow_ = get_double(v, "state_prior_target_gate_pow"); });
+    apply_param(params, "state_prior_target_gate_reach", [&](auto const& v){ state_prior_target_gate_reach_ = get_double_vec(v, "state_prior_target_gate_reach"); });
+    apply_param(params, "state_prior_target_gate_reach_k", [&](auto const& v){ state_prior_target_gate_reach_k_ = get_double(v, "state_prior_target_gate_reach_k"); });
+    apply_param(params, "state_grow_at", [&](auto const& v){ state_grow_at_ = int(get_double(v, "state_grow_at")); });
     apply_param(params, "state_prior_targets", [&](auto const& v){ state_prior_targets_ = get_double_vec(v, "state_prior_targets"); });
     apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
     apply_param(params, "state_prior_lr",      [&](auto const& v){ state_prior_lr_      = get_double(v, "state_prior_lr"); });
@@ -1291,6 +1415,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_calm",    [&](auto const& v){ state_prior_calm_    = get_double(v, "state_prior_calm"); });
     apply_param(params, "state_prior_calm_fixed", [&](auto const& v){ state_prior_calm_fixed_ = get_double(v, "state_prior_calm_fixed"); });
     apply_param(params, "state_prior_split",   [&](auto const& v){ state_prior_split_   = get_double(v, "state_prior_split"); });
+    apply_param(params, "state_prior_isolate", [&](auto const& v){ state_prior_isolate_ = get_double(v, "state_prior_isolate"); });
+    apply_param(params, "state_prior_step_gain", [&](auto const& v){ state_prior_step_gain_ = get_double(v, "state_prior_step_gain"); });
     apply_param(params, "state_prior_damping", [&](auto const& v){ state_prior_damping_ = get_double(v, "state_prior_damping"); });
     apply_param(params, "regime_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) regime_topic_ = *p; });
     apply_param(params, "babble_owns_a", [&](auto const& v){ babble_owns_a_ = get_double(v, "babble_owns_a"); });
@@ -2692,6 +2818,16 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "plan_fade") plan_fade_ = get_double(value, "plan_fade");
     else if (key == "plan_puppet_gain") plan_puppet_gain_ = get_double(value, "plan_puppet_gain");
     else if (key == "state_prior_indices") state_prior_indices_ = get_double_vec(value, "state_prior_indices");
+    else if (key == "state_prior_motors") state_prior_motors_ = get_double_vec(value, "state_prior_motors");
+    else if (key == "state_prior_weights") state_prior_weights_ = get_double_vec(value, "state_prior_weights");
+    else if (key == "state_prior_gated_by") state_prior_gated_by_ = get_double_vec(value, "state_prior_gated_by");
+    else if (key == "state_prior_c_weights") state_prior_c_weights_ = get_double_vec(value, "state_prior_c_weights");
+    else if (key == "state_prior_target_gated_by") state_prior_target_gated_by_ = get_double_vec(value, "state_prior_target_gated_by");
+    else if (key == "state_prior_target_gate_cos") state_prior_target_gate_cos_ = get_double_vec(value, "state_prior_target_gate_cos");
+    else if (key == "state_prior_target_gate_pow") state_prior_target_gate_pow_ = get_double(value, "state_prior_target_gate_pow");
+    else if (key == "state_prior_target_gate_reach") state_prior_target_gate_reach_ = get_double_vec(value, "state_prior_target_gate_reach");
+    else if (key == "state_prior_target_gate_reach_k") state_prior_target_gate_reach_k_ = get_double(value, "state_prior_target_gate_reach_k");
+    else if (key == "state_grow_at") state_grow_at_ = int(get_double(value, "state_grow_at"));
     else if (key == "state_prior_targets") state_prior_targets_ = get_double_vec(value, "state_prior_targets");
     else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
     else if (key == "state_prior_lr")      state_prior_lr_      = get_double(value, "state_prior_lr");
@@ -2699,6 +2835,8 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "state_prior_calm")    state_prior_calm_    = get_double(value, "state_prior_calm");
     else if (key == "state_prior_calm_fixed") state_prior_calm_fixed_ = get_double(value, "state_prior_calm_fixed");
     else if (key == "state_prior_split")   state_prior_split_   = get_double(value, "state_prior_split");
+    else if (key == "state_prior_isolate") state_prior_isolate_ = get_double(value, "state_prior_isolate");
+    else if (key == "state_prior_step_gain") state_prior_step_gain_ = get_double(value, "state_prior_step_gain");
     else if (key == "state_prior_damping") state_prior_damping_ = get_double(value, "state_prior_damping");
     else if (key == "state_prior_calm_indices") state_prior_calm_indices_ = get_double_vec(value, "state_prior_calm_indices");
     else if (key == "state_model_lr")      state_model_lr_      = get_double(value, "state_model_lr");
@@ -2979,6 +3117,96 @@ void MotorEPMv2::ensure_leg_init(int leg, int n) {
     L.initialized = true;
 }
 
+// THE PACE GATE (state_prior_gated_by): once a tick, per prior index, the steadiness of its gating element.
+void MotorEPMv2::update_prior_gates(Leg& L) {
+    const size_t K = state_prior_indices_.size();
+    if (L.gate_g.size() != K) {
+        L.gate_fast.assign(K, 0.0f); L.gate_slow.assign(K, 0.0f); L.gate_var.assign(K, 0.0f); L.gate_g.assign(K, 1.0f);
+        for (size_t k = 0; k < K && k < state_prior_gated_by_.size(); ++k) {
+            int j = int(state_prior_gated_by_[k]);
+            if (j >= 9999) continue;
+            if (j < 0) j += L.n;
+            if (j >= 0 && j < L.n) { L.gate_fast[k] = L.gate_slow[k] = L.x[j]; }
+        }
+    }
+    float sum = 0.0f; int cnt = 0;
+    for (size_t k = 0; k < K; ++k) {
+        L.gate_g[k] = 1.0f;
+        if (k >= state_prior_gated_by_.size() || state_prior_gated_by_[k] >= 9999.0) continue;
+        int j = int(state_prior_gated_by_[k]);
+        if (j < 0) j += L.n;
+        if (j < 0 || j >= L.n) continue;
+        L.gate_fast[k] += (1.0f / 25.0f) * (L.x[j] - L.gate_fast[k]);     // 0.5 s: the stride averaged out
+        L.gate_slow[k] += (1.0f / 100.0f) * (L.x[j] - L.gate_slow[k]);    // 2 s
+        const float d = L.gate_fast[k] - L.gate_slow[k];
+        L.gate_var[k] += (1.0f / 1500.0f) * (d * d - L.gate_var[k]);      // 30 s: the change's own typical size
+        const float rms = std::sqrt(L.gate_var[k]) + 1e-6f;
+        L.gate_g[k] = std::clamp(1.0f - std::fabs(d) / rms, 0.0f, 1.0f);
+        sum += L.gate_g[k]; ++cnt;
+    }
+    gate_mean_ = cnt ? sum / float(cnt) : 1.0f;
+    // the target's gate (state_prior_target_gated_by): the gating element's size against its own running RMS
+    if (!state_prior_target_gated_by_.empty()) {
+        if (L.tgate.size() != K) { L.tgate.assign(K, 1.0f); L.tgate_var.assign(K, 0.0f); }
+        for (size_t k = 0; k < K; ++k) {
+            L.tgate[k] = 1.0f;
+            if (k >= state_prior_target_gated_by_.size() || state_prior_target_gated_by_[k] >= 9999.0) continue;
+            int j = int(state_prior_target_gated_by_[k]);
+            if (j < 0) j += L.n;
+            if (j < 0 || j >= L.n) continue;
+            const float v = L.x[j];
+            L.tgate_var[k] += (1.0f / 1500.0f) * (v * v - L.tgate_var[k]);
+            if (k < state_prior_target_gate_cos_.size() && state_prior_target_gate_cos_[k] > 0.0) {
+                // geometric: the closing speed's factor, cos of the error (in radians), floored at 0
+                const double c = std::max(0.0, std::cos(double(v) * state_prior_target_gate_cos_[k]));
+                L.tgate[k] = float(std::pow(c, state_prior_target_gate_pow_));
+            } else {
+                const float rms = std::sqrt(L.tgate_var[k]) + 1e-6f;
+                L.tgate[k] = std::clamp(1.0f - std::fabs(v) / rms, 0.0f, 1.0f);
+            }
+            if (k < state_prior_target_gate_reach_.size() && state_prior_target_gate_reach_[k] < 9999.0) {
+                // turn before you arrive: the error must be turnable in the time left to the target
+                int jr = int(state_prior_target_gate_reach_[k]);
+                if (jr < 0) jr += L.n;
+                if (jr >= 0 && jr < L.n) {
+                    const float e = std::fabs(v);
+                    const float reach = e > 1e-6f ? std::clamp(float(state_prior_target_gate_reach_k_) * std::max(0.0f, L.x[jr]) / e, 0.0f, 1.0f) : 1.0f;
+                    L.tgate[k] = std::min(L.tgate[k], reach);
+                }
+            }
+        }
+    }
+}
+
+// GROW ON RESTORE (state_grow_at): insert k zero state elements at index g of every n-sized member of the leg.
+// Zero rows of A = no authority identified; zero columns of C / Cp / Cdep = no feedback from the new sense; zero rows
+// and columns of Bx = no state dynamics.  The old elements keep what they learned, at their shifted positions.
+void MotorEPMv2::grow_leg(Leg& L, int g, int k) {
+    const int n0 = L.n, n1 = n0 + k;
+    g = std::clamp(g, 0, n0);
+    auto rows = [&](Eigen::MatrixXf& M) {           // insert k zero ROWS at g (n0 x c -> n1 x c)
+        if (M.rows() != n0) return;
+        Eigen::MatrixXf R = Eigen::MatrixXf::Zero(n1, M.cols());
+        R.topRows(g) = M.topRows(g); R.bottomRows(n0 - g) = M.bottomRows(n0 - g); M = R; };
+    auto cols = [&](Eigen::MatrixXf& M) {           // insert k zero COLUMNS at g (r x n0 -> r x n1)
+        if (M.cols() != n0) return;
+        Eigen::MatrixXf R = Eigen::MatrixXf::Zero(M.rows(), n1);
+        R.leftCols(g) = M.leftCols(g); R.rightCols(n0 - g) = M.rightCols(n0 - g); M = R; };
+    auto vec = [&](Eigen::VectorXf& v) {
+        if (v.size() != n0) return;
+        Eigen::VectorXf R = Eigen::VectorXf::Zero(n1);
+        R.head(g) = v.head(g); R.tail(n0 - g) = v.tail(n0 - g); v = R; };
+    rows(L.A); rows(L.Bx); cols(L.Bx); cols(L.C); cols(L.Cp); cols(L.Cdep);
+    vec(L.b); vec(L.x); vec(L.prev_x); vec(L.pulse_x0); vec(L.pulse_dplus);
+    for (auto& bk : L.banks) {
+        rows(bk.A); rows(bk.Bx); cols(bk.Bx); cols(bk.C);
+        if (bk.b.size() == n0) vec(bk.b);
+    }
+    L.n = n1;
+    std::fprintf(stderr, "  MotorEPMv2 %s: the state grew %d -> %d, %d unidentified element(s) inserted at %d\n",
+                 id_.c_str(), n0, n1, k, g);
+}
+
 void MotorEPMv2::handle_proprio(int leg, MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
@@ -2986,6 +3214,7 @@ void MotorEPMv2::handle_proprio(int leg, MessagePtr payload) {
     int n = int(pt->values.size());
     ensure_leg_init(leg, n);
     Leg& L = legs_[leg];
+    if (L.n != n && state_grow_at_ >= 0 && n > L.n) grow_leg(L, state_grow_at_, n - L.n);
     if (L.n != n) return;            // dimensionality must be stable
     L.x = pt->values;
     // Capture the spawn pose (first frame = body standing) as the postural rest
@@ -4140,6 +4369,12 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     z.noalias() += L.Cphi * L.prev_phi_ctx;        // posture phase-conditioned bias at command time
                     z.noalias() += L.Cvel * L.prev_phi_ctx;        // velocity feed-forward bias (0 until the socket trains it)
                 }
+                // The model-implied step the LAST command carried (W5 fork item (b)).  G is the
+                // slope at the operating point the body actually ran; leaving this out would put
+                // the descent's Jacobian at a different point on the tanh than the command used —
+                // the same dishonest-G trap the split and squelch branches below document.
+                // Empty unless state_prior_step_gain > 0, so this is byte-identical when off.
+                if (L.prior_step.size() == m) z.noalias() += L.prior_step;
                 Eigen::MatrixXf G = Eigen::MatrixXf::Zero(m, m);
                 float sat = 0.0f;
                 for (int i = 0; i < m; ++i) {
@@ -4312,6 +4547,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                        && state_prior_indices_.size() == state_prior_targets_.size();
                     float sp_err = 0.0f; int sp_n = 0;
                     float gate_err = 0.0f; int gate_n = 0;
+                    if (sp_ok && (!state_prior_gated_by_.empty() || !state_prior_target_gated_by_.empty())) update_prior_gates(L);
                     if (sp_ok) {
                         // consolidate_spares_prior: the anneal stops the destroyer (HK),
                         // not the objective — the GN step self-terminates at e = 0.
@@ -4325,7 +4561,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             int idx = int(state_prior_indices_[k]);
                             if (idx < 0) idx += n;
                             if (idx < 0 || idx >= n) continue;
-                            const float e = float(state_prior_targets_[k]) - L.x[idx];
+                            const float tg = (!state_prior_target_gated_by_.empty() && k < L.tgate.size()) ? L.tgate[k] : 1.0f;   // the target's gate
+                            const float e = float(state_prior_targets_[k]) * tg - L.x[idx];
                             // Gauss-Newton normalisation (§5.5: adapt to the signal's own
                             // scale, never tune to it): the raw gradient is DOUBLY small —
                             // e routed through a small-authority channel A(idx,j) — so the
@@ -4401,8 +4638,11 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             // note for the §12.5 measurement behind it.
                             const float gw = (consolidate_n_ > 0.0 && int(k) < int(consolidate_n_))
                                              ? float(state_prior_gate_weight_) : 1.0f;
-                            const float lw_k  = gw * lw_raw;
-                            const float hlw_k = gw * hlw_raw;
+                            // state_prior_weights: this index's own precision (empty = 1, byte-identical)
+                            float pw = (k < state_prior_weights_.size()) ? float(state_prior_weights_[k]) : 1.0f;
+                            if (k < L.gate_g.size() && !state_prior_gated_by_.empty()) pw *= L.gate_g[k];   // the pace gate
+                            const float lw_k  = gw * lw_raw * pw;
+                            const float hlw_k = gw * hlw_raw * pw;
                             if (reach_k) reach_lw_last_ = lw_k;
                             const bool split = state_prior_split_ > 0.0;
                             if (split && L.Cp.rows() != m) L.Cp = Eigen::MatrixXf::Zero(m, n);
@@ -4458,9 +4698,16 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                     Gt[j] = 1.0f - t * t;
                                 }
                             }
+                            const int motor_limit = (k < state_prior_motors_.size() && state_prior_motors_[k] > 0.0) ? int(state_prior_motors_[k]) : m;
                             for (int j = 0; j < m; ++j) {
+                                if (j >= motor_limit) continue;   // the prior's motor mask: this index does not descend through motor j
                                 const float g = lw_k * e * L.A(idx, j) * Gt[j] / anorm;
-                                Cdst.row(j).noalias() += g * L.prev_x.transpose();
+                                if (k < state_prior_c_weights_.size()) {   // the feedback half's own weight (the h half below uses g unscaled)
+                                    const float cw = float(state_prior_c_weights_[k]);
+                                    if (cw != 0.0f) Cdst.row(j).noalias() += (cw * g) * L.prev_x.transpose();
+                                } else {
+                                    Cdst.row(j).noalias() += g * L.prev_x.transpose();
+                                }
                                 // h with CONDITIONAL ANTI-WINDUP.  The roles dissociate
                                 // cleanly (measured, this lever's plant): C is what
                                 // BALANCES (feedback; C-only passed the unstable-plant
@@ -4586,6 +4833,28 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                     * (ctrl_damping_lr_scaled_ > 0.0 ? lr_scale : 1.0f);
                     L.C *= (1.0f - d);
                     L.h *= (1.0f - d);
+                }
+                // STATE-PRIOR ISOLATION (the W5 lesion) — LAST writer of C in the update, so
+                // nothing downstream repopulates a column the lesion has taken out.  See the
+                // state_prior_isolate docstring for what it tests and why h is spared.
+                if (state_prior_isolate_ > 0.0 && !state_prior_indices_.empty()) {
+                    if (int(prior_col_keep_.size()) != n) prior_col_keep_.assign(size_t(n), 0);
+                    else std::fill(prior_col_keep_.begin(), prior_col_keep_.end(), 0);
+                    int kept = 0;
+                    for (double di : state_prior_indices_) {
+                        int idx = int(di);
+                        if (idx < 0) idx += n;
+                        if (idx < 0 || idx >= n) continue;          // out of range: skip, as part 2 does
+                        if (!prior_col_keep_[size_t(idx)]) { prior_col_keep_[size_t(idx)] = 1; ++kept; }
+                    }
+                    if (kept > 0) {                                  // every index out of range = no lesion
+                        for (int i = 0; i < n; ++i) {
+                            if (prior_col_keep_[size_t(i)]) continue;
+                            L.C.col(i).setZero();
+                            if (L.Cp.rows() == m && L.Cp.cols() == n) L.Cp.col(i).setZero();
+                        }
+                        state_prior_isolate_kept_ = kept;
+                    }
                 }
                 L.gain_ema = (1.0f - kTeleEmaAlpha) * L.gain_ema + kTeleEmaAlpha * Lp.norm();
                 L.sat_ema  = (1.0f - kTeleEmaAlpha) * L.sat_ema  + kTeleEmaAlpha * (sat / float(m));
@@ -4881,6 +5150,49 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 L.last_mult = mult;
             } else {
                 calm_mult_ = 1.0f;
+            }
+            // ── THE MODEL-IMPLIED STEP (W5 fork item (b)) ───────────────────────
+            // The command that closes the prior's error in one identified step, solved as a
+            // ridge least squares over the prior's own rows of A — what part 2's descent is
+            // meant to converge to and, at the duck's intent boundary, does not (§17.26).
+            // See the state_prior_step_gain docstring.  Pre-tanh, so it rides the same squash.
+            if (L.prior_step.size() != m) L.prior_step = Eigen::VectorXf::Zero(m);
+            else L.prior_step.setZero();
+            if (!wb_on && state_prior_step_gain_ > 0.0 && !state_prior_indices_.empty()
+                && state_prior_indices_.size() == state_prior_targets_.size()
+                && L.A.rows() == L.n && L.A.cols() == m) {
+                const int K = int(state_prior_indices_.size());
+                Eigen::MatrixXf Ap(K, m);
+                Eigen::VectorXf ep(K);
+                int kk = 0;
+                for (int k = 0; k < K; ++k) {
+                    int idx = int(state_prior_indices_[size_t(k)]);
+                    if (idx < 0) idx += L.n;
+                    if (idx < 0 || idx >= L.n) continue;      // out of range: skip, as the descent does
+                    Ap.row(kk) = L.A.row(idx);
+                    const float tgs = (!state_prior_target_gated_by_.empty() && size_t(k) < L.tgate.size()) ? L.tgate[size_t(k)] : 1.0f;
+                    ep[kk] = float(state_prior_targets_[size_t(k)]) * tgs - L.x[idx];
+                    // state_prior_weights: a weighted least squares, the row and its error scaled by sqrt(w)
+                    // (absent = 1, byte-identical; 0 = the row has no say in the step)
+                    if (size_t(k) < state_prior_weights_.size() || (!state_prior_gated_by_.empty() && size_t(k) < L.gate_g.size())) {
+                        float wk = size_t(k) < state_prior_weights_.size() ? float(state_prior_weights_[size_t(k)]) : 1.0f;
+                        if (!state_prior_gated_by_.empty() && size_t(k) < L.gate_g.size()) wk *= L.gate_g[size_t(k)];   // the pace gate
+                        const float sw = std::sqrt(std::max(0.0f, wk));
+                        Ap.row(kk) *= sw; ep[kk] *= sw;
+                    }
+                    ++kk;
+                }
+                if (kk > 0) {
+                    const Eigen::MatrixXf Aps = Ap.topRows(kk);
+                    Eigen::MatrixXf H = Aps.transpose() * Aps;
+                    H.diagonal().array() += float(reg_eps_);  // the module's own ridge — no new constant
+                    Eigen::VectorXf step = H.ldlt().solve(Aps.transpose() * ep.head(kk));
+                    for (int j = 0; j < m; ++j)
+                        step[j] = float(state_prior_step_gain_) * std::clamp(step[j], -1.0f, 1.0f);
+                    y.noalias() += step;
+                    L.prior_step = step;
+                    state_prior_step_norm_ = step.norm();
+                }
             }
             for (int j = 0; j < m; ++j) y[j] = mg * ag * std::tanh(y[j]);
             // Phase-0 saturation instrument: HK's own contribution, BEFORE any of the
@@ -6204,7 +6516,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["stroke_gate_mean"]   = stroke_gate_mean_;
     mod["stroke_gate_spread"] = stroke_gate_spread_;
     mod["stroke_load_ema"]    = stroke_load_ema_;
-    return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}};
+    // wb_steps: the whole-body babble counter (2026-09-29) -- a restored brain must not babble again
+    return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}, {"wb_steps", wb_steps_}};
 }
 
 // The high-rate payload (xaq_voice at up to 60 Hz).  Every field is an already-computed
@@ -6234,6 +6547,8 @@ nlohmann::json MotorEPMv2::diag_lite() const {
         {"boredom",        boredom_},                       // sensorimotor predictability
         {"interest",       interest_},                      // curiosity drive
         {"hunger",         hunger_},                        // 0 sated → 1 starving
+        {"spIso",          state_prior_isolate_kept_},       // W5 lesion: columns C keeps; -1 = off
+        {"spStep",         state_prior_step_norm_},          // W5 (b): |the model-implied step|; -1 = off
     };
 }
 
@@ -6299,6 +6614,12 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["state_prior_err"] = state_prior_err_ema_;   // mean |x[idx] − x*| (EMA; decays when off)
     j["state_prior_w"]   = state_prior_gain_;
     j["state_prior_applied"] = state_prior_applied_;
+    // for the inspector (2026-10-02): the prior's own arrays, so the state bar chart can draw each prior index's
+    // nominal target and precision beside the state it pulls (gated targets move from these).  Diagnostic only.
+    j["state_prior_idx"] = state_prior_indices_;
+    j["state_prior_tgt"] = state_prior_targets_;
+    j["state_prior_wts"] = state_prior_weights_;
+    if (!state_prior_gated_by_.empty()) j["state_prior_gate"] = gate_mean_;   // the pace gate (mean over gated indices)
     j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied
     j["consolidate_c"] = consolidate_c_;       // 1 = fully consolidated (earned slow plasticity)
     j["consolidate_gate"] = state_prior_gate_ema_;  // the gate subset's own satisfaction EMA
@@ -6695,6 +7016,7 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
     if (version != 1 && version != 2)
         throw std::runtime_error("MotorEPMv2::restore_state: unknown version " + std::to_string(version));
     auto const& legs = s.at("legs");
+    wb_steps_ = s.value("wb_steps", int64_t(0));
     legs_.assign(n_legs_, Leg{});
     int m = motor_dim_;
     for (int leg = 0; leg < n_legs_ && leg < int(legs.size()); ++leg) {

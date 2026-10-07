@@ -25,6 +25,13 @@
 //        plant that diverges under the bare HK rule is held near 0 by the prior,
 //        THROUGH the learned model (no hand-wired feedback anywhere in the test).
 //     7. HotParamRoundTrip — on_param_change round-trips current_params.
+//     8. IsolateHoldsCToThePriorsOwnColumns — state_prior_isolate (2026-09-12, the duck's
+//     9. ModelImpliedStepClosesTheErrorItself — state_prior_step_gain (2026-09-12, W5 (b)):
+//        the gain-0 guard, that it acts, that it PULLS THE RIGHT WAY on its own (with the
+//        descent switched off, so nothing else could be doing it), and the diag read-back.
+//        W5 lesion): the gain-0 guard, that it ACTS when on, and that the kept-column
+//        count in diag says how many columns survived (the read-back a sweep asserts on,
+//        §3.2 rule 5 — the R47 arm was only trustable because spIso said 5).
 // =============================================================================
 
 #include <gtest/gtest.h>
@@ -932,4 +939,327 @@ TEST(StatePrior, HotParamRoundTrip) {
               (std::vector<double>{-1.0, 4.0}));
     EXPECT_EQ(std::get<std::vector<double>>(cp.at("state_prior_targets")),
               (std::vector<double>{0.0, 0.2}));
+}
+
+// =============================================================================
+// 8. state_prior_isolate — C's columns held to the prior's own indices (W5).
+//    Off must be invisible; on must act; and diag must SAY how many columns it
+//    kept, because a lesion nobody can read back is a lesion nobody can trust.
+// =============================================================================
+TEST(StatePrior, IsolateHoldsCToThePriorsOwnColumns) {
+    auto pn = base_params();                                // N: prior live, param absent
+    pn["state_prior_indices"] = std::vector<double>{-1.0};
+    pn["state_prior_targets"] = std::vector<double>{0.0};
+    pn["state_prior_gain"]    = 0.8;
+    auto pz = pn; pz["state_prior_isolate"] = 0.0;          // Z: configured, off
+    auto pi = pn; pi["state_prior_isolate"] = 1.0;          // I: the lesion
+
+    Fixture N(pn), Z(pz), I(pi);
+    double maxdiff_zn = 0.0, maxdiff_iz = 0.0;
+    for (uint64_t t = 0; t < 300; ++t) {
+        const float lean = wobble(t);
+        N.run_tick(t, lean); Z.run_tick(t, lean); I.run_tick(t, lean);
+        if (t < 12) continue;                               // warmup: the babble owns the command
+        for (int j = 0; j < kMotors; ++j) {
+            maxdiff_zn = std::max(maxdiff_zn, double(std::fabs(N.accel(j) - Z.accel(j))));
+            maxdiff_iz = std::max(maxdiff_iz, double(std::fabs(I.accel(j) - Z.accel(j))));
+        }
+    }
+    EXPECT_LT(maxdiff_zn, 1e-6)
+        << "state_prior_isolate=0 must be byte-identical to the param being absent (the gain-0 guard)";
+    EXPECT_GT(maxdiff_iz, 1e-4)
+        << "the lesion changed nothing — it is not reaching C (the R47 arm would have been a false null)";
+
+    EXPECT_EQ(Z.m.diag_lite()["spIso"].get<int>(), -1) << "off must read as off, not as 0 columns kept";
+    EXPECT_EQ(I.m.diag_lite()["spIso"].get<int>(), 1)
+        << "one prior index -> exactly one surviving column; the count is the read-back a sweep asserts on";
+}
+
+// =============================================================================
+// 9. state_prior_step_gain — the command computed from the model, not accumulated
+//    into C (W5 fork item (b)).  The sign control matters most here: with the
+//    Gauss-Newton descent OFF (state_prior_lr 0) the step is the only thing that
+//    can move the plant, so a pull toward the target is the step's own doing.
+// =============================================================================
+TEST(StatePrior, ModelImpliedStepClosesTheErrorItself) {
+    auto pn = base_params();                                // N: prior configured, step absent
+    pn["state_prior_indices"] = std::vector<double>{-1.0};
+    pn["state_prior_targets"] = std::vector<double>{0.0};
+    pn["state_prior_gain"]    = 0.8;
+    auto pz = pn; pz["state_prior_step_gain"] = 0.0;        // Z: configured, off
+    auto ps = pn; ps["state_prior_step_gain"] = 1.0;        // S: the step
+
+    Fixture N(pn), Z(pz), S(ps);
+    double maxdiff_zn = 0.0, maxdiff_sz = 0.0;
+    for (uint64_t t = 0; t < 300; ++t) {
+        const float lean = wobble(t);
+        N.run_tick(t, lean); Z.run_tick(t, lean); S.run_tick(t, lean);
+        if (t < 12) continue;
+        for (int j = 0; j < kMotors; ++j) {
+            maxdiff_zn = std::max(maxdiff_zn, double(std::fabs(N.accel(j) - Z.accel(j))));
+            maxdiff_sz = std::max(maxdiff_sz, double(std::fabs(S.accel(j) - Z.accel(j))));
+        }
+    }
+    EXPECT_LT(maxdiff_zn, 1e-6) << "state_prior_step_gain=0 must be byte-identical to the param being absent";
+    EXPECT_GT(maxdiff_sz, 1e-4) << "the step changed nothing — it is not reaching the command";
+    EXPECT_LT(Z.m.diag_lite()["spStep"].get<float>(), 0.0f) << "off must read as -1, not as a zero step";
+    EXPECT_GT(S.m.diag_lite()["spStep"].get<float>(), 0.0f) << "a live step must read back its own size";
+
+    // The sign control, with the descent OFF so only the step can act: a +target and a
+    // −target must drive the plant's own lean to opposite sides.  A lever whose sign does
+    // not matter is not a mechanism (the v2 plan's rule 4, as test 5 applies it to part 2).
+    auto plant = [](double target) {
+        auto p = base_params();
+        p["state_prior_indices"]  = std::vector<double>{-1.0};
+        p["state_prior_targets"]  = std::vector<double>{target};
+        p["state_prior_gain"]     = 1.0;
+        p["state_prior_lr"]       = 0.0;                    // part 2 silenced: the step acts alone
+        p["ctrl_lr"]              = 0.0;                    // and so is HK
+        p["state_prior_step_gain"] = 1.0;
+        Fixture f(p);
+        float lean = 0.0f;
+        for (uint64_t t = 0; t < 400; ++t) {
+            f.run_tick(t, lean);
+            if (t >= 12) lean += 0.02f * f.accel(0);        // a lean the first motor drives
+            lean = std::clamp(lean, -2.0f, 2.0f);
+        }
+        return lean;
+    };
+    const float up = plant(+0.6), down = plant(-0.6);
+    EXPECT_GT(up, down + 0.05f)
+        << "the model-implied step must pull toward its target: +0.6 gave " << up
+        << " and -0.6 gave " << down << " (sign or solve inverted)";
+}
+
+// =============================================================================
+// 10. state_prior_weights (2026-10-01, the lean's settle): weight 1 is byte-identical to no weights at all (the
+//     guard), and weight 0 on the only index takes the prior's descent and step out (the command differs from w = 1).
+// =============================================================================
+TEST(StatePrior, WeightsOneIsIdenticalZeroSilences) {
+    auto pe = base_params();                                // E: prior, no weights
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.0};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    auto p1 = pe; p1["state_prior_weights"] = std::vector<double>{1.0};
+    auto p0 = pe; p0["state_prior_weights"] = std::vector<double>{0.0};
+    Fixture E(pe), W1(p1), W0(p0);
+    double d1 = 0.0, d0 = 0.0;
+    for (uint64_t t = 0; t < 300; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); W1.run_tick(t, lean); W0.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            d1 = std::max(d1, double(std::fabs(E.accel(j) - W1.accel(j))));
+            d0 = std::max(d0, double(std::fabs(E.accel(j) - W0.accel(j))));
+        }
+    }
+    EXPECT_EQ(d1, 0.0) << "weight 1 must be byte-identical to no weights";
+    EXPECT_GT(d0, 1e-4) << "weight 0 must take the index's descent and step out";
+}
+
+// =============================================================================
+// 11. state_grow_at (2026-10-01, grow on restore): a snapshot of a 10-element state restored into a module fed
+//     12-element frames grows at the index given -- the old model rows kept at their shifted positions, the new rows
+//     zero (unidentified) -- and without the param the wider frames are dropped (the old contract).
+// =============================================================================
+namespace {
+void tick_width(ogma::InProcessBus& bus, ogma::MotorEPMv2& m, uint64_t t, int width, int lean_idx, float lean,
+                float extra) {
+    bus.begin_tick(t);
+    auto pt = std::make_shared<ogma::ProprioToken>();
+    pt->values = Eigen::VectorXf::Zero(width);
+    const double ph = 0.15 * double(t);
+    for (int j = 0; j < kMotors; ++j) {
+        pt->values[3 * j + 0] = float(0.30 * std::sin(ph + j));
+        pt->values[3 * j + 1] = float(0.20 * std::cos(ph + j));
+        pt->values[3 * j + 2] = float(0.30 * 0.15 * std::cos(ph + j));
+    }
+    for (int k = 3 * kMotors; k < lean_idx; ++k) pt->values[k] = extra;   // the grown elements
+    pt->values[lean_idx] = lean;
+    pt->sensor = "proprio";
+    bus.publish("sp.p0", pt);
+    m.tick(t);
+    bus.end_tick();
+}
+}  // namespace
+
+TEST(StatePrior, GrowOnRestoreInsertsUnidentifiedRows) {
+    auto p = base_params();
+    p["state_model_lr"] = 0.05;                               // Bx present, so its rows and columns grow too
+    Fixture F(p);
+    for (uint64_t t = 0; t < 200; ++t) F.run_tick(t, wobble(t));
+    ASSERT_EQ(F.m.state_dim(), kStateN);
+    const nlohmann::json snap = F.m.snapshot_state();
+    std::vector<std::vector<double>> A0(kStateN, std::vector<double>(kMotors));
+    for (int r = 0; r < kStateN; ++r)
+        for (int j = 0; j < kMotors; ++j) A0[size_t(r)][size_t(j)] = F.m.authority_cell(r, j);
+
+    // the restored module learns nothing (model_lr 0, state_model_lr 0) so the grown model can be read exactly
+    auto pg = p; pg["model_lr"] = 0.0; pg["state_model_lr"] = 0.0; pg["state_grow_at"] = int64_t{3 * kMotors};
+    ogma::InProcessBus bus; ogma::MotorEPMv2 g; g.set_id("grown"); g.on_setup(&bus, pg); g.restore_state(snap);
+    const int W = kStateN + 2;
+    for (uint64_t t = 200; t < 205; ++t) tick_width(bus, g, t, W, W - 1, wobble(t), 0.3f);
+    ASSERT_EQ(g.state_dim(), W) << "the state must have grown";
+    for (int j = 0; j < kMotors; ++j) {
+        for (int r = 0; r < 3 * kMotors; ++r) EXPECT_EQ(g.authority_cell(r, j), A0[size_t(r)][size_t(j)]) << r;
+        EXPECT_EQ(g.authority_cell(3 * kMotors, j), 0.0);        // the new rows: unidentified
+        EXPECT_EQ(g.authority_cell(3 * kMotors + 1, j), 0.0);
+        EXPECT_EQ(g.authority_cell(W - 1, j), A0[size_t(kLeanIdx)][size_t(j)]);   // the lean row, shifted by two
+    }
+    EXPECT_TRUE(std::isfinite(double(std::dynamic_pointer_cast<const ogma::ActionOut>(bus.last_value("sp.a0"))->accel)));
+
+    // without state_grow_at the wider frames are dropped: the state keeps its snapshot's width
+    auto pd = p; pd["model_lr"] = 0.0;
+    ogma::InProcessBus bus2; ogma::MotorEPMv2 d; d.set_id("dropped"); d.on_setup(&bus2, pd); d.restore_state(snap);
+    for (uint64_t t = 200; t < 205; ++t) tick_width(bus2, d, t, W, W - 1, wobble(t), 0.3f);
+    EXPECT_EQ(d.state_dim(), kStateN);
+}
+
+// =============================================================================
+// 12. state_prior_gated_by (2026-10-01, the pace gate): the ungated sentinel is byte-identical to no gate; a gate
+//     on an element that keeps changing (the scripted joint 0, a sinusoid) lowers the index's precision -- the
+//     command differs and the diag's gate reads below 1.
+// =============================================================================
+TEST(StatePrior, PaceGateUngatedIdenticalChangingElementGates) {
+    auto pe = base_params();
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.0};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    auto pu = pe; pu["state_prior_gated_by"] = std::vector<double>{9999.0};
+    auto pg = pe; pg["state_prior_gated_by"] = std::vector<double>{0.0};
+    Fixture E(pe), U(pu), G(pg);
+    double du = 0.0, dg = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); U.run_tick(t, lean); G.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            du = std::max(du, double(std::fabs(E.accel(j) - U.accel(j))));
+            dg = std::max(dg, double(std::fabs(E.accel(j) - G.accel(j))));
+        }
+    }
+    EXPECT_EQ(du, 0.0) << "an ungated index must be byte-identical to no gate";
+    EXPECT_GT(dg, 1e-4) << "a gate on a changing element must change the command";
+    const auto diag = G.m.diag_snapshot();
+    ASSERT_TRUE(diag.contains("state_prior_gate"));
+    EXPECT_LT(diag["state_prior_gate"].get<double>(), 1.0);
+    EXPECT_GE(diag["state_prior_gate"].get<double>(), 0.0);
+}
+
+// =============================================================================
+// 13. state_prior_c_weights (2026-10-01, the learned gaze): weight 1 is byte-identical to none; weight 0 leaves the
+//     controller's feedback matrix where it started (a pure reach through h) while h still moves.
+// =============================================================================
+TEST(StatePrior, CWeightZeroMakesAPureReach) {
+    auto pe = base_params();
+    pe["state_prior_indices"] = std::vector<double>{-1.0};
+    pe["state_prior_targets"] = std::vector<double>{0.4};
+    pe["state_prior_gain"]    = 1.0;
+    pe["ctrl_lr"] = 0.0; pe["sat_lr"] = 0.0; pe["bias_lr"] = 0.0;   // the prior is C's only writer
+    auto p1 = pe; p1["state_prior_c_weights"] = std::vector<double>{1.0};
+    auto p0 = pe; p0["state_prior_c_weights"] = std::vector<double>{0.0};
+    Fixture E(pe), W1(p1), W0(p0);
+    double d1 = 0.0;
+    nlohmann::json c0_start;
+    for (uint64_t t = 0; t < 300; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); W1.run_tick(t, lean); W0.run_tick(t, lean);
+        if (t == 12) c0_start = W0.m.snapshot_state()["legs"][0]["C"];
+        for (int j = 0; j < kMotors; ++j) d1 = std::max(d1, double(std::fabs(E.accel(j) - W1.accel(j))));
+    }
+    EXPECT_EQ(d1, 0.0) << "c weight 1 must be byte-identical to none";
+    // with the prior C's only writer, weight 0 leaves C exactly where it was after the babble; weight 1 moves it
+    const auto cE = E.m.snapshot_state()["legs"][0]["C"].get<std::vector<float>>();
+    const auto c0 = W0.m.snapshot_state()["legs"][0]["C"].get<std::vector<float>>();
+    const auto cS = c0_start.get<std::vector<float>>();
+    double dE = 0.0, d0 = 0.0;
+    for (size_t i = 0; i < cS.size(); ++i) { dE += std::fabs(cE[i] - cS[i]); d0 += std::fabs(c0[i] - cS[i]); }
+    EXPECT_EQ(d0, 0.0) << "c weight 0: the feedback matrix untouched";
+    EXPECT_GT(dE, 1e-4) << "c weight 1: the descent writes C";
+    const auto h0 = W0.m.snapshot_state()["legs"][0]["h"].get<std::vector<float>>();
+    double hn = 0.0; for (float v : h0) hn += std::fabs(v);
+    EXPECT_GT(hn, 1e-4) << "the reach still moves h";
+}
+
+// =============================================================================
+// 14. state_prior_target_gated_by (2026-10-01): the ungated sentinel is byte-identical to none; a target scaled by the
+//     size of an element that varies (the scripted joint 0) changes the command.
+// =============================================================================
+TEST(StatePrior, TargetGateUngatedIdenticalGatedActs) {
+    auto pe = base_params();
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.4};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    auto pu = pe; pu["state_prior_target_gated_by"] = std::vector<double>{9999.0};
+    auto pg = pe; pg["state_prior_target_gated_by"] = std::vector<double>{0.0};
+    Fixture E(pe), U(pu), G(pg);
+    double du = 0.0, dg = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); U.run_tick(t, lean); G.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            du = std::max(du, double(std::fabs(E.accel(j) - U.accel(j))));
+            dg = std::max(dg, double(std::fabs(E.accel(j) - G.accel(j))));
+        }
+    }
+    EXPECT_EQ(du, 0.0) << "an ungated target must be byte-identical to none";
+    EXPECT_GT(dg, 1e-4) << "a target gated by a varying element must change the command";
+}
+
+// =============================================================================
+// 15. state_prior_target_gate_cos (2026-10-01): the geometric gate acts (differs from the ungated run) and differs from
+//     the RMS form; absent, the RMS form is unchanged (the facing config reproduces -- checked in the host guard).
+// =============================================================================
+TEST(StatePrior, TargetGateCosActsAndDiffersFromRms) {
+    auto pe = base_params();
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.4};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    pe["state_prior_target_gated_by"] = std::vector<double>{0.0};
+    auto pc = pe; pc["state_prior_target_gate_cos"] = std::vector<double>{3.14159265};
+    auto pn = base_params();
+    pn["state_prior_indices"] = std::vector<double>{-1.0}; pn["state_prior_targets"] = std::vector<double>{0.4};
+    pn["state_prior_gain"] = 0.8; pn["state_prior_step_gain"] = 1.0;
+    Fixture R(pe), C(pc), N(pn);
+    double drc = 0.0, dnc = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        const float lean = wobble(t);
+        R.run_tick(t, lean); C.run_tick(t, lean); N.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            drc = std::max(drc, double(std::fabs(R.accel(j) - C.accel(j))));
+            dnc = std::max(dnc, double(std::fabs(N.accel(j) - C.accel(j))));
+        }
+    }
+    EXPECT_GT(drc, 1e-4) << "the geometric gate differs from the RMS form";
+    EXPECT_GT(dnc, 1e-4) << "the geometric gate acts";
+}
+
+// =============================================================================
+// 16. state_prior_target_gate_reach (2026-10-01): the turn-before-you-arrive gate acts on top of the target gate (the
+//     scripted joint 1 standing in for the range, joint 0 for the heading error); the ungated sentinel is identical.
+// =============================================================================
+TEST(StatePrior, TargetGateReachActsSentinelIdentical) {
+    auto pe = base_params();
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.4};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    pe["state_prior_target_gated_by"] = std::vector<double>{0.0};
+    pe["state_prior_target_gate_cos"] = std::vector<double>{3.14159265};
+    auto pu = pe; pu["state_prior_target_gate_reach"] = std::vector<double>{9999.0};
+    auto pr = pe; pr["state_prior_target_gate_reach"] = std::vector<double>{3.0}; pr["state_prior_target_gate_reach_k"] = 0.2;
+    Fixture E(pe), U(pu), R(pr);
+    double du = 0.0, dr = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); U.run_tick(t, lean); R.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            du = std::max(du, double(std::fabs(E.accel(j) - U.accel(j))));
+            dr = std::max(dr, double(std::fabs(E.accel(j) - R.accel(j))));
+        }
+    }
+    EXPECT_EQ(du, 0.0) << "no reach element: byte-identical";
+    EXPECT_GT(dr, 1e-4) << "the reach gate acts";
 }

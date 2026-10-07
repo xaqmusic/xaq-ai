@@ -944,7 +944,159 @@ def doc_for(module_type: str) -> ModuleDoc:
     return DOCS.get(module_type, _GENERIC)
 
 
-# MotorEPMv2 is the same module under the differ gate (a verified-identical copy that
-# then grew levers), so it documents identically.  Aliased rather than duplicated so the
-# two cannot drift apart.
-DOCS["MotorEPMv2"] = DOCS["MotorEPM"]
+# MotorEPMv2 began as MotorEPM under the differ gate and grew the SELF-MODEL + STATE PRIOR path the duck's walker
+# and head brains act through (2026-10-02: its own entry; the gait formulas still apply and are kept in full below).
+DOCS["MotorEPMv2"] = ModuleDoc(
+    title="MotorEPMv2 — a motor brain that learns its body, then acts to feel what it expects",
+    summary=(
+        "First the brain <b>identifies</b> its body: it babbles its motors and learns a small linear model of how each "
+        "command changes each thing it senses (the <i>self-model</i>, the heatmap on the first tab). Then it "
+        "<b>acts</b> through that model: <i>state priors</i> are values it expects to feel on chosen sense elements "
+        "(the yellow ticks): the head level, the target straight ahead, the near field clear. The controller moves the "
+        "motors in whatever direction the model says will bring those sensations toward what it expects. No trajectory "
+        "is scripted: the motion is what reduces the gap between expected and felt. On the duck the walker brain does "
+        "this with the walking policy's speed and turn commands; the head brain does it with the neck and head joints. "
+        "The second tab is the original gait dashboard (built for the legged picrawler)."
+    ),
+    formulas=(
+        "<b>Self-model.</b> <code>x̂_{t+1} = A·y_t + b</code> (state rows × motors; identified in the babble, refined "
+        "online). <code>motor TLE = ‖x_{t+1} − x̂_{t+1}‖</code> — the model's own surprise.<br>"
+        "<b>State prior.</b> For each prior index i with target <code>x*_i</code> and precision <code>w_i</code>: "
+        "<code>e_i = x_i − x*_i</code>; the step descends <code>Σ w_i·e_i²</code> through the model's authority: "
+        "<code>Δy ∝ −Σ_i w_i·e_i·A[i,:]</code> (plus the model-implied feedback rows).<br>"
+        "<code>state_prior_err = EMA of mean |x_i − x*_i|</code>; gated targets (the pace gate, the dynamic range) "
+        "scale x*_i by another state element.<br><br>"
+        + DOCS["MotorEPM"].formulas
+    ),
+)
+
+
+# ------------------------------------------------------------------ the duck (2026-10-02)
+DOCS["CloudMap"] = ModuleDoc(
+    title="CloudMap — the duck's 3-D sketch of what its distance sensor has seen",
+    summary=(
+        "The duck's time-of-flight sensor measures 64 distances at once. CloudMap drops each return into a "
+        "4 cm cube (a <i>voxel</i>) and keeps them: a <b>stop's cloud</b> while the body stands still, a "
+        "<b>walking cloud</b> carried along by the duck's own step counting between stops. It then groups the "
+        "low voxels into clusters and asks of each one: does it stop rising below about 16 cm and stay narrow? "
+        "Then it is a <b>small thing</b> — a ball, a block — something worth walking to. Anything that keeps "
+        "rising is <b>structure</b>: a wall, a chair, a table. The nearest small thing is <i>attended</i>, and its "
+        "bearing is what the seek loop walks toward. A cluster made of brand-new voxels, standing alone, is a "
+        "<i>mover</i> candidate (the train).<br><br>"
+        "With <b>free rays</b> on, every beam's empty stretch is recorded too, and a cluster only counts as small "
+        "once a beam has passed <i>over</i> it. With the head pitched down, the bottom of a wall looks exactly like a "
+        "ball until you have seen that it has no top."
+    ),
+    formulas=(
+        "<b>Voxel.</b> <code>(ix, iy, iz) = ⌊p / 0.04 m⌋</code>, with hits and the mean height of its returns.<br>"
+        "<b>Stack rule.</b> Break-band voxels (2–20 cm) form 8-connected column clusters; the cluster's "
+        "<code>top</code> climbs its footprint's heights while each step is under "
+        "<code>gap = max(gap_min, gap_k·range)</code>.<br>"
+        "<code>small ⇔ top &lt; small_top ∧ ext_min ≤ ext ≤ small_ext</code><br>"
+        "<code>small_needs_top: small ⇔ … ∧ seen_above ≥ top + voxel</code>, where <code>seen_above</code> is the "
+        "highest free sample of any ray through the cluster's columns.<br>"
+        "<b>Attended</b> = the nearest small cluster within reach (by body range).<br>"
+        "<b>Mover</b> = a cluster whose voxels are young against the cloud's oldest "
+        "(<code>age &lt; mover_age_k·oldest</code>), within <code>mover_range</code>, isolated from tall voxels.<br><br>"
+        "<b>Reading the plan.</b> Forward is up. Orange voxels are 2–20 cm high, blue are furniture height. Rings: "
+        "orange = small; red dashed = small by shape but its top never seen; grey = structure; yellow = attended; "
+        "magenta star = mover. Teal (toggle) = where rays have passed and how high."
+    ),
+)
+
+DOCS["BearingSeekLoop"] = ModuleDoc(
+    title="Seek loop — walk to the thing, chase the thing that moves",
+    summary=(
+        "The seek loop holds one target. When the cloud attends a small thing, the loop pins its position on the "
+        "duck's own map (step counting) and walks to it even after the thing has left the sensor's view. Its "
+        "<b>need</b> competes with play in the arbiter for who steers. When a <b>mover</b> is confirmed — it was "
+        "where the loop predicted it would be — the loop <b>chases</b> it at its predicted position instead. "
+        "A target ends when the duck arrives, when it has been unseen too long, when the duck has walked half a "
+        "metre without getting closer, at contact, or when the target turns out to stand against tall structure."
+    ),
+    formulas=(
+        "<code>range = ‖target − body‖</code> (odometry frame); <code>bearing = R(−yaw)·(target − body) / range</code><br>"
+        "<code>need = confidence</code>, which decays by <code>1/forget_ticks</code> per tick unseen and drops the "
+        "target below <code>floor</code>.<br>"
+        "<b>Chase.</b> A candidate's velocity is fitted over the last 0.8 s of sightings; a sighting within "
+        "<code>chase_gate</code> of the prediction confirms it; the target is the predicted position "
+        "<code>p + v·lead</code>.<br>"
+        "<b>Progress forget.</b> After <code>progress_walk_m</code> walked with under <code>progress_m</code> gained, "
+        "the target is forgotten.<br>"
+        "<b>Memory.</b> A lost chase is held <code>chase_memory_ticks</code>; one sighting near where it should now be "
+        "re-acquires it."
+    ),
+)
+
+DOCS["SkillOutcomeLoop"] = ModuleDoc(
+    title="Outcome loop — what does a kick, a peck, a push do to this kind of thing?",
+    summary=(
+        "When the duck arrives at a thing, this loop asks for an intent by name — kick, peck or push — choosing "
+        "the one whose answer it knows <i>least</i> for this kind of thing. Then it watches: if the thing is seen "
+        "again near where it was, how far it moved is the answer. If it is never seen again the answer is "
+        "<i>unknown</i>, not zero. Once a kind has two answers for every intent it is <b>known</b>, its need falls to "
+        "zero and the duck stops coming back to it — habituation, earned from its own experiments. A surprising "
+        "answer is one far outside that cell's usual spread."
+    ),
+    formulas=(
+        "<code>cell(kind, intent) = (n, mean, M2)</code> — Welford running mean and spread of the displacement<br>"
+        "<code>ask = argmin over intents of (n, −sd, last-asked)</code><br>"
+        "<code>known ⇔ n ≥ min_samples</code>; <code>need = share of this kind's intents not yet known</code><br>"
+        "<code>surprise = |obs − predicted| / (sd + 0.02 m)</code>, predicted = the cell's mean<br>"
+        "<b>Kind</b> = the winner of a small EPM over the thing's shape descriptor (at most 4 nodes)."
+    ),
+)
+
+DOCS["LoopCompetence"] = ModuleDoc(
+    title="Loop competence — does the world behave the way this loop says it will?",
+    summary=(
+        "Every loop makes a prediction about the world while it steers. The seek loop says <i>the range will "
+        "close</i>; play says <i>novelty will rise</i>. This module watches one loop. Each time the loop has driven "
+        "for a while, it checks once whether that prediction held, and keeps a running success rate (and the "
+        "tally as a belief about it). A loop that keeps being right is trusted more by the voter and the arbiter. A loop that is "
+        "not driving drifts back to <i>don't know</i> (0.5)."
+    ),
+    formulas=(
+        "<code>check: sign·(objective_t − objective_{t−H}) &gt; 0</code>, once per window H in which the loop drove "
+        "(arbiter gain &gt; 0.5)<br>"
+        "<code>c ← c + α·(success − c)</code>; beside it the counts <code>a += success, b += failure</code> (a Beta belief)<br>"
+        "Not driving: <code>c ← c + forget·(prior − c)</code>, and a, b relax toward 1 (the flat prior).<br>"
+        "Published p: <code>c</code> (estimator <i>ema</i>), or <code>a/(a+b) + optimism·sd</code> (estimator <i>beta</i>).<br>"
+        "Sent as <code>tle = expected_error = 1 − p</code>, so the voter's trust is <code>1/(1 − p + ε)</code>."
+    ),
+)
+
+DOCS["MotionField"] = ModuleDoc(
+    title="Motion field — something is now where the world was just empty",
+    summary=(
+        "The duck's always-on motion sense. It remembers the distance sensor's rays for a second and a half. When a new "
+        "return lands where, a moment ago, a ray passed straight through and kept going, something has moved into "
+        "that space: a wall cannot do that, because a ray that reached past it went through it. A few such points "
+        "close together are a <b>blob</b>; a blob seen again in the next cast, near where it was, is a <b>track</b> "
+        "with a velocity. A track is published only after it has lasted a few casts (and, if set, travelled), and "
+        "edges the sensor has hit for a while are ignored as background. It sees only inside the sensor's 45° cone."
+    ),
+    formulas=(
+        "<code>evidence: return p with a remembered ray r, |p − r| &lt; near_m, r continuing ≥ beyond_m past p</code><br>"
+        "<code>blob: ≥ min_points evidence points within cluster_m, one cast</code>; "
+        "<code>track: blobs within gate_m cast to cast; published after persist_casts</code><br>"
+        "Background (bg_m): a return near a remembered return 1–10 s old is the static world, not motion.<br>"
+        "Output: <code>[bearing x, bearing y, proximity, salience, casts, cast tick, world vx, world vy]</code>."
+    ),
+)
+
+DOCS["JointSensorimotorBridge"] = ModuleDoc(
+    title="Sensorimotor bridge — exactly what a motor brain gets to feel",
+    summary=(
+        "A motor brain learns how its commands change what it senses. This bridge builds that sensation, tick by "
+        "tick: for each motor, where it is, what it was last told, and how much it just moved. After those it "
+        "appends the <b>sense slots</b>, the host's summary of the world for this brain. On the duck's walker that "
+        "means the distance sensor's view in the body's frame, how much of the view is too close (contact), the "
+        "direction and range of the target, and the head's attitude. If a signal is not in this vector, the motor "
+        "brain cannot use it."
+    ),
+    formulas=(
+        "<code>out = [pos_j, act_j, Δpos_j for each joint in the group] ⊕ sense[0 … load_slots−1]</code><br>"
+        "<code>Δpos_j = pos_j(t) − pos_j(t−1)</code> (from clean positions; optional coloured noise on position only)."
+    ),
+)

@@ -1,0 +1,66 @@
+{
+  "body": "microduck",
+  "host": "mj_host",
+  "env_target": "microduck_head",
+  "title": "Microduck - the head (mj_host --head-graph)",
+  "launch_hint": "loaded beside a level-2 brain: ogma_mjhost --level2 ... --head-graph <config> [--head-joints]",
+  "description": "The head brain (mj_host/src/HeadAdapter.cpp): its own bus and inspector (port +2), sensing the four head joints, the trunk IMU and a 12-slot head sense, commanding the head joints. With --head-joints its commands are written to the servos directly; without it they ride the walking policy's head block.",
+  "sources": [
+    {
+      "name": "head",
+      "topic": "reality.proprio.head",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "the four head joints [neck pitch, head pitch, head yaw, head roll] relative to home, in the policy's command units"
+    },
+    {
+      "name": "imu",
+      "topic": "reality.proprio.imu",
+      "payload": "ProprioToken",
+      "dims": 6,
+      "description": "the TRUNK's projected gravity + gyro"
+    },
+    {
+      "name": "head_sense",
+      "topic": "reality.proprio.head_sense",
+      "payload": "ProprioToken",
+      "dims": 12,
+      "description": "the load slots: head roll, head pitch, down-shortfall (all ~0 level), head gyro x0.3 (3), trunk gravity x, y, trunk gyro x0.3 (3), 11 = the gaze error /yaw range with --head-gaze-sense (the host's gaze target: the seek target, a mover, or with --look-around the bearing least recently seen; minus the head's yaw)"
+    }
+  ],
+  "sinks": [
+    {
+      "name": "neck_pitch",
+      "topic": "action.neck_pitch",
+      "payload": "ActionOut",
+      "description": "neck pitch command, unit-scaled to the head range"
+    },
+    {
+      "name": "head_pitch",
+      "topic": "action.head_pitch",
+      "payload": "ActionOut",
+      "description": "head pitch command"
+    },
+    {
+      "name": "head_yaw",
+      "topic": "action.head_yaw",
+      "payload": "ActionOut",
+      "description": "head yaw command (masked unless the config drives it)"
+    },
+    {
+      "name": "head_roll",
+      "topic": "action.head_roll",
+      "payload": "ActionOut",
+      "description": "head roll command"
+    }
+  ],
+  "reads": [],
+  "events": [
+    {
+      "name": "reset",
+      "topic": "events.reset",
+      "event_type": "reset",
+      "description": "fired when the recovery harness stands the body back up"
+    }
+  ]
+}

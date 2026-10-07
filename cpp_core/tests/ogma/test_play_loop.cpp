@@ -2,6 +2,7 @@
 // novelty→frontier (run-and-tumble beyond the mapped graph), NOT routing to food.
 // "PlaceGraphPlanner minus traverse": same map overlay, novelty value-field, no food.
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include "ogma/modules/PlayLoop.hpp"
 #include "ogma/InProcessBus.hpp"
 
@@ -254,4 +255,81 @@ TEST(PlayLoop, StallWanderOffByDefault) {
     for (uint64_t t = 3; t < 60; ++t) f.run(t, 0, 0.0f);   // long dwell
     EXPECT_FALSE(f.play.forced_wander()) << "off by default → never forces wander regardless of stall";
     EXPECT_TRUE(f.play.climbing()) << "keeps climbing the uphill neighbour (prior behaviour)";
+}
+
+// R37 (duck, 2026-09-11): sub-goal commitment at the timescale of arrival.  The current node flickers
+// to one the committed target is not adjacent to; off, the target is dropped (re-chosen from the new
+// node's neighbours -- none here, so -1); on, it is held because it is still uphill.
+namespace {
+int committed_after_flicker(bool hold) {
+    Fixture f(hold ? ogma::ParamMap{{"commit_hold", true}} : ogma::ParamMap{});
+    f.run(0, 0, 0.0f);
+    f.run(1, 1, 0.0f);
+    f.run(2, 2, 0.0f, false, 1.0f);   // the frontier: novel
+    f.run(3, 1, PI);
+    f.run(4, 0, PI);
+    for (uint64_t t = 5; t < 12; ++t) f.run(t, 0, PI);   // value iteration settles: 0 -> 1 -> 2 is uphill
+    // off: the target is re-chosen from 0's neighbours each time the node changes -> 1 (the hop);
+    // on: the frontier 2, committed at node 1, is held through the move back to 0 (still uphill).
+    EXPECT_EQ(f.play.next_node(), hold ? 2 : 1);
+    f.run(12, 3, PI);                 // a fresh node, adjacent to nothing the target is
+    return f.play.next_node();
+}
+}  // namespace
+TEST(PlayLoop, CommitHoldKeepsTheSubGoalThroughCurrentNodeFlicker) {
+    EXPECT_EQ(committed_after_flicker(false), -1);
+    EXPECT_EQ(committed_after_flicker(true), 2);
+}
+
+// R38 (duck, 2026-09-11): a target beyond the turning radius.  Four nodes in a line 10 odometry
+// units apart, the far one novel; back at node 0, the one-hop climb targets node 1 (inside a
+// 25-unit radius) while the lookahead walks the gradient to the first node at least 25 away: node 3.
+namespace {
+int lookahead_target(bool on) {
+    ogma::ParamMap pm = on ? ogma::ParamMap{{"lookahead", true}, {"lookahead_reach", 25.0}} : ogma::ParamMap{};
+    Fixture f(pm);
+    auto step = [&](uint64_t t, int node, float fwd, float tle = 0.0f) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.cognitive.place", place(node, tle));
+        f.bus.publish("reality.proprio.heading", p1(0.0f));
+        f.bus.publish("reality.proprio.vel_ego", p2(0.0f, fwd));
+        f.play.tick(t);
+        f.bus.end_tick();
+    };
+    uint64_t t = 0;
+    for (int n = 0; n < 4; ++n) for (int k = 0; k < 10; ++k) step(t++, n, 1.0f, n == 3 ? 1.0f : 0.0f);   // out
+    for (int n = 2; n >= 0; --n) for (int k = 0; k < 10; ++k) step(t++, n, -1.0f);                     // back
+    for (int k = 0; k < 10; ++k) step(t++, 0, 0.0f);                                                   // settle
+    return f.play.next_node();
+}
+}  // namespace
+TEST(PlayLoop, LookaheadTargetsTheFirstNodeBeyondTheTurningRadius) {
+    EXPECT_EQ(lookahead_target(false), 1);
+    EXPECT_EQ(lookahead_target(true), 3);
+}
+
+
+// heading_sign (2026-09-17): the loop's frame is a reflection of a right-handed consumer's.  A body that
+// walks forward at heading +pi/2 goes to -x in the loop's frame with the Cell's sign; with heading_sign -1
+// the same walk goes to +x (a rotation of the consumer's frame, not a reflection), and a target that a
+// right-handed body has on its LEFT (a larger yaw) reads as a LEFT turn (fx < 0) instead of a right one.
+TEST(PlayLoop, HeadingSignTurnsTheReflectionIntoARotation) {
+    auto walk = [](float sign) {
+        ogma::ParamMap p; p["heading_sign"] = double(sign); p["pi_cell_size"] = 0.0;
+        Fixture f(p);
+        for (int t = 0; t < 10; ++t) {
+            f.bus.begin_tick(uint64_t(t));
+            f.bus.publish("reality.cognitive.place", place(0, 0.0f));
+            f.bus.publish("reality.proprio.heading", p1(PI / 2));
+            f.bus.publish("reality.proprio.vel_ego", p2(0.0f, 1.0f));      // forward
+            f.play.tick(uint64_t(t));
+            f.bus.end_tick();
+        }
+        auto d = f.play.diag_snapshot();
+        return std::make_pair(d["odo_x"].get<double>(), d["odo_y"].get<double>());
+    };
+    auto cell = walk(1.0f), duck = walk(-1.0f);
+    EXPECT_LT(cell.first, -5.0) << "the Cell's frame: forward at +pi/2 is -x";
+    EXPECT_GT(duck.first, +5.0) << "heading_sign -1: forward at +pi/2 is +x";
+    EXPECT_NEAR(cell.second, 0.0, 1e-4); EXPECT_NEAR(duck.second, 0.0, 1e-4);
 }

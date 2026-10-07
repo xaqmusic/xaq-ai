@@ -876,6 +876,28 @@ private:
     Eigen::VectorXf     prevPrevYw_;           // Δy needs two steps of command history
     bool                wb_ready_ = false, wb_have_prev_ = false;
     int64_t             wb_steps_ = 0;
+public:
+    // THE SECOND BABBLE (2026-09-29, §17.85): a restored brain may reopen its babble window for TICKS more ticks of
+    // random twists with the model learning -- the contact room's regime.  The whole-body path only.
+    void rebabble(int64_t ticks) { wb_steps_ = std::max<int64_t>(0, babble_ticks_ - ticks); for (auto& L : legs_) L.steps_seen = std::max<int64_t>(0, babble_ticks_ - ticks); }
+    // the model's authority over a state element counted from the end (0 = the last: the ToF's too-close share on
+    // the duck; 1..3 = right, ahead, left): the abs-sum of that row of Aw_, 0 when the model has never moved it
+    // one cell of the per-leg model: the authority of motor `col` over state element `row` (0 = the first; negative = from the end)
+    double authority_cell(int row, int col) const {
+        if (legs_.empty()) return 0.0;
+        const auto& A = legs_[0].A; const int N = int(A.rows());
+        if (row < 0) row += N;
+        return (row >= 0 && row < N && col >= 0 && col < int(A.cols())) ? double(A(row, col)) : 0.0;
+    }
+    int state_dim() const { return legs_.empty() ? 0 : int(legs_[0].A.rows()); }
+    int motor_dim() const { return legs_.empty() ? 0 : int(legs_[0].A.cols()); }
+    const std::vector<std::string>& action_topics() const { return action_topics_; }
+    double wb_authority_from_end(int k) const {
+        if (Aw_.rows() > k && k >= 0) return double(Aw_.row(int(Aw_.rows()) - 1 - k).cwiseAbs().sum());
+        if (!legs_.empty() && legs_[0].A.rows() > k && k >= 0) return double(legs_[0].A.row(int(legs_[0].A.rows()) - 1 - k).cwiseAbs().sum());   // the per-leg path (the duck's)
+        return 0.0;
+    }
+private:
     float               wb_tle_ema_ = 0.0f;
     // ---- 2026-08-03 · INTER-LEG PLV, replacing gait_coherence as the coordination read.
     // gait_coherence() is the Kuramoto order parameter of the four phases AT AN INSTANT.
@@ -1282,6 +1304,8 @@ private:
         float               calm_state = 1.0f;    // the annealing ratchet (slow attack, fast release)
         float               calm_peak  = 0.1f;    // decaying peak-hold of the prior error (the reference)
         float               last_mult  = 1.0f;    // the calm multiplier the assembly last applied
+        Eigen::VectorXf     prior_step;           // the model-implied step the LAST command carried (empty/zero unless
+                                                  // state_prior_step_gain > 0); the update adds it back so G is honest
         Eigen::VectorXf     b;                    // n
         Eigen::MatrixXf     C;                    // m x n  (sensor → motor)
         Eigen::MatrixXf     Cphi;                 // m x 2  learned phase-conditioning (posture feed-forward)
@@ -1295,6 +1319,10 @@ private:
         Eigen::MatrixXf     Cdep;                 // m x n  accumulated Δy·Δxᵀ correlation
         Eigen::VectorXf     rest_pos;             // standing pose captured at spawn (m pos targets)
         bool                rest_captured = false;
+        // state_prior_gated_by (the pace gate, 2026-10-01): per prior index, the gating element's fast / slow EMAs, the
+        // running variance of their difference, and the gate itself (1 = steady).  Transient: not in the snapshot.
+        std::vector<float>  gate_fast, gate_slow, gate_var, gate_g;
+        std::vector<float>  tgate_var, tgate;           // state_prior_target_gated_by: the gating element's running mean square, the target's scale
         bool                have_prev   = false;
         bool                fresh       = false;  // new proprio arrived this tick
         int64_t             steps_seen  = 0;      // proprio frames processed (warmup counter)
@@ -1323,6 +1351,8 @@ private:
         bool                step_locked  = false; // false ⇒ the stroke falls back to L.phase
     };
     std::vector<Leg> legs_;
+    void grow_leg(Leg& L, int at, int k);
+    void update_prior_gates(Leg& L);           // state_prior_gated_by: the pace gate of each prior index, once a tick        // state_grow_at: insert k unidentified state elements at `at`
 
     static constexpr float kTeleEmaAlpha   = 0.02f;
     static constexpr float kKneeEmaAlpha   = 0.01f;   // slow mean for the phase reference
@@ -1544,7 +1574,18 @@ private:
     // NOT the mechanism — the HK dC update is sign-blind and amplifies the error):
     //   1. ξ̃[idx] *= (1−w) — the sensitivity rule may REST on the prior-owned dim;
     //   2. C/h descend the prior's own error through the LEARNED model A(idx,·).
-    std::vector<double> state_prior_indices_;   // state indices; NEGATIVE = from the end (−1 = last)
+    std::vector<double> state_prior_indices_;
+    std::vector<double> state_prior_c_weights_; // parallel: the weight on each prior index's C (feedback) descent only (empty = 1)
+    std::vector<double> state_prior_target_gate_cos_; // parallel: > 0 = the target's gate is max(0, cos(x_j * this))^pow (radians per unit of x_j) instead of the RMS form
+    double state_prior_target_gate_pow_ = 1.0;
+    std::vector<double> state_prior_target_gate_reach_; // parallel: the RANGE element of the turn-before-you-arrive gate (>= 9999 = none)
+    double state_prior_target_gate_reach_k_ = 2.0;
+    std::vector<double> state_prior_target_gated_by_; // parallel: the state element whose SIZE scales each prior index's target (empty / >= 9999 = ungated)
+    std::vector<double> state_prior_gated_by_; // parallel: the state element whose steadiness gates each prior index (empty / >= 9999 = ungated)
+    float gate_mean_ = 1.0f;                   // diag: the mean pace gate over the gated indices, last tick
+    std::vector<double> state_prior_weights_;  // parallel: each prior index's precision (empty = 1)
+    int state_grow_at_ = -1;                   // grow on restore: where a wider state's new elements go (-1 = off)
+    std::vector<double> state_prior_motors_;   // parallel: leading motors each prior index may descend through (0 = all)   // state indices; NEGATIVE = from the end (−1 = last)
     std::vector<double> state_prior_targets_;   // target values x*, parallel to indices
     double state_prior_gain_    = 0.0;          // weight w ∈ [0,1]; 0 = off, byte-identical
     double state_prior_lr_     = 0.1;           // fraction of the GN-normalised correction per tick (C half)
@@ -1560,6 +1601,11 @@ private:
     std::vector<double> state_prior_calm_indices_;  // the key's own indices (empty = all prior indices)
     double state_prior_calm_fixed_ = 0.0;       // >0 = pin the multiplier (designed gate, tuned magnitude)
     double state_prior_split_  = 0.0;           // 1 = prior writes its OWN matrix Cp; HK keeps C
+    double state_prior_isolate_ = 0.0;          // 1 = C's columns held to the prior's own indices (the W5 lesion)
+    double state_prior_step_gain_ = 0.0;        // the MODEL-IMPLIED step: weight of the one-step command from A (W5 (b))
+    float  state_prior_step_norm_ = -1.0f;      // read-back: |the step| last applied; -1 = off
+    int    state_prior_isolate_kept_ = -1;      // read-back: columns kept; -1 = never applied
+    std::vector<char> prior_col_keep_;          // scratch for the mask (no per-tick allocation)
     double state_prior_damping_ = 0.0;          // L2 brake on Cp ALONE (the split's whole point)
     // R1: the regime socket
     std::string regime_topic_;                  // RealityToken source; empty = banks off, byte-identical

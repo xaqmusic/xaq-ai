@@ -1,0 +1,207 @@
+{
+ "seed": 1,
+ "half": 2.0,
+ "objects": [
+  {
+   "name": "wall_px",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 2.0
+  },
+  {
+   "name": "wall_nx",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 2.0
+  },
+  {
+   "name": "wall_py",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 2.0
+  },
+  {
+   "name": "wall_ny",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 2.0
+  },
+  {
+   "name": "rug",
+   "cls": "static",
+   "kind": "rug",
+   "x": 0.0,
+   "y": 0.0,
+   "z": 0.002,
+   "extent": 0.5
+  },
+  {
+   "name": "furn_table",
+   "cls": "static",
+   "kind": "table",
+   "x": 1.2571,
+   "y": -1.3593,
+   "z": 0,
+   "extent": 0.45,
+   "yaw": 2.462
+  },
+  {
+   "name": "furn_chair0",
+   "cls": "static",
+   "kind": "chair",
+   "x": -1.3378,
+   "y": -1.5514,
+   "z": 0,
+   "extent": 0.22,
+   "yaw": 0.091
+  },
+  {
+   "name": "furn_chair1",
+   "cls": "static",
+   "kind": "chair",
+   "x": -1.2535,
+   "y": 0.4006,
+   "z": 0,
+   "extent": 0.22,
+   "yaw": 2.164
+  },
+  {
+   "name": "furn_shelf",
+   "cls": "static",
+   "kind": "shelf",
+   "x": 1.845,
+   "y": -0.7981,
+   "z": 0,
+   "extent": 0.45,
+   "wall": "px"
+  },
+  {
+   "name": "clock",
+   "cls": "self_changing",
+   "kind": "clock",
+   "x": 0.0548,
+   "y": 1.955,
+   "z": 0.45,
+   "extent": 0.1,
+   "wall": "py"
+  },
+  {
+   "name": "obj_ball0",
+   "cls": "movable",
+   "kind": "ball",
+   "x": -0.1618,
+   "y": -0.6357,
+   "z": 0.0392,
+   "extent": 0.0392
+  },
+  {
+   "name": "obj_ball1",
+   "cls": "movable",
+   "kind": "ball",
+   "x": -1.6941,
+   "y": -0.4034,
+   "z": 0.0468,
+   "extent": 0.0468
+  },
+  {
+   "name": "obj_block0",
+   "cls": "movable",
+   "kind": "block",
+   "x": 1.4133,
+   "y": 0.0358,
+   "z": 0.0384,
+   "extent": 0.0384,
+   "yaw": 0.328
+  },
+  {
+   "name": "obj_block1",
+   "cls": "movable",
+   "kind": "block",
+   "x": -1.6989,
+   "y": -1.2457,
+   "z": 0.0421,
+   "extent": 0.0421,
+   "yaw": 1.129
+  },
+  {
+   "name": "mov_train0",
+   "cls": "self_moving",
+   "kind": "train",
+   "x": -0.0,
+   "y": 1.525,
+   "z": 0.05,
+   "extent": 0.18,
+   "yaw": 3.142,
+   "path": [
+    0.0,
+    0.0,
+    1.525,
+    0.8,
+    1.5708
+   ],
+   "perimeter": 7.483,
+   "size": [
+    0.18,
+    0.1,
+    0.14
+   ]
+  }
+ ],
+ "xml_sha256": "170c5230fc1f52a7",
+ "free_bodies": [
+  "obj_ball0",
+  "obj_ball1",
+  "obj_block0",
+  "obj_block1",
+  "mov_train0"
+ ],
+ "hinges": [
+  "clock_hand"
+ ],
+ "qpos_robot": 21,
+ "qpos_layout": [
+  [
+   "clock_hand",
+   21,
+   1
+  ],
+  [
+   "obj_ball0",
+   22,
+   7
+  ],
+  [
+   "obj_ball1",
+   29,
+   7
+  ],
+  [
+   "obj_block0",
+   36,
+   7
+  ],
+  [
+   "obj_block1",
+   43,
+   7
+  ],
+  [
+   "mov_train0",
+   50,
+   7
+  ]
+ ],
+ "nq": 57
+}

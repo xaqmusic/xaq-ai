@@ -1,7 +1,9 @@
 # Outreach to Pollen Robotics — the PRs as communication (2026-09-03)
 
-**Status: DRAFT for discussion. Nothing is pushed, opened, or sent; all of that is the
-operator's call (REPORTS.md §9.6).**
+**Status: PR-1 OPENED 2026-09-10 on the operator's go —
+[pollen-robotics/microduck#260](https://github.com/pollen-robotics/microduck/pull/260), from the fork
+`xaqmusic/microduck`, branch `state-velocities-currents`. PR-2 waits for its review (§2). Every further
+push, open, or reply remains the operator's call (REPORTS.md §9.6).**
 
 ## 1. The problem with a "big statement" PR, and its solution
 
@@ -22,7 +24,7 @@ missing. And it can carry the whole plan, because a design doc is where plans be
 | # | what | why this order |
 |---|---|---|
 | 0 | **Preparation** (operator): confirm how they take proposals (Discussions on? issues? a PR to `docs/design/`?), read their last twenty PRs and the review tone, decide whether the standing report can be linked from outside (our repo's visibility) or needs a public copy | a stranger's first message sets the whole relationship |
-| 1 | **PR-1: joint velocities and currents on `robot.state`** (prepared: `state-velocities-currents`, 199 lines, tests 205 → 208, fmt and clippy clean, cost measured at +235 B/frame) | a gift with no philosophy attached; the smallest possible way to show how we write and how we validate; earns the review relationship before the ask |
+| 1 | **PR-1: joint velocities and currents on `robot.state`** (prepared 2026-08-31 on `state-velocities-currents`; **re-vetted 2026-09-10** on `state-velocities-currents-v2` in the worktree `~/microduck-pr`, rebased onto their 0.12.0 main, 247 commits later: the fixture gained their four new state fields, `API_VERSION` 27 → 28 with a history entry on the v24/v25 precedent, the trailer is their `Assisted-by:` per CONTRIBUTING; their whole `check` job run here with the CI's libudev/GStreamer headers: fmt clean, `clippy --workspace --all-targets -D warnings` clean, `cargo test --workspace` 1363 → 1366 passed / 0 failed / 56 binaries (the workspace run caught a fourth crate, `robotctl`'s monitor fixture, that the three-crate run could not see); coverage 72.17 % lines against their floor of 72; cost re-measured on today's frame, +304 B standing / +380 B walking on 3042 B, +10–12 %. **Harness note:** their workspace tests reach the host's systemd over the system bus (`configd` unit status, `robotctl`'s `systemctl` wrappers) and a desktop's polkit answers with password dialogs; run them with `DBUS_SYSTEM_BUS_ADDRESS=unix:path=/nonexistent` as a CI runner effectively does — `mj_host/scripts/pollen_ci.sh <checkout>` runs their whole check job and coverage job that way, branch and baseline. An issue for them, if ever, not a line in PR-1) | a gift with no philosophy attached; the smallest possible way to show how we write and how we validate; earns the review relationship before the ask |
 | 2 | **PR-2: `docs/design/autonomous-brain.md`** — the statement | opened after PR-1 has been reviewed (merged or not): they have seen our care before they read our plan |
 | 3 | **PR-3: a simulated robot for client authors** — only if PR-2's discussion wants it | it helps every client, not us alone; shape decided with them, not for them |
 | 4 | `ogma_duckd` in our repository, with a README written for their users | their repo receives only the hooks; the daemon is ours to run and theirs to ignore |
@@ -57,6 +59,11 @@ Vocabulary that must not appear, even defined: EPM, TLE, Markov blanket, homeoki
 precision-weighted, active inference. What replaces them: "a self-model learned by babbling",
 "the error between what it expected to feel and what it felt", "the boundary between the brain
 and the rest of the robot", "which behaviour wins is decided by how badly each is surprised".
+
+**2026-10-03, the operator's decision: PR-2 leads with active inference, named once, as a design pattern for autonomous
+agents, plus the brain-building principles and how the repo's documents serve AI coding agents.** This supersedes the
+"does not name the framework" line above for PR-2 only; every other internal term stays out. First draft:
+[`microduck_pr2_draft.md`](microduck_pr2_draft.md) (the design doc and the PR description; the operator rewrites it).
 
 ## 4. Risks, and the sentence that answers each
 
@@ -157,3 +164,91 @@ NOTICE. Machine-written code upstream carries `Co-Authored-By`, as PR-1 does.
 - Whether to open a Discussion before either PR, if they use Discussions.
 - Every push, every open, every reply.
 - The signing key custody for our component releases (who holds the private minisign key).
+
+## 8. The head: what to take to Pollen (2026-09-10)
+
+The first thing measured on their duck that needs something from their daemon. Written here
+in our terms; PR-2 and any follow-up carry it in theirs (§3's vocabulary rule).
+
+**The situation, in their terms.** A client that wants a steady head — for a camera, for a
+face that looks at you — has one channel: `robot.head`, four joint targets the walking policy
+tracks as part of its command vector. Two properties of the walking policy bound what any
+client can do through that channel, both measured on their MJCF with their `alpha_walking`
+policy in our host (design doc §17.12–17.14):
+
+1. **The policy moves the head on its own.** With the head command held at exactly zero, the
+   head-yaw joint moves at 1.2 rad/s RMS (69°/s), the neck pitch at 0.67, the head pitch at
+   0.48 and the roll at 0.45 — the gait's period, not the trunk's turning (the trunk's yaw rate
+   is 0.79). The camera on the head turns at 91°/s RMS about vertical.
+2. **The policy answers a head command 120–160 ms late** (its own tracking and the runtime's
+   head low-pass), a quarter of the 2.2 Hz gait period. A client-side reflex that counters the
+   jitter from the head IMU or the trunk gyro arrives late and adds motion; measured, every
+   such loop made the picture worse (frame difference 12.3 → 14–20 on a 64 × 48 frame).
+
+**The measurement that says what would help.** With the four head joints written directly —
+the policy keeping the legs and told nothing about the head — a small level-holding loop
+identified in 600 s of standing babble holds the head level (pitch and roll deviation 0.03–0.05
+against 0.20 and 0.09), halves the head's world rate, brings the camera's yaw motion from
+91 to 58°/s, and makes the picture steadier than the policy's own head (frame difference
+12.3 → 9.9), with the tour intact. Cost: rescues 0.05 → 0.19/min — the policy's balance used
+the head it no longer moves.
+
+**The ask, one thing.** A way for a client to own the head joints while the policy owns the
+legs: either a `robot.headJoints` intent that writes the four head servo targets directly (the
+policy's head outputs ignored while it is live), or a mode flag on `robot.head` with the same
+effect. Our host does exactly this with one flag (`--head-joints`); in `robotd` it is a
+change at the point where the policy's action becomes servo targets. Safety keeps the only
+write handle; when the client stops, the head returns to the policy.
+
+**How it travels.** PR-2 (the design document) states it as the boundary's second seam after
+the twist and the head command: "the head as a client-owned appendage". The daemon change is
+a separate, later PR, prepared and vetted like PR-1, opened at the operator's call — one thing
+per PR. The two findings above (the jitter, the lag) go to them as a measured note with the
+numbers and the method, without our vocabulary; the rescue cost is stated with it.
+
+**What we do not ask.** Nothing about the legs, the policy, or the walking envelope; nothing
+that requires our daemon to exist.
+
+## 9. The camera: what to take to Pollen (2026-10-03)
+
+The second thing measured on their duck that needs something from their daemon (the first is §8's head joints). Written here
+in our terms; PR-2 and any follow-up carry it in theirs. Evidence: design doc §17.104–17.107. **Checked against their tree at
+`ded2f7c` (2026-10-03).**
+
+**What their tree already has.** `media.frame` (#241, merged): one fresh raw frame per call on `mediad`'s local socket
+(`/run/mediad/media.sock`, group-readable), ~1.8 MiB of UYVY at 1280×720, plus `media.video` carrying the intrinsics
+(IMX219, ~62° horizontal on the 1080p crop; their own note: reading 720p off the sensor would narrow it to 27°). It is built
+for snapshots (16 connections, 5 s each), not for a 12.5 Hz stream: pulling and downsampling 1.8 MiB at 12.5 Hz is ~23 MiB/s
+through a socket on an RK3566. And their own direction for perception (`docs/project/npu-bringup.md`, "What is still
+missing"): **a worker beside the camera, on the raw tee, that publishes features on the state stream rather than shipping
+pixels** — the same shape as `tofd` and `pet-detect`. Their duck-detector idea (`docs/ideas/autonomous_behavior.md`) is that
+shape for one class.
+
+**The situation, in their terms.** A client that wants the robot to notice things that move (a toy train, a rolling ball, a
+person walking past) reads the head's 8×8 depth array: a 45° cone, useful to about 2 m. Everything built on it, however good,
+reacts only to what is inside that cone and that range.
+
+**The measurement.** Ten-minute sessions in a simulated playroom on their MJCF, a toy train circling, 18 seeds per arm:
+
+1. **The depth array's field is the limit, not the behaviour behind it.** With the train moving and within 1.5 m it was in the
+   cone 14–15 % of the time in every arm built: a better motion detector on the depth frames, longer memory so the head can
+   glance away, the head turning toward detected motion, a learned choice of where to aim the chase, the head looking around
+   on its own. Each changed what the robot did after it saw the train; none changed how often it saw it.
+2. **Their camera, used only to notice motion, sees the train 2.4× as often** — over all the train's moving time, the depth
+   array has it 8 % of the time (45°, under 2 m), a 62° view at any range 19 % (the train's distance: median 1.8 m, p90
+   2.9 m). The gain is range more than width: on the near train alone, 60° buys 19 % against 15 %.
+3. **What it needs is small.** Frame differencing on a downsampled grey frame (64 × 48) at ~12 Hz: a few kilobytes a frame, a
+   small fraction of one core, and only the result — where in the picture something moved — has to leave the worker.
+
+**The ask, one thing, in their shape.** A motion feature beside the camera: a worker on `mediad`'s raw tee (or inside it)
+that publishes, a few to a dozen times a second, where in the frame something moved (a coarse grid of motion energy, or the
+strongest blob's bearing and size), on the state stream, off unless subscribed. It is their own "features, not pixels"
+direction with the simplest possible feature, needs no model and no NPU, and is useful beyond us (a startle on motion, the
+runtime's contrast-based startle has the same input). The fallback, if they prefer us to own the worker: a small-frame
+variant of `media.frame` that can be polled at ~12 Hz (downsampled grey in the tee), and we run the differencing ourselves.
+
+**How it travels.** PR-2 (the design document) names it once, as the third seam after the twist and the head joints. Then
+an issue or a Discussion, not a PR: the worker's place in their media pipeline is theirs to choose. The video demonstrations
+of the ten-minute behaviour set are the reason it matters. Opening it is the operator's call (REPORTS.md §9.6).
+
+**Open for the operator:** whether the camera goes in PR-2 or after it.

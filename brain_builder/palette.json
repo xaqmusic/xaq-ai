@@ -306,6 +306,113 @@
       "kinds_probed": {},
       "tolerated_missing": []
     },
+    "BearingSeekLoop": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "seek",
+      "purpose": "Seek a thing seen now and then: fixes its position by odometry, homes to it while unseen, arrives or forgets; chases a confirmed mover, with a learned lead",
+      "baseline": "mj_host/configs/a1v2_contact_room.json",
+      "sockets": [
+        {
+          "pattern": "{bearing_topic}",
+          "params": [
+            "bearing_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{pose_topic}",
+          "params": [
+            "pose_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{value_topic}",
+          "params": [
+            "value_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{range_topic}",
+          "params": [
+            "range_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{situation_out_topic}",
+          "params": [
+            "situation_out_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{situation_topic}",
+          "params": [
+            "situation_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{pull_topic}",
+          "params": [
+            "pull_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{renew_topic}",
+          "params": [
+            "renew_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{mover_topic}",
+          "params": [
+            "mover_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{yield_topic}",
+          "params": [
+            "yield_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {},
+      "tolerated_missing": []
+    },
     "BodyRhythmTracker": {
       "category": "sensory",
       "layer": 1,
@@ -579,6 +686,110 @@
           ],
           "output": true,
           "payload": "EnvEvent"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {},
+      "tolerated_missing": []
+    },
+    "CloudMap": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "cloud",
+      "purpose": "The ToF's point cloud in voxels, filed by place: stop and walking clouds, the things in them (small, movable, a seen top, not on a wall line), the attended thing's bearing, the mover",
+      "baseline": "mj_host/configs/a1v2_contact_room.json",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{place_topic}",
+          "params": [
+            "place_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{change_topic}",
+          "params": [
+            "change_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{things_topic}",
+          "params": [
+            "things_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{thing_bearing_topic}",
+          "params": [
+            "thing_bearing_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{target_topic}",
+          "params": [
+            "target_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{target_range_topic}",
+          "params": [
+            "target_range_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{target_tall_topic}",
+          "params": [
+            "target_tall_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{mover_topic}",
+          "params": [
+            "mover_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{context_topic}",
+          "params": [
+            "context_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
         }
       ],
       "fixed": [],
@@ -975,7 +1186,7 @@
       "layer": 3,
       "id_prefix": "efe",
       "purpose": "Arbitrates candidate behaviours by expected free energy",
-      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter.json",
+      "baseline": "mj_host/configs/a1v2_contact_room.json",
       "sockets": [
         {
           "pattern": "{hunger_topic}",
@@ -1082,6 +1293,16 @@
           "payload": "Unknown",
           "required": false,
           "polled": true
+        },
+        {
+          "pattern": "{trust_consensus_topic}",
+          "params": [
+            "trust_consensus_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
@@ -1093,7 +1314,7 @@
       "layer": 1,
       "id_prefix": "epm",
       "purpose": "Episodic Predictive Module: frozen encoder + growing neural gas + dual TLE; publishes one RealityToken per tick on reality.<group>.<name>",
-      "baseline": "mj_host/configs/a1v2_r0_regime.json",
+      "baseline": "mj_host/configs/a1v2_contact_room.json",
       "sockets": [
         {
           "pattern": "prediction.{modality_group}.{modality_name}",
@@ -1136,12 +1357,11 @@
         "modality_group": "string",
         "modality_name": "string",
         "encoder_kind": "string",
-        "input_topic": "string"
+        "input_topic": "string",
+        "dim_min": "list_float",
+        "dim_max": "list_float"
       },
-      "tolerated_missing": [
-        "dim_min",
-        "dim_max"
-      ]
+      "tolerated_missing": []
     },
     "EmbeddingRegistry": {
       "category": "sensory",
@@ -2169,7 +2389,7 @@
       "layer": 2,
       "id_prefix": "voter",
       "purpose": "Precision-weighted (1/(tle+eps)) fusion of many EPMs into one ConsensusToken on consensus.<level>",
-      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "baseline": "mj_host/configs/a1v2_contact_room.json",
       "sockets": [
         {
           "pattern": "consensus.{level}",
@@ -2205,6 +2425,87 @@
           "required": false
         }
       ],
+      "kinds_probed": {},
+      "tolerated_missing": []
+    },
+    "LoopCompetence": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "comp",
+      "purpose": "Grades a loop by whether its objective moves as promised while it drives; a [0,1] competence the arbiter can trust",
+      "baseline": "mj_host/configs/a1v2_contact_room.json",
+      "sockets": [
+        {
+          "pattern": "{objective_topic}",
+          "params": [
+            "objective_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{gain_topic}",
+          "params": [
+            "gain_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "reality.{modality_group}.{modality_name}",
+          "params": [
+            "modality_group",
+            "modality_name"
+          ],
+          "output": true,
+          "payload": "RealityToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "objective_topic": "string",
+        "gain_topic": "string",
+        "modality_name": "string"
+      },
+      "tolerated_missing": []
+    },
+    "MotionField": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "motion",
+      "purpose": "Always-on motion sensor over the ToF's rays: a return where a ray just passed through empty space; tracks with world velocity, optionally vouching for the cloud's mover",
+      "baseline": "mj_host/configs/a1v2_t10_vouch.json",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{cloud_mover_topic}",
+          "params": [
+            "cloud_mover_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
       "kinds_probed": {},
       "tolerated_missing": []
     },
@@ -2622,7 +2923,7 @@
       "layer": 2,
       "id_prefix": "motor",
       "purpose": "Motor EPM v2: sensorimotor GNG with state prior, consolidation ratchet and homeokinetic controller; publishes action.* per joint",
-      "baseline": "mj_host/configs/a1v2_ident.json",
+      "baseline": "mj_host/configs/a1v2_contact_room.json",
       "sockets": [
         {
           "pattern": "{proprio_topics}",
@@ -3104,7 +3405,7 @@
       "layer": 2,
       "id_prefix": "neuro",
       "purpose": "Ambient dopamine/serotonin state from drive errors; scales GNG thresholds and exploration via neuro.state",
-      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/picrawler_senses.json",
       "sockets": [],
       "fixed": [
         {
@@ -3319,12 +3620,59 @@
       "kinds_probed": {},
       "tolerated_missing": []
     },
+    "PlaceVectorBuilder": {
+      "category": "fusion",
+      "layer": 2,
+      "id_prefix": "placevec",
+      "purpose": "Builds the place vector a place-EPM learns the map from: panorama + the dead-reckoned pose, repeated",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_route_far_pillars__a5_epm_map.json",
+      "sockets": [
+        {
+          "pattern": "{pano_topic}",
+          "params": [
+            "pano_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {},
+      "tolerated_missing": []
+    },
     "PlayLoop": {
       "category": "predictor",
       "layer": 3,
       "id_prefix": "play",
-      "purpose": "Replays motor chunks and grades their outcome against the promise",
-      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter_fused_lbend.json",
+      "purpose": "Epistemic play: ascends map novelty toward the frontier to grow the place map; a bearing and a play value",
+      "baseline": "mj_host/configs/a1v2_contact_room.json",
       "sockets": [
         {
           "pattern": "{place_topic}",
@@ -4217,6 +4565,104 @@
       },
       "tolerated_missing": []
     },
+    "SkillOutcomeLoop": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "outcome",
+      "purpose": "Learns what a skill (the kick) does to each kind of thing, per context; kicks while the answer is uncertain, publishes the surprise and a pull",
+      "baseline": "mj_host/configs/a1v2_contact_room.json",
+      "sockets": [
+        {
+          "pattern": "{bearing_topic}",
+          "params": [
+            "bearing_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{thing_topic}",
+          "params": [
+            "thing_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{seek_value_topic}",
+          "params": [
+            "seek_value_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{seek_range_topic}",
+          "params": [
+            "seek_range_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{pose_topic}",
+          "params": [
+            "pose_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{skill_topic}",
+          "params": [
+            "skill_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{outcome_topic}",
+          "params": [
+            "outcome_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{need_topic}",
+          "params": [
+            "need_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{context_topic}",
+          "params": [
+            "context_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{pull_topic}",
+          "params": [
+            "pull_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {},
+      "tolerated_missing": []
+    },
     "StaleConfidenceDecay": {
       "category": "meta",
       "layer": 5,
@@ -4368,6 +4814,43 @@
         "premotor_leg_assignment": "list_string",
         "premotor_policy_topics": "list_string"
       },
+      "tolerated_missing": []
+    },
+    "TofAvoidLoop": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "avoid",
+      "purpose": "Avoidance as a loop with a bearing: away from the nearest ToF obstacle, its proximity as its need",
+      "baseline": "mj_host/configs/a1v2_r28_l2_arbitrated.json",
+      "sockets": [
+        {
+          "pattern": "{prox_topic}",
+          "params": [
+            "prox_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{value_topic}",
+          "params": [
+            "value_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {},
       "tolerated_missing": []
     },
     "VisualBearing": {
