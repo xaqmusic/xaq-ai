@@ -7309,3 +7309,53 @@ before the promotion decision; the next push is the chase.
 The stack is now ★ F5 + the look loop as built in lever 2b — config `a1v2_f5_look_pay2` with host `--stop-every 0
 --stop-by-look` (launcher preset ★ LOOK 2b, first row). Levers 2c, 3 and 4 stay in the record with their re-use contexts.
 The push moves to the chase (§17.113).
+
+### 17.113 A loop above the chase: what the thing is doing, not where it was (2026-10-08, design)
+
+**The operator (2026-10-08), watching ★ LOOK 2b:** "When the robot sees the moving object, it will walk to the place the
+object was when it completed the look, stop there, and begin the stationary object interaction on nothing. It seems we need a
+higher-level loop above chase."
+
+**Measured (`mj_host/tools/moved_targets.py`: each seek target matched to the movable thing under it when taken, looked up
+again at the next arrival stop and the next skill; n = 24 per arm).**
+
+| | arrivals at a thing that had moved | skills at a thing that had moved | which thing | target taken |
+|---|---|---|---|---|
+| ★ F5 | 1.88 a run (14 %) | 1.46 a run (14 %) | train 42, ball 35, block 3 | at a stop 44, on the walk 36 |
+| ★ LOOK 2b | 1.71 a run (12 %) | 1.62 a run (16 %) | train 48, ball 28, block 4 | at a stop 29, on the walk 51 |
+
+The failure predates the look loop: one interaction in seven is aimed at an empty place. The train (it runs 8 s, stands 8 s)
+is the larger half — a train seen standing is a still thing like any other, fixed as a place; the balls are the other —
+most of them, likely, rolled by the duck's own kicks.
+
+**Why the brain does this.** The seek loop's target is a PLACE. A sighting fixes it by dead reckoning; the chase is a
+separate path that only a mover seen moving (young voxels, isolated, confirmed by its own prediction) can enter; a chased
+thing that stops becomes a place again (`chase_stop_v`); and the arrival — range under `arrive_m` — fires the stop and the
+outcome loop's request without anything checking the thing is still there. Nothing in the brain holds a belief about the
+THING: whether it is still where it was, whether its kind moves on its own, where it went.
+
+**What exists to build on (the record):** the chase and its pursuit, memory and "mover in mind" (§17.53–17.103, §17.112
+lever 1); `CloudMap`'s counts at the seek target (`target_small`, `target_tall`; the impeded look's wall verdict, §17.99)
+and the free rays (`--tof-free-rays`, §17.97: a ray that passes over a place says it is empty); the thing's kind
+(`thing_kind_epm`, O62) and the outcome loop keyed by kind × context; the outcome loop's "fire at what you see"
+(`reach_m`, R75–R78: honest, starved because the gaze could not see a thing at the feet — the sweep sign fix since put the
+target in view at 51 % of arrival stops); the phantom's design (O69: particles bounded by structure, thinned by negative
+evidence along rays, gaze first, interest that spends itself); the coverage limit (§17.106: a 45° cone sees the train
+~15 % of the time it is near — the camera case).
+
+**The proposal: a thing loop (an object file) above seek and chase.**
+
+| | the thing loop |
+|---|---|
+| infers | whether the thing the seek loop is sent to is still where the brain believes it is, and if not, where it went |
+| sensors | the sightings (the thing bearing, the mover bearing); the cloud AT the believed position — something small there, or rays passing through it to beyond (negative evidence); the thing's kind |
+| predicts | the thing's presence at its believed position, decaying with time unseen at a rate learned per kind (a train-kind thing leaves; a block stays); and, for a thing seen moving, its position from its last velocity |
+| honest signal | a re-sighting at the believed place (presence confirmed) or a view of the place that comes back empty (refuted) — its own prediction error |
+| need / what it owns | the target: the seek loop is sent to the belief, not to a place; when presence falls the target is released and the look is handed a lost thing (where it went), the phantom's entry; the outcome loop's request waits on presence (a learned gate where `reach_m` was a rule) |
+
+**Stages, each guarded and measured on `moved_targets.py` + the ten-minute set + the chase readout:** T0 the instrument
+(done, above). T1 the presence belief, passive: does it fall before the arrivals at moved things (an ROC over the 80 a
+24-run arm makes) and stay up for the rest? T2 release: a target whose presence is refuted is dropped before the walk ends
+(no walk to nothing). T3 the request waits on presence (no kick at nothing). T4 the release hands the look the lost thing
+(the look gets a payoff that takes time — §17.112 lever 4's re-use). T5 mobility per kind (the train-kind thing is a
+mover even while it stands).
