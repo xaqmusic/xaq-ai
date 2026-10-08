@@ -7215,3 +7215,18 @@ byte-identical (★ F5 and L1 tick for tick on the new binary). Unit-tested (see
   and handed back, is what the walker falls out of.
 - **Verdict: `WORKING` on its mechanism (the leak, the chase), `REGRESSION` on falls inherited from L1's short stops** —
   not promoted. Kept in the stack under lever 2, which replaces the need and the trust that make the stops short.
+
+**Lever 2, the pragmatic look (`a1v2_f5_look_pay`, `log/ten/lk4`, n = 24, on lever 1).** `LookLoop.need_mode yield`: a stop PAYS
+when a seek target appears or a skill is requested during it; the need is P(payoff) per context (Beta, optimism 1), during a
+stop the probability a payoff is still to come given none yet (P·S(τ) / (1 − P + P·S(τ)), S the learned time to payoff),
+0 once paid; the trust is its own calibration (1 − mean Brier) in place of `comp_look`. Unit-tested 9/9; the surprise form
+and lever 1 byte-identical.
+- **Falls back to ★ F5's level:** 2.75 → (lever 1 4.08) → 2.83 (CI [−1.18, +1.35]); skills touching 35.0 → (30.0) → 34.1 %;
+  outcomes observed 67 → 71 %. The look's stops 6.0 a run, 2.5 s.
+- **The chase's gain does not carry over:** on the moving train 13.0 → (15.1) → 9.9 s a run, chase 23.6 → (29.9) → 23.0;
+  walls 11.5 → 17.0 /min (CI [−0.8, +11.9]); map baked at stops 22.0 → 18.7 (CI [−5.9, −0.7]). Boring 20.9 → 22.9 %.
+- **Faithfulness (§3.2 rule 6): a weakened slice.** The look's payoff rate read 31 % and its predictions were no better than
+  the base rate (Brier 0.229 against 0.215): arrival stops read 32 % paid. An arrival's skill is requested ON THE WALK at
+  the arrival and fired at the stop's hand-back, before the stop's cloud opens (304 of 306 skills) — the look never saw the
+  payoff that justifies most arrival stops. **Verdict `PARTIAL` as built; not a verdict on the pragmatic need.** Fixed as
+  `pending_skill_pays` (a skill requested since the last stop is that stop's payoff at t = 0; off = byte-identical): lever 2b.

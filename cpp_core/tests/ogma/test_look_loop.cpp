@@ -150,3 +150,23 @@ TEST(LookLoop, YieldASkillRequestIsAPayoff) {
     f.tick(false);
     EXPECT_DOUBLE_EQ(f.m.last_realized(), 1.0);
 }
+
+TEST(LookLoop, YieldASkillDeferredToTheStopIsItsPayoff) {
+    // the host defers a skill requested on the walk to the next stop's hand-back: that stop pays at t = 0
+    for (bool counts : {false, true}) {
+        ogma::InProcessBus bus; ogma::LookLoop m; m.set_id("look");
+        m.on_setup(&bus, {{"state_topic", std::string("reality.proprio.cloud_state")}, {"value_topic", std::string("reality.cognitive.look")},
+                          {"need_mode", std::string("yield")}, {"skill_topic", std::string("intent.skill")}, {"pending_skill_pays", counts}});
+        uint64_t t = 0;
+        auto tick = [&](bool still, bool skill) {
+            bus.begin_tick(t);
+            bus.publish("reality.proprio.cloud_state", pv({1.0f, still ? 0.0f : 1.0f, 100.0f, 0.5f}));
+            if (skill) { auto s = pv({3.0f, 1.0f}); s->tick_id = t; bus.publish("intent.skill", s); }
+            m.tick(t++); bus.end_tick();
+        };
+        tick(false, true);                               // requested on the walk, at the arrival
+        for (int i = 0; i < 60; ++i) tick(true, false);  // the stop
+        tick(false, false);
+        EXPECT_DOUBLE_EQ(m.last_realized(), counts ? 1.0 : 0.0);
+    }
+}

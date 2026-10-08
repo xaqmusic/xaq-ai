@@ -98,7 +98,7 @@ private:
     uint64_t episodes_ = 0;
     // yield mode
     std::deque<double> pay_times_;   // seconds from a stop's start to its payoff, the most recent 400
-    bool   ep_paid_ = false;
+    bool   ep_paid_ = false, skill_pending_ = false, pending_counts_ = false;
     double ep_p_ = 0.5, seek_prev_ = 0.0, brier_sum_ = 0.0;
     uint64_t paid_ = 0;
 };

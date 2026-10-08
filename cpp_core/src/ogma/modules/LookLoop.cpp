@@ -84,6 +84,9 @@ ParamSchema LookLoop::params_schema() const {
             "'surprise' (S1: the stop cloud's new_fraction integral) | 'yield' (lever 2: P(a stop pays -- a seek target appears or a "
             "skill is requested), and during a stop the probability a payoff is still to come).", ParamValue{std::string("surprise")}},
         {"skill_topic", ParamMutability::ConstructionOnly, "yield: intent.skill [id, request]; a request during a stop is a payoff.", ParamValue{std::string("")}},
+        {"pending_skill_pays", ParamMutability::ConstructionOnly,
+            "yield: a skill requested on the walk (deferred by the host to the next stop's hand-back) is that stop's payoff at t = 0.  "
+            "false = only a request inside the stop counts (lever 2 as first built).", ParamValue{false}},
         {"trust_topic", ParamMutability::ConstructionOnly,
             "yield: a RealityToken for the voter (reality.loop.look): expected_error = the mean Brier score of the look's payoff "
             "predictions (0.25 before any).  Empty = not published.", ParamValue{std::string("")}},
@@ -104,7 +107,7 @@ ParamMap LookLoop::current_params() const {
     m["place_topic"] = ParamValue{place_topic_}; m["seek_value_topic"] = ParamValue{seek_value_topic_};
     m["outcome_need_topic"] = ParamValue{outcome_need_topic_}; m["active_topic"] = ParamValue{active_topic_};
     m["driving_topic"] = ParamValue{driving_topic_};
-    m["need_mode"] = ParamValue{need_mode_}; m["skill_topic"] = ParamValue{skill_topic_}; m["trust_topic"] = ParamValue{trust_topic_};
+    m["need_mode"] = ParamValue{need_mode_}; m["skill_topic"] = ParamValue{skill_topic_}; m["trust_topic"] = ParamValue{trust_topic_}; m["pending_skill_pays"] = ParamValue{pending_counts_};
     m["optimism"] = ParamValue{optimism_}; m["peak_decay"] = ParamValue{peak_decay_};
     m["min_stop_ticks"] = ParamValue{int64_t(min_stop_ticks_)}; m["tick_hz"] = ParamValue{tick_hz_};
     return m;
@@ -126,6 +129,8 @@ void LookLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "need_mode",          [&](auto const& v){ need_mode_ = get_string(v, "need_mode"); });
     apply_param(params, "skill_topic",        [&](auto const& v){ skill_topic_ = get_string(v, "skill_topic"); });
     apply_param(params, "trust_topic",        [&](auto const& v){ trust_topic_ = get_string(v, "trust_topic"); });
+    apply_param(params, "pending_skill_pays", [&](auto const& v){
+        if (auto b = std::get_if<bool>(&v)) pending_counts_ = *b; else pending_counts_ = get_double(v, "pending_skill_pays") > 0.5; });
     apply_param(params, "peak_decay",         [&](auto const& v){ peak_decay_ = get_double(v, "peak_decay"); });
     apply_param(params, "min_stop_ticks",     [&](auto const& v){ min_stop_ticks_ = std::max(1, int(get_double(v, "min_stop_ticks"))); });
     apply_param(params, "tick_hz",            [&](auto const& v){ tick_hz_ = std::max(1.0, get_double(v, "tick_hz")); });
@@ -229,7 +234,14 @@ void LookLoop::tick(uint64_t tick_id) {
         if (!skill_topic_.empty())
             if (auto sk = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(skill_topic_)))
                 skill = sk->values.size() >= 2 && sk->values[1] > 0.5f && sk->tick_id == tick_id;
-        if (in_ep_ && ep_ticks_ == 1) { ep_paid_ = false; ep_p_ = pay_mean(ep_cell_); }
+        // a skill requested on the walk is deferred by the host to the next stop's hand-back (it fires from standing, before
+        // the stop's cloud opens): that stop is what serves it -- its payoff at t = 0 (2026-10-08: without this the look
+        // never saw an arrival stop's skill, 304 of 306)
+        if (skill && !in_ep_ && pending_counts_) skill_pending_ = true;
+        if (in_ep_ && ep_ticks_ == 1) {
+            ep_paid_ = false; ep_p_ = pay_mean(ep_cell_);
+            if (skill_pending_) { ep_paid_ = true; skill_pending_ = false; pay_times_.push_back(0.0); if (pay_times_.size() > 400) pay_times_.pop_front(); }
+        }
         if (in_ep_ && !ep_paid_ && ((sv > 0.0 && seek_prev_ <= 0.0) || skill)) {
             ep_paid_ = true;
             pay_times_.push_back(double(ep_ticks_) / tick_hz_); if (pay_times_.size() > 400) pay_times_.pop_front();
