@@ -7182,3 +7182,20 @@ TLE over its running peak, the seek need, the outcome need], the host's `look` r
   the walking cloud), not against a fresh one. Arbitration does not depend on the prediction: the in-stop need (new_fraction
   over the stop's own peak) is the cloud-end rule's continuous form, and the chase's silencing is the arbiter's gate — L1
   measures those.
+
+**L1, the look owns its stops (`a1v2_f5_look_l1` + host `--stop-every 0 --stop-by-look`, `log/ten/lk2`, n = 24 × 600 s, paired
+against ★ F5 `fx5`).** The look wins 8.8 stops a run (the timer's 3.6 gone) and every one ends on its loss; they are short
+(1.5 s mean against the timer's 8.9 s): the look wins on its optimistic walking need, the stop starts, and the need is
+overtaken before the stop's cloud has opened.
+- **Behaviour ties.** Boring 20.9 → 22.2 % (CI [−3.8, +6.5]); interesting 48.2 → 48.1; walls 11.5 → 15.1 /min (CI [−3.0,
+  +10.3]); falls 2.75 → 3.71 (CI [−0.2, +2.1]); the block touched in the first minute 19 → 20 of 24; skills 11.9 → 10.6,
+  touching 35 → 29 %; map baked at stops 22.0 → 19.2 (CI [−5.2, −0.4], the one difference beyond the noise: fewer, shorter
+  stops bake less). Chase: 23.6 → 25.5 s a run, on the moving train 13.0 → 12.8, contacts 3.7 → 3.5. The moving train within
+  1.5 m while standing 45.7 → 39.5 s a run, chasing while standing 5.6 → 7.9 %.
+- **The chase's gate leaks.** 28 look stops started within 1 s after a chase (the timer's 11) and 5 on a chasing tick: a chase
+  drops (median 2.7 s) and the seek need with it, and the look, the best epistemic bid, takes the body at once. "A confirmed
+  chase silences the look" holds only while the chase is held; the moment it blinks off, the look is what interrupts it.
+- **Verdict `NULL` (the mechanism lands; the run ties, leaning worse on falls and walls).** Not a verdict on the look as a
+  loop: its walking need is the S1 prediction, which predicts nothing (r = 0.05), so L1 arbitrated a loop with no information
+  about when to stop. Re-use: with a need that carries information (S1's re-use: what a stop delivers — a new target, an
+  answer to watch) and a seek need that holds through the chase's short drops (the pursuit's coasting, not the chased flag).
