@@ -973,3 +973,31 @@ TEST(EFEArbiter, AMoverInMindHoldsTheLookOff) {
     EXPECT_EQ(run(false), 4) << "without the hold, the dropped chase hands the body to the look";
     EXPECT_EQ(run(true), 2)  << "with it, the look waits (0.2·0.9·0.4 = 0.07 < play 0.3)";
 }
+
+TEST(EFEArbiter, ACommittedLookYieldsOnlyToTheSeek) {
+    // §17.112 lever 4: while the look holds the body and commits, play cannot take it back; the seek can
+    std::unordered_map<std::string, float> w = {{"reality.loop.seek", 0.4f}, {"reality.loop.play", 0.3f}, {"reality.loop.look", 0.4f}};
+    auto run = [&](bool commit, float seek_late) {
+        ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")},
+                            {"play_weight", 1.0}, {"play_value_topic", std::string("reality.cognitive.play_value")},
+                            {"vision_weight", 1.0}, {"vision_value_topic", std::string("reality.cognitive.seek_value")},
+                            {"trust_key_vision", std::string("reality.loop.seek")}, {"look_value_topic", std::string("reality.cognitive.look")},
+                            {"look_commit_topic", std::string("look.commit")}};
+        Fix f(p); uint64_t t = 0;
+        for (int i = 0; i < 400; ++i) {
+            const bool late = i >= 200;
+            f.bus.begin_tick(t);
+            const float seek = late ? seek_late : 0.0f;
+            f.bus.publish("reality.proprio.hunger", p1(seek)); f.bus.publish("reality.cognitive.seek_value", p1(seek));
+            f.bus.publish("reality.cognitive.play_value", p1(1.0f));
+            f.bus.publish("reality.cognitive.look", p1(late ? 0.5f : 0.9f));   // late: the look's need sinks under play's
+            f.bus.publish("look.commit", p1(commit ? 1.0f : 0.0f));
+            f.bus.publish("consensus.1", trust_token(w));
+            f.arb.tick(t++); f.bus.end_tick();
+        }
+        return f.arb.winner();
+    };
+    EXPECT_EQ(run(false, 0.0f), 2) << "uncommitted: play (0.3) beats the sunk look (0.5·0.4 = 0.2)";
+    EXPECT_EQ(run(true, 0.0f), 4)  << "committed: the look keeps the body against play";
+    EXPECT_EQ(run(true, 0.9f), 3)  << "but a payoff (the seek need) takes it back";
+}

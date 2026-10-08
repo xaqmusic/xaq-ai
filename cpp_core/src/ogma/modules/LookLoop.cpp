@@ -55,6 +55,7 @@ std::vector<TopicSpec> LookLoop::output_topics() const {
     if (!driving_topic_.empty())    v.push_back(TopicSpec{driving_topic_, std::type_index(typeid(ProprioToken))});
     if (!descriptor_topic_.empty()) v.push_back(TopicSpec{descriptor_topic_, std::type_index(typeid(ProprioToken))});
     if (!trust_topic_.empty())      v.push_back(TopicSpec{trust_topic_, std::type_index(typeid(RealityToken))});
+    if (!commit_topic_.empty())     v.push_back(TopicSpec{commit_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
 
@@ -90,6 +91,14 @@ ParamSchema LookLoop::params_schema() const {
         {"per_context_times", ParamMutability::ConstructionOnly,
             "yield: the time to a payoff is learned per context (each cell's own payoff times, the all-stops distribution as a "
             "prior worth one observation).  false = one distribution over all stops (lever 2b).", ParamValue{false}},
+        {"episode_start", ParamMutability::ConstructionOnly,
+            "'cloud' (default): a stop is the stop's cloud being open.  'hold' (lever 3): also while the trunk is still (state_topic "
+            "values[4]) or the look holds the body (hold_topic) -- the payoff window opens when the stop does.", ParamValue{std::string("cloud")}},
+        {"commit_topic", ParamMutability::ConstructionOnly,
+            "lever 4: output [1 while the look holds a stop it took, unpaid, and under half of this context's payoffs would have "
+            "come by now (the learned median time to a payoff)]; the arbiter's look_commit_topic.  Empty = not published.",
+            ParamValue{std::string("")}},
+        {"hold_topic", ParamMutability::ConstructionOnly, "episode_start hold: the arbiter's gain for the look.", ParamValue{std::string("")}},
         {"trust_topic", ParamMutability::ConstructionOnly,
             "yield: a RealityToken for the voter (reality.loop.look): expected_error = the mean Brier score of the look's payoff "
             "predictions (0.25 before any).  Empty = not published.", ParamValue{std::string("")}},
@@ -111,6 +120,7 @@ ParamMap LookLoop::current_params() const {
     m["outcome_need_topic"] = ParamValue{outcome_need_topic_}; m["active_topic"] = ParamValue{active_topic_};
     m["driving_topic"] = ParamValue{driving_topic_};
     m["need_mode"] = ParamValue{need_mode_}; m["skill_topic"] = ParamValue{skill_topic_}; m["trust_topic"] = ParamValue{trust_topic_}; m["pending_skill_pays"] = ParamValue{pending_counts_}; m["per_context_times"] = ParamValue{per_context_times_};
+    m["episode_start"] = ParamValue{episode_start_}; m["hold_topic"] = ParamValue{hold_topic_}; m["commit_topic"] = ParamValue{commit_topic_};
     m["optimism"] = ParamValue{optimism_}; m["peak_decay"] = ParamValue{peak_decay_};
     m["min_stop_ticks"] = ParamValue{int64_t(min_stop_ticks_)}; m["tick_hz"] = ParamValue{tick_hz_};
     return m;
@@ -132,6 +142,9 @@ void LookLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "need_mode",          [&](auto const& v){ need_mode_ = get_string(v, "need_mode"); });
     apply_param(params, "skill_topic",        [&](auto const& v){ skill_topic_ = get_string(v, "skill_topic"); });
     apply_param(params, "trust_topic",        [&](auto const& v){ trust_topic_ = get_string(v, "trust_topic"); });
+    apply_param(params, "episode_start",      [&](auto const& v){ episode_start_ = get_string(v, "episode_start"); });
+    apply_param(params, "hold_topic",         [&](auto const& v){ hold_topic_ = get_string(v, "hold_topic"); });
+    apply_param(params, "commit_topic",       [&](auto const& v){ commit_topic_ = get_string(v, "commit_topic"); });
     apply_param(params, "per_context_times", [&](auto const& v){
         if (auto b = std::get_if<bool>(&v)) per_context_times_ = *b; else per_context_times_ = get_double(v, "per_context_times") > 0.5; });
     apply_param(params, "pending_skill_pays", [&](auto const& v){
@@ -142,6 +155,7 @@ void LookLoop::on_setup(Bus* bus, ParamMap const& params) {
     if (state_topic_.empty()) throw std::invalid_argument("LookLoop: state_topic is required");
     if (value_topic_.empty()) throw std::invalid_argument("LookLoop: value_topic is required");
     if (need_mode_ != "surprise" && need_mode_ != "yield") throw std::invalid_argument("LookLoop: need_mode is 'surprise' or 'yield'");
+    if (episode_start_ != "cloud" && episode_start_ != "hold") throw std::invalid_argument("LookLoop: episode_start is 'cloud' or 'hold'");
 }
 
 void LookLoop::on_param_change(std::string_view key, ParamValue const& value) {
@@ -185,21 +199,27 @@ void LookLoop::record_pay(int cell, double secs) {
 
 double LookLoop::still_to_come(double p, double tau, int cell) const {
     // P(a payoff is still to come | none in the first tau s) = P S(tau) / (1 - P + P S(tau))
+    const double surv = survival(tau, cell);
+    const double num = p * surv, den = 1.0 - p + num;
+    return den > 1e-12 ? num / den : 0.0;
+}
+
+double LookLoop::survival(double tau, int cell) const {
     double surv = 1.0;
     if (!pay_times_.empty()) {
-        int later = 0; for (double x : pay_times_) later += x > tau;
+        const bool hold = episode_start_ == "hold";        // hold: a payoff AT tau is still to come (continuity at t = 0)
+        int later = 0; for (double x : pay_times_) later += hold ? x >= tau : x > tau;
         surv = double(later) / double(pay_times_.size());
     }
     if (per_context_times_) {
         // this context's own times to a payoff, the all-stops survival as a prior worth one observation
         auto it = cell_times_.find(cell);
         if (it != cell_times_.end() && !it->second.empty()) {
-            int later = 0; for (double x : it->second) later += x > tau;
+            int later = 0; for (double x : it->second) later += episode_start_ == "hold" ? x >= tau : x > tau;
             surv = (double(later) + surv) / (double(it->second.size()) + 1.0);
         }
     }
-    const double num = p * surv, den = 1.0 - p + num;
-    return den > 1e-12 ? num / den : 0.0;
+    return surv;
 }
 
 void LookLoop::tick(uint64_t tick_id) {
@@ -207,7 +227,14 @@ void LookLoop::tick(uint64_t tick_id) {
     const bool walking = scalar(bus_, state_topic_, 1, 0.0f) > 0.5f;
     nf_ = std::clamp(double(scalar(bus_, state_topic_, 3, 0.0f)), 0.0, 1.0);
     const bool active = active_topic_.empty() || scalar(bus_, active_topic_, 0, 0.0f) > 0.5f;
-    const bool in_now = open && !walking && active;
+    bool in_now = open && !walking && active;
+    if (episode_start_ == "hold") {
+        // lever 3: a stop starts when the body does -- the look's own stop when it takes the body (the arbiter's gain), any
+        // stop when the trunk is still (the stillness the cloud's input carries) -- not when the stop's cloud opens
+        const bool still = scalar(bus_, state_topic_, 4, 0.0f) > 0.5f;
+        const bool held  = !hold_topic_.empty() && scalar(bus_, hold_topic_, 0, 0.0f) > 0.5f;
+        in_now = in_now || still || held;
+    }
 
     // the context: the descriptor for the context EPM (published every tick), and the winner it last returned
     if (!descriptor_topic_.empty()) {
@@ -261,7 +288,11 @@ void LookLoop::tick(uint64_t tick_id) {
         if (skill && !in_ep_ && pending_counts_) skill_pending_ = true;
         if (in_ep_ && ep_ticks_ == 1) {
             ep_paid_ = false; ep_p_ = pay_mean(ep_cell_);
-            if (skill_pending_) { ep_paid_ = true; skill_pending_ = false; record_pay(ep_cell_, 0.0); }
+            if (skill_pending_) {
+                ep_paid_ = true; skill_pending_ = false;
+                // hold: a deferred skill is a certain payoff, served at once -- not a time the look waits for
+                if (episode_start_ != "hold") record_pay(ep_cell_, 0.0);
+            }
         }
         if (in_ep_ && !ep_paid_ && ((sv > 0.0 && seek_prev_ <= 0.0) || skill)) {
             ep_paid_ = true;
@@ -281,6 +312,15 @@ void LookLoop::tick(uint64_t tick_id) {
         pred_norm_ = pay_optimistic(cell);
         if (!in_ep_) need_ = pred_norm_;
         else need_ = ep_paid_ ? 0.0 : still_to_come(pay_optimistic(ep_cell_), double(ep_ticks_) / tick_hz_, ep_cell_);
+        if (!commit_topic_.empty()) {
+            // lever 4: the look commits to a stop it took while under half of this context's payoffs would have come by now
+            const bool held = !hold_topic_.empty() && scalar(bus_, hold_topic_, 0, 0.0f) > 0.5f;
+            commit_ = in_ep_ && held && !ep_paid_ && survival(double(ep_ticks_) / tick_hz_, ep_cell_) >= 0.5;
+            auto cm = std::make_shared<ProprioToken>();
+            cm->tick_id = tick_id; cm->producer_id = id_.empty() ? std::string("look") : id_; cm->sensor = "look_commit";
+            cm->values = Eigen::VectorXf::Constant(1, commit_ ? 1.0f : 0.0f);
+            bus_->publish(commit_topic_, cm);
+        }
         if (!trust_topic_.empty()) {
             const double err = episodes_ ? brier_sum_ / double(episodes_) : 0.25;
             auto tok = std::make_shared<RealityToken>();
@@ -351,7 +391,7 @@ nlohmann::json LookLoop::diag_snapshot() const {
                           {"last_predicted", last_predicted_},
                           {"mean_abs_error", episodes_ ? abs_err_sum_ / double(episodes_) : 0.0}, {"cells", cells},
                           {"need_mode", need_mode_}, {"paid", paid_}, {"brier", episodes_ ? brier_sum_ / double(episodes_) : 0.25},
-                          {"in_stop_paid", ep_paid_}};
+                          {"in_stop_paid", ep_paid_}, {"commit", commit_}};
 }
 
 } // namespace ogma

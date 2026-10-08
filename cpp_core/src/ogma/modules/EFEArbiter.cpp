@@ -84,6 +84,7 @@ ParamSchema EFEArbiter::params_schema() const {
         {"look_gain_topic",  ParamMutability::ConstructionOnly, "§17.112: winner-take-all gain of the look (the host stops while it is 1).", ParamValue{std::string("arbiter.gain.look")}},
         {"look_weight",      ParamMutability::HotMutable, "§17.112: the look's weight; 0 = inert.", ParamValue{1.0}},
         {"look_hold_topic",  ParamMutability::ConstructionOnly, "§17.112 lever 1: [a mover in mind] (BearingSeekLoop.mind_topic); the look's gate becomes 1 − max(hunger, hold): standing to look while a mover is in mind loses it. Empty = 1 − hunger.", ParamValue{std::string("")}},
+        {"look_commit_topic", ParamMutability::ConstructionOnly, "§17.112 lever 4: [1 while the look commits to its stop] (LookLoop.commit_topic): while the look holds the body and commits, only the vision (seek) policy may take it back -- a payoff or a chase ends a stop, play does not. Empty = the ordinary hysteresis.", ParamValue{std::string("")}},
         {"trust_key_look",   ParamMutability::ConstructionOnly, "precision: trust_weights key for the look loop's competence.", ParamValue{std::string("reality.loop.look")}},
         {"vision_weight",      ParamMutability::HotMutable, "loop #4: vision pragmatic gain. G_vision = vision_weight·hunger·vision_value (CLOSE on a seen source, hunger-weighted like klino). 0 (default) = vision INERT (never wins; 2/3-policy race byte-identical). 1 = the fourth policy (Stage 2+). efe mode only.", ParamValue{0.0}},
         {"epistemic_reach_gated", ParamMutability::HotMutable, "R1 (2026-07-09): gate the epistemic (explore) terms by (1 − max(g_prag_klino, g_prag_planner)) = 1 − hunger·max_reach, NOT the blanket (1−hunger). Breaks the starvation deadlock (§2.1): a HUNGRY-but-BLIND agent (no reach) is in MAX uncertainty → epistemic stays high → play pushes the frontier to find food, instead of (1−hunger)→0 silencing exploration exactly when it is needed. full → gate≈1 (play when full, preserved); hungry+reachable → gate≈0 (exploit). No new constant. false = legacy (1−hunger) gate (ablation baseline).", ParamValue{true}},
@@ -125,7 +126,7 @@ ParamMap EFEArbiter::current_params() const {
     m["vision_gain_topic"]  = ParamValue{vision_gain_topic_};
     m["vision_weight"]      = ParamValue{double(vision_weight_)};
     m["look_value_topic"] = ParamValue{look_value_topic_}; m["look_gain_topic"] = ParamValue{look_gain_topic_};
-    m["look_weight"] = ParamValue{double(look_weight_)}; m["look_hold_topic"] = ParamValue{look_hold_topic_}; m["trust_key_look"] = ParamValue{trust_key_look_};
+    m["look_weight"] = ParamValue{double(look_weight_)}; m["look_hold_topic"] = ParamValue{look_hold_topic_}; m["look_commit_topic"] = ParamValue{look_commit_topic_}; m["trust_key_look"] = ParamValue{trust_key_look_};
     m["epistemic_reach_gated"] = ParamValue{epistemic_reach_gated_};
     m["scoring_mode"]  = ParamValue{scoring_mode_};
     m["z_peak_decay"]  = ParamValue{double(z_peak_decay_)};
@@ -194,6 +195,7 @@ void EFEArbiter::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "look_weight",        [&](auto const& v){ look_weight_        = float(get_double(v,"look_weight")); });
     apply_param(params, "trust_key_look",     [&](auto const& v){ trust_key_look_     = get_string(v,"trust_key_look"); });
     apply_param(params, "look_hold_topic",    [&](auto const& v){ look_hold_topic_    = get_string(v,"look_hold_topic"); });
+    apply_param(params, "look_commit_topic",  [&](auto const& v){ look_commit_topic_  = get_string(v,"look_commit_topic"); });
     apply_param(params, "epistemic_reach_gated", [&](auto const& v){ epistemic_reach_gated_ = get_bool(v,"epistemic_reach_gated"); });
     apply_param(params, "scoring_mode",  [&](auto const& v){ scoring_mode_  = get_string(v,"scoring_mode"); });
     apply_param(params, "z_peak_decay",  [&](auto const& v){ z_peak_decay_  = float(get_double(v,"z_peak_decay")); });
@@ -569,9 +571,14 @@ void EFEArbiter::tick(uint64_t tick_id) {
         // §17.112 -- 5-policy: keep the incumbent unless the best challenger leads it by more than the margin
         float vs[5] = { v_klino_, v_planner_, v_play_, v_vision_, G_look_ };
         int inc = (winner_ >= 0 && winner_ <= 4) ? winner_ : 0;
+        bool committed = false;
+        if (inc == 4 && !look_commit_topic_.empty())
+            if (auto ct = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(look_commit_topic_)))
+                committed = ct->values.size() > 0 && ct->values[0] > 0.5f;
+        look_committed_ = committed;
         int best_chl = -1; float best_chl_v = -1e30f;
         for (int i = 0; i < 5; ++i)
-            if (i != inc && vs[i] > best_chl_v) { best_chl_v = vs[i]; best_chl = i; }
+            if (i != inc && (!committed || i == 3) && vs[i] > best_chl_v) { best_chl_v = vs[i]; best_chl = i; }
         if (best_chl >= 0 && best_chl_v - vs[inc] > margin_) new_winner = best_chl;
         else                                                 new_winner = inc;
     } else if (vision_active_) {
@@ -663,7 +670,7 @@ nlohmann::json EFEArbiter::diag_snapshot() const {
         {"g_prag_vision", g_prag_vision_}, // vision_weight · hunger · vision_value
         {"v_vision", v_vision_},           // selected vision score (= G_vision)
         {"gain_vision", gain_vision_},
-        {"look_active", look_active_}, {"look_need", look_need_}, {"look_hold", look_hold_}, {"trust_look", trust_look_}, {"G_look", G_look_}, {"gain_look", gain_look_},   // §17.112
+        {"look_active", look_active_}, {"look_need", look_need_}, {"look_hold", look_hold_}, {"look_committed", look_committed_}, {"trust_look", trust_look_}, {"G_look", G_look_}, {"gain_look", gain_look_},   // §17.112
         {"winner", winner_},               // 0 = klino, 1 = planner, 2 = play, 3 = vision, 4 = look
         {"gain_klino", gain_klino_},
         {"gain_planner", gain_planner_},

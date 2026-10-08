@@ -212,3 +212,69 @@ TEST(LookLoop, YieldTheTimeToAPayoffIsLearnedPerContext) {
     EXPECT_GT(need[1], 0.8) << "this context's payoffs come at 3 s: still worth standing";
     EXPECT_GT(need[1], need[0] + 0.2) << "over all stops most payoffs come at once: the shared distribution has half given up";
 }
+
+TEST(LookLoop, YieldHoldStartsThePayoffWindowWhenTheStopDoes) {
+    // lever 3: a target found while the trunk is still, before the stop's cloud opens, is the stop's payoff in 'hold' mode
+    for (bool hold : {false, true}) {
+        ogma::InProcessBus bus; ogma::LookLoop m; m.set_id("look");
+        m.on_setup(&bus, {{"state_topic", std::string("reality.proprio.cloud_state")}, {"value_topic", std::string("reality.cognitive.look")},
+                          {"need_mode", std::string("yield")}, {"seek_value_topic", std::string("reality.cognitive.seek_value")},
+                          {"episode_start", std::string(hold ? "hold" : "cloud")}, {"hold_topic", std::string("arbiter.gain.look")}});
+        uint64_t t = 0;
+        auto tick = [&](bool still, bool cloud_open, float seek, float gain) {
+            bus.begin_tick(t);
+            // a walking cloud until the stop's cloud opens; [open, walking, voxels, new_fraction, still]
+            bus.publish("reality.proprio.cloud_state", pv({1.0f, cloud_open ? 0.0f : 1.0f, 100.0f, 0.5f, still ? 1.0f : 0.0f}));
+            bus.publish("reality.cognitive.seek_value", pv({seek}));
+            bus.publish("arbiter.gain.look", pv({gain}));
+            m.tick(t++); bus.end_tick();
+        };
+        tick(false, false, 0.0f, 1.0f);                                  // the look takes the body
+        for (int i = 0; i < 10; ++i) tick(true, false, 0.0f, 1.0f);      // still, the cloud not yet open
+        for (int i = 0; i < 20; ++i) tick(true, false, 0.7f, 1.0f);      // a target, 0.2 s in
+        for (int i = 0; i < 30; ++i) tick(true, true, 0.7f, 0.0f);       // the cloud opens; the look lets go
+        tick(false, false, 0.7f, 0.0f);
+        EXPECT_DOUBLE_EQ(m.last_realized(), hold ? 1.0 : 0.0);
+    }
+}
+
+TEST(LookLoop, YieldTheLookCommitsUntilItsMedianTimeToPayoff) {
+    // lever 4: payoffs in this context come at 1 s; a stop the look holds commits for its first second, then not
+    ogma::InProcessBus bus; ogma::LookLoop m; m.set_id("look");
+    m.on_setup(&bus, {{"state_topic", std::string("reality.proprio.cloud_state")}, {"value_topic", std::string("reality.cognitive.look")},
+                      {"need_mode", std::string("yield")}, {"seek_value_topic", std::string("reality.cognitive.seek_value")},
+                      {"hold_topic", std::string("arbiter.gain.look")}, {"commit_topic", std::string("look.commit")}});
+    uint64_t t = 0; float seek = 0.0f;
+    auto tick = [&](bool still, float gain) {
+        bus.begin_tick(t);
+        bus.publish("reality.proprio.cloud_state", pv({1.0f, still ? 0.0f : 1.0f, 100.0f, 0.5f, 0.0f}));
+        bus.publish("reality.cognitive.seek_value", pv({seek})); bus.publish("arbiter.gain.look", pv({gain}));
+        m.tick(t++); bus.end_tick();
+    };
+    for (int k = 0; k < 6; ++k) { for (int i = 0; i < 100; ++i) { if (i == 50) seek = 0.8f; tick(true, 0.0f); } tick(false, 0.0f); seek = 0.0f; tick(false, 0.0f); }
+    for (int i = 0; i < 20; ++i) tick(true, 1.0f);
+    EXPECT_TRUE(m.committed()) << "0.4 s in: most payoffs here are still to come";
+    for (int i = 0; i < 60; ++i) tick(true, 1.0f);
+    EXPECT_FALSE(m.committed()) << "1.6 s in: past the median, the commitment is spent";
+}
+
+TEST(LookLoop, YieldHoldTheNeedIsContinuousWhenTheLookTakesTheBody) {
+    // lever 3's own trap: payoffs recorded at t = 0 made the need drop the tick the look took the body (a 1-tick cycle)
+    ogma::InProcessBus bus; ogma::LookLoop m; m.set_id("look");
+    m.on_setup(&bus, {{"state_topic", std::string("reality.proprio.cloud_state")}, {"value_topic", std::string("reality.cognitive.look")},
+                      {"need_mode", std::string("yield")}, {"seek_value_topic", std::string("reality.cognitive.seek_value")},
+                      {"episode_start", std::string("hold")}, {"hold_topic", std::string("arbiter.gain.look")}});
+    uint64_t t = 0; float seek = 0.0f;
+    auto tick = [&](bool still, float gain) {
+        bus.begin_tick(t);
+        bus.publish("reality.proprio.cloud_state", pv({1.0f, 1.0f, 100.0f, 0.5f, still ? 1.0f : 0.0f}));
+        bus.publish("reality.cognitive.seek_value", pv({seek})); bus.publish("arbiter.gain.look", pv({gain}));
+        m.tick(t++); bus.end_tick();
+    };
+    // stops that pay on their first tick
+    for (int k = 0; k < 6; ++k) { seek = 0.8f; for (int i = 0; i < 40; ++i) tick(true, 0.0f); tick(false, 0.0f); seek = 0.0f; tick(false, 0.0f); }
+    tick(false, 0.0f);
+    const double walking = m.need();
+    tick(false, 1.0f);                                    // the look takes the body
+    EXPECT_NEAR(m.need(), walking, 1e-9) << "no drop at t = 0";
+}

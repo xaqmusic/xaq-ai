@@ -99,7 +99,7 @@ ParamSchema CloudMap::params_schema() const {
          "were last here).  revisit_change is -1 when no cloud is cached for this place.",
          ParamValue{std::string("")}},
         {"state_topic", ParamMutability::ConstructionOnly,
-         "Optional ProprioToken [open, walking, voxels, new_fraction]: whether a cloud is open, whether it is a walking "
+         "Optional ProprioToken [open, walking, voxels, new_fraction, still]: whether a cloud is open, whether it is a walking "
          "cloud, its size and its new_fraction -- the stop's cloud as a loop sees it (the look loop, design doc §17.112).  "
          "Empty = not published.", ParamValue{std::string("")}},
         {"voxel_m", ParamMutability::HotMutable,
@@ -827,11 +827,12 @@ void CloudMap::tick(uint64_t tick_id) {
         out->tick_id = tick_id;
         out->producer_id = std::string(id());
         out->sensor = "cloud_state";
-        out->values = Eigen::VectorXf(4);
+        out->values = Eigen::VectorXf(5);
         out->values[0] = open_ ? 1.0f : 0.0f;
         out->values[1] = is_walking_cloud() ? 1.0f : 0.0f;
         out->values[2] = float(vox_.size());
         out->values[3] = float(new_frac_);
+        out->values[4] = still_run_ > 0 ? 1.0f : 0.0f;          // the input's stillness this tick (lever 3: a stop starts with it)
         bus_->publish(state_topic_, out);
     }
     if (prof_) {

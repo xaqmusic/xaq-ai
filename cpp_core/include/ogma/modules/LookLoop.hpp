@@ -64,6 +64,7 @@ public:
     double   need()       const { return need_; }
     double   prediction() const { return pred_norm_; }
     bool     in_stop()    const { return in_ep_; }
+    bool     committed()  const { return commit_; }
     uint64_t episodes()   const { return episodes_; }
     double   last_realized()  const { return last_realized_; }
     double   last_predicted() const { return last_predicted_; }
@@ -75,6 +76,7 @@ private:
     double pay_mean(int cell) const;                // the Beta posterior's mean of a payoff here
     double pay_optimistic(int cell) const;          // ... + optimism x sd
     double still_to_come(double p, double tau, int cell) const;
+    double survival(double tau, int cell) const;    // S(tau): the share of payoffs (this context's, with the all-stops prior) later than tau
     void   record_pay(int cell, double secs);
     nlohmann::json cell_times_json() const;
     double predict(int cell) const;                 // seconds of surprise a stop here resolves (optimistic)
@@ -83,7 +85,7 @@ private:
     std::string state_topic_, context_topic_, active_topic_;
     std::string place_topic_, seek_value_topic_, outcome_need_topic_;
     std::string value_topic_, driving_topic_, descriptor_topic_;
-    std::string need_mode_ = "surprise", skill_topic_, trust_topic_;
+    std::string need_mode_ = "surprise", skill_topic_, trust_topic_, episode_start_ = "cloud", hold_topic_, commit_topic_;
     double optimism_ = 1.0;          // the prediction's credit to the unproven: mean + optimism x sd / sqrt(n)
     double peak_decay_ = 0.02;       // per stop: the running peak of realized integrals decays toward the latest
     double tick_hz_ = 50.0;
@@ -101,7 +103,8 @@ private:
     // yield mode
     std::deque<double> pay_times_;   // seconds from a stop's start to its payoff, the most recent 400
     bool   ep_paid_ = false, skill_pending_ = false, pending_counts_ = false, per_context_times_ = false;
-    std::map<int, std::deque<double>> cell_times_;   // per context: seconds to a payoff, the most recent 200
+    std::map<int, std::deque<double>> cell_times_;
+    bool commit_ = false;   // per context: seconds to a payoff, the most recent 200
     double ep_p_ = 0.5, seek_prev_ = 0.0, brier_sum_ = 0.0;
     uint64_t paid_ = 0, skill_seen_tick_ = ~uint64_t{0};
 };
