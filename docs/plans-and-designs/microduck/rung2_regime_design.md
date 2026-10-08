@@ -7104,3 +7104,62 @@ resident, ~0.6 MB heap. The Radxa Zero 3W's A55 is an estimated 10–15× slower
 **O2b settled:** on the same inputs, `cast_once 2` (weighted) costs 158 µs a tick against ★ F5's 199 (−21 %; p99 1.58 →
 1.37 ms, max 2.9 → 2.3 ms), the same as the unweighted form; with its n = 24 behaviour tie (§17.110) it is a candidate for the
 stack — the operator's eye decides.
+
+### 17.112 The stop as a loop: the look, arbitrated with the chase (2026-10-08, design)
+
+**The operator (2026-10-08):** the scaffolds are next (the design document's §9.3), starting with the stop and its look:
+"the look is currently interrupting the chase." The form chosen: a look loop in the intent brain, arbitrated beside seek and
+its chase, that starts and ends the stop. The host keeps the stop's mechanics (the settle, the stander's hand-back, the
+sweep) and gives up its decisions.
+
+**What the scaffold costs the chase (★ F5, the 24 logged runs `log/ten/fx5`; `mj_host/tools/stop_readout.py`).**
+
+| trigger | a run | length s | surprise resolved s | `new_fraction`, 1st s | moving train near s | ended by a chase |
+|---|---|---|---|---|---|---|
+| arrival | 17.2 | 5.0 | 2.35 | 0.46 | 15.6 | 26 of 412 |
+| the look after a skill's back-off | 8.2 | 7.0 | 3.48 | 0.75 | 11.0 | 48 of 198 |
+| impeded | 6.0 | 9.1 | 4.47 | 0.40 | 8.6 | 20 of 145 |
+| the timer | 3.6 | 8.9 | 4.24 | 0.50 | 6.5 | 11 of 87 |
+| stuck | 0.5 | 8.6 | 4.88 | 0.83 | 1.0 | 2 of 11 |
+
+(surprise resolved = the integral of the stop cloud's `new_fraction` over the stop; every stop not ended by a chase ended on
+the cloud's growth rule — none reached the 60 s cap; the host logs a stop ended by a chase as `stop:bored`, the instrument
+recovers them from the chase's rising edge: 107, the host's own count 110.)
+- **The duck stands 235 s of 600**, in 35.5 stops a run, every phase counted (the settle, the stander, the walker's hold).
+- **A stop rarely starts in the middle of a chase** (11 of the 102 chases at the train end with a stop starting; most
+  simply drop, median 2.7 s).
+- **The stop itself is what costs the chase.** The moving train is within 1.5 m ~117 s a run: 71 s of it on the walk,
+  chasing 17 % of it, and **46 s of it standing, chasing 5.6 %**. The stop does see the train: its sightings on the train
+  are confirmed 188 times in the 24 runs and almost never become a chase; 129 are judged still, the sightings too sparse to
+  show the motion while the sweep turns the head to the least-looked-at cell.
+So the look and the chase are not in one decision: the stop is a host rule outside the arbiter, and nothing weighs "a mover is
+passing" against "keep looking".
+
+**The loop's five fields.**
+
+| | the look (`LookLoop`) |
+|---|---|
+| infers | whether standing still here would teach the cloud something: the expected surprise a stop would resolve |
+| sensors | the cloud's own surprise (`CloudMap.change_topic` value 0, `new_fraction`: of the voxels touched in the last second, the share never seen before), the body's stillness (odometry), and a context: the place map's TLE (have I stood here?), the seek loop's need and range (have I just arrived?), the outcome loop's need (is there an answer to watch?) |
+| predicts | per context (an EPM node over that descriptor, EPM rule 1), the surprise a stop resolves: the integral of `new_fraction` over a stop, a running mean per node, optimistic while a node is untried |
+| honest signal | the realized integral at the stop's end against the prediction; during a stop, `new_fraction` itself — it falls as the cloud resolves |
+| need handed to the arbiter | before a stop, the node's prediction over its own running peak of realized gains; during one, `new_fraction` over this stop's own peak (the host's cloud-end rule as a continuous need) |
+
+**The arbitration.** `EFEArbiter` (precision mode) gains a fifth policy, off unless its topics are set (byte-identical
+otherwise): `G_look = look_weight · (1 − seek need) · look need · trust_look`, where trust comes from a `LoopCompetence`
+over the cloud's surprise (sign −1: while the look holds the body, the surprise should fall). The look is epistemic, gated by
+the pragmatic surplus as play is (the recipe's sign of play). **A confirmed chase raises the seek need and silences the look
+by construction**: no look starts in a chase, and a chase confirmed during a look hands the body back (`--stop-on-chase`,
+generalised). Arrival drops the seek target and the need with it, so the arrival stop becomes the look's best case rather
+than a rule. Hysteresis is the arbiter's own adaptive margin.
+
+**What it retires, in order:** the timer stop (`--stop-every` as a trigger), the arrival stop as a rule, the cloud-end rule,
+the 60 s cap, `--stop-on-chase`. Kept as named scaffolds for now: the stuck stop and its escape, the impeded look, the look
+after a skill's back-off (each a later step), and the sweep's gaze (the next lever on the look: the mover is the most
+informative thing in view).
+
+**Stages, each guarded.** S0 the instrument (`stop_readout.py`: per stop, the trigger, the length, the end cause including
+chase, the cloud's surprise integral, the train's time within 1.5 m while standing and the chase made of it). S1 the loop
+passive (it predicts beside the host's stops; does its need rise before the stops that pay and stay low in chases?). S2 the
+arbiter's look starts the stop (the timer and the arrival rule off). S3 the look's loss ends it. Each judged on the ten-minute
+set and the first minute against ★ F5, n = 24, and the chase readout; the eye promotes.
