@@ -7295,3 +7295,12 @@ Unit-tested; 2c and ★ F5 byte-identical. The host logs `lkc` [committed, the l
   honest and calibrated, and what it learns is that a look pays at the instant the stop's cloud opens. Re-use of the
   commitment: with a payoff that takes time to come (an answer to watch after a kick, a mover to see pass), not a fix the
   first casts deliver.
+
+**The operator's eye (2026-10-08) and the turn to the chase.** "It seems the stop look works correctly. The issue is when the
+robot sees the moving object, it will walk to the place the object was when it completed the look, stop there, and begin
+the stationary object interaction on nothing. It seems we need a higher-level loop above chase that could solve the issue."
+The eye locates the cost the numbers circled (the stop's 5–6 % chasing beside the walk's 12–17 %): a mover seen at a stop
+becomes a STATIC target — the seek loop fixes where the thing was, the arrival stop fires there, and the outcome loop asks
+for a skill at an empty place. A belief that the thing moves (and where it will be) has to sit above the chase and own
+what the seek loop is sent to — register O69's phantom is one form of it. Preset "LOOK 3" (lever 3) added for the eye
+before the promotion decision; the next push is the chase.
