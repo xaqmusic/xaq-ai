@@ -233,7 +233,10 @@ void LookLoop::tick(uint64_t tick_id) {
         bool skill = false;
         if (!skill_topic_.empty())
             if (auto sk = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(skill_topic_)))
-                skill = sk->values.size() >= 2 && sk->values[1] > 0.5f && sk->tick_id == tick_id;
+                if (sk->tick_id != skill_seen_tick_) {                 // a token not seen before (the outcome loop may run
+                    skill_seen_tick_ = sk->tick_id;                    // after this module: its request is a tick old here)
+                    skill = sk->values.size() >= 2 && sk->values[1] > 0.5f;
+                }
         // a skill requested on the walk is deferred by the host to the next stop's hand-back (it fires from standing, before
         // the stop's cloud opens): that stop is what serves it -- its payoff at t = 0 (2026-10-08: without this the look
         // never saw an arrival stop's skill, 304 of 306)

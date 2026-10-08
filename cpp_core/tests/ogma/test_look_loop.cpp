@@ -170,3 +170,17 @@ TEST(LookLoop, YieldASkillDeferredToTheStopIsItsPayoff) {
         EXPECT_DOUBLE_EQ(m.last_realized(), counts ? 1.0 : 0.0);
     }
 }
+
+TEST(LookLoop, YieldSeesASkillRequestedOnThePreviousTick) {
+    // the outcome loop runs after the look in the duck's graph: its request reaches the look a tick old, once
+    ogma::InProcessBus bus; ogma::LookLoop m; m.set_id("look");
+    m.on_setup(&bus, {{"state_topic", std::string("reality.proprio.cloud_state")}, {"value_topic", std::string("reality.cognitive.look")},
+                      {"need_mode", std::string("yield")}, {"skill_topic", std::string("intent.skill")}});
+    for (uint64_t t = 0; t < 40; ++t) {
+        bus.begin_tick(t);
+        bus.publish("reality.proprio.cloud_state", pv({1.0f, 0.0f, 100.0f, 0.5f}));
+        if (t == 30) { auto s = pv({3.0f, 1.0f}); s->tick_id = 29; bus.publish("intent.skill", s); }
+        m.tick(t); bus.end_tick();
+    }
+    EXPECT_DOUBLE_EQ(m.need(), 0.0) << "the stop paid";
+}

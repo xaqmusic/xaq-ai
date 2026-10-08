@@ -7230,3 +7230,8 @@ and lever 1 byte-identical.
   the arrival and fired at the stop's hand-back, before the stop's cloud opens (304 of 306 skills) — the look never saw the
   payoff that justifies most arrival stops. **Verdict `PARTIAL` as built; not a verdict on the pragmatic need.** Fixed as
   `pending_skill_pays` (a skill requested since the last stop is that stop's payoff at t = 0; off = byte-identical): lever 2b.
+- **Lever 2b's first run did not land (§3.2 rule 7, a silent confound caught):** `log/ten/lk5` came out tick for tick lever 2.
+  The look took a skill request only on a token stamped with the current tick, but the outcome loop runs AFTER the look in
+  the scheduler (config order), so every request reached it a tick old: lever 2 as measured never saw ANY skill, in a stop or
+  deferred. Fixed unconditionally (a request is a token not seen before; unit test `YieldSeesASkillRequestedOnThePreviousTick`);
+  lever 2's config now behaves differently from its record. 2b re-run on the fixed binary.
