@@ -48,6 +48,54 @@
   }
  },
  {
+  "name": "LOOK 2b · the pragmatic look (§17.112, awaiting the eye): ★ F5's stops started and ended by an arbitrated look loop that learns how often a stop pays",
+  "hint": "§17.112 lever 2b (2026-10-08). The timer is off; the arbiter's fifth policy, the look, starts a stop when its need -- P(a stop pays: a new seek target or a skill), learned per situation -- outbids play, and ends it when the probability a payoff is still to come falls; a mover in mind (5 s after a chase) holds it off. n = 24 vs ★ F5: interesting 48 -> 52 %, walls and falls tie, the first minute 20/24 (19), skills 11.9 -> 10.2, the moving train chased 13.0 -> 9.7 s a run (CI crosses 0). WATCH the short look stops (13.6 a run, ~2 s) and whether they read as attention or as hesitation; and the chase. Seeds 1 and 2060249272.",
+  "state": {
+   "config": "a1v2_f5_look_pay2.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 0 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest --stop-by-look",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
+  "name": "LOOK 1 · the look held off by a chase (§17.112): L1 + the mover in mind",
+  "hint": "§17.112 lever 1 (2026-10-08). The look owns its stops (need = the stop cloud's surprise, a measure found to carry no information), and a mover in mind holds it off for 5 s after a chase. n = 24 vs ★ F5: the moving train chased 13.0 -> 15.1 s a run, chasing while standing near it 5.6 -> 12.2 %; falls 2.75 -> 4.08 (the look's 1.3 s stops). WATCH the chase and the falls after short stops.",
+  "state": {
+   "config": "a1v2_f5_look_hold.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 0 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest --stop-by-look",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
   "name": "O2b · ★ F5 + the cloud adds each ToF cast once, weighted (−21 % CPU; awaiting the eye)",
   "hint": "The resource push (design doc §17.110–17.111, 2026-10-04): the host repeats each ToF cast for 4 ticks; the cloud now adds it once, weighted by the ticks it stood for, and recomputes its profile only when the cloud changed. On identical inputs (the replay benchmark) the intent brain costs 158 us a tick against ★ F5's 199 (−21 %). n = 24 against ★ F5: ties every measure (boring 20.9 -> 18.6 %, skills touching 35 -> 33 %, first minute 19/24 both). Compare with ★ F5 on the same seed: the behaviour should look the same. Seeds 1 and 2060249272.",
   "state": {

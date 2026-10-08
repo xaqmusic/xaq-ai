@@ -7235,3 +7235,18 @@ and lever 1 byte-identical.
   the scheduler (config order), so every request reached it a tick old: lever 2 as measured never saw ANY skill, in a stop or
   deferred. Fixed unconditionally (a request is a token not seen before; unit test `YieldSeesASkillRequestedOnThePreviousTick`);
   lever 2's config now behaves differently from its record. 2b re-run on the fixed binary.
+
+**Lever 2b, the pragmatic look measured faithfully (`a1v2_f5_look_pay2`, `log/ten/lk5`, n = 24, on the fixed binary).**
+- **The need is now informative:** after a run's first 5 stops, stops predicted under 0.3 paid 19 %, 0.3–0.5 32 %, 0.5–0.7 49 %,
+  over 0.7 63 % — monotone; Brier 0.229 against the base rate's 0.243 (modest). By trigger: arrival 77 % paid, the look
+  after a skill 45 %, the look's own stops 27 %, impeded 23 %.
+- **Behaviour against ★ F5:** interesting 48.2 → 52.4 % (CI [−1.4, +9.9]), boring 20.9 → 21.7, walls 11.5 → 11.3, falls 2.75 →
+  3.12 (CI [−0.8, +1.5]), the first minute 19 → 20 of 24, skills touching 35 → 37 %, outcomes observed 67 → 72 %, stops at
+  things 74 → 76 %; skills 11.9 → 10.2 a run (CI [−3.2, −0.2]); the moving train chased 13.0 → 9.7 s a run (CI [−6.9, +0.3]),
+  contacts 3.7 → 2.6. The look's own stops 13.6 a run, 1.9 s; no look stop starts within 1 s after a chase.
+- **Verdict `PARTIAL`, a signal, not a capability:** the look is the first form here whose need predicts its payoff, and the
+  run ties ★ F5 everywhere but skills (fewer) and the chase (leaning worse). Not loud (§3.3). Diagnosis for the next form:
+  the time to a payoff is learned over ALL stops, dominated by arrival skills at t = 0 (served at the hand-back), so S(τ)
+  falls within a second and the look gives up on its own stops at 1.9 s, where its payoffs come at ~5 s (★ F5's timer and
+  impeded stops: median 4.8–5.8 s). Re-use: the time to payoff per context. Presets "LOOK 2b" and "LOOK 1" beside ★ F5
+  for the operator's eye.
