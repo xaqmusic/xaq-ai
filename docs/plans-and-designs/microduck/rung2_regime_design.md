@@ -7250,3 +7250,18 @@ and lever 1 byte-identical.
   falls within a second and the look gives up on its own stops at 1.9 s, where its payoffs come at ~5 s (★ F5's timer and
   impeded stops: median 4.8–5.8 s). Re-use: the time to payoff per context. Presets "LOOK 2b" and "LOOK 1" beside ★ F5
   for the operator's eye.
+
+**Lever 2c, the time to a payoff per context (`a1v2_f5_look_pay3`, `log/ten/lk6`, n = 24, on 2b).** `LookLoop.per_context_times`:
+each context cell's own payoff times, the all-stops distribution as a prior worth one observation (unit-tested; 2b and ★ F5
+byte-identical). Operator, 2026-10-08: "look 2b is an improvement" — this lever asked whether it reaches promotion.
+- **It ties 2b and ★ F5:** boring 20.9 / 21.7 / 24.8 % (★ F5 / 2b / 2c), interesting 48.2 / 52.4 / 49.4, walls 11.5 / 11.3 /
+  13.6, falls 2.75 / 3.12 / 2.50, the first minute 19 / 20 / 21 of 24, skills 11.9 / 10.2 / 10.5, outcomes observed 67 / 72 /
+  75 %, the moving train chased 13.0 / 9.7 / 9.8 s, contacts 3.7 / 2.6 / 2.1. No difference beyond the noise.
+- **Why it moves nothing: the look's stops are not ended by its need.** Its own stops last 1.7 s (2b 1.9); of 351, 194 end
+  before the stop's cloud opens. At their ends: 155 with a seek target already held (a payoff in the first second — before
+  the cloud opens, so the look never counts it), 111 with the look's need unchanged (a competitor's score rose past it: the
+  arbitration has no commitment to a stop it started), ~70 with the need fallen (the only case this lever acts on).
+- **Verdict `NULL` against 2b; not promoted.** 2b stays the candidate for the eye. Re-use / next, one at a time: the
+  payoff window from the stop's START (the look's own body still, not the cloud's opening: the 155 quick finds are its
+  payoffs); then commitment — the look holds the body it took while its own need stands (the 111), the switching cost of a
+  stop (the settle, the hand-back, the falls after short stops) set against the competitor's lead.
