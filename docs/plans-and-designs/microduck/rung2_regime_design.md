@@ -7099,8 +7099,56 @@ digest caught at exactly that tick.
 
 **The numbers for Pollen (desktop, Intel Core Ultra 7 265F, ★ F5 seed 1, 600 s):** intent 199 µs a tick (1.0 % of a core at
 50 Hz; p99 1.6 ms, max 2.9 ms), head 8 µs (0.04 %), stop 31 µs (0.15 %, while standing); the whole brains-only process 24 MB
-resident, ~0.6 MB heap. The Radxa Zero 3W's A55 is an estimated 10–15× slower: still to be measured — the replay runs there.
+resident, ~0.6 MB heap *(corrected in §17.112: that was read after the brains were destroyed; with every brain alive at the
+end of the tape the heap is 4.4 MB)*. The Radxa Zero 3W's A55 is an estimated 10–15× slower: still to be measured — the replay runs there.
 
 **O2b settled:** on the same inputs, `cast_once 2` (weighted) costs 158 µs a tick against ★ F5's 199 (−21 %; p99 1.58 →
 1.37 ms, max 2.9 → 2.3 ms), the same as the unweighted form; with its n = 24 behaviour tie (§17.110) it is a candidate for the
 stack — the operator's eye decides.
+
+### 17.112 The brain on ARM: the Pi 5 measured, the Radxa Zero 3W projected (2026-10-08)
+
+**Built:** `mj_host/tools/arm_bench/` (its README has the method). One command, `arm_bench.py all picrawler`, records ★ F5 seed 1
+(600 s, argv from the launcher's own `host_args()`), stages a replay-only build to the board's `/tmp` (tmpfs: the Pi's SD card is
+full), builds it with `-mcpu=cortex-a55`, and runs timing (pinned, `--repeat 3`), per-tick hardware counters, an `OGMA_PROFILE`
+pass and an all-cores contention pass, with a sampler of temperature, clocks, throttling and the other cores' load. The replay
+gained `--counters` (per-tick instructions, cycles, L1D/L2D/L3D refills, backend stalls, branch misses, around `tick()` only, the
+read cost subtracted), `--json`, `--ticks-csv`, `--dump`, a heap trace once a second and the heap with the brains still alive.
+None given, the replay prints what it printed.
+
+**Fidelity on ARM is a different check.** The aarch64 brain does not compute the x86 recording's numbers bit for bit, and no
+flag makes it: libm agrees (23 functions, same bits), `-ffp-contract=off -U__ARM_FEATURE_FMA` makes element-wise ops and
+reductions agree, but Eigen's aarch64 matrix products sum in another order. The first difference is MotorEPMv2's action,
+`tanh(C·x + …)`, at tick 1, 1–4 ulp, in all three brains. The replaced check is per-tick cost against two x86 replays: the
+intent brain correlates **r = 0.994 against a noise ceiling of 0.999**, and 94 % of its most expensive 1 % of ticks are the same
+ticks. The board does the recorded run's work.
+
+**Measured, Pi 5 (Cortex-A76 at 2.4 GHz throughout, no throttling, ≤ 64 °C, the other cores ~2 % busy):**
+
+| brain | mean µs | p99 | max | % of a core at 50 Hz | IPC | L2 misses per 1000 instr. |
+|---|---|---|---|---|---|---|
+| intent | 523 | 4076 | 10586 | 2.62 | 1.32 | 5.75 |
+| head | 27 | 82 | 1611 | 0.14 | 1.85 | 9.66 |
+| stop (while standing) | 89 | 135 | 378 | 0.45 | 2.53 | 2.55 |
+
+All three: 585 µs a tick, **2.9 % of one A76**; ×2.1 the desktop's time, tick by tick. The cloud map is 83 % of the intent brain
+(clustering 38 % of it, movers 18 %, add_cast 19 %); its worst tick is 26.7 M instructions. With all four cores busy the intent
+brain slows ×1.6. Memory: the process peaks at 12.5 MB resident on a 16 kB-page kernel; the brains' heap grows from 1.0 MB at 1 s
+to 4.4 MB at 600 s and is still rising slowly. A longer tape is needed to say whether it levels off.
+
+**Projected, Radxa Zero 3W (4× A55 at 1.6 GHz, 32 kB L1D, no L2, one 512 kB L3):** two independent brackets. (A) The Pi's time ×
+4.2–4.4 (Geekbench 6 single-core, rescaled to 1.6 GHz). (B) Per tick: the A55-built instructions × CPI 1.3–2.0, L1D misses at
+25–45 cycles to the L3, and the A76's L2 misses (its L2 is the RK3566's whole L3) at 110–170 ns to DRAM.
+
+| | intent mean | intent p99 | intent worst | ticks > 20 ms | all three brains |
+|---|---|---|---|---|---|
+| A | 2.2–2.3 ms | 17–18 ms | — | — | 12–13 % of one A55 |
+| B | 2.7–4.9 ms | 20–35 ms | 36–67 ms | 1–3 % of ticks | 16–28 % of one A55 |
+| floor (instructions only, IPC 1.0) | 1.0 ms | 8.6 ms | 16.7 ms | 0 | — |
+
+**For Pollen:** on average the brain needs an eighth to a quarter of one of the four A55 cores, and ~5 MB of memory. The cost is
+its spikes. The cloud map's clustering ticks would run past a 20 ms tick on the A55 on roughly 1–3 % of ticks, so the brain must not
+share the 50 Hz control thread, and the clustering is the module to make incremental or pipelined (the ten-minutes phase's open item) before
+the board is real. B's DRAM term dominates its upper bound, and the RK3566's L3 is shared with the walking policy, so the
+contention number on the real board is the one to watch. **Next:** `arm_bench.py all <radxa>`: the same harness on the real A55,
+which turns projection into measurement and checks B's parameters against measured cycles.
