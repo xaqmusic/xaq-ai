@@ -316,7 +316,8 @@ public:
     int    cloud_place()     const;
     double cloud_newfrac()   const;
     std::vector<double> look_now() const;
-    double look_gain() const;               // the arbiter's gain for the look (arbiter.gain.look); 0 when absent   // the look loop's value token, if the graph has one (§17.112); empty otherwise
+    double look_gain() const;
+    std::vector<double> look_commit_now() const;   // [commit, look gain] when the look publishes a commitment; empty otherwise               // the arbiter's gain for the look (arbiter.gain.look); 0 when absent   // the look loop's value token, if the graph has one (§17.112); empty otherwise
     double cloud_revisit()   const;
     double cloud_revisit_dist() const;
     int    cloud_cached()    const;

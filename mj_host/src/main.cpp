@@ -3036,7 +3036,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             { const auto oc = brain.outcome_now();   // the outcome loop: [node, predicted, observed, surprise, samples]
               if (!oc.empty()) std::printf(",\"outc\":[%d,%.3f,%.3f,%.2f,%d,%d]", int(oc[0]), oc[1], oc[2], oc[3], int(oc[4]), oc.size() > 5 ? int(oc[5]) : 0); }
             { const auto lk = brain.look_now();      // the look loop (§17.112): [need, prediction, in a stop, realized, predicted]
-              if (!lk.empty()) std::printf(",\"look\":[%.3f,%.3f,%d,%.3f,%.3f]", lk[0], lk[1], int(lk[2]), lk[3], lk[4]); }
+              if (!lk.empty()) std::printf(",\"look\":[%.3f,%.3f,%d,%.3f,%.3f]", lk[0], lk[1], int(lk[2]), lk[3], lk[4]);
+              const auto lc = brain.look_commit_now();     // lever 4: [committed, the arbiter's gain for the look], when wired
+              if (!lc.empty()) std::printf(",\"lkc\":[%d,%d]", int(lc[0] > 0.5), int(lc[1] > 0.5)); }
             // live changes a client made through the inspector this tick: the run's record must show them
             {
                 const auto pe = brain.take_inspector_events();

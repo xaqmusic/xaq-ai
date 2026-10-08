@@ -7278,3 +7278,20 @@ walk. Stops at things 74 → 62 % (CI [−24.2, −0.5]), interesting 48.2 → 4
 lesson: 2c's 155 "quick finds before the cloud opened" were not the look's payoffs either; the cloud's opening is the right
 start of the look's window. Re-use: none in this form; what it exposed — the look has not looked before its cloud opens —
 is lever 4's commitment.
+
+**Lever 4, commitment (`a1v2_f5_look_commit`, `log/ten/lk8`, n = 24, on 2c).** `LookLoop.commit_topic` → `EFEArbiter.look_commit_topic`:
+the look commits to a stop it took — before its cloud opens (it has not looked yet), then while unpaid and under half of its
+context's payoffs would have come by now — and while committed only the seek (a payoff, a chase) may take the body back.
+Unit-tested; 2c and ★ F5 byte-identical. The host logs `lkc` [committed, the look's gain] when wired.
+- **Against ★ F5:** the moving train chased 13.0 → 8.3 s a run (CI [−9.1, −0.3]), contacts 3.7 → 2.3 (CI [−2.7, −0.2]); the
+  rest ties (boring 23.4, interesting 50.4, walls 13.6, falls 3.04, the first minute 21/24, skills 10.5). The look's stops 15.3
+  a run, still 1.9 s.
+- **Why it does not lengthen them (the `lkc` trace, seed 2):** the commitment holds the body through the settle (1.1 s) and
+  expires within two ticks of the cloud opening — in the look's own data the payoff comes AT the cloud's opening (the stop
+  cloud's first casts hand the seek loop a thing) or hardly at all, so the median time to a payoff is ~0.04 s. The short stops
+  are what the look has learned is worth it, by its own definition of a payoff. A glitch on the side: the seek need drops to 0
+  for a single tick (an arrival and its renewal) and the look takes the body for that tick (stops of 0.02 s).
+- **Verdict `NULL` on the stops, `REGRESSION` on the chase; not promoted.** The series' reading: the pragmatic look (2b) is
+  honest and calibrated, and what it learns is that a look pays at the instant the stop's cloud opens. Re-use of the
+  commitment: with a payoff that takes time to come (an answer to watch after a kick, a mover to see pass), not a fix the
+  first casts deliver.
