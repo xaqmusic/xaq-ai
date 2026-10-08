@@ -7304,3 +7304,8 @@ becomes a STATIC target — the seek loop fixes where the thing was, the arrival
 for a skill at an empty place. A belief that the thing moves (and where it will be) has to sit above the chase and own
 what the seek loop is sent to — register O69's phantom is one form of it. Preset "LOOK 3" (lever 3) added for the eye
 before the promotion decision; the next push is the chase.
+
+**★ LOOK 2b PROMOTED on the operator's eye (2026-10-08):** "look 2b is an improvement"; lever 3 "is not an improvement".
+The stack is now ★ F5 + the look loop as built in lever 2b — config `a1v2_f5_look_pay2` with host `--stop-every 0
+--stop-by-look` (launcher preset ★ LOOK 2b, first row). Levers 2c, 3 and 4 stay in the record with their re-use contexts.
+The push moves to the chase (§17.113).

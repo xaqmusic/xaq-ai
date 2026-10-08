@@ -20,6 +20,11 @@
 
 ## ▶ Resume here
 
+**2026-10-08 (later): ★ LOOK 2b promoted — the stop is a loop.** The timer stop is gone: an arbitrated look loop
+(`LookLoop` + `EFEArbiter`'s fifth policy) starts and ends the stop on what a stop pays (a new target, a skill), held off by
+a chase (design doc §17.112). The operator's eye found what the chase still lacks: a mover seen at a stop becomes a static
+target, walked to and kicked at nothing. **The push now: a loop above the chase** (§17.113).
+
 **2026-10-08: the demo is ★ F5 and it is posted.** ★ F5 = ★ LA1 (★ T4's stack, the chase at T11, the look-around on the
 walk) + the four §17.108 correctness fixes, promoted on the operator's eye 2026-10-04 (design doc §17.108–17.109; the
 companion document "Inside the MicroDuck Brain"). The design document for Pollen is open as pollen-robotics/microduck#381
