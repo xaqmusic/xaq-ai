@@ -73,7 +73,8 @@ every tick, so even two x86 runs barely correlate there; the check is uninformat
 ## The projection to the RK3566 — and why it is needed
 
 The Pi 5's Cortex-A76 is out-of-order, 2.4 GHz, with a 64 kB L1D, a 512 kB private L2 and a 2 MB L3. The RK3566's
-Cortex-A55 is in-order (dual-issue), 1.6 GHz on the Zero 3W, with a 32 kB L1D, **no L2**, and **one 512 kB L3 shared by all
+Cortex-A55 is in-order (dual-issue), 1.8 GHz on the duck's board (Pollen's figure, "408 MHz of 1800" in their
+`robotd` design doc on throttling; some retail listings give the Zero 3W 1.6 GHz, `report --ghz` sets it), with a 32 kB L1D, **no L2**, and **one 512 kB L3 shared by all
 four cores**. Microseconds measured on the Pi do not transfer. Two things do:
 
 - **The instructions.** The binary is built with `-mcpu=cortex-a55`. Both cores implement ARMv8.2-A, so the A55 build
@@ -84,10 +85,10 @@ four cores**. Microseconds measured on the Pi do not transfer. Two things do:
 
 The report gives two independent estimates, each a low–high bracket (low = the kinder board):
 
-**A, whole-CPU ratio.** Time on the Pi × 4.2–4.4. Geekbench 6 single-core is ~764–800 for the Pi 5 at 2.4 GHz
+**A, whole-CPU ratio.** Time on the Pi × 3.8–3.9 at 1.8 GHz. Geekbench 6 single-core is ~764–800 for the Pi 5 at 2.4 GHz
 ([Raspberry Pi](https://www.raspberrypi.com/news/benchmarking-raspberry-pi-5/)) against ~203 for the RK3566
 ([Notebookcheck](https://www.notebookcheck.com/Rockchip-RK3566-Prozessor-Benchmarks-und-Specs.741610.0.html), boards
-typically at 1.8 GHz), rescaled to the Zero 3W's 1.6 GHz
+typically at 1.8 GHz), rescaled to the target clock
 ([CNX Software](https://www.cnx-software.com/2023/10/30/radxa-zero-3w-sbc-features-rockchip-rk3566-soc-up-to-8gb-ram-in-raspberry-pi-zero-2-w-form-factor/)).
 It is valid only if the Pi ran at 2.4 GHz during the timing pass; the Conditions table shows the clock. A benchmark
 suite's mix is not this workload's, which is why B exists.
@@ -97,7 +98,7 @@ suite's mix is not this workload's, which is why B exists.
 ```
 t_A55 = ( instructions × CPI_core                        CPI_core 1.3–2.0: the A55 with its data in L1
         + L1D refills × miss_scale × L3_hit_cycles       miss_scale 1–2 (32 kB L1D vs 64 kB), L3 hit 25–45 cycles
-        + L2D refills × DRAM_ns × f ) / f                DRAM 110–170 ns (LPDDR4), f = 1.6 GHz
+        + L2D refills × DRAM_ns × f ) / f                DRAM 110–170 ns (LPDDR4), f = 1.8 GHz
 ```
 
 Computing it per tick keeps the worst tick's own instructions and misses together, so its p99 and max are the model's

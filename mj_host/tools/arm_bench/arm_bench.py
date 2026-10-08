@@ -190,21 +190,24 @@ def cmd_run(a):
 # ---------------------------------------------------------------------------------------------------------------------
 
 # The projection's parameters, each a (low, high) bracket -- "low" is the kinder board.  Sources in README.md.
-TARGET = {
-    "name": "Radxa Zero 3W (RK3566, 4x Cortex-A55 @ 1.6 GHz, 32 kB L1D, no L2, 512 kB shared L3)",
-    "ghz": 1.6,
+# The clock: 1.8 GHz is Pollen's own figure for the duck's board ("408 MHz of 1800", their robotd design doc, on thermal
+# throttling); some retail listings give the Zero 3W 1.6 GHz.  `report --ghz` sets it.
+def target(ghz=1.8):
+    return {
+    "name": f"Radxa Zero 3W (RK3566, 4x Cortex-A55 @ {ghz:g} GHz, 32 kB L1D, no L2, 512 kB shared L3)",
+    "ghz": ghz,
     # A: whole-CPU benchmark ratio.  Geekbench 6 single-core, Pi 5 ~764-800 at 2.4 GHz vs RK3566 ~203 (boards at 1.8 GHz),
-    #    rescaled to the Zero 3W's 1.6 GHz: time on the Zero 3W / time on the Pi 5 at 2.4 GHz.
-    "gb6_ratio": (764 / 203 * 1.8 / 1.6, 800 / 203 * 1.8 / 1.6),
+    #    rescaled to the target clock: time on the Zero 3W / time on the Pi 5 at 2.4 GHz.
+    "gb6_ratio": (764 / 203 * 1.8 / ghz, 800 / 203 * 1.8 / ghz),
     # B: the in-order core's cycles per instruction when the data is in L1, for branchy scalar/small-vector C++
     "a55_cpi_core": (1.3, 2.0),
-    # an L1D miss that hits the shared L3 (no L2 between them on the RK3566), cycles at 1.6 GHz
+    # an L1D miss that hits the shared L3 (no L2 between them on the RK3566), cycles
     "a55_l3_hit_cycles": (25, 45),
     # how many more L1D misses the A55's 32 kB L1D takes than the A76's 64 kB
     "l1d_miss_scale": (1.0, 2.0),
     # a miss to LPDDR4 (an A76 L2 refill stands for one), ns; the in-order core waits most of it out
     "dram_ns": (110, 170),
-}
+    }
 
 
 def load_json(p):
@@ -346,7 +349,7 @@ def cmd_report(a):
     if not timing:
         sys.exit(f"no timing.json in {d}")
     samples, ph = parse_samples(d), phases(d)
-    tgt = TARGET
+    tgt = target(getattr(a, "ghz", 1.8))
     L = []
     P = L.append
     P(f"# MicroDuck brain on ARM -- {facts.get('model', '?')}")
@@ -504,7 +507,7 @@ def cmd_report(a):
         P("Two independent estimates; each is a bracket, low = the kinder board. Parameters and sources in README.md.")
         P("")
         P(f"- **A, whole-CPU ratio:** the time here × {tgt['gb6_ratio'][0]:.1f}-{tgt['gb6_ratio'][1]:.1f} "
-          "(Geekbench 6 single-core, Pi 5 at 2.4 GHz against RK3566, rescaled to 1.6 GHz). Valid only if this board ran "
+          f"(Geekbench 6 single-core, Pi 5 at 2.4 GHz against RK3566, rescaled to {tgt['ghz']:g} GHz). Valid only if this board ran "
           "at its 2.4 GHz top clock -- see Conditions.")
         P(f"- **B, the work on an in-order core:** per tick, (instructions × CPI {tgt['a55_cpi_core'][0]}-{tgt['a55_cpi_core'][1]}"
           f" + L1D misses × {tgt['l1d_miss_scale'][0]}-{tgt['l1d_miss_scale'][1]} × {tgt['a55_l3_hit_cycles'][0]}-{tgt['a55_l3_hit_cycles'][1]}"
@@ -590,6 +593,7 @@ def main():
         p.add_argument("--sudo-counters", action="store_true", help="run the counters pass with sudo -n")
         p.add_argument("--label", default="")
     p = sub.add_parser("report"); p.add_argument("results")
+    p.add_argument("--ghz", type=float, default=1.8, help="the target A55's clock (1.8: Pollen's figure for the duck's board)")
     a = ap.parse_args()
     if a.cmd == "all":
         if not Path(a.tape).exists():

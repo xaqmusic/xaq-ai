@@ -7136,19 +7136,20 @@ All three: 585 µs a tick, **2.9 % of one A76**; ×2.1 the desktop's time, tick 
 brain slows ×1.6. Memory: the process peaks at 12.5 MB resident on a 16 kB-page kernel; the brains' heap grows from 1.0 MB at 1 s
 to 4.4 MB at 600 s and is still rising slowly. A longer tape is needed to say whether it levels off.
 
-**Projected, Radxa Zero 3W (4× A55 at 1.6 GHz, 32 kB L1D, no L2, one 512 kB L3):** two independent brackets. (A) The Pi's time ×
-4.2–4.4 (Geekbench 6 single-core, rescaled to 1.6 GHz). (B) Per tick: the A55-built instructions × CPI 1.3–2.0, L1D misses at
+**Projected, Radxa Zero 3W (4× A55 at 1.8 GHz, Pollen's figure for the duck's board; 32 kB L1D, no L2, one 512 kB L3):** two
+independent brackets. (A) The Pi's time × 3.8–3.9 (Geekbench 6 single-core). (B) Per tick: the A55-built instructions × CPI 1.3–2.0, L1D misses at
 25–45 cycles to the L3, and the A76's L2 misses (its L2 is the RK3566's whole L3) at 110–170 ns to DRAM.
 
 | | intent mean | intent p99 | intent worst | ticks > 20 ms | all three brains |
 |---|---|---|---|---|---|
-| A | 2.2–2.3 ms | 17–18 ms | — | — | 12–13 % of one A55 |
-| B | 2.7–4.9 ms | 20–35 ms | 36–67 ms | 1–3 % of ticks | 16–28 % of one A55 |
-| floor (instructions only, IPC 1.0) | 1.0 ms | 8.6 ms | 16.7 ms | 0 | — |
+| A | 2.0–2.1 ms | 15–16 ms | — | — | 11–12 % of one A55 |
+| B | 2.5–4.5 ms | 18–32 ms | 34–61 ms | 0.8–2.9 % of ticks | 15–26 % of one A55 |
+| floor (instructions only, IPC 1.0) | 0.9 ms | 7.6 ms | 14.8 ms | 0 | — |
 
-**For Pollen:** on average the brain needs an eighth to a quarter of one of the four A55 cores, and ~5 MB of memory. The cost is
-its spikes. The cloud map's clustering ticks would run past a 20 ms tick on the A55 on roughly 1–3 % of ticks, so the brain must not
+**For Pollen:** on average the brain needs 11–26 % of one of the four A55 cores, and ~5 MB of memory. The cost is
+its spikes. The cloud map's clustering ticks would run past a 20 ms tick on the A55 on roughly 1–3 % of ticks (0.8–2.9 %), so the brain must not
 share the 50 Hz control thread, and the clustering is the module to make incremental or pipelined (the ten-minutes phase's open item) before
 the board is real. B's DRAM term dominates its upper bound, and the RK3566's L3 is shared with the walking policy, so the
 contention number on the real board is the one to watch. **Next:** `arm_bench.py all <radxa>`: the same harness on the real A55,
-which turns projection into measurement and checks B's parameters against measured cycles.
+which turns projection into measurement and checks B's parameters against measured cycles. The write-up for Pollen's PR (a Claude Docs page, "What the autonomous brain costs on a Radxa Zero 3W") uses these
+1.8 GHz figures.
