@@ -252,6 +252,8 @@ TEST(LookLoop, YieldTheLookCommitsUntilItsMedianTimeToPayoff) {
         m.tick(t++); bus.end_tick();
     };
     for (int k = 0; k < 6; ++k) { for (int i = 0; i < 100; ++i) { if (i == 50) seek = 0.8f; tick(true, 0.0f); } tick(false, 0.0f); seek = 0.0f; tick(false, 0.0f); }
+    tick(false, 1.0f);
+    EXPECT_TRUE(m.committed()) << "the look took the body; its cloud has not opened: it has not looked yet";
     for (int i = 0; i < 20; ++i) tick(true, 1.0f);
     EXPECT_TRUE(m.committed()) << "0.4 s in: most payoffs here are still to come";
     for (int i = 0; i < 60; ++i) tick(true, 1.0f);

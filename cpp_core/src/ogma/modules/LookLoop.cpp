@@ -95,8 +95,9 @@ ParamSchema LookLoop::params_schema() const {
             "'cloud' (default): a stop is the stop's cloud being open.  'hold' (lever 3): also while the trunk is still (state_topic "
             "values[4]) or the look holds the body (hold_topic) -- the payoff window opens when the stop does.", ParamValue{std::string("cloud")}},
         {"commit_topic", ParamMutability::ConstructionOnly,
-            "lever 4: output [1 while the look holds a stop it took, unpaid, and under half of this context's payoffs would have "
-            "come by now (the learned median time to a payoff)]; the arbiter's look_commit_topic.  Empty = not published.",
+            "lever 4: output [1 while the look holds a stop it took: before the stop's cloud opens (it has not looked yet), then while "
+            "unpaid and under half of this context's payoffs would have come by now (the learned median time to a payoff)]; the "
+            "arbiter's look_commit_topic.  Empty = not published.",
             ParamValue{std::string("")}},
         {"hold_topic", ParamMutability::ConstructionOnly, "episode_start hold: the arbiter's gain for the look.", ParamValue{std::string("")}},
         {"trust_topic", ParamMutability::ConstructionOnly,
@@ -315,7 +316,8 @@ void LookLoop::tick(uint64_t tick_id) {
         if (!commit_topic_.empty()) {
             // lever 4: the look commits to a stop it took while under half of this context's payoffs would have come by now
             const bool held = !hold_topic_.empty() && scalar(bus_, hold_topic_, 0, 0.0f) > 0.5f;
-            commit_ = in_ep_ && held && !ep_paid_ && survival(double(ep_ticks_) / tick_hz_, ep_cell_) >= 0.5;
+            // before the stop's cloud opens the look has not looked yet: it is committed from the moment it takes the body
+            commit_ = held && (in_ep_ ? (!ep_paid_ && survival(double(ep_ticks_) / tick_hz_, ep_cell_) >= 0.5) : true);
             auto cm = std::make_shared<ProprioToken>();
             cm->tick_id = tick_id; cm->producer_id = id_.empty() ? std::string("look") : id_; cm->sensor = "look_commit";
             cm->values = Eigen::VectorXf::Constant(1, commit_ ? 1.0f : 0.0f);

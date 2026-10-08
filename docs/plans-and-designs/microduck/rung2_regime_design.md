@@ -7265,3 +7265,16 @@ byte-identical). Operator, 2026-10-08: "look 2b is an improvement" — this leve
   payoff window from the stop's START (the look's own body still, not the cloud's opening: the 155 quick finds are its
   payoffs); then commitment — the look holds the body it took while its own need stands (the 111), the switching cost of a
   stop (the settle, the hand-back, the falls after short stops) set against the competitor's lead.
+
+**Lever 3, the payoff window opens when the stop does (`a1v2_f5_look_pay4`, `log/ten/lk7`, n = 24, on 2c).** `LookLoop.episode_start
+hold`: a stop is the look holding the body (its arbiter gain) or the trunk still (`CloudMap.state_topic` value 4, the input's
+stillness), not the stop's cloud being open. The first run cycled every tick (488 look stops a run, 0.0 s; `log/ten/lk7_cycle`):
+payoffs recorded at exactly t = 0 (deferred skills) counted as already passed, so the need dropped the tick the look took the
+body. Fixed inside hold mode (a payoff at τ is still to come; a deferred skill, certain, is not a time the look waits for).
+The re-run still churns: 150 look stops a run of 0.2 s, concentrated on 6 seeds (180–1039 a run): with the window opened at
+the stop's start, the recorded times to payoff cluster at 0.02–0.06 s — seek targets re-arming at the walk-to-stand
+transition, which nothing the look did could have caused — and the need falls 0.50 → 0.37 within two ticks; walk, stand,
+walk. Stops at things 74 → 62 % (CI [−24.2, −0.5]), interesting 48.2 → 46.6, the rest ties. **`REGRESSION`, killed.** The
+lesson: 2c's 155 "quick finds before the cloud opened" were not the look's payoffs either; the cloud's opening is the right
+start of the look's window. Re-use: none in this form; what it exposed — the look has not looked before its cloud opens —
+is lever 4's commitment.
