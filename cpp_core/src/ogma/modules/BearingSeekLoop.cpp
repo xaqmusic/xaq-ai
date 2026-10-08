@@ -47,6 +47,7 @@ std::vector<TopicSpec> BearingSeekLoop::output_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{output_topic_, std::type_index(typeid(ProprioToken))},
                               TopicSpec{value_topic_,  std::type_index(typeid(ProprioToken))} };
     if (!range_topic_.empty()) v.push_back(TopicSpec{range_topic_, std::type_index(typeid(ProprioToken))});
+    if (!mind_topic_.empty()) v.push_back(TopicSpec{mind_topic_, std::type_index(typeid(ProprioToken))});
     if (!situation_out_topic_.empty()) v.push_back(TopicSpec{situation_out_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
@@ -87,6 +88,10 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"lead_eval_ticks", ParamMutability::HotMutable, "How long one option is tried before its outcome is recorded (ticks).", ParamValue{int64_t{50}}},
         {"lead_min_samples", ParamMutability::HotMutable, "An option with fewer outcomes than this in a situation is tried first.", ParamValue{int64_t{2}}},
         {"restore_lead_only", ParamMutability::ConstructionOnly, "A restored snapshot brings the lead table and nothing else.", ParamValue{false}},
+        {"mind_topic", ParamMutability::ConstructionOnly,
+         "§17.112 lever 1: [a mover in mind] -- 1 while chasing or coasting, then falling linearly to 0 over chase_memory_ticks "
+         "after the last chased tick, whatever ended the chase (a loss, a yield, a stop).  The arbiter's look reads it: standing "
+         "to look while a mover is in mind loses the mover.  Empty = not published.", ParamValue{std::string("")}},
         {"publish_chase_flag", ParamMutability::ConstructionOnly,
          "The output token carries a 4th value: 1 while chasing or coasting (CloudMap's mover_not_target_m reads it).  false = off.",
          ParamValue{false}},
@@ -173,7 +178,7 @@ ParamMap BearingSeekLoop::current_params() const {
     ParamMap m;
     m["bearing_topic"] = ParamValue{bearing_topic_}; m["pose_topic"] = ParamValue{pose_topic_};
     m["output_topic"] = ParamValue{output_topic_}; m["value_topic"] = ParamValue{value_topic_};
-    m["range_topic"] = ParamValue{range_topic_};
+    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_};
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
     m["pull_topic"] = ParamValue{pull_topic_}; m["publish_chase_flag"] = ParamValue{publish_chase_flag_};
@@ -203,6 +208,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "output_topic",    [&](auto const& v){ output_topic_  = get_string(v,"output_topic"); });
     apply_param(params, "value_topic",     [&](auto const& v){ value_topic_   = get_string(v,"value_topic"); });
     apply_param(params, "range_topic",     [&](auto const& v){ range_topic_   = get_string(v,"range_topic"); });
+    apply_param(params, "mind_topic",      [&](auto const& v){ mind_topic_    = get_string(v,"mind_topic"); });
     apply_param(params, "proximity_range", [&](auto const& v){ proximity_range_ = get_double(v,"proximity_range"); });
     apply_param(params, "min_conf",        [&](auto const& v){ min_conf_      = float(get_double(v,"min_conf")); });
     apply_param(params, "arrive_m",        [&](auto const& v){ arrive_m_      = get_double(v,"arrive_m"); });
@@ -446,6 +452,15 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         r->tick_id = tick_id; r->producer_id = out->producer_id; r->sensor = "seek_range";
         r->values = Eigen::VectorXf::Constant(1, float(range_left_));
         bus_->publish(range_topic_, r);
+    }
+    if (!mind_topic_.empty()) {
+        if (chasing_ || coasting_) { mind_from_ = tick_id; have_mind_ = true; }
+        const double span = double(std::max(1, chase_memory_ticks_));
+        const double mind = have_mind_ ? std::max(0.0, 1.0 - double(tick_id - mind_from_) / span) : 0.0;
+        auto m = std::make_shared<ProprioToken>();
+        m->tick_id = tick_id; m->producer_id = out->producer_id; m->sensor = "seek_mind";
+        m->values = Eigen::VectorXf::Constant(1, float(mind));
+        bus_->publish(mind_topic_, m);
     }
 }
 

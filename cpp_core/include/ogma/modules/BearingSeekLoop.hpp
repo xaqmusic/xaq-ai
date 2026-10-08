@@ -70,6 +70,8 @@ private:
     std::string output_topic_  = "percept.seek_bearing";
     std::string value_topic_   = "reality.cognitive.seek_value";
     std::string range_topic_   = "reality.cognitive.seek_range";
+    std::string mind_topic_    = "";                 // §17.112 lever 1: [a mover in mind]
+    uint64_t    mind_from_ = 0; bool have_mind_ = false;
     double proximity_range_ = 2.5;    // the bearing's proximity is 1 - range / this (CloudMap max_range / things_range)
     float  min_conf_        = 0.02f;  // proximity above this = the thing is in view
     double arrive_m_        = 0.25;   // the remaining range at which the target counts as reached

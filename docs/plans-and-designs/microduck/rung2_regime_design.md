@@ -7199,3 +7199,19 @@ overtaken before the stop's cloud has opened.
   loop: its walking need is the S1 prediction, which predicts nothing (r = 0.05), so L1 arbitrated a loop with no information
   about when to stop. Re-use: with a need that carries information (S1's re-use: what a stop delivers — a new target, an
   answer to watch) and a seek need that holds through the chase's short drops (the pursuit's coasting, not the chased flag).
+
+**Lever 1, the mover in mind holds the look off (`a1v2_f5_look_hold`, `log/ten/lk3`, n = 24, on L1).** The seek loop publishes
+`mind_topic` [1 while chasing or coasting, then falling to 0 over `chase_memory_ticks` (5 s) after the last chased tick,
+whatever ended the chase]; the arbiter's look gate becomes 1 − max(seek need, mind) (`look_hold_topic`). Both empty =
+byte-identical (★ F5 and L1 tick for tick on the new binary). Unit-tested (seek 27/27, arbiter 36/36).
+- **The leak is closed:** look stops starting within 1 s after a chase 28 → 0 (L1 → lever 1); 20 of L1's 28 came 0.02 s after
+  a chase yielded to tall structure, which left no memory.
+- **The chase grows** (★ F5 → L1 → lever 1): chase 23.6 → 25.5 → 29.9 s a run, on the moving train 13.0 → 12.8 → 15.1,
+  pursuit 13.3 → 14.7 → 17.1 s; with the moving train near and the duck standing, chasing 5.6 → 7.9 → 12.2 %.
+- **Falls 2.75 → 4.08 a run against ★ F5 (CI [+0.13, +2.54]), L1 3.71.** Attributed: falls within 3 s after a look stop 14
+  (L1 9; the timer's in ★ F5, 5), after an impeded stop 19 (★ F5 7). The look's stops last 1.3 s; of 240, 100 end on a new
+  seek target (a payoff), 140 with the look's need still high (median 0.89) — its trust falls, because `comp_look` grades it
+  on the cloud's surprise falling and a stop's fresh cloud makes it RISE in the first windows. A stop of a second, settled
+  and handed back, is what the walker falls out of.
+- **Verdict: `WORKING` on its mechanism (the leak, the chase), `REGRESSION` on falls inherited from L1's short stops** —
+  not promoted. Kept in the stack under lever 2, which replaces the need and the trust that make the stops short.

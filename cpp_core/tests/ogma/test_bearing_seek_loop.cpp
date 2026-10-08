@@ -655,3 +655,35 @@ TEST(BearingSeekLoop, ARestoredLeadTableAimsWithItsBestOptionAndBringsNoTarget) 
     ASSERT_TRUE(r.m.chasing());
     EXPECT_EQ(r.m.lead_option(), 1) << "situation 0, both known: the best mean (1 s ahead)";
 }
+
+// §17.112 lever 1 (2026-10-08): the mover in mind -- 1 while chasing, then falling to 0 over chase_memory_ticks after the
+// last chased tick, whatever ended the chase.
+TEST(BearingSeekLoop, AMoverStaysInMindForTheMemoryAfterTheChaseEnds) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_memory_ticks"] = int64_t{100}; p["mind_topic"] = std::string("reality.cognitive.seek_mind");
+    Rig r(p);
+    auto mind = [&]() { auto m = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.cognitive.seek_mind"));
+                        return m ? m->values[0] : -1.0f; };
+    r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FLOAT_EQ(mind(), 0.0f) << "nothing chased yet";
+    for (int k = 0; k < 10; ++k) {
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(r.m.chasing());
+    EXPECT_FLOAT_EQ(mind(), 1.0f);
+    int ended = -1;
+    for (int i = 0; i < 200; ++i) { r.step(0, 0, 0, 0.0f, 0.0f, 0.0f); if (ended < 0 && !r.m.chasing()) ended = i; }
+    ASSERT_GE(ended, 0);
+    EXPECT_FALSE(r.m.chasing());
+    EXPECT_FLOAT_EQ(mind(), 0.0f) << "the memory's span has passed";
+    Rig q(p);
+    for (int k = 0; k < 10; ++k) {
+        q.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    int i = 0; while (q.m.chasing() && i++ < 200) q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    for (int k = 0; k < 49; ++k) q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    auto m2 = std::dynamic_pointer_cast<const ogma::ProprioToken>(q.bus.last_value("reality.cognitive.seek_mind"));
+    ASSERT_TRUE(m2); EXPECT_NEAR(m2->values[0], 0.5f, 0.02f) << "half the memory's span after the last chased tick";
+}

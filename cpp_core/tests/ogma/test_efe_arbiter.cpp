@@ -950,3 +950,26 @@ TEST(EFEArbiter, LookAbsentLeavesTheRaceAndPublishesNoGain) {
     EXPECT_EQ(run_look(0.0f, 0.9f, w, false, &g), 2) << "unwired, the look never wins";
     EXPECT_FLOAT_EQ(g, -1.0f) << "and no gain is published";
 }
+
+TEST(EFEArbiter, AMoverInMindHoldsTheLookOff) {
+    // §17.112 lever 1: the look's gate is 1 − max(hunger, hold); a chase that just dropped (hunger 0, hold 0.8) keeps it off
+    std::unordered_map<std::string, float> w = {{"reality.loop.seek", 0.4f}, {"reality.loop.play", 0.3f}, {"reality.loop.look", 0.4f}};
+    auto run = [&](bool hold_wired) {
+        ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")},
+                            {"play_weight", 1.0}, {"play_value_topic", std::string("reality.cognitive.play_value")},
+                            {"vision_weight", 1.0}, {"vision_value_topic", std::string("reality.cognitive.seek_value")},
+                            {"trust_key_vision", std::string("reality.loop.seek")}, {"look_value_topic", std::string("reality.cognitive.look")}};
+        if (hold_wired) p["look_hold_topic"] = std::string("reality.cognitive.seek_mind");
+        Fix f(p); uint64_t t = 0;
+        for (int i = 0; i < 300; ++i) {
+            f.bus.begin_tick(t);
+            f.bus.publish("reality.proprio.hunger", p1(0.0f)); f.bus.publish("reality.cognitive.seek_value", p1(0.0f));
+            f.bus.publish("reality.cognitive.play_value", p1(1.0f)); f.bus.publish("reality.cognitive.look", p1(0.9f));
+            f.bus.publish("reality.cognitive.seek_mind", p1(0.8f)); f.bus.publish("consensus.1", trust_token(w));
+            f.arb.tick(t++); f.bus.end_tick();
+        }
+        return f.arb.winner();
+    };
+    EXPECT_EQ(run(false), 4) << "without the hold, the dropped chase hands the body to the look";
+    EXPECT_EQ(run(true), 2)  << "with it, the look waits (0.2·0.9·0.4 = 0.07 < play 0.3)";
+}
