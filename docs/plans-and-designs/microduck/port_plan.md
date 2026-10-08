@@ -20,6 +20,15 @@
 
 ## ▶ Resume here
 
+**2026-10-08: the demo is ★ F5 and it is posted.** ★ F5 = ★ LA1 (★ T4's stack, the chase at T11, the look-around on the
+walk) + the four §17.108 correctness fixes, promoted on the operator's eye 2026-10-04 (design doc §17.108–17.109; the
+companion document "Inside the MicroDuck Brain"). The design document for Pollen is open as pollen-robotics/microduck#381
+(2026-10-07); replies there are the operator's call. Its §9 sets the work ahead: (1) the client on a board, (2) the head,
+the stand and the camera as separate issues, (3) **the scaffolds replaced one at a time, each by a loop that owns the error
+it stands in for**, (4) new states. The cost on ARM (the replay benchmark on the Pi 5, then a Radxa Zero 3W) runs on another
+machine — ten-minutes phase page, last section. **The push now: (3), starting with the stop and its look** (the operator,
+2026-10-08: "the look is currently interrupting the chase") — design doc §17.112.
+
 **2026-10-02 (later): the ten-minutes phase opened** — [`microduck/ten_minutes_phase.md`](ten_minutes_phase.md):
 the goal is ten minutes of interesting behaviour for the plan to Pollen. The instrument (`ten_minutes.py`) measured ★ TURN
 43 % boring; the fragments it walked to were clusters whose top was never seen, and "small needs a seen top" (preset

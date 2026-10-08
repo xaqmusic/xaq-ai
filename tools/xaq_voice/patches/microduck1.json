@@ -1,0 +1,1075 @@
+{
+  "brain": {
+    "host": "127.0.0.1",
+    "hz": 30.0,
+    "port": 7400
+  },
+  "engine": "xaq_voice",
+  "master": {
+    "filter": {
+      "cutoff_hz": 4000.0,
+      "enabled": false,
+      "mix": 1.0,
+      "mode": "vowel",
+      "morph": 0.214,
+      "q": 0.7,
+      "vowel_a": "U",
+      "vowel_b": "I"
+    },
+    "mod_smooth_ms": 49.25,
+    "quantize": false,
+    "routes": [
+      {
+        "curve": 1.0,
+        "depth": 1.0,
+        "dest": "vowel_morph",
+        "enabled": true,
+        "invert": false,
+        "norm": {
+          "full": 2.0,
+          "gate": 1.4,
+          "in_hi": 1.0,
+          "in_lo": 0.0,
+          "mode": "median_mad",
+          "ref_key": "",
+          "smooth_ms": 120.0,
+          "window_s": 10.0,
+          "z_hi": 4.0,
+          "z_lo": 0.0
+        },
+        "source": {
+          "key": "ema_tle",
+          "module": "object_epm"
+        }
+      }
+    ],
+    "scale": "major_pentatonic",
+    "span": 24.0,
+    "volume": 0.5
+  },
+  "version": 1,
+  "voices": [
+    {
+      "enabled": true,
+      "events": [],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": true,
+        "mix": 1.0,
+        "mode": "vowel",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "O",
+        "vowel_b": "I"
+      },
+      "id": "motor_epm_intent",
+      "module": "motor_epm_intent",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 254.9145907074778,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": 1,
+        "release_ms": 150.0,
+        "waveform": "saw"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "vowel_morph",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "delta",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "spStep",
+            "module": "motor_epm_intent"
+          }
+        },
+        {
+          "curve": 0.1,
+          "depth": 0.7200000000000002,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.061,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "delta",
+            "ref_key": "",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 9.568,
+            "z_lo": 0.2599999999999998
+          },
+          "source": {
+            "key": "upright",
+            "module": "motor_epm_intent"
+          }
+        },
+        {
+          "curve": 1.0,
+          "depth": 32.831999999999994,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 7.824,
+            "z_lo": -1.7320000000000002
+          },
+          "source": {
+            "key": "motor_tle",
+            "module": "motor_epm_intent"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": false,
+      "events": [
+        {
+          "enabled": true,
+          "sound": "chirp_up",
+          "source": {
+            "key": "baked_now",
+            "module": "map_epm"
+          },
+          "trigger": "true"
+        },
+        {
+          "enabled": true,
+          "sound": "two_notes",
+          "source": {
+            "key": "mitosis_count",
+            "module": "map_epm"
+          },
+          "trigger": "increase"
+        },
+        {
+          "enabled": true,
+          "sound": "blip_down",
+          "source": {
+            "key": "nodes",
+            "module": "map_epm"
+          },
+          "trigger": "decrease"
+        }
+      ],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": false,
+        "mix": 1.0,
+        "mode": "lowpass",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "map_epm",
+      "module": "map_epm",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 261.63,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "square"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "map_epm"
+          }
+        },
+        {
+          "curve": 0.5,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "novelty_threshold_now",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "map_epm"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "events": [],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": false,
+        "mix": 1.0,
+        "mode": "lowpass",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "play",
+      "module": "play",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 523.25,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "square"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "n_nodes",
+            "module": "play"
+          }
+        },
+        {
+          "curve": 0.5,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "n_nodes",
+            "module": "play"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": false,
+      "events": [],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": false,
+        "mix": 1.0,
+        "mode": "lowpass",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "cloud",
+      "module": "cloud",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 1046.5,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "square"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "voxels",
+            "module": "cloud"
+          }
+        },
+        {
+          "curve": 0.5,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "voxels",
+            "module": "cloud"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "events": [
+        {
+          "enabled": true,
+          "sound": "chirp_up",
+          "source": {
+            "key": "baked_now",
+            "module": "object_epm"
+          },
+          "trigger": "true"
+        },
+        {
+          "enabled": true,
+          "sound": "two_notes",
+          "source": {
+            "key": "mitosis_count",
+            "module": "object_epm"
+          },
+          "trigger": "increase"
+        },
+        {
+          "enabled": true,
+          "sound": "blip_down",
+          "source": {
+            "key": "nodes",
+            "module": "object_epm"
+          },
+          "trigger": "decrease"
+        }
+      ],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": true,
+        "mix": 1.0,
+        "mode": "vowel",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "object_epm",
+      "module": "object_epm",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 51.41019019982905,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "saw"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 29.951999999999998,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 6.064,
+            "z_lo": -1.492
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "object_epm"
+          }
+        },
+        {
+          "curve": 0.1,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 0.9895,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "novelty_threshold_now",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 9.712,
+            "z_lo": 0.17600000000000016
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "object_epm"
+          }
+        },
+        {
+          "curve": 1.0,
+          "depth": 12.0,
+          "dest": "vowel_morph",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 274.0,
+            "in_lo": -91.6,
+            "mode": "delta",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 5.215999999999999,
+            "z_lo": -3.7720000000000002
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "object_epm"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": false,
+      "events": [
+        {
+          "enabled": true,
+          "sound": "chirp_up",
+          "source": {
+            "key": "baked_now",
+            "module": "thing_epm"
+          },
+          "trigger": "true"
+        },
+        {
+          "enabled": true,
+          "sound": "two_notes",
+          "source": {
+            "key": "mitosis_count",
+            "module": "thing_epm"
+          },
+          "trigger": "increase"
+        },
+        {
+          "enabled": true,
+          "sound": "blip_down",
+          "source": {
+            "key": "nodes",
+            "module": "thing_epm"
+          },
+          "trigger": "decrease"
+        }
+      ],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": false,
+        "mix": 1.0,
+        "mode": "lowpass",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "thing_epm",
+      "module": "thing_epm",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 2093.0,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "square"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "thing_epm"
+          }
+        },
+        {
+          "curve": 0.5,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "novelty_threshold_now",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "thing_epm"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": false,
+      "events": [
+        {
+          "enabled": true,
+          "sound": "chirp_up",
+          "source": {
+            "key": "baked_now",
+            "module": "thing_kind_epm"
+          },
+          "trigger": "true"
+        },
+        {
+          "enabled": true,
+          "sound": "two_notes",
+          "source": {
+            "key": "mitosis_count",
+            "module": "thing_kind_epm"
+          },
+          "trigger": "increase"
+        },
+        {
+          "enabled": true,
+          "sound": "blip_down",
+          "source": {
+            "key": "nodes",
+            "module": "thing_kind_epm"
+          },
+          "trigger": "decrease"
+        }
+      ],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": false,
+        "mix": 1.0,
+        "mode": "lowpass",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "thing_kind_epm",
+      "module": "thing_kind_epm",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 2093.0,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "square"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "thing_kind_epm"
+          }
+        },
+        {
+          "curve": 0.5,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "novelty_threshold_now",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "thing_kind_epm"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": false,
+      "events": [
+        {
+          "enabled": true,
+          "sound": "chirp_up",
+          "source": {
+            "key": "baked_now",
+            "module": "thing_context_epm"
+          },
+          "trigger": "true"
+        },
+        {
+          "enabled": true,
+          "sound": "two_notes",
+          "source": {
+            "key": "mitosis_count",
+            "module": "thing_context_epm"
+          },
+          "trigger": "increase"
+        },
+        {
+          "enabled": true,
+          "sound": "blip_down",
+          "source": {
+            "key": "nodes",
+            "module": "thing_context_epm"
+          },
+          "trigger": "decrease"
+        }
+      ],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": false,
+        "mix": 1.0,
+        "mode": "lowpass",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "thing_context_epm",
+      "module": "thing_context_epm",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 2093.0,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "square"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "thing_context_epm"
+          }
+        },
+        {
+          "curve": 0.5,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "novelty_threshold_now",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "last_tle",
+            "module": "thing_context_epm"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": false,
+      "events": [],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": false,
+        "mix": 1.0,
+        "mode": "lowpass",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "seek",
+      "module": "seek",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 2093.0,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "square"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "range",
+            "module": "seek"
+          }
+        },
+        {
+          "curve": 0.5,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "range",
+            "module": "seek"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": false,
+      "events": [],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": false,
+        "mix": 1.0,
+        "mode": "lowpass",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "voter_loops",
+      "module": "voter_loops",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 2093.0,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "square"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "fused_tle",
+            "module": "voter_loops"
+          }
+        },
+        {
+          "curve": 0.5,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "fused_tle",
+            "module": "voter_loops"
+          }
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "events": [],
+      "filter": {
+        "cutoff_hz": 4000.0,
+        "enabled": false,
+        "mix": 1.0,
+        "mode": "lowpass",
+        "morph": 0.0,
+        "q": 0.7,
+        "vowel_a": "A",
+        "vowel_b": "E"
+      },
+      "id": "outcome",
+      "module": "outcome",
+      "osc": {
+        "attack_ms": 20.0,
+        "base_hz": 2093.0,
+        "glide_ms": 30.0,
+        "level": 1.0,
+        "noise_mix": 0.0,
+        "pan": 0.0,
+        "pulse_width": 0.5,
+        "quantize": -1,
+        "release_ms": 150.0,
+        "waveform": "square"
+      },
+      "routes": [
+        {
+          "curve": 1.0,
+          "depth": 24.0,
+          "dest": "pitch",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "median_mad",
+            "ref_key": "",
+            "smooth_ms": 60.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "misses",
+            "module": "outcome"
+          }
+        },
+        {
+          "curve": 0.5,
+          "depth": 1.0,
+          "dest": "amp",
+          "enabled": true,
+          "invert": false,
+          "norm": {
+            "full": 2.0,
+            "gate": 1.4,
+            "in_hi": 1.0,
+            "in_lo": 0.0,
+            "mode": "threshold_ratio",
+            "ref_key": "",
+            "smooth_ms": 0.0,
+            "window_s": 10.0,
+            "z_hi": 4.0,
+            "z_lo": 0.0
+          },
+          "source": {
+            "key": "misses",
+            "module": "outcome"
+          }
+        }
+      ]
+    }
+  ]
+}
