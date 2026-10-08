@@ -7163,3 +7163,22 @@ chase, the cloud's surprise integral, the train's time within 1.5 m while standi
 passive (it predicts beside the host's stops; does its need rise before the stops that pay and stay low in chases?). S2 the
 arbiter's look starts the stop (the timer and the arrival rule off). S3 the look's loss ends it. Each judged on the ten-minute
 set and the first minute against ★ F5, n = 24, and the chase readout; the eye promotes.
+
+**S1, the loop passive (`a1v2_f5_look_passive`, `log/ten/lk1`, n = 24 × 600 s).** Built: `LookLoop` (cpp_core, unit-tested 6/6),
+`CloudMap.state_topic` [open, walking, voxels, new_fraction] (empty = byte-identical), a 4-node context EPM over [the place
+TLE over its running peak, the seek need, the outcome need], the host's `look` record. Guard: all 24 runs tick for tick ★ F5
+(fx5) with the `look` field stripped; ★ F5 on the new binary byte-identical to the old.
+- **The prediction is `NULL`, and the measure is a `TAUTOLOGY`.** Over 908 stops, the loop's prediction against the realized
+  integral: r = 0.05; its error (1.92 s) worse than the run's plain running mean (1.39), which knowing the host's trigger
+  does not beat either (1.41). The realized integral is the stop's LENGTH (r = 0.94), and the length is the host's cloud-end
+  rule. Nothing sensed before a stop predicts its yield (the walking cloud's new_fraction, its size, the place TLE: |r| ≤ 0.08),
+  because **every stop opens a fresh cloud**: new_fraction is 0.97 in its first second, 0.63 in the second, 0.34 at the end.
+  It measures the stop's cloud rebuilding what the walking cloud had already seen, not the world being new.
+- **What a stop delivers** (★ F5's own stops, a seek target acquired during the stop or 2 s after / a skill fired): arrival
+  67 % / 75 %; the timer 48 % / 6 %; impeded 50 % / 1 %; the look after a skill 55 % / 0 %. The timer and impeded stops start
+  while the seek loop holds a target (76 %, 99 %): they interrupt a pursuit.
+- **Re-use / next form of the error:** the look's yield is pragmatic (a new thing to go to, an answer to watch), not the stop
+  cloud's growth. A world-novelty form needs a cloud that remembers across stops (new against the cached place clouds and
+  the walking cloud), not against a fresh one. Arbitration does not depend on the prediction: the in-stop need (new_fraction
+  over the stop's own peak) is the cloud-end rule's continuous form, and the chase's silencing is the arbiter's gate — L1
+  measures those.

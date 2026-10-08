@@ -1605,6 +1605,7 @@ struct StopPlan {
     // A 4 cm block at 1 m sits ~7 deg below level, so what finds it is a NARROW band held
     // there, not a wide sweep.  0 = centred on level, byte-identical.
     double gaze_down = 0.0;
+    bool   by_look = false;        // --stop-by-look (§17.112 L1): a stop starts while the arbiter's look holds the body and ends when it loses; the timer may be off (--stop-every 0)
     bool   on_arrive = false;      // --stop-on-arrive (things phase T4): a stop starts when the seek loop reaches its target
     bool   on_lost = false;        // --stop-on-lost (2026-09-29): a stop starts when a chase is LOST (the thing left the view still moving), its sweep centred on where the thing was last predicted -- a look, not a walk
     bool   on_chase = false;       // --stop-on-chase (2026-09-28): a stop ENDS when the seek loop confirms a chase -- the orienting reflex's substrate form: the thing moved while I watched, follow it
@@ -1666,6 +1667,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_head_forward != 0.0) std::fprintf(stderr, "  head forward: the neck and head pitch targets offset by %.2f rad (the head over the feet)\n", g_head_forward);
     if (g_body_pitch != 0.0) std::fprintf(stderr, "  body pitch: the walker's body_pitch command slot set to %.2f rad\n", g_body_pitch);
     if (g_stop.on_lost) std::fprintf(stderr, "  stop on lost: a stop starts when a chase is lost, its sweep centred on where the thing was last predicted (a look, not a walk)\n");
+    if (g_stop.by_look) std::fprintf(stderr, "  stop by look: a stop starts while the arbiter's look (the LookLoop's need) holds the body and ends when it loses (the cloud-end rule is not applied to these stops; the --stop-secs cap stays)\n");
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
     if (g_stuck_contact > 0.0) { brain.set_stuck_contact(g_stuck_contact); std::fprintf(stderr, "  stuck on contact: a forward push with the ToF's too-close share above %.2f for a second is a stall\n", g_stuck_contact); }
@@ -1887,7 +1889,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
 
     // The joint brain at the stops (W1).  Calibrated and restored exactly as --brain does it; its
     // learning is off until it drives.
-    const bool stop_on = g_stop.every_s > 0.0 && g_stop.secs > 0.0;
+    const bool stop_on = (g_stop.every_s > 0.0 || g_stop.by_look) && g_stop.secs > 0.0;
     std::unique_ptr<OgmaBrainAdapter> stander;
     const bool stop_walker_holds = (g_stop_brain == "walker");   // the control: the same stops, the walker stands them
     if (stop_on && stop_walker_holds) {
@@ -2007,6 +2009,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const int kCloudWin = int(2.0 * kBrainHz);
     std::vector<int> cg_vox; double cg_peak = 0.0; int cg_below = 0, stops_cloud_ended = 0;
     bool chase_prev = false; int stops_chase_ended = 0;
+    bool stop_is_byl = false; int stops_byl = 0, stops_byl_lost = 0;   // §17.112: stops the look started; of them ended by its loss
     bool stop_is_lost = false; int stops_lost = 0; double lost_ego = 0.0, lost_range = 0.0;
     if (g_map_view_cloud && !(cloud_on && brain.cloud_present()))
         throw std::runtime_error("--map-view cloud needs --cloud and a CloudMap in the graph");
@@ -2070,7 +2073,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 scan_stop(); if (looking) look_stop();
                 if (g_stop.map_on_stop) brain.set_map_learning(false);
                 if (stop_phase == StopPhase::Brain) end_stop_drive(false);
-                stop_phase = StopPhase::None; stop_left = 0; ++stop_rescued; stop_event = "stop:rescued";
+                stop_phase = StopPhase::None; stop_left = 0; ++stop_rescued; stop_event = "stop:rescued"; stop_is_byl = false;
             }
         } else if (recovery.handed_back_this_tick()) {
             if (down_rise_watch > 0) { ++down_rises; down_rise_watch = 0; }   // upright within the watch after the roll: the roll rose
@@ -2240,12 +2243,20 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (g_stop.on_chase && chase_edge && stop_phase != StopPhase::None && stop_left > 0) {
                 stop_left = 0; ++stops_chase_ended; stop_event = "stop:chase";
             }
-            if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now || lost_now)
+            // §17.112 L1: the look holds the body -- a stop starts (and lasts while it holds)
+            const bool byl_now = g_stop.by_look && stop_phase == StopPhase::None && t >= stop_from && !skill_active && unwind_left == 0
+                                 && imp_back_left == 0 && brain.look_gain() > 0.5;
+            if (g_stop.by_look && stop_is_byl && stop_phase != StopPhase::None && stop_left > 0 && brain.look_gain() <= 0.5) {
+                stop_left = 0; ++stops_byl_lost;                     // the look lost the body: the stop ends
+            }
+            if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now || lost_now || byl_now)
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
                 ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : (lost_now ? "stop:lost" : "stop:start")); stop_started_tick = t;
                 stop_is_arrive = arrive_now; stop_is_stuck = stuck_now && !arrive_now; stop_is_look = false; spin_walk_run = 0;
                 stop_is_lost = lost_now && !arrive_now && !stuck_now;
+                stop_is_byl = byl_now && !arrive_now && !stuck_now && !lost_now;
+                if (stop_is_byl) { ++stops_byl; stop_event = "stop:bylook"; }
                 if (arrive_now) ++stops_arrive;
                 if (stuck_now && !arrive_now) ++stops_stuck;
                 if (stop_is_lost) ++stops_lost;
@@ -2482,7 +2493,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         }
                     }
                 }
-                if (cloud_end_on && stop_phase != StopPhase::None && stop_left > 0) {
+                if (cloud_end_on && stop_phase != StopPhase::None && stop_left > 0 && !stop_is_byl) {
                     // the growth judged is the STOP's cloud: a walking cloud (walk_cloud) still open at the stop's
                     // start is not it (R74: its file-and-reopen read as "stopped growing" and ended every stop at 1.4 s)
                     if (brain.cloud_open() && !brain.cloud_walking()) {
@@ -2509,6 +2520,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     const bool bored = (look_on || gaze_on) && (t - stop_started_tick) < stop_ticks - 1 && orient == Orient::None;
                     if (bored) ++stops_bored;
                     stop_phase = StopPhase::None; stop_event = orient != Orient::None ? "stop:orient" : bored ? "stop:bored" : "stop:end";
+                    stop_is_byl = false;
                     if (stop_is_stuck && g_stuck_escape_s > 0.0) {
                         // the escape: the freest sector of the stop's cloud view (8 sectors across +-64 deg, 1 = nothing
                         // off the floor within 4 m; sector 0 on the right), ties to the one nearest straight ahead
@@ -3023,6 +3035,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                   if (!ps.is_null()) std::printf(",\"pl\":[%d,%d,%d,%.2f]", ps.value("climbing", false) ? 1 : 0, ps.value("wandering", false) ? 1 : 0, ps.value("next_node", -1), ps.value("explore_dir", 0.0)); } }
             { const auto oc = brain.outcome_now();   // the outcome loop: [node, predicted, observed, surprise, samples]
               if (!oc.empty()) std::printf(",\"outc\":[%d,%.3f,%.3f,%.2f,%d,%d]", int(oc[0]), oc[1], oc[2], oc[3], int(oc[4]), oc.size() > 5 ? int(oc[5]) : 0); }
+            { const auto lk = brain.look_now();      // the look loop (§17.112): [need, prediction, in a stop, realized, predicted]
+              if (!lk.empty()) std::printf(",\"look\":[%.3f,%.3f,%d,%.3f,%.3f]", lk[0], lk[1], int(lk[2]), lk[3], lk[4]); }
             // live changes a client made through the inspector this tick: the run's record must show them
             {
                 const auto pe = brain.take_inspector_events();
@@ -3190,6 +3204,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
+        if (g_stop.by_look) std::fprintf(stderr, "  look stops: %d of %d started by the arbiter's look, %d ended when it lost the body\n", stops_byl, stops_started, stops_byl_lost);
         if (chase_on) { const auto cf = brain.chase_cand_fates();
             std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase; candidates not chased: %d replaced (missed the gate), %d too fast, %d still, %d timed out; targets taken from the walk: %d; chases yielded near tall structure: %d, sightings dropped at a yielded place: %d; static targets yielded near tall structure: %d, sightings dropped there: %d; targets forgotten for no progress: %d\n",
                          brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3], brain.walk_takes(), brain.chases_yielded(), brain.yield_drops(), brain.static_yielded(), brain.static_yield_drops(), brain.progress_forgets()); }
@@ -3523,6 +3538,8 @@ int main(int argc, char** argv) {
             g_stop.on_lost = true;
         } else if (a == "--stop-on-chase") {
             g_stop.on_chase = true;
+        } else if (a == "--stop-by-look") {
+            g_stop.by_look = true;
         } else if (a == "--stop-on-arrive") {
             g_stop.on_arrive = true;
         } else if (a == "--stop-gaze-at-thing") {

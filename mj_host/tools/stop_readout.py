@@ -5,7 +5,7 @@ The operator: "the look is currently interrupting the chase."  From the host's F
 `train`, `cld` records), per stop:
 
   trigger      the event that started it: arrive / look (after a skill's back-off) / impeded / start (the timer) /
-               stuck / lost
+               stuck / lost / the look (the arbiter's look loop, host --stop-by-look)
   length       seconds from the start to the walk's return
   end          chase (a chase confirmed during the stop ended it -- the host logs these as stop:bored), cap (ran the full
                --stop-secs), fall (rescued), cloud (ended early otherwise: the cloud stopped growing, or the gaze's novelty)
@@ -30,7 +30,7 @@ import sys
 DT = 0.02
 NEAR = 1.5
 STARTS = {"stop:arrive": "arrive", "stop:look": "look", "stop:impeded": "impeded", "stop:start": "timer",
-          "stop:stuck": "stuck", "stop:lost": "lost"}
+          "stop:stuck": "stuck", "stop:lost": "lost", "stop:bylook": "the look"}
 
 
 def run(path: str, cap_s: float) -> dict:

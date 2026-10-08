@@ -209,6 +209,7 @@ add_library(ogma_core
     src/ogma/modules/CylinderBuilder.cpp
     src/ogma/modules/PlaceVectorBuilder.cpp
     src/ogma/modules/LoopCompetence.cpp
+    src/ogma/modules/LookLoop.cpp
     src/ogma/modules/TofAvoidLoop.cpp
     src/ogma/modules/BearingSeekLoop.cpp
     src/ogma/modules/SkillOutcomeLoop.cpp
@@ -608,6 +609,9 @@ gtest_discover_tests(test_bearing_seek_loop)
 add_executable(test_motion_field tests/ogma/test_motion_field.cpp)
 target_link_libraries(test_motion_field PRIVATE ogma_core GTest::gtest_main pthread)
 gtest_discover_tests(test_motion_field)
+add_executable(test_look_loop tests/ogma/test_look_loop.cpp)
+target_link_libraries(test_look_loop PRIVATE ogma_core GTest::gtest_main pthread)
+gtest_discover_tests(test_look_loop)
 add_executable(test_cloud_map tests/ogma/test_cloud_map.cpp)
 target_link_libraries(test_cloud_map PRIVATE ogma_core GTest::gtest_main pthread)
 gtest_discover_tests(test_cloud_map)

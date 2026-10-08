@@ -59,6 +59,8 @@ std::vector<TopicSpec> EFEArbiter::output_topics() const {
         v.push_back(TopicSpec{play_gain_topic_, std::type_index(typeid(ProprioToken))});
     if (!vision_gain_topic_.empty()) // loop #4 — only when the vision channel is wired (byte-identical otherwise)
         v.push_back(TopicSpec{vision_gain_topic_, std::type_index(typeid(ProprioToken))});
+    if (look_active_)                // §17.112 -- only when the look is wired (byte-identical otherwise)
+        v.push_back(TopicSpec{look_gain_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
 
@@ -78,6 +80,10 @@ ParamSchema EFEArbiter::params_schema() const {
         {"play_hunger_weight", ParamMutability::HotMutable, "task #33 ABLATION (wrong-sign control): weight play by HUNGER instead of (1−hunger) energy surplus. true → the bug explores when HUNGRY (should REGRESS: wanders off known food and starves), proving the play-when-FULL sign is correct. Default false.", ParamValue{false}},
         {"vision_value_topic", ParamMutability::ConstructionOnly, "loop #4: VisualHomingNav sight-confidence ∈[0,1] (pragmatic close on a SEEN source) → G_vision. Empty (default) = vision absent (byte-identical arbiter).", ParamValue{std::string("")}},
         {"vision_gain_topic",  ParamMutability::ConstructionOnly, "loop #4: winner-take-all gain → MotorBus (vision channel). Empty (default) = no publish.", ParamValue{std::string("")}},
+        {"look_value_topic", ParamMutability::ConstructionOnly, "§17.112 (the duck): the LookLoop's need ∈[0,1] (values[0]) -> the fifth policy, the stop-and-look. precision mode only: G_look = look_weight · (1 − hunger) · look need · trust_look (epistemic, gated by the pragmatic surplus like play). Empty (default) = the look absent (byte-identical arbiter).", ParamValue{std::string("")}},
+        {"look_gain_topic",  ParamMutability::ConstructionOnly, "§17.112: winner-take-all gain of the look (the host stops while it is 1).", ParamValue{std::string("arbiter.gain.look")}},
+        {"look_weight",      ParamMutability::HotMutable, "§17.112: the look's weight; 0 = inert.", ParamValue{1.0}},
+        {"trust_key_look",   ParamMutability::ConstructionOnly, "precision: trust_weights key for the look loop's competence.", ParamValue{std::string("reality.loop.look")}},
         {"vision_weight",      ParamMutability::HotMutable, "loop #4: vision pragmatic gain. G_vision = vision_weight·hunger·vision_value (CLOSE on a seen source, hunger-weighted like klino). 0 (default) = vision INERT (never wins; 2/3-policy race byte-identical). 1 = the fourth policy (Stage 2+). efe mode only.", ParamValue{0.0}},
         {"epistemic_reach_gated", ParamMutability::HotMutable, "R1 (2026-07-09): gate the epistemic (explore) terms by (1 − max(g_prag_klino, g_prag_planner)) = 1 − hunger·max_reach, NOT the blanket (1−hunger). Breaks the starvation deadlock (§2.1): a HUNGRY-but-BLIND agent (no reach) is in MAX uncertainty → epistemic stays high → play pushes the frontier to find food, instead of (1−hunger)→0 silencing exploration exactly when it is needed. full → gate≈1 (play when full, preserved); hungry+reachable → gate≈0 (exploit). No new constant. false = legacy (1−hunger) gate (ablation baseline).", ParamValue{true}},
         {"scoring_mode",  ParamMutability::HotMutable, "'value_race' (legacy value race — DEFAULT, byte-identical to prior builds) | 'precision' (Cell round 3: preference x LateralVoter trust over each loop's own bearing stream; needs trust_consensus_topic) | 'efe' (explicit-EFE precision scoring: each policy G = pragmatic hunger·reach-prob (SHARED UNITS, scale mismatch gone by construction — no cede/plan_peak/max-of-three) + epistemic (1−hunger)·uncertainty-reduction; hunger sets the exploit/explore balance).", ParamValue{std::string("value_race")}},
@@ -117,6 +123,8 @@ ParamMap EFEArbiter::current_params() const {
     m["vision_value_topic"] = ParamValue{vision_value_topic_};
     m["vision_gain_topic"]  = ParamValue{vision_gain_topic_};
     m["vision_weight"]      = ParamValue{double(vision_weight_)};
+    m["look_value_topic"] = ParamValue{look_value_topic_}; m["look_gain_topic"] = ParamValue{look_gain_topic_};
+    m["look_weight"] = ParamValue{double(look_weight_)}; m["trust_key_look"] = ParamValue{trust_key_look_};
     m["epistemic_reach_gated"] = ParamValue{epistemic_reach_gated_};
     m["scoring_mode"]  = ParamValue{scoring_mode_};
     m["z_peak_decay"]  = ParamValue{double(z_peak_decay_)};
@@ -160,6 +168,8 @@ void EFEArbiter::on_param_change(std::string_view key, ParamValue const& value) 
     else if (k == "hysteresis_k")  hysteresis_k_  = float(get_double(value, k));
     else if (k == "gap_std_alpha") gap_std_alpha_ = float(get_double(value, k));
     else if (k == "force_policy")  force_policy_  = get_string(value, k);
+    else if (k == "look_weight")   { look_weight_ = float(get_double(value, k));
+                                     look_active_ = (look_weight_ > 0.0f) && !look_value_topic_.empty() && scoring_mode_ == "precision"; }
     else throw std::invalid_argument("EFEArbiter: param '" + k + "' is construction-only / unknown");
 }
 
@@ -178,6 +188,10 @@ void EFEArbiter::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "vision_value_topic", [&](auto const& v){ vision_value_topic_ = get_string(v,"vision_value_topic"); });
     apply_param(params, "vision_gain_topic",  [&](auto const& v){ vision_gain_topic_  = get_string(v,"vision_gain_topic"); });
     apply_param(params, "vision_weight",      [&](auto const& v){ vision_weight_      = float(get_double(v,"vision_weight")); });
+    apply_param(params, "look_value_topic",   [&](auto const& v){ look_value_topic_   = get_string(v,"look_value_topic"); });
+    apply_param(params, "look_gain_topic",    [&](auto const& v){ look_gain_topic_    = get_string(v,"look_gain_topic"); });
+    apply_param(params, "look_weight",        [&](auto const& v){ look_weight_        = float(get_double(v,"look_weight")); });
+    apply_param(params, "trust_key_look",     [&](auto const& v){ trust_key_look_     = get_string(v,"trust_key_look"); });
     apply_param(params, "epistemic_reach_gated", [&](auto const& v){ epistemic_reach_gated_ = get_bool(v,"epistemic_reach_gated"); });
     apply_param(params, "scoring_mode",  [&](auto const& v){ scoring_mode_  = get_string(v,"scoring_mode"); });
     apply_param(params, "z_peak_decay",  [&](auto const& v){ z_peak_decay_  = float(get_double(v,"z_peak_decay")); });
@@ -236,6 +250,8 @@ void EFEArbiter::on_setup(Bus* bus, ParamMap const& params) {
     play_active_ = (play_weight_ > 0.0f) && !play_value_topic_.empty() && (scoring_mode_ == "efe" || scoring_mode_ == "precision");
     // loop #4 — vision joins the race only when wired AND weighted AND in efe mode (else byte-identical).
     vision_active_ = (vision_weight_ > 0.0f) && !vision_value_topic_.empty() && (scoring_mode_ == "efe" || scoring_mode_ == "precision");
+    // §17.112 -- the look joins the race only when wired AND weighted AND in precision mode (else byte-identical).
+    look_active_ = (look_weight_ > 0.0f) && !look_value_topic_.empty() && scoring_mode_ == "precision";
 }
 
 void EFEArbiter::handle_hunger(MessagePtr payload) {
@@ -314,6 +330,14 @@ void EFEArbiter::tick(uint64_t tick_id) {
         g_epist_play_   = play_active_   ? play_weight_   * play_pref * trust_play_   : 0.0f; G_play_   = g_epist_play_;
         g_prag_vision_  = vision_active_ ? vision_weight_ * hunger_   * trust_vision_ : 0.0f; G_vision_ = g_prag_vision_;
         v_klino_ = G_klino_; v_planner_ = G_planner_; v_play_ = G_play_; v_vision_ = G_vision_;
+        if (look_active_) {
+            // §17.112: the stop-and-look, epistemic, gated by the pragmatic surplus as play is -- a confirmed chase
+            // (the seek need high) silences it by construction
+            if (auto lt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(look_value_topic_)))
+                if (lt->values.size() > 0) look_need_ = std::clamp(float(lt->values[0]), 0.0f, 1.0f);
+            trust_look_ = T(trust_key_look_);
+            G_look_ = look_weight_ * (1.0f - hunger_) * look_need_ * trust_look_;
+        }
     } else if (scoring_mode_ == "efe") {
         // =====================================================================
         // EXPLICIT-EFE SCORING (doctrine §2.2 / §2.3) — the precision refactor.
@@ -487,7 +511,13 @@ void EFEArbiter::tick(uint64_t tick_id) {
     // task #33: when play is active the live competition is 3-way → use the top-two gap; otherwise
     // the 2-policy gap is unchanged (byte-identical).
     float gap;
-    if (vision_active_) {
+    if (look_active_) {
+        // §17.112 -- 5-way: top1 − top2 over {klino, planner, play, vision, look}
+        float vs5[5] = { v_klino_, v_planner_, v_play_, v_vision_, G_look_ };
+        float t1 = -1e30f, t2 = -1e30f;
+        for (float x : vs5) { if (x > t1) { t2 = t1; t1 = x; } else if (x > t2) { t2 = x; } }
+        gap = t1 - t2;
+    } else if (vision_active_) {
         // loop #4 — 4-way live competition → top1 − top2 over {klino, planner, play, vision}.
         float vs4[4] = { v_klino_, v_planner_, v_play_, v_vision_ };
         float t1 = -1e30f, t2 = -1e30f;
@@ -520,6 +550,8 @@ void EFEArbiter::tick(uint64_t tick_id) {
         new_winner = 2;
     } else if (force_policy_ == "vision") { // loop #4 ablation: force the vision policy
         new_winner = 3;
+    } else if (force_policy_ == "look" && look_active_) {   // §17.112 ablation: always look
+        new_winner = 4;
     } else if (force_policy_ == "shuffle") {
         // random winner each tick — the FAIR ablation null. rng seeded by master_seed,
         // re-seeded per tick so the stream varies with the tick id (reproducible per seed).
@@ -527,6 +559,15 @@ void EFEArbiter::tick(uint64_t tick_id) {
         std::mt19937 r(master_seed_ ^ (tick_id * 0x9E3779B97F4A7C15ull + 0x1234567ull));
         int n = vision_active_ ? 4 : (play_active_ ? 3 : 2);
         new_winner = (std::uniform_int_distribution<int>(0, n - 1)(r));
+    } else if (look_active_) {
+        // §17.112 -- 5-policy: keep the incumbent unless the best challenger leads it by more than the margin
+        float vs[5] = { v_klino_, v_planner_, v_play_, v_vision_, G_look_ };
+        int inc = (winner_ >= 0 && winner_ <= 4) ? winner_ : 0;
+        int best_chl = -1; float best_chl_v = -1e30f;
+        for (int i = 0; i < 5; ++i)
+            if (i != inc && vs[i] > best_chl_v) { best_chl_v = vs[i]; best_chl = i; }
+        if (best_chl >= 0 && best_chl_v - vs[inc] > margin_) new_winner = best_chl;
+        else                                                 new_winner = inc;
     } else if (vision_active_) {
         // LIVE EFE arbiter, 4-policy (loop #4): keep the incumbent unless the BEST challenger leads
         // it by more than the adaptive margin. Reduces to the 2/3-policy cases when those are inert
@@ -564,6 +605,7 @@ void EFEArbiter::tick(uint64_t tick_id) {
     gain_planner_ = (winner_ == 1) ? 1.0f : 0.0f;
     gain_play_    = (winner_ == 2) ? 1.0f : 0.0f;
     gain_vision_  = (winner_ == 3) ? 1.0f : 0.0f;
+    gain_look_    = (winner_ == 4) ? 1.0f : 0.0f;
 
     auto pub = [&](std::string const& topic, float v){
         auto out = std::make_shared<ProprioToken>();
@@ -578,6 +620,7 @@ void EFEArbiter::tick(uint64_t tick_id) {
     pub(planner_gain_topic_, gain_planner_);
     if (!play_gain_topic_.empty()) pub(play_gain_topic_, gain_play_);  // task #33 — 0 when inert/lost (consumer fires)
     if (!vision_gain_topic_.empty()) pub(vision_gain_topic_, gain_vision_);  // loop #4 — 0 when inert/lost (consumer fires)
+    if (look_active_) pub(look_gain_topic_, gain_look_);                    // §17.112
 }
 
 nlohmann::json EFEArbiter::diag_snapshot() const {
@@ -614,7 +657,8 @@ nlohmann::json EFEArbiter::diag_snapshot() const {
         {"g_prag_vision", g_prag_vision_}, // vision_weight · hunger · vision_value
         {"v_vision", v_vision_},           // selected vision score (= G_vision)
         {"gain_vision", gain_vision_},
-        {"winner", winner_},               // 0 = klino, 1 = planner, 2 = play, 3 = vision
+        {"look_active", look_active_}, {"look_need", look_need_}, {"trust_look", trust_look_}, {"G_look", G_look_}, {"gain_look", gain_look_},   // §17.112
+        {"winner", winner_},               // 0 = klino, 1 = planner, 2 = play, 3 = vision, 4 = look
         {"gain_klino", gain_klino_},
         {"gain_planner", gain_planner_},
         {"margin", margin_},

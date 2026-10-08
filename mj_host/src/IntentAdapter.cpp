@@ -602,6 +602,15 @@ bool IntentAdapter::cloud_walking() const { auto* c = find_cloud(*instance_); re
 int  IntentAdapter::cloud_voxels() const { auto* c = find_cloud(*instance_); return c ? c->voxels() : 0; }
 int  IntentAdapter::cloud_break() const { auto* c = find_cloud(*instance_); return c ? c->break_voxels() : 0; }
 int  IntentAdapter::cloud_place() const { auto* c = find_cloud(*instance_); return c ? c->last_key() : -1; }
+double IntentAdapter::look_gain() const {
+    auto g = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("arbiter.gain.look"));
+    return (g && g->values.size() > 0) ? double(g->values[0]) : 0.0;
+}
+std::vector<double> IntentAdapter::look_now() const {
+    auto lk = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.cognitive.look"));
+    if (!lk || lk->values.size() < 5) return {};
+    return std::vector<double>(lk->values.data(), lk->values.data() + 5);
+}
 double IntentAdapter::cloud_newfrac() const { auto* c = find_cloud(*instance_); return c ? c->new_fraction() : 0.0; }
 double IntentAdapter::cloud_revisit() const { auto* c = find_cloud(*instance_); return c ? c->revisit_change() : -1.0; }
 double IntentAdapter::cloud_revisit_dist() const { auto* c = find_cloud(*instance_); return c ? c->revisit_anchor_dist() : -1.0; }

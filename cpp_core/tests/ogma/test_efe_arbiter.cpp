@@ -900,3 +900,53 @@ TEST(EFEArbiter, PrecisionModeAbsentTrustScoresZero) {
     EXPECT_FLOAT_EQ(f.arb.g_prag_planner(), 0.0f);
     EXPECT_FLOAT_EQ(f.arb.g_prag_klino(), 0.0f);
 }
+
+// §17.112 (the duck, 2026-10-08): the look -- the stop-and-look as a fifth policy in precision mode,
+// G_look = look_weight · (1 − hunger) · look need · trust_look.  Absent, the race is unchanged.
+namespace {
+int run_look(float hunger, float need, std::unordered_map<std::string, float> w, bool wired = true, float* gain_look = nullptr) {
+    ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")},
+                        {"play_weight", 1.0}, {"play_value_topic", std::string("reality.cognitive.play_value")},
+                        {"vision_weight", 1.0}, {"vision_value_topic", std::string("reality.cognitive.seek_value")},
+                        {"trust_key_vision", std::string("reality.loop.seek")}};
+    if (wired) p["look_value_topic"] = std::string("reality.cognitive.look");
+    Fix f(p);
+    uint64_t t = 0; int last = -1;
+    for (int i = 0; i < 300; ++i) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.proprio.hunger",        p1(hunger));
+        f.bus.publish("reality.cognitive.seek_value",  p1(hunger));
+        f.bus.publish("reality.cognitive.play_value",  p1(1.0f));
+        f.bus.publish("reality.cognitive.look",        p1(need));
+        f.bus.publish("consensus.1", trust_token(w));
+        f.arb.tick(t++);
+        f.bus.end_tick();
+        last = f.arb.winner();
+    }
+    if (gain_look) {
+        auto g = std::dynamic_pointer_cast<const ogma::ProprioToken>(f.bus.last_value("arbiter.gain.look"));
+        *gain_look = g ? g->values[0] : -1.0f;
+    }
+    return last;
+}
+}  // namespace
+
+TEST(EFEArbiter, LookWinsWhenItsNeedOutweighsPlayAndYieldsToTheSeek) {
+    std::unordered_map<std::string, float> w = {{"reality.loop.seek", 0.4f}, {"reality.loop.play", 0.3f}, {"reality.loop.look", 0.4f}};
+    float g = -1.0f;
+    // nothing sought: look 1·0.9·0.4 = 0.36 beats play 1·0.3 = 0.30
+    EXPECT_EQ(run_look(0.0f, 0.9f, w, true, &g), 4);
+    EXPECT_FLOAT_EQ(g, 1.0f);
+    // a spent look: 1·0.2·0.4 = 0.08 loses to play
+    EXPECT_EQ(run_look(0.0f, 0.2f, w, true, &g), 2);
+    EXPECT_FLOAT_EQ(g, 0.0f);
+    // a chase (the seek need high): seek 0.9·0.4 = 0.36, the look silenced by the surplus 0.1 -> 0.036
+    EXPECT_EQ(run_look(0.9f, 1.0f, w), 3);
+}
+
+TEST(EFEArbiter, LookAbsentLeavesTheRaceAndPublishesNoGain) {
+    std::unordered_map<std::string, float> w = {{"reality.loop.seek", 0.4f}, {"reality.loop.play", 0.3f}, {"reality.loop.look", 0.4f}};
+    float g = 0.0f;
+    EXPECT_EQ(run_look(0.0f, 0.9f, w, false, &g), 2) << "unwired, the look never wins";
+    EXPECT_FLOAT_EQ(g, -1.0f) << "and no gain is published";
+}

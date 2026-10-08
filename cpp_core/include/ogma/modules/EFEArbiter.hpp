@@ -135,6 +135,9 @@ public:
     float gain_planner() const { return gain_planner_; }
     float gain_play()    const { return gain_play_; }
     float gain_vision()  const { return gain_vision_; }
+    float gain_look()    const { return gain_look_; }
+    float G_look()       const { return G_look_; }
+    bool  look_active()  const { return look_active_; }
     float margin()       const { return margin_; }
     float hunger()       const { return hunger_; }
     float scent()        const { return scent_; }
@@ -298,6 +301,10 @@ private:
     float v_vision_ = 0.0f, g_prag_vision_ = 0.0f, G_vision_ = 0.0f;  // vision policy (loop #4)
     int   winner_      = 0;         // 0 = klino (incumbent at start), 1 = planner, 2 = play, 3 = vision
     float gain_klino_  = 1.0f, gain_planner_ = 0.0f, gain_play_ = 0.0f, gain_vision_ = 0.0f;
+    // §17.112 -- the look (the duck's stop-and-look as a loop): a fifth policy in precision mode, inert unless wired
+    std::string look_value_topic_ = "", look_gain_topic_ = "arbiter.gain.look", trust_key_look_ = "reality.loop.look";
+    float look_weight_ = 1.0f, look_need_ = 0.0f, trust_look_ = 0.0f, G_look_ = 0.0f, gain_look_ = 0.0f;
+    bool  look_active_ = false;
     float margin_      = 0.0f;
 
     std::mt19937 rng_{11};

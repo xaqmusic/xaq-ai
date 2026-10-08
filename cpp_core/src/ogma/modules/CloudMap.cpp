@@ -62,6 +62,7 @@ std::vector<TopicSpec> CloudMap::output_topics() const {
     std::vector<TopicSpec> t;
     if (!output_topic_.empty()) t.emplace_back(output_topic_, std::type_index(typeid(ProprioToken)));
     if (!change_topic_.empty()) t.emplace_back(change_topic_, std::type_index(typeid(ProprioToken)));
+    if (!state_topic_.empty()) t.emplace_back(state_topic_, std::type_index(typeid(ProprioToken)));
     if (!things_topic_.empty()) t.emplace_back(things_topic_, std::type_index(typeid(ProprioToken)));
     if (!thing_bearing_topic_.empty()) t.emplace_back(thing_bearing_topic_, std::type_index(typeid(ProprioToken)));
     if (!mover_topic_.empty()) t.emplace_back(mover_topic_, std::type_index(typeid(ProprioToken)));
@@ -97,6 +98,10 @@ ParamSchema CloudMap::params_schema() const {
          "crossing it) and change against this place's stored cloud (the room rearranged since we "
          "were last here).  revisit_change is -1 when no cloud is cached for this place.",
          ParamValue{std::string("")}},
+        {"state_topic", ParamMutability::ConstructionOnly,
+         "Optional ProprioToken [open, walking, voxels, new_fraction]: whether a cloud is open, whether it is a walking "
+         "cloud, its size and its new_fraction -- the stop's cloud as a loop sees it (the look loop, design doc §17.112).  "
+         "Empty = not published.", ParamValue{std::string("")}},
         {"voxel_m", ParamMutability::HotMutable,
          "Voxel edge, metres.  0.04 makes one voxel about one block, which is the scale the "
          "sub-pixel measurement argues for.", ParamValue{0.04}, ParamValue{0.005}, ParamValue{0.5}},
@@ -317,6 +322,7 @@ ParamMap CloudMap::current_params() const {
     m["place_topic"] = ParamValue{place_topic_};
     m["output_topic"] = ParamValue{output_topic_};
     m["change_topic"] = ParamValue{change_topic_};
+    m["state_topic"] = ParamValue{state_topic_};
     m["voxel_m"] = voxel_m_;
     m["break_lo"] = break_lo_;
     m["break_hi"] = break_hi_;
@@ -419,6 +425,7 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     place_topic_  = get_s(params, "place_topic");
     output_topic_ = get_s(params, "output_topic");
     change_topic_ = get_s(params, "change_topic");
+    state_topic_ = get_s(params, "state_topic");
     voxel_m_    = get_d(params, "voxel_m", voxel_m_);
     break_lo_   = get_d(params, "break_lo", break_lo_);
     break_hi_   = get_d(params, "break_hi", break_hi_);
@@ -814,6 +821,18 @@ void CloudMap::tick(uint64_t tick_id) {
         out->values[0] = float(new_frac_);
         out->values[1] = float(revisit_change_);
         bus_->publish(change_topic_, out);
+    }
+    if (!state_topic_.empty()) {
+        auto out = std::make_shared<ProprioToken>();
+        out->tick_id = tick_id;
+        out->producer_id = std::string(id());
+        out->sensor = "cloud_state";
+        out->values = Eigen::VectorXf(4);
+        out->values[0] = open_ ? 1.0f : 0.0f;
+        out->values[1] = is_walking_cloud() ? 1.0f : 0.0f;
+        out->values[2] = float(vox_.size());
+        out->values[3] = float(new_frac_);
+        bus_->publish(state_topic_, out);
     }
     if (prof_) {
         mark(kStRest);
