@@ -87,6 +87,9 @@ ParamSchema LookLoop::params_schema() const {
         {"pending_skill_pays", ParamMutability::ConstructionOnly,
             "yield: a skill requested on the walk (deferred by the host to the next stop's hand-back) is that stop's payoff at t = 0.  "
             "false = only a request inside the stop counts (lever 2 as first built).", ParamValue{false}},
+        {"per_context_times", ParamMutability::ConstructionOnly,
+            "yield: the time to a payoff is learned per context (each cell's own payoff times, the all-stops distribution as a "
+            "prior worth one observation).  false = one distribution over all stops (lever 2b).", ParamValue{false}},
         {"trust_topic", ParamMutability::ConstructionOnly,
             "yield: a RealityToken for the voter (reality.loop.look): expected_error = the mean Brier score of the look's payoff "
             "predictions (0.25 before any).  Empty = not published.", ParamValue{std::string("")}},
@@ -107,7 +110,7 @@ ParamMap LookLoop::current_params() const {
     m["place_topic"] = ParamValue{place_topic_}; m["seek_value_topic"] = ParamValue{seek_value_topic_};
     m["outcome_need_topic"] = ParamValue{outcome_need_topic_}; m["active_topic"] = ParamValue{active_topic_};
     m["driving_topic"] = ParamValue{driving_topic_};
-    m["need_mode"] = ParamValue{need_mode_}; m["skill_topic"] = ParamValue{skill_topic_}; m["trust_topic"] = ParamValue{trust_topic_}; m["pending_skill_pays"] = ParamValue{pending_counts_};
+    m["need_mode"] = ParamValue{need_mode_}; m["skill_topic"] = ParamValue{skill_topic_}; m["trust_topic"] = ParamValue{trust_topic_}; m["pending_skill_pays"] = ParamValue{pending_counts_}; m["per_context_times"] = ParamValue{per_context_times_};
     m["optimism"] = ParamValue{optimism_}; m["peak_decay"] = ParamValue{peak_decay_};
     m["min_stop_ticks"] = ParamValue{int64_t(min_stop_ticks_)}; m["tick_hz"] = ParamValue{tick_hz_};
     return m;
@@ -129,6 +132,8 @@ void LookLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "need_mode",          [&](auto const& v){ need_mode_ = get_string(v, "need_mode"); });
     apply_param(params, "skill_topic",        [&](auto const& v){ skill_topic_ = get_string(v, "skill_topic"); });
     apply_param(params, "trust_topic",        [&](auto const& v){ trust_topic_ = get_string(v, "trust_topic"); });
+    apply_param(params, "per_context_times", [&](auto const& v){
+        if (auto b = std::get_if<bool>(&v)) per_context_times_ = *b; else per_context_times_ = get_double(v, "per_context_times") > 0.5; });
     apply_param(params, "pending_skill_pays", [&](auto const& v){
         if (auto b = std::get_if<bool>(&v)) pending_counts_ = *b; else pending_counts_ = get_double(v, "pending_skill_pays") > 0.5; });
     apply_param(params, "peak_decay",         [&](auto const& v){ peak_decay_ = get_double(v, "peak_decay"); });
@@ -173,12 +178,25 @@ double LookLoop::pay_optimistic(int cell) const {
     return std::clamp(a / n + optimism_ * std::sqrt(a * b / (n * n * (n + 1.0))), 0.0, 1.0);
 }
 
-double LookLoop::still_to_come(double p, double tau) const {
+void LookLoop::record_pay(int cell, double secs) {
+    pay_times_.push_back(secs); if (pay_times_.size() > 400) pay_times_.pop_front();
+    auto& ct = cell_times_[cell]; ct.push_back(secs); if (ct.size() > 200) ct.pop_front();
+}
+
+double LookLoop::still_to_come(double p, double tau, int cell) const {
     // P(a payoff is still to come | none in the first tau s) = P S(tau) / (1 - P + P S(tau))
     double surv = 1.0;
     if (!pay_times_.empty()) {
         int later = 0; for (double x : pay_times_) later += x > tau;
         surv = double(later) / double(pay_times_.size());
+    }
+    if (per_context_times_) {
+        // this context's own times to a payoff, the all-stops survival as a prior worth one observation
+        auto it = cell_times_.find(cell);
+        if (it != cell_times_.end() && !it->second.empty()) {
+            int later = 0; for (double x : it->second) later += x > tau;
+            surv = (double(later) + surv) / (double(it->second.size()) + 1.0);
+        }
     }
     const double num = p * surv, den = 1.0 - p + num;
     return den > 1e-12 ? num / den : 0.0;
@@ -243,11 +261,11 @@ void LookLoop::tick(uint64_t tick_id) {
         if (skill && !in_ep_ && pending_counts_) skill_pending_ = true;
         if (in_ep_ && ep_ticks_ == 1) {
             ep_paid_ = false; ep_p_ = pay_mean(ep_cell_);
-            if (skill_pending_) { ep_paid_ = true; skill_pending_ = false; pay_times_.push_back(0.0); if (pay_times_.size() > 400) pay_times_.pop_front(); }
+            if (skill_pending_) { ep_paid_ = true; skill_pending_ = false; record_pay(ep_cell_, 0.0); }
         }
         if (in_ep_ && !ep_paid_ && ((sv > 0.0 && seek_prev_ <= 0.0) || skill)) {
             ep_paid_ = true;
-            pay_times_.push_back(double(ep_ticks_) / tick_hz_); if (pay_times_.size() > 400) pay_times_.pop_front();
+            record_pay(ep_cell_, double(ep_ticks_) / tick_hz_);
         }
         seek_prev_ = sv;
         if (!in_ep_ && ep_ticks_ > 0) {                                   // the stop that just ended: its outcome
@@ -262,7 +280,7 @@ void LookLoop::tick(uint64_t tick_id) {
         }
         pred_norm_ = pay_optimistic(cell);
         if (!in_ep_) need_ = pred_norm_;
-        else need_ = ep_paid_ ? 0.0 : still_to_come(pay_optimistic(ep_cell_), double(ep_ticks_) / tick_hz_);
+        else need_ = ep_paid_ ? 0.0 : still_to_come(pay_optimistic(ep_cell_), double(ep_ticks_) / tick_hz_, ep_cell_);
         if (!trust_topic_.empty()) {
             const double err = episodes_ ? brier_sum_ / double(episodes_) : 0.25;
             auto tok = std::make_shared<RealityToken>();
@@ -291,6 +309,12 @@ void LookLoop::tick(uint64_t tick_id) {
     }
 }
 
+nlohmann::json LookLoop::cell_times_json() const {
+    nlohmann::json j = nlohmann::json::array();
+    for (auto const& [k, v] : cell_times_) j.push_back({k, std::vector<double>(v.begin(), v.end())});
+    return j;
+}
+
 nlohmann::json LookLoop::snapshot_state() const {
     nlohmann::json cells = nlohmann::json::array();
     for (auto const& [k, c] : cells_) cells.push_back({k, c.n, c.mean, c.m2});
@@ -299,7 +323,7 @@ nlohmann::json LookLoop::snapshot_state() const {
     return nlohmann::json{{"version", 1}, {"cells", cells}, {"peak", peak_}, {"place_peak", place_peak_},
                           {"episodes", episodes_}, {"abs_err_sum", abs_err_sum_},
                           {"pay", pay}, {"pay_times", std::vector<double>(pay_times_.begin(), pay_times_.end())},
-                          {"brier_sum", brier_sum_}, {"paid", paid_}};
+                          {"brier_sum", brier_sum_}, {"paid", paid_}, {"cell_times", cell_times_json()}};
 }
 
 void LookLoop::restore_state(nlohmann::json const& s) {
@@ -313,6 +337,9 @@ void LookLoop::restore_state(nlohmann::json const& s) {
         if (c.is_array() && c.size() == 3) { Cell& x = cells_[c[0].get<int>()]; x.a = c[1].get<double>(); x.b = c[2].get<double>(); }
     pay_times_.clear(); for (double x : s.value("pay_times", std::vector<double>{})) pay_times_.push_back(x);
     brier_sum_ = s.value("brier_sum", 0.0); paid_ = s.value("paid", uint64_t{0});
+    cell_times_.clear();
+    for (auto const& c : s.value("cell_times", nlohmann::json::array()))
+        if (c.is_array() && c.size() == 2) for (double x : c[1].get<std::vector<double>>()) cell_times_[c[0].get<int>()].push_back(x);
     in_ep_ = false;
 }
 

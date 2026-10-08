@@ -184,3 +184,31 @@ TEST(LookLoop, YieldSeesASkillRequestedOnThePreviousTick) {
     }
     EXPECT_DOUBLE_EQ(m.need(), 0.0) << "the stop paid";
 }
+
+TEST(LookLoop, YieldTheTimeToAPayoffIsLearnedPerContext) {
+    // context 0 pays at once (an arrival's skill); context 1 pays after 3 s (a look that finds a target).  With one
+    // distribution over all stops, a context-1 stop gives up after the first second; per context it waits.
+    double need[2] = {0.0, 0.0};
+    for (bool per : {false, true}) {
+        ogma::InProcessBus bus; ogma::LookLoop m; m.set_id("look");
+        m.on_setup(&bus, {{"state_topic", std::string("reality.proprio.cloud_state")}, {"value_topic", std::string("reality.cognitive.look")},
+                          {"need_mode", std::string("yield")}, {"seek_value_topic", std::string("reality.cognitive.seek_value")},
+                          {"context_topic", std::string("reality.cognitive.look_context")}, {"optimism", 0.0}, {"per_context_times", per}});
+        uint64_t t = 0; float seek = 0.0f; int ctxw = 0;
+        auto tick = [&](bool still) {
+            bus.begin_tick(t);
+            bus.publish("reality.proprio.cloud_state", pv({1.0f, still ? 0.0f : 1.0f, 100.0f, 0.5f}));
+            bus.publish("reality.cognitive.seek_value", pv({seek}));
+            bus.publish("reality.cognitive.look_context", ctx(ctxw));
+            m.tick(t++); bus.end_tick();
+        };
+        auto stop = [&](int n, int k) { for (int i = 0; i < n; ++i) { if (i == k) seek = 0.8f; tick(true); } tick(false); seek = 0.0f; tick(false); };
+        for (int i = 0; i < 20; ++i) { ctxw = 0; stop(60, 2); }      // context 0: pays at ~0.04 s
+        for (int i = 0; i < 6; ++i)  { ctxw = 1; stop(200, 150); }   // context 1: pays at 3 s
+        ctxw = 1;
+        for (int i = 0; i < 75; ++i) tick(true);                      // 1.5 s into a context-1 stop, nothing yet
+        need[per ? 1 : 0] = m.need();
+    }
+    EXPECT_GT(need[1], 0.8) << "this context's payoffs come at 3 s: still worth standing";
+    EXPECT_GT(need[1], need[0] + 0.2) << "over all stops most payoffs come at once: the shared distribution has half given up";
+}

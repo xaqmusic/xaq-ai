@@ -74,7 +74,9 @@ private:
     struct Cell { int n = 0; double mean = 0.0, m2 = 0.0; double a = 1.0, b = 1.0; };
     double pay_mean(int cell) const;                // the Beta posterior's mean of a payoff here
     double pay_optimistic(int cell) const;          // ... + optimism x sd
-    double still_to_come(double p, double tau) const;
+    double still_to_come(double p, double tau, int cell) const;
+    void   record_pay(int cell, double secs);
+    nlohmann::json cell_times_json() const;
     double predict(int cell) const;                 // seconds of surprise a stop here resolves (optimistic)
     int    context_now() const;
 
@@ -98,7 +100,8 @@ private:
     uint64_t episodes_ = 0;
     // yield mode
     std::deque<double> pay_times_;   // seconds from a stop's start to its payoff, the most recent 400
-    bool   ep_paid_ = false, skill_pending_ = false, pending_counts_ = false;
+    bool   ep_paid_ = false, skill_pending_ = false, pending_counts_ = false, per_context_times_ = false;
+    std::map<int, std::deque<double>> cell_times_;   // per context: seconds to a payoff, the most recent 200
     double ep_p_ = 0.5, seek_prev_ = 0.0, brier_sum_ = 0.0;
     uint64_t paid_ = 0, skill_seen_tick_ = ~uint64_t{0};
 };
