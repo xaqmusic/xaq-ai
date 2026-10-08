@@ -95,3 +95,58 @@ TEST(LookLoop, StateRoundTrips) {
     g.m.restore_state(f.m.snapshot_state());
     EXPECT_EQ(g.m.cell_n(3), 1); EXPECT_DOUBLE_EQ(g.m.peak(), f.m.peak()); EXPECT_EQ(g.m.episodes(), 1u);
 }
+
+// §17.112 lever 2: the pragmatic look -- a stop PAYS when a seek target appears or a skill is requested during it.
+namespace {
+struct YFix {
+    ogma::InProcessBus bus; ogma::LookLoop m; uint64_t t = 0; float seek = 0.0f; bool skill_now = false;
+    YFix() {
+        m.set_id("look");
+        m.on_setup(&bus, {{"state_topic", std::string("reality.proprio.cloud_state")}, {"value_topic", std::string("reality.cognitive.look")},
+                          {"need_mode", std::string("yield")}, {"seek_value_topic", std::string("reality.cognitive.seek_value")},
+                          {"skill_topic", std::string("intent.skill")}, {"trust_topic", std::string("reality.loop.look")}, {"optimism", 0.0}});
+    }
+    void tick(bool still) {
+        bus.begin_tick(t);
+        bus.publish("reality.proprio.cloud_state", pv({1.0f, still ? 0.0f : 1.0f, 100.0f, 0.5f}));
+        bus.publish("reality.cognitive.seek_value", pv({seek}));
+        if (skill_now) { auto s = pv({3.0f, 1.0f}); s->tick_id = t; bus.publish("intent.skill", s); skill_now = false; }
+        m.tick(t++); bus.end_tick();
+    }
+    // a stop of n ticks that pays at tick k (k < 0: never); the seek need drops back to 0 on the walk after
+    void stop(int n, int k) { for (int i = 0; i < n; ++i) { if (i == k) seek = 0.8f; tick(true); } tick(false); seek = 0.0f; tick(false); }
+};
+}
+
+TEST(LookLoop, YieldLearnsHowOftenAStopPays) {
+    YFix f;
+    f.tick(false);
+    EXPECT_NEAR(f.m.need(), 0.5, 1e-9) << "untried: the flat prior's mean (optimism 0)";
+    for (int i = 0; i < 6; ++i) f.stop(100, 50);     // six stops that paid
+    for (int i = 0; i < 2; ++i) f.stop(100, -1);     // two that did not
+    EXPECT_NEAR(f.m.need(), 7.0 / 10.0, 1e-9) << "Beta(1+6, 1+2)";
+    auto tr = std::dynamic_pointer_cast<const ogma::RealityToken>(f.bus.last_value("reality.loop.look"));
+    ASSERT_TRUE(tr); EXPECT_LT(tr->expected_error, 0.3f); EXPECT_GT(tr->expected_error, 0.0f);
+}
+
+TEST(LookLoop, YieldInAStopTheNeedIsWhatIsStillToCome) {
+    YFix f;
+    for (int i = 0; i < 8; ++i) f.stop(200, 50);     // every stop pays, one second in
+    f.tick(true);
+    const double early = f.m.need();
+    for (int i = 0; i < 40; ++i) f.tick(true);       // 0.8 s: before any payoff was ever this late, still hopeful
+    EXPECT_NEAR(f.m.need(), early, 1e-9);
+    for (int i = 0; i < 20; ++i) f.tick(true);       // past the second every payoff came by: nothing still to come
+    EXPECT_LT(f.m.need(), 0.01) << "no payoff has ever come this late: the look is spent";
+    f.seek = 0.8f; f.tick(true);
+    EXPECT_DOUBLE_EQ(f.m.need(), 0.0) << "it paid: the look is done";
+}
+
+TEST(LookLoop, YieldASkillRequestIsAPayoff) {
+    YFix f;
+    for (int i = 0; i < 30; ++i) f.tick(true);
+    f.skill_now = true; f.tick(true);
+    EXPECT_DOUBLE_EQ(f.m.need(), 0.0);
+    f.tick(false);
+    EXPECT_DOUBLE_EQ(f.m.last_realized(), 1.0);
+}

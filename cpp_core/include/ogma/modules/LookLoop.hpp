@@ -24,8 +24,16 @@
 // Publishes value_topic [need, prediction / peak, in a stop, the last realized integral, its prediction] and,
 // optionally, driving_topic [in a stop] (a LoopCompetence's gain while the loop is passive) and descriptor_topic
 // (the context EPM's input).  The module absent = byte-identical.
+//
+// need_mode "yield" (§17.112 lever 2, the pragmatic look): what a stop delivers is something to go to or watch -- a
+// stop PAYS when a seek target appears (the seek need rises from 0) or a skill is requested during it.  Per context
+// cell a Beta posterior of the payoff (published need before a stop: its mean + optimism x sd); during a stop, the
+// probability a payoff is still to come given none yet, P S(t) / (1 - P + P S(t)), S the learned distribution of the
+// time to a payoff (over every stop that paid); 0 once it paid.  trust_topic publishes the look's calibration as a
+// RealityToken (expected_error = the mean Brier score of its predictions, 0.25 before any) for the voter.
 #pragma once
 
+#include <deque>
 #include <map>
 #include <string>
 #include <nlohmann/json.hpp>
@@ -63,13 +71,17 @@ public:
     int      cell_n(int c) const { auto it = cells_.find(c); return it == cells_.end() ? 0 : it->second.n; }
 
 private:
-    struct Cell { int n = 0; double mean = 0.0, m2 = 0.0; };
+    struct Cell { int n = 0; double mean = 0.0, m2 = 0.0; double a = 1.0, b = 1.0; };
+    double pay_mean(int cell) const;                // the Beta posterior's mean of a payoff here
+    double pay_optimistic(int cell) const;          // ... + optimism x sd
+    double still_to_come(double p, double tau) const;
     double predict(int cell) const;                 // seconds of surprise a stop here resolves (optimistic)
     int    context_now() const;
 
     std::string state_topic_, context_topic_, active_topic_;
     std::string place_topic_, seek_value_topic_, outcome_need_topic_;
     std::string value_topic_, driving_topic_, descriptor_topic_;
+    std::string need_mode_ = "surprise", skill_topic_, trust_topic_;
     double optimism_ = 1.0;          // the prediction's credit to the unproven: mean + optimism x sd / sqrt(n)
     double peak_decay_ = 0.02;       // per stop: the running peak of realized integrals decays toward the latest
     double tick_hz_ = 50.0;
@@ -84,6 +96,11 @@ private:
     double need_ = 1.0, pred_norm_ = 1.0, nf_ = 0.0;
     double last_realized_ = 0.0, last_predicted_ = 0.0, abs_err_sum_ = 0.0;
     uint64_t episodes_ = 0;
+    // yield mode
+    std::deque<double> pay_times_;   // seconds from a stop's start to its payoff, the most recent 400
+    bool   ep_paid_ = false;
+    double ep_p_ = 0.5, seek_prev_ = 0.0, brier_sum_ = 0.0;
+    uint64_t paid_ = 0;
 };
 
 } // namespace ogma
