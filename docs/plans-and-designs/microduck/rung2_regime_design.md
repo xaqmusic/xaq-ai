@@ -7382,3 +7382,27 @@ form. What both say: the evidence is judged at the seek loop's believed POINT, a
 enough to blur both confirmation and refutation. Next form (T1c, passive): the belief keeps the confirmed thing's own
 position (the nearest small thing within the confirmation radius) and judges refutation at THAT point — an object file that
 tracks where its thing is, not where the seek loop aimed.
+
+**The world changes: the train runs constantly (the operator, 2026-10-09: "keep the train running constantly so we can study
+how belief and moving objects can work together; the 8-second stop-start is likely making our job harder").** Host
+`--train 0.2 8 0` (the stop phase of zero length; no code change). Baseline re-measured there: ★ LOOK 2b + T1 passive
+(`log/ten/tc1`, n = 24): arrivals at a thing that had moved 1.54 a run (13 %), skills 1.29 (13 %) — **the train is still
+the larger half (41 of 68)**: a train seen at a stop is not seen MOVING (the stop's sightings rarely confirm a mover), so its
+sighting fixes a place even though it never stops. The phenomenon survives the cleaner world. Chase 23.4 s a run, all of it
+on the moving train. T1's AUC there 0.72.
+
+**T1c, the evidence follows the confirmed thing (`CloudMap.presence_track`; `a1v2_lk2b_thing_track`, `log/ten/tc2`, passive,
+tick for tick tc1).** AUC 0.72 — unchanged. The target point's offset is not where the false refutations come from. **They
+come from the walking cloud:** at things still there, stopped ticks confirm 71 871 and refute 8 825 (1 in 9), walking ticks
+confirm 61 178 and refute 47 109 (nearly 1 to 1) — the walking cloud's registration (dead-reckoned, de-rotated while
+moving) smears what is at the target. At things gone, walking refutes 9 : 1. **`NULL` as a lever; the diagnosis is the
+gain.**
+- **T2's rules replayed over the walk (`presence_roc.py`, exact up to the first release):** `ub` releases 50 % of real targets
+  (65 % of moved, 77 % of nothing); `after_confirm` 36 % (73 %, 27 %); `either` 59 % (84 %, 82 %). With this evidence every
+  rule costs more real interactions than it saves; T2 was not run live.
+- **T3 (the skill waits on presence) has no evidence to wait on:** between the arrival and the skill (median 2.0 s) stopped
+  evidence exists for 2 % of real targets — the skill fires at the hand-back, before the stop's cloud forms, and the thing
+  at the feet is under the ToF's view (R75's limit, §17.49).
+- **What would carry it:** evidence weighted by how reliable the cloud is that produced it — learned by the belief from its
+  own record (a walking refutation later contradicted by a stop's confirmation is a false one), not set — or presence judged
+  from the stop's clean cloud before the walk is committed (the look that STARTS the walk, not the arrival).

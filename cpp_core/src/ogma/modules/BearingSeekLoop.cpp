@@ -37,6 +37,7 @@ std::vector<TopicSpec> BearingSeekLoop::input_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{bearing_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
                               TopicSpec{pose_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
     if (!renew_topic_.empty()) v.push_back(TopicSpec{renew_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    if (!release_topic_.empty()) v.push_back(TopicSpec{release_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!pull_topic_.empty()) v.push_back(TopicSpec{pull_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!situation_topic_.empty()) v.push_back(TopicSpec{situation_topic_, std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false});
     if (!mover_topic_.empty()) v.push_back(TopicSpec{mover_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
@@ -89,6 +90,10 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"lead_eval_ticks", ParamMutability::HotMutable, "How long one option is tried before its outcome is recorded (ticks).", ParamValue{int64_t{50}}},
         {"lead_min_samples", ParamMutability::HotMutable, "An option with fewer outcomes than this in a situation is tried first.", ParamValue{int64_t{2}}},
         {"restore_lead_only", ParamMutability::ConstructionOnly, "A restored snapshot brings the lead table and nothing else.", ParamValue{false}},
+        {"release_topic", ParamMutability::ConstructionOnly,
+         "§17.113 T2: the thing belief's token; values[5] > 0.5 = the thing is refuted (not where the loop believes): a static "
+         "target is dropped before the walk ends, and the outcome loop's renewal of that place is refused for forget_ticks (a "
+         "fresh sighting there is still taken).  Empty = off.", ParamValue{std::string("")}},
         {"target_out_topic", ParamMutability::ConstructionOnly,
          "§17.113: [have a target, x, y (odometry frame), the tick it was set, chasing or coasting] -- what a belief about the "
          "THING needs to know which thing the loop is sent to.  Empty = not published.", ParamValue{std::string("")}},
@@ -182,7 +187,7 @@ ParamMap BearingSeekLoop::current_params() const {
     ParamMap m;
     m["bearing_topic"] = ParamValue{bearing_topic_}; m["pose_topic"] = ParamValue{pose_topic_};
     m["output_topic"] = ParamValue{output_topic_}; m["value_topic"] = ParamValue{value_topic_};
-    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_}; m["target_out_topic"] = ParamValue{target_out_topic_};
+    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_}; m["target_out_topic"] = ParamValue{target_out_topic_}; m["release_topic"] = ParamValue{release_topic_};
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
     m["pull_topic"] = ParamValue{pull_topic_}; m["publish_chase_flag"] = ParamValue{publish_chase_flag_};
@@ -214,6 +219,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "range_topic",     [&](auto const& v){ range_topic_   = get_string(v,"range_topic"); });
     apply_param(params, "mind_topic",      [&](auto const& v){ mind_topic_    = get_string(v,"mind_topic"); });
     apply_param(params, "target_out_topic", [&](auto const& v){ target_out_topic_ = get_string(v,"target_out_topic"); });
+    apply_param(params, "release_topic",   [&](auto const& v){ release_topic_ = get_string(v,"release_topic"); });
     apply_param(params, "proximity_range", [&](auto const& v){ proximity_range_ = get_double(v,"proximity_range"); });
     apply_param(params, "min_conf",        [&](auto const& v){ min_conf_      = float(get_double(v,"min_conf")); });
     apply_param(params, "arrive_m",        [&](auto const& v){ arrive_m_      = get_double(v,"arrive_m"); });
@@ -334,11 +340,14 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
     }
     // the renewal: with no target held (the arrival's tick has passed -- the value read 0 for one tick, which
     // is the arrival the outcome loop sees) and nothing in view, a need still open at the thing re-arms it
+    if (have_release_ && tick_id - release_tick_ > uint64_t(forget_ticks_)) have_release_ = false;
     if (!renew_topic_.empty() && !have_target_ && !seen_ && have_pose_) {
         if (auto rt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(renew_topic_))) {
             if (rt->values.size() >= 3 && rt->values[0] > renew_min_) {
                 const double rr = std::hypot(double(rt->values[1]) - px_, double(rt->values[2]) - py_);
-                if (rr > 1.5 * arrive_m_ && rr < renew_range_) {
+                const bool refused = have_release_ && std::hypot(double(rt->values[1]) - release_x_, double(rt->values[2]) - release_y_) <= chase_gate_m_;
+                if (refused) ++release_refusals_;
+                if (rr > 1.5 * arrive_m_ && rr < renew_range_ && !refused) {
                     tx_ = rt->values[1]; ty_ = rt->values[2]; have_target_ = true; target_set_tick_ = tick_id; target_px_ = tx_; target_py_ = ty_; target_src_ = 2;
                     conf_ = std::clamp(rt->values[0], 0.0f, 1.0f); ++renewals_;
                 }
@@ -440,6 +449,13 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
                 have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++static_yielded_;
             }
     }
+    // §17.113 T2: the thing belief refutes the static target -- drop it before the walk ends at an empty place
+    if (!release_topic_.empty() && have_target_ && !chasing_ && !coasting_)
+        if (auto rl = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(release_topic_)))
+            if (rl->values.size() >= 6 && rl->values[5] > 0.5f) {
+                have_release_ = true; release_x_ = tx_; release_y_ = ty_; release_tick_ = tick_id; ++released_;
+                have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f;
+            }
     value_ = have_target_ ? conf_ : 0.0f;
 
     auto out = std::make_shared<ProprioToken>();

@@ -109,6 +109,11 @@ ParamSchema CloudMap::params_schema() const {
          "confirmed thing's half-extent, at least a voxel) BELOW the top of the thing last confirmed there (small_top until one "
          "is) -- the place seen empty.  Needs target_topic, target_tall_topic and free_rays.  Empty = not computed.",
          ParamValue{std::string("")}},
+        {"presence_track", ParamMutability::ConstructionOnly,
+         "§17.113 T1c: with presence_evidence 'things', the evidence follows the CONFIRMED thing -- its position kept in the "
+         "odometry frame (across the walking cloud's re-anchors), confirmation sought around it and refutation judged at it, "
+         "not at the seek loop's believed point; forgotten when the seek target moves 0.3 m away (a new target).  false = off.",
+         ParamValue{false}},
         {"presence_evidence", ParamMutability::ConstructionOnly,
          "§17.113 T1b: 'things' (default) = confirmed by a small classified thing at the target, refuted by free rays through "
          "its footprint below its top.  'fresh' = confirmed by ANY voxel hit by this cast within the target radius below the "
@@ -334,7 +339,7 @@ ParamMap CloudMap::current_params() const {
     m["place_topic"] = ParamValue{place_topic_};
     m["output_topic"] = ParamValue{output_topic_};
     m["change_topic"] = ParamValue{change_topic_};
-    m["state_topic"] = ParamValue{state_topic_}; m["presence_topic"] = ParamValue{presence_topic_}; m["presence_evidence"] = ParamValue{std::string(presence_fresh_ ? "fresh" : "things")};
+    m["state_topic"] = ParamValue{state_topic_}; m["presence_topic"] = ParamValue{presence_topic_}; m["presence_track"] = presence_track_; m["presence_evidence"] = ParamValue{std::string(presence_fresh_ ? "fresh" : "things")};
     m["voxel_m"] = voxel_m_;
     m["break_lo"] = break_lo_;
     m["break_hi"] = break_hi_;
@@ -439,6 +444,7 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     change_topic_ = get_s(params, "change_topic");
     state_topic_ = get_s(params, "state_topic");
     presence_topic_ = get_s(params, "presence_topic");
+    presence_track_ = get_d(params, "presence_track", 0.0) > 0.5;
     { const std::string pe = get_s(params, "presence_evidence"); presence_fresh_ = pe == "fresh";
       if (!pe.empty() && pe != "fresh" && pe != "things") throw std::invalid_argument("CloudMap: presence_evidence is 'things' or 'fresh'"); }
     voxel_m_    = get_d(params, "voxel_m", voxel_m_);
@@ -1251,16 +1257,29 @@ void CloudMap::publish_target_tall(double yaw, uint64_t tick_id) {
         }
         const double rs = std::max(0.12, 0.5 * target_iso_radius_);
         const Thing* conf = nullptr; double dbest = 1e9;
-        for (auto const& th : things_) if (th.small && std::hypot(th.cx - gx, th.cy - gy) <= rs) {
-            ++target_small_;
-            const double dd = std::hypot(th.cx - gx, th.cy - gy); if (dd < dbest) { dbest = dd; conf = &th; }
+        // T1c: the cloud frame <-> the odometry (cloud = R(-anchor_yaw) (odom - anchor), as the mover follow carries it)
+        const double ca = std::cos(anchor_yaw_), sa = std::sin(anchor_yaw_);
+        double ex = gx, ey = gy;                       // where the evidence is judged
+        if (presence_track_ && !presence_topic_.empty()) {
+            const double tox = anchor_x_ + ca * gx - sa * gy, toy = anchor_y_ + sa * gx + ca * gy;
+            if (track_ok_ && std::hypot(tox - track_ox_, toy - track_oy_) > 0.3) track_ok_ = false;   // a new target
+            if (track_ok_) { const double dx = track_ox_ - anchor_x_, dy = track_oy_ - anchor_y_; ex = ca * dx + sa * dy; ey = -sa * dx + ca * dy; }
+        }
+        for (auto const& th : things_) if (th.small && std::hypot(th.cx - gx, th.cy - gy) <= rs) ++target_small_;
+        for (auto const& th : things_) if (th.small && std::hypot(th.cx - ex, th.cy - ey) <= rs) {
+            const double dd = std::hypot(th.cx - ex, th.cy - ey); if (dd < dbest) { dbest = dd; conf = &th; }
+        }
+        if (presence_track_ && conf) {
+            track_ox_ = anchor_x_ + ca * conf->cx - sa * conf->cy; track_oy_ = anchor_y_ + sa * conf->cx + ca * conf->cy; track_ok_ = true;
+            ex = conf->cx; ey = conf->cy;
         }
         if (!presence_topic_.empty()) {
             // §17.113: a new target (or a new frame) forgets the last confirmed thing's size
-            if (!tgt_ok_ || std::hypot(gx - tgt_gx_, gy - tgt_gy_) > 0.2) { tgt_top_ = small_top_; tgt_r_ = voxel_m_; }
+            if (!tgt_ok_ || std::hypot((presence_track_ ? ex : gx) - tgt_gx_, (presence_track_ ? ey : gy) - tgt_gy_) > 0.2) { tgt_top_ = small_top_; tgt_r_ = voxel_m_; }
             if (conf) { tgt_top_ = conf->top; tgt_r_ = std::max(voxel_m_, 0.5 * conf->ext); }
             if (presence_fresh_) { tgt_top_ = small_top_; tgt_r_ = rs_f; fresh_ = fresh_hit; }   // T1b: the radius both use
-            tgt_gx_ = gx; tgt_gy_ = gy; tgt_ok_ = true;
+            tgt_gx_ = presence_track_ ? ex : gx; tgt_gy_ = presence_track_ ? ey : gy; tgt_ok_ = true;
+            if (presence_track_) target_conf_ = conf != nullptr;
         }
     } else if (!presence_topic_.empty()) {
         tgt_ok_ = false;
@@ -1269,7 +1288,7 @@ void CloudMap::publish_target_tall(double yaw, uint64_t tick_id) {
         auto pr = std::make_shared<ProprioToken>();
         pr->tick_id = tick_id; pr->producer_id = std::string(id()); pr->sensor = "target_presence";
         pr->values = Eigen::VectorXf(4);
-        pr->values[0] = (presence_fresh_ ? fresh_ : target_small_ > 0) ? 1.0f : 0.0f;
+        pr->values[0] = (presence_fresh_ ? fresh_ : (presence_track_ ? target_conf_ : target_small_ > 0)) ? 1.0f : 0.0f;
         pr->values[1] = float(presence_fresh_ && fresh_ ? 0 : refute_n_);
         pr->values[2] = tgt_ok_ ? 1.0f : 0.0f;           pr->values[3] = float(tgt_top_);
         bus_->publish(presence_topic_, pr);

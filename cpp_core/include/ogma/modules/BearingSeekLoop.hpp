@@ -35,6 +35,8 @@ namespace ogma {
 
 class BearingSeekLoop : public Module {
 public:
+    int released() const { return released_; }              // §17.113 T2
+    int release_refusals() const { return release_refusals_; }
     BearingSeekLoop();
     ~BearingSeekLoop() override;
 
@@ -71,7 +73,10 @@ private:
     std::string value_topic_   = "reality.cognitive.seek_value";
     std::string range_topic_   = "reality.cognitive.seek_range";
     std::string mind_topic_    = "";
-    std::string target_out_topic_ = "";            // §17.113: [have, x, y, set tick, chasing]                 // §17.112 lever 1: [a mover in mind]
+    std::string target_out_topic_ = "";            // §17.113: [have, x, y, set tick, chasing]
+    std::string release_topic_ = "";               // §17.113 T2: the thing belief's refutation
+    bool have_release_ = false; double release_x_ = 0.0, release_y_ = 0.0; uint64_t release_tick_ = 0;
+    int released_ = 0, release_refusals_ = 0;                 // §17.112 lever 1: [a mover in mind]
     uint64_t    mind_from_ = 0; bool have_mind_ = false;
     double proximity_range_ = 2.5;    // the bearing's proximity is 1 - range / this (CloudMap max_range / things_range)
     float  min_conf_        = 0.02f;  // proximity above this = the thing is in view
