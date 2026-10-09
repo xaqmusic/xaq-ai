@@ -7606,3 +7606,19 @@ m/s with the slide forward) was mostly the reverse: the walker extends the neck 
 command. The train (0.2 m/s) is faster than the duck can walk. Open, and the larger lever: why the policy tracks speed so
 poorly here (the head brain's joints and the bird's neck in place of the policy's own trained head? the playroom floor? the
 body model?) — a probe of the plain walker on the same command answers it.
+
+**The plain-walker probe (the operator, 2026-10-09: "run the plain walker probe; in that probe let's examine the turning radius").**
+Host `--level2 … --l2-twist VX 0 VYAW` (the brain's command replaced, open loop), the open arena, 20 s a run, measured over the last
+15 s, two or three seeds a cell; arm A the plain walker (the policy's own trained head), B the head brain on the joints, C B + the
+bird's neck (`--intent-head-translate 0.6`).
+- **Forward:** at 0.15 m/s commanded none of the arms walks (the policy's standing regime, §16.2); at 0.25 / 0.35 / 0.4 the plain
+  walker moves 0.090 / 0.102 / 0.111 m/s and curves (0.1–0.2 rad/s of drift); B and C within ±0.02 of it. **The head is not what
+  slows the duck: the policy itself delivers ~25–30 % of its forward command in this simulation** (the record had 0.128 m/s at 0.3,
+  §16.5). Pollen's walking task leaves the body-pose command untrained (weight 0), so it offers no lean either.
+- **Turning while walking:** at forward 0.3–0.4 the trained maximum yaw (1.0) turns 0.58–0.68 rad/s, a radius of 0.21–0.28 m; 1.5
+  (beyond training) 0.75–1.07 rad/s, 0.15–0.21 m, without a fall; yaw 0.5 gives 0.26–0.31 rad/s, 0.42–0.55 m. In place (forward
+  0) 1.0–1.5 turns 0.29–0.75 rad/s. C turns as well as A or better.
+- **The chase does not use it:** in ★ M2's chases with the train > 80° off the nose the yaw command sits at ~0.8 and the body turns
+  0.50 rad/s at a 0.26 m radius (`chase_turn.py`) — the heading reflex is mixed with the walker brain's yaw by proximity and the
+  range is the trained ±1.0. **The turning radius the operator sees is mostly command, not body:** the body can turn ~1.5–2×
+  faster while walking than the chase asks it to.
