@@ -7373,3 +7373,12 @@ confirmation needs a CLASSIFIED small thing (on a walking cloud a thing often is
 measured at the seek's believed point, so a target 0.1–0.2 m off a still thing reads as an empty place. **`PARTIAL`, a
 signal.** T1b: the evidence by fresh hits (any voxel this cast hit within the target radius below the small top confirms;
 low free rays there with no fresh hit refute; `CloudMap.presence_evidence fresh`), the belief unchanged.
+
+**T1b, the evidence by fresh hits (`a1v2_lk2b_thing_fresh`, `log/ten/th2`, n = 24, passive, tick for tick ★ LOOK 2b).** AUC
+0.57 (vs moved 0.58, vs nothing 0.56) against T1's 0.69; the recency forms fall under 0.5. A fresh hit within 0.12 m below
+the small top is not specific to the thing: wall bases, clutter and the passing train confirm it, and a target that was
+never on a thing is confirmed too. **`REGRESSION` as evidence; T1's classified-thing evidence stays.** Re-use: none in this
+form. What both say: the evidence is judged at the seek loop's believed POINT, and that point is 0.1–0.2 m off the thing often
+enough to blur both confirmation and refutation. Next form (T1c, passive): the belief keeps the confirmed thing's own
+position (the nearest small thing within the confirmation radius) and judges refutation at THAT point — an object file that
+tracks where its thing is, not where the seek loop aimed.
