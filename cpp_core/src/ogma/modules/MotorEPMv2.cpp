@@ -2867,7 +2867,9 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "coord_explore") coord_explore_ = get_double(value, "coord_explore");
     else if (key == "coord_reward_drive") coord_reward_drive_ = get_double(value, "coord_reward_drive");
     else if (key == "stuck_explore_gain") stuck_explore_gain_ = get_double(value, "stuck_explore_gain");
-    else if (key == "progress_commit_gain") progress_commit_gain_ = get_double(value, "progress_commit_gain");
+    // A new chain: MSVC rejects one else-if chain this long (C1061, nesting limit 128).
+    // The keys are distinct and nothing follows the chains, so splitting it changes nothing.
+    if (key == "progress_commit_gain") progress_commit_gain_ = get_double(value, "progress_commit_gain");
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
     else if (key == "stance_release_frac") stance_release_frac_ = get_double(value, "stance_release_frac");
