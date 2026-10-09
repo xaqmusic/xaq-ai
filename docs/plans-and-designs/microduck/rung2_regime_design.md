@@ -7622,3 +7622,36 @@ bird's neck (`--intent-head-translate 0.6`).
   0.50 rad/s at a 0.26 m radius (`chase_turn.py`) — the heading reflex is mixed with the walker brain's yaw by proximity and the
   range is the trained ±1.0. **The turning radius the operator sees is mostly command, not body:** the body can turn ~1.5–2×
   faster while walking than the chase asks it to.
+
+**BAM ported and validated (the operator, 2026-10-09: "port BAM and validate it first; then proceed with the lever; if there is
+a real delta, examine the effects on our promoted configs").** Host `--bam [VIN [LAG_S]]` (`DuckBody::bam_setup` /
+`bam_update`): Rhoban's BAM (`github.com/Rhoban/bam`, branch `mjlab_frictionloss`, the one `microduck_rl` pins), the XL330 "m6"
+model in the form `bam.mjlab.BamActuator` trains with — the 14 position actuators turned to motors (force-limited at 8.2 V kt/R),
+the firmware P loop (kp_fw 200, error gain (4096/2π)/(256·885), the 1.75 A current limiter as a duty window, the PWM clamp), the DC
+motor with back-EMF, and the m6 friction budget (Coulomb, Stribeck, directional load-dependent, the quadratic term) written each
+physics step into MuJoCo's per-dof frictionloss and damping, the friction constraint stiffened as mjlab does; vin 7.35 V (the
+middle of Pollen's 6.5–8.2), an optional command delay. Off = byte-identical (★ F5's guard). **Validation** (`mj_host/tools/bam/
+bam_reference.py`, the duck's MJCF edited at the spec level as `edit_spec` does, the control law and torque from Rhoban's own
+`bam` classes, the friction budget from `bam/mjlab.py`, fed the host's dumped per-tick targets, `--bam-dump`): the first
+substep's 14 torques, recomputed from the host's own state each tick, agree to 0.000 Nm over 50 ticks; a free-running replay from
+the host's first state agrees to 1e-3–1e-2 rad for a second (it cannot carry the host's solver warm start or previous torques)
+and then diverges, as walks do.
+
+**The delta: none that matters.** The port's own arithmetic says why: BAM's firmware loop is kt/R · vin · kp_fw · error gain ≈ 0.55
+Nm/rad — the XML actuator's kp 0.55, which was set to match it. The plain walker (open loop, 3 seeds, the open floor of
+`scene_walk.xml` — the arena's walls stop a straight walk inside 20 s and undercounted the earlier straight runs):
+
+| plain walker, open floor | XML actuator | BAM | BAM + 20 ms delay (arena) |
+|---|---|---|---|
+| straight, 0.25 m/s commanded | 0.112 m/s | — | — |
+| straight, 0.35 | 0.155 | 0.131 | — |
+| forward 0.4, yaw 1.0 | 0.627 rad/s, radius 0.26 m | 0.567, 0.26 | 0.669, 0.27 |
+| forward 0.4, yaw 1.5 | 0.873 rad/s, 0.18 m | 0.901, 0.16 | 1.073, 0.15 |
+
+A 5 ms timestep with the training's 30 / 50 solver iterations (either integrator) and mjlab's contact rule (`--train-contacts`:
+the soles frictional, the rest condim 1) change nothing measurable either. **`NULL` as a fix for the speed: the policy delivers
+~45 % of its forward command in plain MuJoCo whatever the actuator model, and BAM is no faster.** The record's 2026-08-31 reading
+("the XML actuator cannot walk") is corrected: the XML actuator already had BAM's stiffness; what kp × 5 showed was a stiffer body
+than the real servo. Per the operator's condition, the promoted configurations are not re-measured on BAM. Open: why the policy
+tracks forward speed at ~45 % here (the training's domain randomisation and delays, terrain, or simply its trained behaviour) —
+a question for Pollen, who can compare with their own training rollouts and the real duck.

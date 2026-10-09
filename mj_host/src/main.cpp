@@ -3598,6 +3598,15 @@ int main(int argc, char** argv) {
             g_stop.on_lost = true;
         } else if (a == "--stop-on-chase") {
             g_stop.on_chase = true;
+        } else if (a == "--bam") {
+            // the XL330 m6 actuator model Pollen trains with, in place of the XML position actuators: [VIN [LAG_S]]
+            DuckBody::bam.on = true;
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) DuckBody::bam.vin = std::stod(next("--bam"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) DuckBody::bam.lag_s = std::stod(next("--bam"));
+        } else if (a == "--train-contacts") {
+            DuckBody::train_contacts = true;
+        } else if (a == "--bam-dump") {
+            DuckBody::bam.dump = next("--bam-dump");
         } else if (a == "--neck-burst") {
             g_neck_burst_s = std::stod(next("--neck-burst"));
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_neck_burst_gap_s = std::stod(next("--neck-burst"));

@@ -22,6 +22,7 @@
 //     of physics steps or the body refuses to run (gate G3).
 
 #include <array>
+#include <cstdio>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -173,7 +174,29 @@ public:
     const mjModel* model() const { return m_; }
     const mjData*  data()  const { return d_; }
 
+    // ---- BAM (better-actuator-models, Rhoban), the XL330 "m6" model Pollen trains the walking policy with -------------
+    // The XML position actuator delivers about half the commanded gait (port plan, "the XML actuator cannot walk"); BAM is
+    // the voltage-controlled firmware P loop + DC motor with back-EMF + the load-dependent friction budget written into
+    // MuJoCo's per-dof frictionloss / damping each physics step (bam.mjlab.BamActuator, the form mjlab trains with).
+    struct BamConfig {
+        bool   on = false;
+        double vin = 7.35;          // supply voltage [V] (Pollen samples 6.5-8.2 per env; the midpoint)
+        double vin_max = 8.2;       // the force limit's voltage (Pollen: the top of vin_range)
+        double kp_fw = 200.0;       // firmware P gain (microduck's preserved firmware stiffness)
+        double lag_s = 0.0;         // command delay [s] (Pollen: 3-6 steps of 5 ms)
+        std::string dump;           // --bam-dump FILE: per tick, the targets and the state (the validation's input)
+    };
+    static BamConfig bam;            // set before a body is built (the host's --bam)
+    static bool train_contacts;      // --train-contacts: mjlab's FULL_COLLISION on the robot (feet condim 3 priority 1 friction 1, the rest condim 1)
+    double bam_last_torque(int i) const { return bam_tau_[size_t(i)]; }
+
 private:
+    void bam_setup();
+    void bam_update(const std::array<double, kNumPolicyJoints>& target);
+    std::array<double, kNumPolicyJoints> bam_tau_{};
+    std::vector<std::array<double, kNumPolicyJoints>> bam_queue_;   // the delay line, one entry per physics step
+    FILE* bam_dump_ = nullptr;
+    long  bam_tick_ = 0;
     mjModel* m_ = nullptr;
     mjData*  d_ = nullptr;
     int      substeps_ = 0;

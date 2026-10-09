@@ -1,6 +1,8 @@
 #include "DuckBody.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -99,6 +101,91 @@ DuckBody::DuckBody(const std::string& scene_path) {
         const int sid = mj_name2id(m_, mjOBJ_SENSOR, "head_gyro");
         head_gyro_adr_ = (sid >= 0) ? m_->sensor_adr[sid] : -1;
     }
+    if (train_contacts) {
+        // microduck_rl's FULL_COLLISION, the contacts the walking policy trained with: the soles frictional (condim 3, priority
+        // 1, friction 1.0), every other robot collision geom frictionless (condim 1)
+        const int robot_root2 = m_->body_rootid[trunk_body_];
+        for (int g = 0; g < m_->ngeom; ++g) {
+            if (!(m_->geom_contype[g] || m_->geom_conaffinity[g])) continue;
+            if (m_->body_rootid[m_->geom_bodyid[g]] != robot_root2) continue;
+            const char* n = mj_id2name(m_, mjOBJ_GEOM, g);
+            const bool foot = n && (std::string(n) == "left_foot_collision" || std::string(n) == "right_foot_collision");
+            if (foot) { m_->geom_condim[g] = 3; m_->geom_priority[g] = 1; m_->geom_friction[3 * g] = 1.0; }
+            else m_->geom_condim[g] = 1;
+        }
+    }
+    if (bam.on) bam_setup();
+}
+bool DuckBody::train_contacts = false;
+
+// ---- BAM ---------------------------------------------------------------------------------------------------------------
+DuckBody::BamConfig DuckBody::bam;
+
+namespace {
+// Rhoban bam, params/xl330/m6.json (branch mjlab_frictionloss, the one microduck_rl pins), and the XL330 actuator constants
+// (bam/dynamixel/actuator.py)
+constexpr double kBamKt = 0.36601349688984386, kBamR = 2.8113923539223227, kBamArmature = 0.0018077432831600838;
+constexpr double kBamFrictionBase = 0.004771183165566, kBamFrictionStribeck = 0.004676345799486616;
+constexpr double kBamLfMotor = 0.2667860954283698, kBamLfExternal = 8.515871897059342e-06;
+constexpr double kBamLfMotorStribeck = 1.0722918395099123e-05, kBamLfExternalStribeck = 0.08077928978935671;
+constexpr double kBamLfMotorQuad = 0.009972471242139415, kBamLfExternalQuad = 0.004902565732332559;
+constexpr double kBamDthetaStribeck = 2.890372094130307, kBamAlpha = 8.683259907618984, kBamViscous = 0.005359668274599504;
+constexpr double kBamErrorGain = (4096.0 / (2.0 * 3.14159265358979323846)) / (256.0 * 885.0);
+constexpr double kBamMaxPwm = 1.0, kBamMaxCurrent = 1.75;
+}  // namespace
+
+void DuckBody::bam_setup() {
+    // bam.mjlab.BamActuator.edit_spec: position actuators -> motors (torque in ctrl), force-limited at vin_max kt / R; the
+    // joint's armature from BAM, its damping and frictionloss zeroed (rewritten every step), its friction constraint stiffened
+    const double force_limit = bam.vin_max * kBamKt / kBamR;
+    for (int i = 0; i < kNumPolicyJoints; ++i) {
+        const int a = actuator_[i];
+        m_->actuator_gaintype[a] = mjGAIN_FIXED; m_->actuator_biastype[a] = mjBIAS_NONE;
+        for (int k = 0; k < mjNGAIN; ++k) m_->actuator_gainprm[a * mjNGAIN + k] = 0.0;
+        for (int k = 0; k < mjNBIAS; ++k) m_->actuator_biasprm[a * mjNBIAS + k] = 0.0;
+        m_->actuator_gainprm[a * mjNGAIN] = 1.0;
+        m_->actuator_forcelimited[a] = 1;
+        m_->actuator_forcerange[2 * a] = -force_limit; m_->actuator_forcerange[2 * a + 1] = force_limit;
+        m_->actuator_ctrllimited[a] = 0;
+        for (int k = 0; k < 6; ++k) m_->actuator_gear[a * 6 + k] = (k == 0) ? 1.0 : 0.0;
+        const int dof = qvel_adr_[i];
+        m_->dof_armature[dof] = kBamArmature; m_->dof_damping[dof] = 0.0; m_->dof_frictionloss[dof] = 0.0;
+        m_->dof_solref[dof * mjNREF] = -5.0e4; m_->dof_solref[dof * mjNREF + 1] = -2.0e2;
+        const double imp[5] = {0.99, 0.9999, 0.001, 0.5, 2.0};
+        for (int k = 0; k < 5 && k < mjNIMP; ++k) m_->dof_solimp[dof * mjNIMP + k] = imp[k];
+    }
+    mj_setConst(m_, d_);
+    if (!bam.dump.empty()) bam_dump_ = std::fopen(bam.dump.c_str(), "w");
+}
+
+void DuckBody::bam_update(const std::array<double, kNumPolicyJoints>& target) {
+    // bam.mjlab.BamActuator.compute, one physics step, every actuated joint (no voltage drop, no gain randomisation)
+    std::vector<double> fric(size_t(m_->nv), 0.0);        // the dof-friction constraint force of the previous solve
+    for (int r = 0; r < d_->nefc; ++r)
+        if (d_->efc_type[r] == mjCNSTR_FRICTION_DOF) fric[size_t(d_->efc_id[r])] += d_->efc_force[r];
+    for (int i = 0; i < kNumPolicyJoints; ++i) {
+        const int dof = qvel_adr_[i];
+        const double q = d_->qpos[qpos_adr_[i]], dq = d_->qvel[dof];
+        const double prev = d_->qfrc_actuator[dof];
+        // 1-2. the firmware P loop (duty cycle), its current limiter, the PWM clamp; the DC motor with back-EMF
+        double duty = (target[size_t(i)] - q) * bam.kp_fw * kBamErrorGain;
+        const double span = kBamR * kBamMaxCurrent / bam.vin, centre = kBamKt * dq / bam.vin;
+        duty = std::clamp(duty, centre - span, centre + span);
+        duty = std::clamp(duty, -kBamMaxPwm, kBamMaxPwm);
+        const double volts = bam.vin * duty;
+        const double tau = kBamKt * volts / kBamR - kBamKt * kBamKt * dq / kBamR;
+        d_->ctrl[actuator_[i]] = tau; bam_tau_[size_t(i)] = tau;
+        // 3. the external load on the gearbox: bias + constraints, less our own friction constraint
+        const double ext = -d_->qfrc_bias[dof] + d_->qfrc_constraint[dof] - fric[size_t(dof)];
+        // 4-5. the m6 friction budget -> frictionloss; the viscous term -> damping
+        const double strib = std::exp(-std::pow(std::fabs(dq) / kBamDthetaStribeck, kBamAlpha));
+        double fl = kBamFrictionBase + strib * kBamFrictionStribeck;
+        fl += std::fabs(ext * kBamLfExternal - prev * kBamLfMotor);
+        fl += strib * std::fabs(ext * kBamLfExternalStribeck - prev * kBamLfMotorStribeck);
+        const bool drive = std::fabs(prev) > std::fabs(ext);
+        fl += strib * (drive ? kBamLfExternalQuad * ext * ext : kBamLfMotorQuad * prev * prev);
+        m_->dof_frictionloss[dof] = fl; m_->dof_damping[dof] = kBamViscous;
+    }
 }
 
 std::array<double, 3> DuckBody::head_gyro() const {
@@ -108,6 +195,7 @@ std::array<double, 3> DuckBody::head_gyro() const {
 }
 
 DuckBody::~DuckBody() {
+    if (bam_dump_) std::fclose(bam_dump_);
     if (d_) mj_deleteData(d_);
     if (m_) mj_deleteModel(m_);
 }
@@ -143,7 +231,29 @@ void DuckBody::step(const std::array<double, kNumPolicyJoints>& ctrl) {
     for (int i = 0; i < 3; ++i) d_->xfrc_applied[6 * trunk_body_ + i] = pushing ? push_[i] : 0.0;
     if (pushing) --push_ticks_;
 
-    for (int s = 0; s < substeps_; ++s) mj_step(m_, d_);
+    if (!bam.on) { for (int s = 0; s < substeps_; ++s) mj_step(m_, d_); return; }
+    if (bam_dump_) {
+        // the validation's input: this tick's targets, then the robot's state before the physics runs
+        std::fprintf(bam_dump_, "%ld", bam_tick_++);
+        for (int i = 0; i < kNumPolicyJoints; ++i) std::fprintf(bam_dump_, " %.17g", ctrl[size_t(i)]);
+        for (int k = 0; k < m_->nq; ++k) std::fprintf(bam_dump_, " %.17g", d_->qpos[k]);
+        for (int k = 0; k < m_->nv; ++k) std::fprintf(bam_dump_, " %.17g", d_->qvel[k]);
+        std::fprintf(bam_dump_, "\n");
+    }
+    const int lag = int(std::lround(bam.lag_s / m_->opt.timestep));
+    for (int s = 0; s < substeps_; ++s) {
+        bam_queue_.push_back(ctrl);
+        const auto& tgt = bam_queue_.size() > size_t(lag) ? bam_queue_[bam_queue_.size() - 1 - size_t(lag)] : bam_queue_.front();
+        bam_update(tgt);
+        if (bam_queue_.size() > size_t(lag) + 1) bam_queue_.erase(bam_queue_.begin());
+        if (bam_dump_ && s == 0) {   // the first substep's torques and friction budget, for the validation
+            std::fprintf(bam_dump_, "T");
+            for (int i = 0; i < kNumPolicyJoints; ++i) std::fprintf(bam_dump_, " %.17g", bam_tau_[size_t(i)]);
+            for (int i = 0; i < kNumPolicyJoints; ++i) std::fprintf(bam_dump_, " %.17g", m_->dof_frictionloss[qvel_adr_[i]]);
+            std::fprintf(bam_dump_, "\n");
+        }
+        mj_step(m_, d_);
+    }
 }
 
 std::array<double, kNumPolicyJoints> DuckBody::joint_positions() const {
