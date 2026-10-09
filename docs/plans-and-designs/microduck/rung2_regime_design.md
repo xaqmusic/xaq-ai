@@ -7514,3 +7514,19 @@ place (a node with ≥ 2 passes, the nearest the body), the body waits there wat
 mover's own return at that node predicts (the median interval between its passes there, learned from the map's recurrence;
 no constant). A wait that outlasts the predicted return without a sighting spends interest; any chase restores it. An
 ambush arrival is not a thing's arrival: no skill is asked for there.
+
+**A1, the ambush (`StalkLoop`; `a1v2_m2_ambush`, `log/ten/tc7`, n = 24, against ★ M2 `tc4`).** The stalk loop learns, per
+motion-map node, the passing place's position, the mover's passes through it and the median interval between them, and
+P(a wait sees the mover) (Beta); after a lost chase, the mover out of mind and nothing held, it sends the seek loop to the
+place that scores highest on P / (1 + distance) (a node with ≥ 2 passes); the seek loop HOLDS an ambush place (target
+source 4: no arrival, the walker's range-scaled speed falls to nothing, the head free), the outcome loop asks no skill at one;
+a wait that outlasts the place's own return spends it (b += 1), a chase during it pays (a += 1). No new constant: the place,
+the wait, the interest are the map's record. Unit-tested; A0 and ★ F5 byte-identical.
+- 23 ambushes a run, 2.9 ending in a chase (13 %); holding a place 105 s a run, waiting at it 26 s.
+- The train chased 28.1 → 33.5 s a run (CI [−1.6, +12.4]), followed (within 1.5 m, walking) 148 → 163 s, contacts 3.3 → 3.9;
+  walls 15.1 → 11.6 /min (CI [−8.9, +1.9]); skills 10.6 → 9.5 (CI [−2.4, +0.4]), arrivals at things 10.4 → 7.7 (the ambush holds
+  the seek loop's time), skills at a thing that had moved 1.21 → 0.75 a run; boring 28.4 → 31.6 % (CI [−1.5, +8.0]); falls and
+  the first minute tie.
+- **Verdict `PARTIAL`: the hunter waits and it sometimes pays (one ambush in eight); the chase and the walls lean the right
+  way, boring and the interactions with things lean the wrong way — all inside the noise.** The eye decides; preset "A1"
+  (seed 10: waits that pay at 73, 348, 539, 571 s).

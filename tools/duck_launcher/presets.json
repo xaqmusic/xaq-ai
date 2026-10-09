@@ -24,6 +24,30 @@
   }
  },
  {
+  "name": "A1 · THE AMBUSH (§17.113, awaiting the eye): ★ M2 + the hunter waits where the mover passes",
+  "hint": "§17.113 A1 (2026-10-09): a motion map (an EPM over the duck's own confirmed mover sightings) learns where the train passes; after a lost chase, with the mover out of mind and nothing else held, the stalk loop sends the body to a passing place, holds it there (no arrival, no skill) and waits as long as that place's own learned return predicts; a wait that sees nothing makes the place less worth waiting at. n = 24 vs ★ M2: 23 ambushes a run, 13 % end in a chase; the train chased 28.1 -> 33.5 s, followed 148 -> 163 s; boring 28.4 -> 31.6 %, skills 10.6 -> 9.5, walls 15.1 -> 11.6 -- all inside the noise. WATCH seed 10 (waits that pay at 73, 348, 539, 571 s), seed 13 (71, 153 s).",
+  "state": {
+   "config": "a1v2_m2_ambush.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 10,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 0 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 0 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest --stop-by-look --impeded-not-chasing",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
   "name": "★ LOOK 2b · THE PRAGMATIC LOOK (promoted 2026-10-08): ★ F5 with the stop started and ended by an arbitrated look loop",
   "hint": "PROMOTED on the operator's eye (2026-10-08): 'look 2b is an improvement'; 'the stop look works correctly'. §17.112: the timer is off; the arbiter's fifth policy, the look, takes the body when its need -- P(a stop pays: a new seek target or a skill), learned per situation -- outbids play, and lets go when a payoff is no longer likely; a chase holds it off for 5 s after it ends. n = 24 vs ★ F5: interesting 48 -> 52 %, walls and falls tie, first minute 20/24 (19), skills 11.9 -> 10.2, the moving train chased 13.0 -> 9.7 s (CI crosses 0). The open problem the eye found: a mover seen at a stop becomes a static target, walked to and kicked at nothing -- the chase push. Seeds 1 and 2060249272.",
   "state": {
