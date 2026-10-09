@@ -35,6 +35,7 @@ namespace ogma {
 
 class BearingSeekLoop : public Module {
 public:
+    int static_promoted() const { return static_promoted_; }   // §17.113 M1
     int released() const { return released_; }              // §17.113 T2
     int release_refusals() const { return release_refusals_; }
     BearingSeekLoop();
@@ -236,6 +237,8 @@ private:
     // the candidate's recent sightings (tick, x, y), kept for chase_v_window_s: the velocity is the displacement across
     // this ring, long enough to average the centroid's jitter and short enough to see a thing that just stopped
     std::deque<std::array<double, 3>> sight_;
+    std::deque<std::array<double, 3>> static_ring_;   // §17.113 M1: a static target's recent fixes [tick, x, y]
+    bool static_motion_check_ = false; int static_promoted_ = 0;
     double chase_v_window_s_ = 0.8;
 public:
     double last_miss()  const { return last_miss_; }

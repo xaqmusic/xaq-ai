@@ -90,6 +90,10 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"lead_eval_ticks", ParamMutability::HotMutable, "How long one option is tried before its outcome is recorded (ticks).", ParamValue{int64_t{50}}},
         {"lead_min_samples", ParamMutability::HotMutable, "An option with fewer outcomes than this in a situation is tried first.", ParamValue{int64_t{2}}},
         {"restore_lead_only", ParamMutability::ConstructionOnly, "A restored snapshot brings the lead table and nothing else.", ParamValue{false}},
+        {"static_motion_check", ParamMutability::ConstructionOnly,
+         "§17.113 M1: a static target's own re-sightings are judged by the chase's speed test -- over chase_v_window_s, a fix that "
+         "drifts at chase_min_v or more is a thing MOVING: it becomes a chase (its velocity the drift's), never a place.  "
+         "Needs mover_topic and chase_min_v > 0.  false = off.", ParamValue{false}},
         {"release_topic", ParamMutability::ConstructionOnly,
          "§17.113 T2: the thing belief's token; values[5] > 0.5 = the thing is refuted (not where the loop believes): a static "
          "target is dropped before the walk ends, and the outcome loop's renewal of that place is refused for forget_ticks (a "
@@ -187,7 +191,7 @@ ParamMap BearingSeekLoop::current_params() const {
     ParamMap m;
     m["bearing_topic"] = ParamValue{bearing_topic_}; m["pose_topic"] = ParamValue{pose_topic_};
     m["output_topic"] = ParamValue{output_topic_}; m["value_topic"] = ParamValue{value_topic_};
-    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_}; m["target_out_topic"] = ParamValue{target_out_topic_}; m["release_topic"] = ParamValue{release_topic_};
+    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_}; m["target_out_topic"] = ParamValue{target_out_topic_}; m["release_topic"] = ParamValue{release_topic_}; m["static_motion_check"] = static_motion_check_;
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
     m["pull_topic"] = ParamValue{pull_topic_}; m["publish_chase_flag"] = ParamValue{publish_chase_flag_};
@@ -220,6 +224,8 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "mind_topic",      [&](auto const& v){ mind_topic_    = get_string(v,"mind_topic"); });
     apply_param(params, "target_out_topic", [&](auto const& v){ target_out_topic_ = get_string(v,"target_out_topic"); });
     apply_param(params, "release_topic",   [&](auto const& v){ release_topic_ = get_string(v,"release_topic"); });
+    apply_param(params, "static_motion_check", [&](auto const& v){
+        if (auto b = std::get_if<bool>(&v)) static_motion_check_ = *b; else static_motion_check_ = get_double(v,"static_motion_check") > 0.5; });
     apply_param(params, "proximity_range", [&](auto const& v){ proximity_range_ = get_double(v,"proximity_range"); });
     apply_param(params, "min_conf",        [&](auto const& v){ min_conf_      = float(get_double(v,"min_conf")); });
     apply_param(params, "arrive_m",        [&](auto const& v){ arrive_m_      = get_double(v,"arrive_m"); });
@@ -389,6 +395,24 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         target_px_ = tx_; target_py_ = ty_; target_src_ = 1;
         have_target_ = true;
         conf_ = 1.0f;
+        if (static_motion_check_ && !mover_topic_.empty() && chase_min_v_ > 0.0) {
+            // §17.113 M1: the fix's own drift over the chase's speed window -- a thing that moves is chased, not fixed
+            if (tick_id == target_set_tick_) static_ring_.clear();
+            static_ring_.push_back({double(tick_id), tx_, ty_});
+            while (!static_ring_.empty() && double(tick_id) - static_ring_.front()[0] > chase_v_window_s_ * 50.0) static_ring_.pop_front();
+            const double span = double(tick_id) - static_ring_.front()[0];
+            if (span >= 0.5 * chase_v_window_s_ * 50.0) {
+                const double dts = span / 50.0;
+                const double vx = (tx_ - static_ring_.front()[1]) / dts, vy = (ty_ - static_ring_.front()[2]) / dts;
+                const double v = std::hypot(vx, vy);
+                if (v >= chase_min_v_ && v <= chase_v_max_) {
+                    have_cand_ = true; cand_x_ = cand_x0_ = tx_; cand_y_ = cand_y0_ = ty_; cand_vx_ = vx; cand_vy_ = vy;
+                    cand_tick_ = cand_first_ = tick_id; cand_n_ = chase_confirm_;
+                    sight_.clear(); sight_.push_back({double(tick_id), tx_, ty_});
+                    chasing_ = true; ++chases_; ++static_promoted_; last_decision_ = 7; static_ring_.clear();
+                }
+            }
+        }
         if (!pull_topic_.empty())                                         // S3: the expected answer at this thing
             if (auto pp = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(pull_topic_)))
                 if (pp->values.size() > 0) conf_ = std::clamp(float(pp->values[0]), 0.0f, 1.0f);
@@ -737,7 +761,7 @@ void BearingSeekLoop::restore_state(nlohmann::json const& s) {
 }
 nlohmann::json BearingSeekLoop::diag_lite() const {
     return nlohmann::json{{"seen", seen_}, {"target", have_target_}, {"value", value_}, {"range", range_left_},
-                          {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}, {"refixes", refixes_}};
+                          {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}, {"refixes", refixes_}, {"static_promoted", static_promoted_}, {"released", released_}};
 }
 nlohmann::json BearingSeekLoop::diag_snapshot() const {
     nlohmann::json j = diag_lite();

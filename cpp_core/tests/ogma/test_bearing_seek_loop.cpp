@@ -687,3 +687,19 @@ TEST(BearingSeekLoop, AMoverStaysInMindForTheMemoryAfterTheChaseEnds) {
     auto m2 = std::dynamic_pointer_cast<const ogma::ProprioToken>(q.bus.last_value("reality.cognitive.seek_mind"));
     ASSERT_TRUE(m2); EXPECT_NEAR(m2->values[0], 0.5f, 0.02f) << "half the memory's span after the last chased tick";
 }
+
+// §17.113 M1 (2026-10-09): a static target whose own re-sightings drift at the chase's speed is a thing moving -- chased,
+// not fixed; one that stays put stays a place.
+TEST(BearingSeekLoop, AStaticSightingThatDriftsIsChasedNotFixed) {
+    for (bool moving : {false, true}) {
+        ogma::ParamMap p = chase_params();
+        p["chase_min_v"] = 0.1; p["static_motion_check"] = true;
+        Rig r(p);
+        for (int i = 0; i < 60; ++i) {                     // the thing seen every tick, straight ahead
+            const double range = 1.0 + (moving ? 0.2 * i / 50.0 : 0.0);
+            r.step(0, 0, 0, 0.0f, 1.0f, prox_of(range));
+        }
+        if (moving) { EXPECT_TRUE(r.m.chasing()) << "drifting at 0.2 m/s: a mover"; EXPECT_EQ(r.m.static_promoted(), 1); }
+        else        { EXPECT_FALSE(r.m.chasing()) << "still: a place"; EXPECT_EQ(r.m.static_promoted(), 0); EXPECT_TRUE(r.m.have_target()); }
+    }
+}
