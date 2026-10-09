@@ -1312,7 +1312,7 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
-bool g_dash = false; double g_dash_lean = 0.0;   // --dash [SIN]: the lean target's sine (0 = 1.5 x the hand-off lean)   // --dash (§17.113 D1): a chase confirmed at a stand leans the standing brain toward the mover; the lean hand-off releases a run   // --stop-head-hold (§17.113 H2): at the stand the head's pitch, roll and neck held where the walk left them   // --impeded-not-chasing (§17.113 M2): the impeded look does not judge a chase -- a mover not closing is the chase's business
+bool g_dash = false; double g_dash_lean = 0.0, g_dash_release = 0.0;   // --dash [SIN [DEG]]: DEG the lean (deg) a dash is released at (0 = the stop's hand-off lean)   // --dash [SIN]: the lean target's sine (0 = 1.5 x the hand-off lean)   // --dash (§17.113 D1): a chase confirmed at a stand leans the standing brain toward the mover; the lean hand-off releases a run   // --stop-head-hold (§17.113 H2): at the stand the head's pitch, roll and neck held where the walk left them   // --impeded-not-chasing (§17.113 M2): the impeded look does not judge a chase -- a mover not closing is the chase's business
 // --freeze-walker (2026-10-03): the walker's learning off for the whole run (the learned chase's practice)
 bool g_freeze_walker = false;
 // --log-motion (2026-10-02, the chase push): on every tick a new ToF cast reached the graph's MotionField, the record gains
@@ -2333,7 +2333,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         const int req = brain.skill_request();
                         if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && skill_start(kSkills[req].name)) { stop_event = "skill:stand"; ++skills_requested; req_consumed = true; }
                     }
-                    double sig = lean, thresh = g_stop.handoff_lean;
+                    double sig = lean, thresh = (dash_left > 0 && g_dash_release > 0.0) ? g_dash_release : g_stop.handoff_lean;   // D1: a dash releases later
                     if (g_stop.handoff_att > 0.0) {
                         sig = 0.0; for (double v : stander->attitude_error()) sig = std::max(sig, v);
                         thresh = g_stop.handoff_att;
@@ -3585,6 +3585,7 @@ int main(int argc, char** argv) {
         } else if (a == "--dash") {
             g_dash = true;
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_dash_lean = std::stod(next("--dash"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_dash_release = std::stod(next("--dash"));
         } else if (a == "--stop-head-hold") {
             g_stop_head_hold = true;
         } else if (a == "--impeded-not-chasing") {

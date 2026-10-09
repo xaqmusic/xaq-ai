@@ -7561,3 +7561,19 @@ the chase's forward command; no release in 1.5 s ends the stop as a chase does; 
 0.5–0.7 s and is released (7 of 7 on seeds 14, 18; no falls). The first second after release: peak 0.19–0.23 m/s, mean 0.12–0.17
 (the walk's 0.14) — **a burst, not yet the organic run**: the hand-off releases at 6.5°, before the lean the policy answers with a
 sprint. Open: release later during a dash (a larger lean), the operator's call on how far.
+
+**D1's release angle (the operator, 2026-10-09: "try a 15 degree lean for the dash release; most likely we will have to try a
+few angles; a short burst then normal walking without pause is a win").** Host `--dash SIN DEG`: a dash is released at DEG of
+lean (normal stops keep 6.5°). Probes, lean target sin 0.9, on A1 + H2 (dashes in 600 s runs; the walk is 0.14 m/s):
+
+| release | seeds · dashes | lean reached | 1st s peak | 1–3 s mean | falls ≤ 6 s |
+|---|---|---|---|---|---|
+| 10° | 14, 18 · 5 | 11–12° | 0.21–0.27 m/s | 0.12–0.17 (walks on) | 0 |
+| **12.5°** | 14, 18, 10, 22 · 19 | 13–15° | 0.19–0.38 | ≥ 0.12 in about half | **0** |
+| 15° | 14, 18 · 5 | 16–19° | 0.25–**0.57** (two sprints, ~4× the walk) | 0.03–0.16 (a pause) | 1 |
+| 20° | 14, 18 · 4 | 24–26° | 0.36–0.52 | 0.03–0.07 | 4 |
+
+After a 15° sprint the chase loses the train (the view shakes in the sprint), the seek need drops, and a stop starts within a
+second (seed 14, 375.6 s); walking resumes after a short stand. **12.5° is the compromise on the operator's criterion (no falls,
+a burst, walking on about half the time); 15° is the dash the operator described, at the cost of a pause and an occasional
+fall.** Presets "D · THE DASH at 12.5 deg" and "at 15 deg" for the eye.
