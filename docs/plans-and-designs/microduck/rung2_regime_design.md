@@ -7406,3 +7406,24 @@ gain.**
 - **What would carry it:** evidence weighted by how reliable the cloud is that produced it — learned by the belief from its
   own record (a walking refutation later contradicted by a stop's confirmation is a false one), not set — or presence judged
   from the stop's clean cloud before the walk is committed (the look that STARTS the walk, not the arrival).
+
+**The operator's fork (2026-10-09): judge motion at the sighting.** How the constant train becomes a static target
+(`log/ten/tc1`, 84 targets set on the moving train): 57 set with the body walking and no chase before (the stop's cloud
+still open in the first ticks of the walk, or the outcome loop's renewal of a remembered place — walking sightings are
+ignored in this stack), 17 sightings at a stop, 10 a chase that had just ended; 50 never re-chased. A mover candidate near the
+fix in the last second: 43 % of train targets, 13 % of others — not a decision. **The fix's own drift is:** over the first
+second the seek loop's re-fixed point moves at 0.20 m/s median on the train (its true speed) against 0.03 on still things;
+AUC 0.82; at the chase's own bar (`chase_min_v` 0.1) 69 % of train targets against 18 % of still ones.
+
+**M1, a static target that drifts is chased (`BearingSeekLoop.static_motion_check`; `a1v2_lk2b_motion_m1`, `log/ten/tc3`,
+n = 24, the constant train, against tc1).** The chase's speed test (`chase_min_v`, over `chase_v_window_s`) run on a static
+target's own re-sightings; a drift at the bar makes it a chase, never a place. No new constant. Unit-tested; the passive arm
+byte-identical. 3.8 targets a run promoted.
+- **The chase:** the moving train chased 23.4 → 31.1 s a run (CI [+1.5, +14.0]), pursuit 15.3 → 26.3 s; falls 4.05 → 2.88
+  (CI [−2.18, −0.15]).
+- **The empty-place interactions do not move:** arrivals at a moved thing 1.54 → 1.42 a run, skills 1.29 → 1.29; at the
+  train's old place 41 → 39. Boring, walls, the first minute tie; outcomes observed 71.8 → 65.1 % (CI [−13.9, +0.4]).
+- **Verdict `WORKING` on the chase, `NULL` on what the operator saw.** The stale place is re-armed by another route: the
+  outcome loop's RENEWAL (34 a run) re-arms the seek target at the position it remembers for a thing it wants to watch, and
+  that position never learns the thing moved. Next lever: the renewal judged by the thing — refused for a thing seen moving,
+  or re-aimed at where the belief says it went. Presets "★ LOOK 2b · CONSTANT TRAIN" (the baseline) and "M1" for the eye.
