@@ -7359,3 +7359,17 @@ evidence along rays, gaze first, interest that spends itself); the coverage limi
 (no walk to nothing). T3 the request waits on presence (no kick at nothing). T4 the release hands the look the lost thing
 (the look gets a payoff that takes time — §17.112 lever 4's re-use). T5 mobility per kind (the train-kind thing is a
 mover even while it stands).
+
+**The operator's fork (2026-10-09): a new module, presence first.** Built: `ThingBelief` (cpp_core, unit-tested), the seek
+loop's `target_out_topic` [have, x, y, set tick, chasing], `CloudMap.presence_topic` (per tick: a small thing at the target
+confirms; free-ray samples through its footprint below its top refute), the host's `thb` record; instrument
+`mj_host/tools/presence_roc.py`. All guarded: ★ LOOK 2b and ★ F5 byte-identical; the passive arm tick for tick ★ LOOK 2b.
+
+**T1, the presence belief passive (`a1v2_lk2b_thing_passive`, `log/ten/th1`, n = 24, 391 arrivals: there 291, moved 41,
+nothing 59).** AUC of the presence at arrival, 'there' against moved + nothing: 0.69 (vs moved 0.66, vs nothing 0.71);
+releasing under 0.1 would keep 79 % of the real targets and drop 46 % of the moved and empty ones. Recency helps a little
+(refutations since the last confirmation: vs moved 0.74) but every scoring caps near 0.70 — the limit is the evidence: a
+confirmation needs a CLASSIFIED small thing (on a walking cloud a thing often is not: its top unseen), and refutation is
+measured at the seek's believed point, so a target 0.1–0.2 m off a still thing reads as an empty place. **`PARTIAL`, a
+signal.** T1b: the evidence by fresh hits (any voxel this cast hit within the target radius below the small top confirms;
+low free rays there with no fresh hit refute; `CloudMap.presence_evidence fresh`), the belief unchanged.
