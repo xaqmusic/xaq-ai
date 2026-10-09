@@ -7487,3 +7487,16 @@ the target > 60° off 19 %. The chase 28.1 → 32.7 s a run (CI [−2.4, +11.8])
 (CI [−0.33, −0.01]); the rest ties. **`NULL` on the turn, a first-minute `REGRESSION`; not promoted.** The limit is the body:
 whatever the command, it walks 0.11–0.14 m/s (the train runs 0.2) and turns ≤ 0.5 rad/s — the walker and the policy (O67), not
 the chase's floor.
+
+**The stalk loop, before building: what a lost chase does now (★ M2, `log/ten/tc4`).** 94 chases went into a coast (the pursuit
+of the predicted position, need falling linearly over `chase_permanence_ticks`, 10 s); 9 re-acquired the train (median 1.0 s,
+all within ~2 s), 85 were lost (median 6.7 s); in 30 of the lost the predicted spot was never in the ToF's view (no refutation).
+With the body at 0.11–0.14 m/s against the train's 0.2 (C1), pursuing a prediction longer mostly walks a slow body after a
+mover it cannot catch. **A hunter with a slow body intercepts or waits.** Three forms for the stalk's search, one per lever:
+- (a) **evidence-spent pursuit:** the coast's need spent by refutations at the predicted spot (looked at, empty), not by the
+  timer; the gaze on the prediction. The first plan; the numbers above say it pays rarely.
+- (b) **ambush / intercept:** a slow loop over mover sightings learns WHERE movers pass (a motion map in the place
+  vocabulary); the stalk goes to the nearest place the mover will come through and waits there, watching; interest spent by
+  waits that see nothing. The train returns every ~37 s (7.48 m of track at 0.2 m/s).
+- (c) **motion-seeking gaze after a loss:** the head scans along the mover's predicted path and its learned passing places
+  (coverage is the limit, §17.106) before the body commits.
