@@ -20,6 +20,12 @@
 
 ## ▶ Resume here
 
+**2026-10-09 (late): the body under the chase.** The walking policy delivers ~45 % of its forward command in plain MuJoCo (0.155
+m/s at 0.35 on the open floor) and turns 0.6–1.1 rad/s while walking at yaw 1.0–1.5. BAM (Rhoban's XL330 m6, the model Pollen
+trains with) is ported (`--bam`) and validated, and changes neither: the XML actuator already had its stiffness. A1 (the ambush)
+is the operator's candidate; H2 and the dash are reverted; the neck burst is causal but small (+9 %); T1 (the chase's yaw range
+1.5) tightens the turn by a sixth. All in design doc §17.113; presets A1 and T1 await the eye.
+
 **2026-10-09: ★ M2 promoted — the chaser.** The world changed: the train runs constantly (`--train 0.2 8 0`, the operator's
 call, to study belief and moving things). On ★ LOOK 2b: a fixed target that drifts is chased, not walked to (M1), and the
 impeded look no longer stops a chase (M2) — the train chased 23 → 28 s a run, stops inside a chase 3.2 → 0.3. A passive

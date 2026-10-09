@@ -7655,3 +7655,13 @@ the soles frictional, the rest condim 1) change nothing measurable either. **`NU
 than the real servo. Per the operator's condition, the promoted configurations are not re-measured on BAM. Open: why the policy
 tracks forward speed at ~45 % here (the training's domain randomisation and delays, terrain, or simply its trained behaviour) —
 a question for Pollen, who can compare with their own training rollouts and the real duck.
+
+**T1, the chase may turn as hard as the policy can (host `--chase-yaw-range 1.5`: while a mover is chased or coasted after, the
+heading reflex's clamp opens from the walker's ±1.0 to ±1.5; `log/ten/tc11`, n = 24, on A1 `tc7`).** With the train > 80° off the
+nose: the yaw command 0.85 → 1.06, the turn 0.42 → 0.49 rad/s, the radius 0.31 → 0.26 m (the obstacle-proximity mix with the
+walker's own yaw still holds the command under the clamp). The train chased 33.5 → 36.0 s a run (CI [−5.7, +10.7]), followed
+163 → 176 s; falls 3.67 → 2.62 (CI [−2.09, +0.01]); boring, walls, the first minute tie; skills touching 30.8 → 23.7 % (CI
+[−13.7, −0.4]) and stops at things 71.2 → 62.7 % (CI [−15.8, −1.2]). **`PARTIAL`: the turn tightens by a sixth and the chase
+leans longer; interactions with things lean worse.** Not promoted; preset "T1" for the eye. Re-use: the reflex's share released
+from the obstacle mix while the target is the mover (the mix, not the clamp, is what holds the command at ~1.0); the policy itself
+turns 0.9–1.1 rad/s at 1.5.
