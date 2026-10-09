@@ -606,6 +606,11 @@ double IntentAdapter::look_gain() const {
     auto g = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("arbiter.gain.look"));
     return (g && g->values.size() > 0) ? double(g->values[0]) : 0.0;
 }
+std::vector<double> IntentAdapter::thing_belief_now() const {
+    auto b = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.cognitive.thing_belief"));
+    if (!b || b->values.size() < 5) return {};
+    return std::vector<double>(b->values.data(), b->values.data() + 5);
+}
 std::vector<double> IntentAdapter::look_commit_now() const {
     auto c = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.cognitive.look_commit"));
     if (!c || c->values.size() < 1) return {};

@@ -63,6 +63,7 @@ std::vector<TopicSpec> CloudMap::output_topics() const {
     if (!output_topic_.empty()) t.emplace_back(output_topic_, std::type_index(typeid(ProprioToken)));
     if (!change_topic_.empty()) t.emplace_back(change_topic_, std::type_index(typeid(ProprioToken)));
     if (!state_topic_.empty()) t.emplace_back(state_topic_, std::type_index(typeid(ProprioToken)));
+    if (!presence_topic_.empty()) t.emplace_back(presence_topic_, std::type_index(typeid(ProprioToken)));
     if (!things_topic_.empty()) t.emplace_back(things_topic_, std::type_index(typeid(ProprioToken)));
     if (!thing_bearing_topic_.empty()) t.emplace_back(thing_bearing_topic_, std::type_index(typeid(ProprioToken)));
     if (!mover_topic_.empty()) t.emplace_back(mover_topic_, std::type_index(typeid(ProprioToken)));
@@ -102,6 +103,12 @@ ParamSchema CloudMap::params_schema() const {
          "Optional ProprioToken [open, walking, voxels, new_fraction, still]: whether a cloud is open, whether it is a walking "
          "cloud, its size and its new_fraction -- the stop's cloud as a loop sees it (the look loop, design doc §17.112).  "
          "Empty = not published.", ParamValue{std::string("")}},
+        {"presence_topic", ParamMutability::ConstructionOnly,
+         "§17.113 T1: optional ProprioToken [confirmed, refuted, target in the cloud, the thing's top]: a small thing at the seek "
+         "target this tick (target_small), and the count of free-ray samples this tick that crossed the target's footprint (the "
+         "confirmed thing's half-extent, at least a voxel) BELOW the top of the thing last confirmed there (small_top until one "
+         "is) -- the place seen empty.  Needs target_topic, target_tall_topic and free_rays.  Empty = not computed.",
+         ParamValue{std::string("")}},
         {"voxel_m", ParamMutability::HotMutable,
          "Voxel edge, metres.  0.04 makes one voxel about one block, which is the scale the "
          "sub-pixel measurement argues for.", ParamValue{0.04}, ParamValue{0.005}, ParamValue{0.5}},
@@ -322,7 +329,7 @@ ParamMap CloudMap::current_params() const {
     m["place_topic"] = ParamValue{place_topic_};
     m["output_topic"] = ParamValue{output_topic_};
     m["change_topic"] = ParamValue{change_topic_};
-    m["state_topic"] = ParamValue{state_topic_};
+    m["state_topic"] = ParamValue{state_topic_}; m["presence_topic"] = ParamValue{presence_topic_};
     m["voxel_m"] = voxel_m_;
     m["break_lo"] = break_lo_;
     m["break_hi"] = break_hi_;
@@ -426,6 +433,7 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     output_topic_ = get_s(params, "output_topic");
     change_topic_ = get_s(params, "change_topic");
     state_topic_ = get_s(params, "state_topic");
+    presence_topic_ = get_s(params, "presence_topic");
     voxel_m_    = get_d(params, "voxel_m", voxel_m_);
     break_lo_   = get_d(params, "break_lo", break_lo_);
     break_hi_   = get_d(params, "break_hi", break_hi_);
@@ -630,6 +638,7 @@ void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, ui
                 const double x = ox + ux * r, y = oy + uy * r, z = oz + uz * r;
                 if (std::hypot(x - ox, y - oy) > max_range_) break;
                 if (z < break_lo_) break;                                    // into the floor: nothing beyond is free air
+                if (tgt_ok_ && z < tgt_top_ && std::hypot(x - tgt_gx_, y - tgt_gy_) <= tgt_r_) ++refute_n_;   // §17.113
                 const int64_t k = key_of(int(std::floor(x / voxel_m_)), int(std::floor(y / voxel_m_)), 0);
                 auto [it, fresh] = free_col_.try_emplace(k, float(z));
                 if (!fresh && float(z) > it->second) it->second = float(z);
@@ -1228,8 +1237,29 @@ void CloudMap::publish_target_tall(double yaw, uint64_t tick_id) {
             if (std::hypot((ix + 0.5) * voxel_m_ - gx, (iy + 0.5) * voxel_m_ - gy) <= target_iso_radius_) ++target_tall_;
         }
         const double rs = std::max(0.12, 0.5 * target_iso_radius_);
-        for (auto const& th : things_) if (th.small && std::hypot(th.cx - gx, th.cy - gy) <= rs) ++target_small_;
+        const Thing* conf = nullptr; double dbest = 1e9;
+        for (auto const& th : things_) if (th.small && std::hypot(th.cx - gx, th.cy - gy) <= rs) {
+            ++target_small_;
+            const double dd = std::hypot(th.cx - gx, th.cy - gy); if (dd < dbest) { dbest = dd; conf = &th; }
+        }
+        if (!presence_topic_.empty()) {
+            // §17.113: a new target (or a new frame) forgets the last confirmed thing's size
+            if (!tgt_ok_ || std::hypot(gx - tgt_gx_, gy - tgt_gy_) > 0.2) { tgt_top_ = small_top_; tgt_r_ = voxel_m_; }
+            if (conf) { tgt_top_ = conf->top; tgt_r_ = std::max(voxel_m_, 0.5 * conf->ext); }
+            tgt_gx_ = gx; tgt_gy_ = gy; tgt_ok_ = true;
+        }
+    } else if (!presence_topic_.empty()) {
+        tgt_ok_ = false;
     }
+    if (!presence_topic_.empty()) {
+        auto pr = std::make_shared<ProprioToken>();
+        pr->tick_id = tick_id; pr->producer_id = std::string(id()); pr->sensor = "target_presence";
+        pr->values = Eigen::VectorXf(4);
+        pr->values[0] = target_small_ > 0 ? 1.0f : 0.0f; pr->values[1] = float(refute_n_);
+        pr->values[2] = tgt_ok_ ? 1.0f : 0.0f;           pr->values[3] = float(tgt_top_);
+        bus_->publish(presence_topic_, pr);
+    }
+    refute_n_ = 0;
     auto out = std::make_shared<ProprioToken>();
     out->tick_id = tick_id;
     out->producer_id = std::string(id());

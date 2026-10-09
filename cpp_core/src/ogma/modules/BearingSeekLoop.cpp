@@ -48,6 +48,7 @@ std::vector<TopicSpec> BearingSeekLoop::output_topics() const {
                               TopicSpec{value_topic_,  std::type_index(typeid(ProprioToken))} };
     if (!range_topic_.empty()) v.push_back(TopicSpec{range_topic_, std::type_index(typeid(ProprioToken))});
     if (!mind_topic_.empty()) v.push_back(TopicSpec{mind_topic_, std::type_index(typeid(ProprioToken))});
+    if (!target_out_topic_.empty()) v.push_back(TopicSpec{target_out_topic_, std::type_index(typeid(ProprioToken))});
     if (!situation_out_topic_.empty()) v.push_back(TopicSpec{situation_out_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
@@ -88,6 +89,9 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"lead_eval_ticks", ParamMutability::HotMutable, "How long one option is tried before its outcome is recorded (ticks).", ParamValue{int64_t{50}}},
         {"lead_min_samples", ParamMutability::HotMutable, "An option with fewer outcomes than this in a situation is tried first.", ParamValue{int64_t{2}}},
         {"restore_lead_only", ParamMutability::ConstructionOnly, "A restored snapshot brings the lead table and nothing else.", ParamValue{false}},
+        {"target_out_topic", ParamMutability::ConstructionOnly,
+         "§17.113: [have a target, x, y (odometry frame), the tick it was set, chasing or coasting] -- what a belief about the "
+         "THING needs to know which thing the loop is sent to.  Empty = not published.", ParamValue{std::string("")}},
         {"mind_topic", ParamMutability::ConstructionOnly,
          "§17.112 lever 1: [a mover in mind] -- 1 while chasing or coasting, then falling linearly to 0 over chase_memory_ticks "
          "after the last chased tick, whatever ended the chase (a loss, a yield, a stop).  The arbiter's look reads it: standing "
@@ -178,7 +182,7 @@ ParamMap BearingSeekLoop::current_params() const {
     ParamMap m;
     m["bearing_topic"] = ParamValue{bearing_topic_}; m["pose_topic"] = ParamValue{pose_topic_};
     m["output_topic"] = ParamValue{output_topic_}; m["value_topic"] = ParamValue{value_topic_};
-    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_};
+    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_}; m["target_out_topic"] = ParamValue{target_out_topic_};
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
     m["pull_topic"] = ParamValue{pull_topic_}; m["publish_chase_flag"] = ParamValue{publish_chase_flag_};
@@ -209,6 +213,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "value_topic",     [&](auto const& v){ value_topic_   = get_string(v,"value_topic"); });
     apply_param(params, "range_topic",     [&](auto const& v){ range_topic_   = get_string(v,"range_topic"); });
     apply_param(params, "mind_topic",      [&](auto const& v){ mind_topic_    = get_string(v,"mind_topic"); });
+    apply_param(params, "target_out_topic", [&](auto const& v){ target_out_topic_ = get_string(v,"target_out_topic"); });
     apply_param(params, "proximity_range", [&](auto const& v){ proximity_range_ = get_double(v,"proximity_range"); });
     apply_param(params, "min_conf",        [&](auto const& v){ min_conf_      = float(get_double(v,"min_conf")); });
     apply_param(params, "arrive_m",        [&](auto const& v){ arrive_m_      = get_double(v,"arrive_m"); });
@@ -452,6 +457,14 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         r->tick_id = tick_id; r->producer_id = out->producer_id; r->sensor = "seek_range";
         r->values = Eigen::VectorXf::Constant(1, float(range_left_));
         bus_->publish(range_topic_, r);
+    }
+    if (!target_out_topic_.empty()) {
+        auto tt = std::make_shared<ProprioToken>();
+        tt->tick_id = tick_id; tt->producer_id = out->producer_id; tt->sensor = "seek_target";
+        tt->values = Eigen::VectorXf(5);
+        tt->values[0] = have_target_ ? 1.0f : 0.0f; tt->values[1] = float(tx_); tt->values[2] = float(ty_);
+        tt->values[3] = float(target_set_tick_); tt->values[4] = (chasing_ || coasting_) ? 1.0f : 0.0f;
+        bus_->publish(target_out_topic_, tt);
     }
     if (!mind_topic_.empty()) {
         if (chasing_ || coasting_) { mind_from_ = tick_id; have_mind_ = true; }
