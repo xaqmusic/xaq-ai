@@ -1312,6 +1312,7 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
+double g_neck_burst_s = 0.0, g_neck_burst_gap_s = 4.0;   // --neck-burst SECS [GAP] (§17.113 N1): in a chase, walking, the mover ahead, the slide at its forward limit for SECS, at most every GAP s
 bool g_dash = false; double g_dash_lean = 0.0, g_dash_release = 0.0;   // --dash [SIN [DEG]]: DEG the lean (deg) a dash is released at (0 = the stop's hand-off lean)   // --dash [SIN]: the lean target's sine (0 = 1.5 x the hand-off lean)   // --dash (§17.113 D1): a chase confirmed at a stand leans the standing brain toward the mover; the lean hand-off releases a run   // --stop-head-hold (§17.113 H2): at the stand the head's pitch, roll and neck held where the walk left them   // --impeded-not-chasing (§17.113 M2): the impeded look does not judge a chase -- a mover not closing is the chase's business
 // --freeze-walker (2026-10-03): the walker's learning off for the whole run (the learned chase's practice)
 bool g_freeze_walker = false;
@@ -1934,8 +1935,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     }
     enum class StopPhase { None, Settle, Brain, Walker };
     StopPhase stop_phase = StopPhase::None;
-    bool head_hold_on = false; std::array<double, 3> head_hold{};
-    int dash_left = 0, dashes = 0, dash_released = 0, dash_timeouts = 0;   // §17.113 D1   // §17.113 H2: the head held at the stand (neck, head pitch, head roll)
+    bool head_hold_on = false; std::array<double, 3> head_hold{};   // §17.113 H2: the head held at the stand (neck, head pitch, head roll)
+    int dash_left = 0, dashes = 0, dash_released = 0, dash_timeouts = 0;   // §17.113 D1
+    int neck_burst_left = 0, neck_burst_since = 1 << 30, neck_bursts = 0;  // §17.113 N1
     const int stop_period = int(g_stop.every_s * kBrainHz), stop_ticks = int(g_stop.secs * kBrainHz);
     const int stop_from = int(g_stop.from_s * kBrainHz), stop_settle_ticks = std::max(1, int(g_stop.settle_s * kBrainHz));
     int stop_left = 0, stop_settle_left = 0, stop_confirm = 0;
@@ -2707,6 +2709,17 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                                          q[2] - kHomePose[2]);            // the left hip pitch: the stride clock
             if (driver == Driver::Brain) command.head = hcmd;
         }
+        if (g_neck_burst_s > 0.0 && g_translate > 0.0) {
+            // §17.113 N1, the causal test: a burst of the neck forward while a chase walks toward a mover ahead
+            ++neck_burst_since;
+            if (neck_burst_left > 0) --neck_burst_left;
+            const bool chasing = chase_on && (brain.chase_active() || brain.chase_coasting());
+            if (neck_burst_left > 0 && (!chasing || stop_phase != StopPhase::None)) neck_burst_left = 0;   // the chase or the walk ended
+            if (neck_burst_left == 0 && chasing && stop_phase == StopPhase::None && driver == Driver::Brain
+                && std::cos(brain.seek_ego()) > 0.0 && neck_burst_since >= int(g_neck_burst_gap_s * kBrainHz)) {
+                neck_burst_left = int(g_neck_burst_s * kBrainHz); neck_burst_since = 0; ++neck_bursts;
+            }
+        }
         std::array<double, 4> head_targets{};
         bool head_owns_joints = false;
         if (stop_phase != StopPhase::Brain) head_hold_on = false;   // H2: the hold is taken afresh at each stand
@@ -2736,7 +2749,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 // servo, centred at stops; the policy is told it (it was trained to carry a commanded head)
                 static double fore = 0.0;
                 g_fore_now = fore;
-                const double want = stop_phase == StopPhase::None ? brain.head_fore_target() : 0.0;
+                double want = stop_phase == StopPhase::None ? brain.head_fore_target() : 0.0;
+                if (neck_burst_left > 0 && stop_phase == StopPhase::None) want = g_translate * 1.10;   // §17.113 N1: the burst, the slide at its forward limit
                 fore += std::clamp(want - fore, -g_translate_rate / kBrainHz, g_translate_rate / kBrainHz);
                 head_targets[0] -= fore; head_targets[1] -= fore;
                 command.head[0] = -fore; command.head[1] = -fore;
@@ -3177,6 +3191,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 std::printf(",\"head\":[%.4f,%.4f,%.4f,%.4f],\"hg\":[%.4f,%.4f,%.4f],\"hw\":[%.4f,%.4f,%.4f]",
                             hc[0], hc[1], hc[2], hc[3], hg[0], hg[1], hg[2], hw[0], hw[1], hw[2]);
                 if (g_translate > 0.0) std::printf(",\"fore\":%.4f", g_fore_now);
+                if (g_neck_burst_s > 0.0) std::printf(",\"nb\":%d", neck_burst_left > 0 ? 1 : 0);
             }
             std::printf("}\n");
         }
@@ -3246,6 +3261,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
         if (g_stop.by_look) std::fprintf(stderr, "  look stops: %d of %d started by the arbiter's look, %d ended when it lost the body\n", stops_byl, stops_started, stops_byl_lost);
+        if (g_neck_burst_s > 0.0) std::fprintf(stderr, "  neck bursts: %d (the slide at its forward limit for %.1f s in a chase, at most every %.1f s)\n", neck_bursts, g_neck_burst_s, g_neck_burst_gap_s);
         if (g_dash) std::fprintf(stderr, "  dashes: %d leaned toward a mover, %d released by the lean hand-off, %d timed out\n", dashes, dash_released, dash_timeouts);
         if (chase_on) { const auto cf = brain.chase_cand_fates();
             std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase; candidates not chased: %d replaced (missed the gate), %d too fast, %d still, %d timed out; targets taken from the walk: %d; chases yielded near tall structure: %d, sightings dropped at a yielded place: %d; static targets yielded near tall structure: %d, sightings dropped there: %d; targets forgotten for no progress: %d\n",
@@ -3582,6 +3598,9 @@ int main(int argc, char** argv) {
             g_stop.on_lost = true;
         } else if (a == "--stop-on-chase") {
             g_stop.on_chase = true;
+        } else if (a == "--neck-burst") {
+            g_neck_burst_s = std::stod(next("--neck-burst"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_neck_burst_gap_s = std::stod(next("--neck-burst"));
         } else if (a == "--dash") {
             g_dash = true;
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_dash_lean = std::stod(next("--dash"));
