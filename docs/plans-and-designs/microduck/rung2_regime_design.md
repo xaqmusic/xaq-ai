@@ -7453,3 +7453,11 @@ a need that holds the body until it spends itself. As a loop:
 It sits in the arbiter above look and play (the look's gate already reads the mover in mind), owns the gaze while a mover is in
 mind, and every scaffold that stops the body (the impeded look, the arrival stop, the stuck stop) yields to it while its need
 stands. The phantom (O69) is its search phase.
+
+**M2 measured (`log/ten/tc4`, n = 24, on M1, the constant train).** Stops starting inside a chase 3.2 → 0.3 a run (impeded 3.0 →
+0.08); standing within 4 s after a chase 6.8 → 2.3 s. The chase does not lengthen: the moving train chased 31.1 → 28.1 s a run
+(M1 → M2, inside the noise; baseline 23.4), pursuit 26.3 → 21.8 s; falls 2.88 → 4.42 (vs the baseline 4.05: a tie); boring,
+walls, the first minute, skills tie. **`WORKING` on its mechanism (the interruption the operator saw is gone), `NULL` on the
+chase's length** — the chase ends for another reason once it is no longer stopped: the sightings run out (coverage, §17.106)
+and the pursuit coasts to its loss. That is the stalk loop's job (search, the gaze, interest that spends itself). Preset "M2"
+for the eye (seed 1 at 320, 450, 515 s).
