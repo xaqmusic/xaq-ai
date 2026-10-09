@@ -385,7 +385,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         }
         // the yaw rate that closes the error in tau seconds, minus damping on the sensed rate, in rad/s
         const double want = -err / hr_tau_ - hr_damp_ * vel_body[2];
-        const double reflex = std::clamp(want, -yaw_range_, yaw_range_);
+        const double rr = reflex_range_override_ > 0.0 ? reflex_range_override_ : yaw_range_;   // §17.113 T1
+        const double reflex = std::clamp(want, -rr, rr);
         // the share: 1 with nothing within the gate's reach, 0 at a wall (the brain's avoidance keeps the yaw)
         // the seek gate covers the reflex too (2026-09-29, sweep 19: the reflex closed on its target at 1-1.5 m and was
         // released within a metre of it -- the thing walked to is a ToF hit -- handing yaw to the avoidance that orbits it)

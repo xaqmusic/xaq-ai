@@ -1312,6 +1312,7 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
+double g_chase_yaw_range = 0.0;   // --chase-yaw-range R (§17.113 T1): the heading reflex's yaw clamp while a mover is chased (0 = the walker's range)
 double g_neck_burst_s = 0.0, g_neck_burst_gap_s = 4.0;   // --neck-burst SECS [GAP] (§17.113 N1): in a chase, walking, the mover ahead, the slide at its forward limit for SECS, at most every GAP s
 bool g_dash = false; double g_dash_lean = 0.0, g_dash_release = 0.0;   // --dash [SIN [DEG]]: DEG the lean (deg) a dash is released at (0 = the stop's hand-off lean)   // --dash [SIN]: the lean target's sine (0 = 1.5 x the hand-off lean)   // --dash (§17.113 D1): a chase confirmed at a stand leans the standing brain toward the mover; the lean hand-off releases a run   // --stop-head-hold (§17.113 H2): at the stand the head's pitch, roll and neck held where the walk left them   // --impeded-not-chasing (§17.113 M2): the impeded look does not judge a chase -- a mover not closing is the chase's business
 // --freeze-walker (2026-10-03): the walker's learning off for the whole run (the learned chase's practice)
@@ -2136,6 +2137,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const double fore = -0.5 * ((qf[5] - kHomePose[5]) + (qf[6] - kHomePose[6]));
             brain.feed_head_fore(fore / (std::max(g_translate, 0.05) * 1.10));
         }
+        if (g_chase_yaw_range > 0.0)   // §17.113 T1: the reflex may turn as hard as the policy can while a mover is chased
+            brain.set_reflex_range_override(chase_on && (brain.chase_active() || brain.chase_coasting()) ? g_chase_yaw_range : 0.0);
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
         if (cloud_on) {
@@ -3607,6 +3610,8 @@ int main(int argc, char** argv) {
             DuckBody::train_contacts = true;
         } else if (a == "--bam-dump") {
             DuckBody::bam.dump = next("--bam-dump");
+        } else if (a == "--chase-yaw-range") {
+            g_chase_yaw_range = std::stod(next("--chase-yaw-range"));
         } else if (a == "--neck-burst") {
             g_neck_burst_s = std::stod(next("--neck-burst"));
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_neck_burst_gap_s = std::stod(next("--neck-burst"));
