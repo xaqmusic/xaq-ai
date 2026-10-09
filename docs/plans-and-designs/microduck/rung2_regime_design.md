@@ -7577,3 +7577,16 @@ After a 15° sprint the chase loses the train (the view shakes in the sprint), t
 second (seed 14, 375.6 s); walking resumes after a short stand. **12.5° is the compromise on the operator's criterion (no falls,
 a burst, walking on about half the time); 15° is the dash the operator described, at the cost of a pause and an occasional
 fall.** Presets "D · THE DASH at 12.5 deg" and "at 15 deg" for the eye.
+
+**The operator's eye on H2 and D1 (2026-10-09): both reverted.** H2: "during the look the head no longer pitches, it only yaws —
+the robot looks very stiff during the look, and the cloud's errors make interactions with small objects less accurate"
+(the numbers agreed: outcomes observed 67 → 55 %). D1: "the lean forward and recover speeds up briefly, but it mostly looks like
+an accident." Both stay in the code behind their flags (off = byte-identical); the dash presets are removed. **H2 `REGRESSION`
+(the look), D1 `NULL` (on the eye).** Re-use: the head's stale pitch at the stand still wants a fix that leaves the look its pitch
+(the hold only through the takeover's first second); the dash, never from a stand.
+
+**The operator's next idea: a burst from the neck while walking** — the neck extends the head farther forward for a short burst of
+speed. The record agrees in correlation: on the walk (H2's runs, `fore` logged), the bird's-neck slide at the forward end of
+its range (+0.6, +0.7 of the 0.66 rad limit) goes with a real speed of 0.19–0.21 m/s against 0.105–0.127 everywhere else, at a
+similar or lower speed command (0.21–0.29 against 0.31 at 0); and on the six-motor arm (§17.86) the walker's speed tonic ran
+through the head's pitch. Not yet causal: the walker owns the slide, and may push the head out because it is already fast.
