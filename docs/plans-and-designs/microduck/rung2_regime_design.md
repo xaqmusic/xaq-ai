@@ -7590,3 +7590,19 @@ speed. The record agrees in correlation: on the walk (H2's runs, `fore` logged),
 its range (+0.6, +0.7 of the 0.66 rad limit) goes with a real speed of 0.19–0.21 m/s against 0.105–0.127 everywhere else, at a
 similar or lower speed command (0.21–0.29 against 0.31 at 0); and on the six-motor arm (§17.86) the walker's speed tonic ran
 through the head's pitch. Not yet causal: the walker owns the slide, and may push the head out because it is already fast.
+
+**N1, the causal test of the neck burst (host `--neck-burst 1.5 4`: in a chase, walking, the mover ahead, the slide driven to its
+forward limit for 1.5 s, at most every 4 s; `a1v2_m2_ambush`, `log/ten/tc10`, n = 24, on A1; instrument
+`mj_host/tools/neck_burst_readout.py`).** 490 bursts. Chase windows on the walk: speed 0.166 m/s in a burst against 0.151 without
+(paired by run +0.014, CI [+0.009, +0.020]); the slide reaches +0.45 on average (its 1 rad/s rate limit), and the trunk pitches
+LESS nose-down in a burst (+0.019 against +0.060 rad) — the policy leans the trunk back against the head's forward mass. Falls
+3.67 → 3.83 a run (tie); 14 of 92 falls within 3 s of a burst's start (2.9 % of bursts). Chase time, walls, the ten-minute set
+tie. **`WORKING` and small: the neck has authority over speed (+9 %), not a burst.** The correlation that motivated it (0.19–0.21
+m/s with the slide forward) was mostly the reverse: the walker extends the neck when it is already fast.
+
+**What caps the speed (★ A1's own walks, one-second windows, `log/ten/tc7`):** commanded straight ahead at ≥ 0.3 m/s (|yaw| <
+0.15) the body moves 0.147 m/s median (p90 0.175); turning, 0.128–0.138. Pollen's walking task trains forward commands up to
+±0.4 m/s (`microduck_rl/.../microduck_velocity_env_cfg.py`: `lin_vel_x = (-0.4, 0.4)`); in our host it delivers ~40 % of the
+command. The train (0.2 m/s) is faster than the duck can walk. Open, and the larger lever: why the policy tracks speed so
+poorly here (the head brain's joints and the bird's neck in place of the policy's own trained head? the playroom floor? the
+body model?) — a probe of the plain walker on the same command answers it.
