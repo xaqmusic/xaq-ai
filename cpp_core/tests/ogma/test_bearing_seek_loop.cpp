@@ -716,3 +716,17 @@ TEST(BearingSeekLoop, AChasedMoversSightingsArePublishedForTheMotionMap) {
     ASSERT_TRUE(r.m.chasing());
     EXPECT_GE(fresh, 3) << "one token per confirmed sighting once chased, none before";
 }
+
+TEST(BearingSeekLoop, AnAmbushPlaceIsHeldNotReached) {
+    ogma::ParamMap p = chase_params(); p["ambush_topic"] = std::string("amb"); p["target_out_topic"] = std::string("tt");
+    Rig r(p);
+    auto amb = [&](float have, float need) { auto a = std::make_shared<ogma::ProprioToken>(); a->values.resize(5); a->values << have, 1.0f, 0.0f, need, 0.0f; r.bus.publish("amb", a); };
+    for (int i = 0; i < 3; ++i) { amb(1.0f, 0.6f); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f); }
+    ASSERT_TRUE(r.m.have_target()); EXPECT_NEAR(r.m.value(), 0.6f, 1e-6f);
+    for (int i = 0; i < 20; ++i) { amb(1.0f, 0.6f); r.step(1.0, 0, 0, 0.0f, 0.0f, 0.0f); }     // standing on the place
+    EXPECT_TRUE(r.m.have_target()) << "held: no arrival drop at an ambush place";
+    EXPECT_EQ(r.m.arrivals(), 0);
+    amb(0.0f, 0.0f); r.step(1.0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r.m.have_target()) << "the stalk let go";
+    auto tt = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("tt")); ASSERT_TRUE(tt); ASSERT_EQ(tt->values.size(), 6);
+}

@@ -3044,6 +3044,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
               if (!oc.empty()) std::printf(",\"outc\":[%d,%.3f,%.3f,%.2f,%d,%d]", int(oc[0]), oc[1], oc[2], oc[3], int(oc[4]), oc.size() > 5 ? int(oc[5]) : 0); }
             { const auto lk = brain.look_now();      // the look loop (§17.112): [need, prediction, in a stop, realized, predicted]
               if (!lk.empty()) std::printf(",\"look\":[%.3f,%.3f,%d,%.3f,%.3f]", lk[0], lk[1], int(lk[2]), lk[3], lk[4]);
+              const auto amb = brain.ambush_now();         // §17.113 A1: [have, x, y, need, waiting] when the stalk loop is wired
+              if (!amb.empty() && amb[0] > 0.5) std::printf(",\"amb\":[%.3f,%.3f,%.3f,%d]", amb[1], amb[2], amb[3], int(amb[4]));
               const auto mvp = brain.mover_pos_now();      // §17.113 A0: a confirmed mover sighting and its motion-map node
               if (!mvp.empty()) std::printf(",\"mvp\":[%.4f,%.4f,%d,%d]", mvp[0], mvp[1], int(mvp[2]), int(mvp[3]));
               const auto tb = brain.thing_belief_now();    // §17.113: [presence, confirming, refuting, since, have], when wired

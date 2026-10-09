@@ -606,6 +606,11 @@ double IntentAdapter::look_gain() const {
     auto g = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("arbiter.gain.look"));
     return (g && g->values.size() > 0) ? double(g->values[0]) : 0.0;
 }
+std::vector<double> IntentAdapter::ambush_now() const {
+    auto a = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.cognitive.ambush"));
+    if (!a || a->values.size() < 5) return {};
+    return std::vector<double>(a->values.data(), a->values.data() + 5);
+}
 std::vector<double> IntentAdapter::mover_pos_now() const {
     auto mp = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.proprio.mover_pos"));
     if (!mp || mp->values.size() < 2 || mp->tick_id == mover_pos_seen_) return {};

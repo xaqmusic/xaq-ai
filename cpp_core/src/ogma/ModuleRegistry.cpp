@@ -22,6 +22,7 @@
 #include "ogma/modules/LoopCompetence.hpp"
 #include "ogma/modules/LookLoop.hpp"
 #include "ogma/modules/ThingBelief.hpp"
+#include "ogma/modules/StalkLoop.hpp"
 #include "ogma/modules/TofAvoidLoop.hpp"
 #include "ogma/modules/BearingSeekLoop.hpp"
 #include "ogma/modules/SkillOutcomeLoop.hpp"
@@ -147,6 +148,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("LoopCompetence",        [](){ return std::make_unique<LoopCompetence>(); });       // Cell round 4, register O21
         reg.register_type("LookLoop",              [](){ return std::make_unique<LookLoop>(); });             // the duck: the stop-and-look as a loop (§17.112)
         reg.register_type("ThingBelief",           [](){ return std::make_unique<ThingBelief>(); });          // the duck: what the targeted thing is doing (§17.113)
+        reg.register_type("StalkLoop",             [](){ return std::make_unique<StalkLoop>(); });            // the duck: the hunter's ambush (§17.113)
         reg.register_type("TofAvoidLoop",          [](){ return std::make_unique<TofAvoidLoop>(); });         // duck §17.6: avoidance as a loop with a bearing
         reg.register_type("BearingSeekLoop",       [](){ return std::make_unique<BearingSeekLoop>(); });      // duck things phase T2: seeking a thing seen only at stops
         reg.register_type("SkillOutcomeLoop",      [](){ return std::make_unique<SkillOutcomeLoop>(); });     // duck things phase: learning what a kick does (O54)

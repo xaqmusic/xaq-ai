@@ -38,6 +38,7 @@ std::vector<TopicSpec> BearingSeekLoop::input_topics() const {
                               TopicSpec{pose_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
     if (!renew_topic_.empty()) v.push_back(TopicSpec{renew_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!release_topic_.empty()) v.push_back(TopicSpec{release_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    if (!ambush_topic_.empty()) v.push_back(TopicSpec{ambush_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!pull_topic_.empty()) v.push_back(TopicSpec{pull_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!situation_topic_.empty()) v.push_back(TopicSpec{situation_topic_, std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false});
     if (!mover_topic_.empty()) v.push_back(TopicSpec{mover_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
@@ -91,6 +92,11 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"lead_eval_ticks", ParamMutability::HotMutable, "How long one option is tried before its outcome is recorded (ticks).", ParamValue{int64_t{50}}},
         {"lead_min_samples", ParamMutability::HotMutable, "An option with fewer outcomes than this in a situation is tried first.", ParamValue{int64_t{2}}},
         {"restore_lead_only", ParamMutability::ConstructionOnly, "A restored snapshot brings the lead table and nothing else.", ParamValue{false}},
+        {"ambush_topic", ParamMutability::ConstructionOnly,
+         "§17.113 A1: the stalk loop's [have, x, y, need, waiting]: with nothing held and nothing chased, the loop goes to the "
+         "ambush place (target source 4) with the stalk's need, and HOLDS it there (no arrival drop: the body waits, the head "
+         "free); dropped when the stalk lets go.  A thing seen or a mover chased takes over as ever.  Empty = off.",
+         ParamValue{std::string("")}},
         {"mover_pos_topic", ParamMutability::ConstructionOnly,
          "§17.113 A0: [x / 2, y / 2] (odometry, the place map's pose scale) on every confirmed sighting of a chased mover -- the "
          "input of a motion map (an EPM over where movers pass).  Empty = not published.", ParamValue{std::string("")}},
@@ -195,7 +201,7 @@ ParamMap BearingSeekLoop::current_params() const {
     ParamMap m;
     m["bearing_topic"] = ParamValue{bearing_topic_}; m["pose_topic"] = ParamValue{pose_topic_};
     m["output_topic"] = ParamValue{output_topic_}; m["value_topic"] = ParamValue{value_topic_};
-    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_}; m["target_out_topic"] = ParamValue{target_out_topic_}; m["release_topic"] = ParamValue{release_topic_}; m["static_motion_check"] = static_motion_check_; m["mover_pos_topic"] = ParamValue{mover_pos_topic_};
+    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_}; m["target_out_topic"] = ParamValue{target_out_topic_}; m["release_topic"] = ParamValue{release_topic_}; m["static_motion_check"] = static_motion_check_; m["mover_pos_topic"] = ParamValue{mover_pos_topic_}; m["ambush_topic"] = ParamValue{ambush_topic_};
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
     m["pull_topic"] = ParamValue{pull_topic_}; m["publish_chase_flag"] = ParamValue{publish_chase_flag_};
@@ -229,6 +235,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "target_out_topic", [&](auto const& v){ target_out_topic_ = get_string(v,"target_out_topic"); });
     apply_param(params, "release_topic",   [&](auto const& v){ release_topic_ = get_string(v,"release_topic"); });
     apply_param(params, "mover_pos_topic", [&](auto const& v){ mover_pos_topic_ = get_string(v,"mover_pos_topic"); });
+    apply_param(params, "ambush_topic",    [&](auto const& v){ ambush_topic_ = get_string(v,"ambush_topic"); });
     apply_param(params, "static_motion_check", [&](auto const& v){
         if (auto b = std::get_if<bool>(&v)) static_motion_check_ = *b; else static_motion_check_ = get_double(v,"static_motion_check") > 0.5; });
     apply_param(params, "proximity_range", [&](auto const& v){ proximity_range_ = get_double(v,"proximity_range"); });
@@ -429,7 +436,11 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         range_left_ = std::hypot(dx, dy);
         const double bx =  c * dx + s * dy;                               // world → body
         const double by = -s * dx + c * dy;
-        if (range_left_ < arrive_m_) {
+        if (target_src_ == 4) {
+            // §17.113 A1: the ambush place -- held, not reached: the body waits there (the walker's range-scaled speed falls
+            // to nothing), the need the stalk's own
+            if (range_left_ > 1e-6) { cx_ = float(-by / range_left_); cy_ = float(bx / range_left_); } else { cx_ = 0.0f; cy_ = 0.0f; }
+        } else if (range_left_ < arrive_m_) {
             have_target_ = false; conf_ = 0.0f; ++arrivals_;              // reached: the belief is fulfilled
             cx_ = 0.0f; cy_ = 0.0f;
         } else {
@@ -478,6 +489,22 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
                 have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++static_yielded_;
             }
     }
+    // §17.113 A1: the ambush -- taken when nothing is held or chased, followed while held, dropped when the stalk lets go
+    if (!ambush_topic_.empty()) {
+        bool ah = false; double ax = 0.0, ay = 0.0, an = 0.0;
+        if (auto at = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(ambush_topic_)))
+            if (at->values.size() >= 4) { ah = at->values[0] > 0.5f; ax = at->values[1]; ay = at->values[2]; an = at->values[3]; }
+        if (have_target_ && target_src_ == 4 && !chasing_ && !coasting_) {
+            if (!ah) { have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++ambush_released_; }
+            else { tx_ = ax; ty_ = ay; conf_ = float(std::clamp(an, 0.0, 1.0)); }
+        } else if (!have_target_ && !chasing_ && !coasting_ && ah && have_pose_) {
+            tx_ = ax; ty_ = ay; have_target_ = true; target_set_tick_ = tick_id; target_px_ = tx_; target_py_ = ty_; target_src_ = 4;
+            conf_ = float(std::clamp(an, 0.0, 1.0)); ++ambush_taken_;
+            const double dx = tx_ - px_, dy = ty_ - py_; range_left_ = std::hypot(dx, dy);
+            const double bx = c * dx + s * dy, by = -s * dx + c * dy;
+            if (range_left_ > 1e-6) { cx_ = float(-by / range_left_); cy_ = float(bx / range_left_); }
+        }
+    }
     // §17.113 T2: the thing belief refutes the static target -- drop it before the walk ends at an empty place
     if (!release_topic_.empty() && have_target_ && !chasing_ && !coasting_)
         if (auto rl = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(release_topic_)))
@@ -506,9 +533,10 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
     if (!target_out_topic_.empty()) {
         auto tt = std::make_shared<ProprioToken>();
         tt->tick_id = tick_id; tt->producer_id = out->producer_id; tt->sensor = "seek_target";
-        tt->values = Eigen::VectorXf(5);
+        tt->values = Eigen::VectorXf(6);
         tt->values[0] = have_target_ ? 1.0f : 0.0f; tt->values[1] = float(tx_); tt->values[2] = float(ty_);
         tt->values[3] = float(target_set_tick_); tt->values[4] = (chasing_ || coasting_) ? 1.0f : 0.0f;
+        tt->values[5] = float(target_src_);   // 1 a sighting, 2 a renewal, 3 a stopped chase, 4 an ambush (§17.113 A1)
         bus_->publish(target_out_topic_, tt);
     }
     if (!mind_topic_.empty()) {
@@ -773,7 +801,7 @@ void BearingSeekLoop::restore_state(nlohmann::json const& s) {
 }
 nlohmann::json BearingSeekLoop::diag_lite() const {
     return nlohmann::json{{"seen", seen_}, {"target", have_target_}, {"value", value_}, {"range", range_left_},
-                          {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}, {"refixes", refixes_}, {"static_promoted", static_promoted_}, {"released", released_}};
+                          {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}, {"refixes", refixes_}, {"static_promoted", static_promoted_}, {"released", released_}, {"ambush_taken", ambush_taken_}, {"ambush_released", ambush_released_}};
 }
 nlohmann::json BearingSeekLoop::diag_snapshot() const {
     nlohmann::json j = diag_lite();

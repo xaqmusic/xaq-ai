@@ -92,6 +92,7 @@ private:
     // (Laplace: (ans + 1) / (n + 2)).  An answer is a displacement above answer_m (two voxels).  The seek loop's need for
     // a sighted thing.  Both empty = off (byte-identical).
     std::string context_topic_, pull_topic_;
+    std::string target_topic_; int last_src_ = 0;   // §17.113 A1
     int    context_n_ = 4, ctx_ = 0, kctx_ = 0;
     // context_pool_min (S3b): the pooled outcomes a context needs before it lends its answered share to an uncertain cell;
     // 0 = min_samples x the intents (S3 as first built, starved at ~10 answers a run, §17.99)

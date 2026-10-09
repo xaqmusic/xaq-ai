@@ -319,7 +319,8 @@ public:
     double look_gain() const;
     std::vector<double> look_commit_now() const;
     std::vector<double> thing_belief_now() const;
-    std::vector<double> mover_pos_now() const;     // §17.113 A0: [x/2, y/2, the motion map's winner, its nodes] on a fresh confirmed mover sighting; empty otherwise  // §17.113: the ThingBelief token, if the graph has one; empty otherwise   // [commit, look gain] when the look publishes a commitment; empty otherwise               // the arbiter's gain for the look (arbiter.gain.look); 0 when absent   // the look loop's value token, if the graph has one (§17.112); empty otherwise
+    std::vector<double> mover_pos_now() const;
+    std::vector<double> ambush_now() const;        // §17.113 A1: the stalk loop's [have, x, y, need, waiting]; empty if absent     // §17.113 A0: [x/2, y/2, the motion map's winner, its nodes] on a fresh confirmed mover sighting; empty otherwise  // §17.113: the ThingBelief token, if the graph has one; empty otherwise   // [commit, look gain] when the look publishes a commitment; empty otherwise               // the arbiter's gain for the look (arbiter.gain.look); 0 when absent   // the look loop's value token, if the graph has one (§17.112); empty otherwise
     double cloud_revisit()   const;
     double cloud_revisit_dist() const;
     int    cloud_cached()    const;
