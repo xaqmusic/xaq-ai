@@ -7500,3 +7500,17 @@ mover it cannot catch. **A hunter with a slow body intercepts or waits.** Three 
   waits that see nothing. The train returns every ~37 s (7.48 m of track at 0.2 m/s).
 - (c) **motion-seeking gaze after a loss:** the head scans along the mover's predicted path and its learned passing places
   (coverage is the limit, §17.106) before the body commits.
+
+**The operator's fork (2026-10-09): ambush / intercept first.** A0, the motion map, passive (`a1v2_m2_motion_map`, `log/ten/tc6`,
+n = 24, tick for tick ★ M2): the seek loop's `mover_pos_topic` (each confirmed sighting of a chased mover, odometry / 2) into an
+EPM (`motion_map_epm`, rbf, ≤ 24 nodes); instrument `mj_host/tools/motion_map_readout.py`. 249 sightings a run (the first at
+46 s median), error to the train's true position 0.12 m median; 8.5 nodes at the end (3.8 with ≥ 5 sightings); a node's
+centroid 0.08 m from the train's path median (p75 0.31), its spread 0.17 m (p75 0.42 — the dead reckoning's drift); 55 % of
+nodes collect ≥ 2 passes. **`WORKING` (passive): the map learns where the mover passes, on the track, within the odometry's
+drift.**
+
+**A1, the ambush (design):** after a lost chase, while the stalk's interest stands, the seek loop is sent to a learned passing
+place (a node with ≥ 2 passes, the nearest the body), the body waits there watching, and the wait lasts as long as the
+mover's own return at that node predicts (the median interval between its passes there, learned from the map's recurrence;
+no constant). A wait that outlasts the predicted return without a sighting spends interest; any chase restores it. An
+ambush arrival is not a thing's arrival: no skill is asked for there.
