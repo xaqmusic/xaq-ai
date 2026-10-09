@@ -1528,6 +1528,7 @@ std::string g_load_brain_modules = "motor_epm_intent";   // --load-brain-modules
 // a mover, the forward command is raised to at least VX -- the walker's trained range reaches 0.4 m/s and the brain's own
 // pace is ~0.22.  A global lean (--body-pitch, --head-forward) bought falls; speed spent only on the chase.  0 = off.
 double g_chase_vx = 0.0;
+bool   g_chase_vx_facing = false;   // --chase-vx-facing (§17.113 C1): the chase's forward floor scaled by max(0, cos) of the mover's bearing
 // --chase-gaze GAIN (2026-09-29, the operator: "the robot should be able to turn its head while it's walking to try to
 // reacquire the moving target"): on the walk, the head yaw target is offset by GAIN x the bearing of the chased target,
 // or of the lost mover's extrapolated memory, clamped to +-0.7 rad; nothing moving in mind = the head brain's own.  0 = off.
@@ -1664,7 +1665,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
     if (g_chase_gaze > 0.0) std::fprintf(stderr, "  chase gaze: on the walk the head yaw turns toward the chased target or the lost mover's memory (gain %.2f, +-0.7 rad)\n", g_chase_gaze);
-    if (g_chase_vx > 0.0) std::fprintf(stderr, "  chase vx: the forward command raised to at least %.2f m/s while a mover is chased or coasted after\n", g_chase_vx);
+    if (g_chase_vx > 0.0) std::fprintf(stderr, "  chase vx: the forward command raised to at least %.2f m/s while a mover is chased or coasted after%s\n", g_chase_vx,
+                                       g_chase_vx_facing ? ", scaled by max(0, cos) of its bearing (the nose must face it)" : "");
     if (g_head_forward != 0.0) std::fprintf(stderr, "  head forward: the neck and head pitch targets offset by %.2f rad (the head over the feet)\n", g_head_forward);
     if (g_body_pitch != 0.0) std::fprintf(stderr, "  body pitch: the walker's body_pitch command slot set to %.2f rad\n", g_body_pitch);
     if (g_stop.on_lost) std::fprintf(stderr, "  stop on lost: a stop starts when a chase is lost, its sweep centred on where the thing was last predicted (a look, not a walk)\n");
@@ -2145,7 +2147,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (driver == Driver::Brain) command.twist = twist;
         if (g_body_pitch != 0.0 && driver == Driver::Brain) command.body_pitch = g_body_pitch;
         if (g_chase_vx > 0.0 && driver == Driver::Brain && chase_on && (brain.chase_active() || brain.chase_coasting()) && stop_phase == StopPhase::None)
-            command.twist[0] = std::max(command.twist[0], g_chase_vx);     // the pursuit at speed
+            command.twist[0] = std::max(command.twist[0], g_chase_vx_facing
+                ? g_chase_vx * std::max(0.0, std::cos(brain.seek_ego()))   // §17.113 C1: the floor only as the nose faces the mover
+                : g_chase_vx);                                              // the pursuit at speed
         if (g_yaw_lin && driver == Driver::Brain) command.twist[2] = yaw_calibrated(command.twist[2], command.twist[0]);   // the yaw motor's calibration
         else if (g_yaw_lin_below > 0.0 && driver == Driver::Brain && std::fabs(command.twist[0]) < g_yaw_lin_below)
             command.twist[2] = yaw_calibrated(command.twist[2], command.twist[0]);   // only the in-place deadband: the walk's own yaw untouched
@@ -3502,6 +3506,8 @@ int main(int argc, char** argv) {
             g_chase_gaze = std::stod(next("--chase-gaze"));
         } else if (a == "--chase-vx") {
             g_chase_vx = std::stod(next("--chase-vx"));
+        } else if (a == "--chase-vx-facing") {
+            g_chase_vx_facing = true;
         } else if (a == "--head-forward") {
             g_head_forward = std::stod(next("--head-forward"));
         } else if (a == "--body-pitch") {

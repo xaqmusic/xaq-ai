@@ -7473,3 +7473,17 @@ during walking to follow the train around the turns. Turning radius in general h
 the mover; the walk cannot: the record's turning limits (§17.90–17.92: the walking policy's in-place yaw deadband, the
 walker's yaw range, the heading loop's limit cycle) — register O67, the navigation, open. A chase on a curved track is the
 sharpest test of it the duck has had.
+
+**The operator (2026-10-09) on falls:** they usually come from walking over a block and from the head tilted back as the stop's
+standing brain takes over; a few are not what makes a run boring. (Weigh falls by their cause and rate, not as a veto.)
+
+**C1, the chase's forward floor scaled by facing (host `--chase-vx-facing`: the floor × max(0, cos) of the mover's bearing;
+`log/ten/tc5`, n = 24, on ★ M2).** Instrument `mj_host/tools/chase_turn.py` (half-second windows of a chase, binned by the target's
+bearing off the nose: commanded and real speed, commanded yaw, the real turn rate, the turning radius). Before (★ M2): the walker
+commanded 0.34–0.38 m/s moves at 0.12–0.14 m/s, turns 0.2–0.5 rad/s (radius 0.26–0.65 m), the target > 60° off 24 % of the
+chase. With C1: the forward command falls only to 0.25–0.32 (the walker's own command sits above the scaled floor — it never
+reaches the 0.15 m/s under which the in-place yaw is compensated), the turn rate unchanged (0.52 rad/s with the target behind),
+the target > 60° off 19 %. The chase 28.1 → 32.7 s a run (CI [−2.4, +11.8]); the block touched in the first minute 20/24 → 16/24
+(CI [−0.33, −0.01]); the rest ties. **`NULL` on the turn, a first-minute `REGRESSION`; not promoted.** The limit is the body:
+whatever the command, it walks 0.11–0.14 m/s (the train runs 0.2) and turns ≤ 0.5 rad/s — the walker and the policy (O67), not
+the chase's floor.
