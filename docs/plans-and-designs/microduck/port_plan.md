@@ -20,6 +20,13 @@
 
 ## ▶ Resume here
 
+**2026-10-09: ★ M2 promoted — the chaser.** The world changed: the train runs constantly (`--train 0.2 8 0`, the operator's
+call, to study belief and moving things). On ★ LOOK 2b: a fixed target that drifts is chased, not walked to (M1), and the
+impeded look no longer stops a chase (M2) — the train chased 23 → 28 s a run, stops inside a chase 3.2 → 0.3. A passive
+`ThingBelief` (the presence of the targeted thing) is in the graph; its evidence is limited by the walking cloud (§17.113).
+**Open, in the operator's words:** the head follows the train but the body cannot turn enough while walking (the turning
+radius, O67); and the hunter's drive — a stalk loop whose interest spends itself only on failed searches (§17.113).
+
 **2026-10-08 (later): ★ LOOK 2b promoted — the stop is a loop.** The timer stop is gone: an arbitrated look loop
 (`LookLoop` + `EFEArbiter`'s fifth policy) starts and ends the stop on what a stop pays (a new target, a skill), held off by
 a chase (design doc §17.112). The operator's eye found what the chase still lacks: a mover seen at a stop becomes a static

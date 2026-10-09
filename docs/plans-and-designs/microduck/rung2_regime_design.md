@@ -7461,3 +7461,15 @@ walls, the first minute, skills tie. **`WORKING` on its mechanism (the interrupt
 chase's length** — the chase ends for another reason once it is no longer stopped: the sightings run out (coverage, §17.106)
 and the pursuit coasts to its loss. That is the stalk loop's job (search, the gaze, interest that spends itself). Preset "M2"
 for the eye (seed 1 at 320, 450, 515 s).
+
+**★ M2 PROMOTED on the operator's eye (2026-10-09): "the best chaser so far without bad effects on other behaviours."** The
+stack is now ★ LOOK 2b + M1 + M2 in the constant-train world: config `a1v2_lk2b_motion_m1` (the thing belief passive in it)
+with ★ LOOK 2b's host args, `--train 0.2 8 0` and `--impeded-not-chasing` (launcher preset ★ M2, first row). On the numbers it
+ties the constant-train baseline; boring (24.9 → 28.4 %) and falls (4.05 → 4.42) lean worse inside the noise. Not measured
+in the stop-go train world.
+
+**The operator's eye on ★ M2 (seed 18 from 170 s):** "I see the head following the train but the body can't turn enough
+during walking to follow the train around the turns. Turning radius in general has been an ongoing issue." The gaze keeps
+the mover; the walk cannot: the record's turning limits (§17.90–17.92: the walking policy's in-place yaw deadband, the
+walker's yaw range, the heading loop's limit cycle) — register O67, the navigation, open. A chase on a curved track is the
+sharpest test of it the duck has had.
