@@ -7427,3 +7427,29 @@ byte-identical. 3.8 targets a run promoted.
   outcome loop's RENEWAL (34 a run) re-arms the seek target at the position it remembers for a thing it wants to watch, and
   that position never learns the thing moved. Next lever: the renewal judged by the thing — refused for a thing seen moving,
   or re-aimed at where the belief says it went. Presets "★ LOOK 2b · CONSTANT TRAIN" (the baseline) and "M1" for the eye.
+
+**The operator's eye on M1, seed 1 (2026-10-09):** "Around 320 the robot sees the train moving and starts a chase with the head
+pointed at the target. However, at 330 the robot stops and looks. This is repeated around 450 and 515, where the robot knows
+the object is moving (the yellow arrow is visible) but stops to look. The brain needs strong tendencies toward moving objects
+(like all animal hunters), so the arbiter chooses chase/stalk behaviours until truly bored with not finding anything moving."
+**The log names it:** all three are the IMPEDED scaffold (`--look-up-when-impeded`: seek steers and its range has not closed by
+5 cm for 3 s → back off, stop, look up). A train running away keeps the range from closing, so the rule fires on exactly what a
+chase is: 325.1 `impeded:back` with the chase active at 0.76 m, the stop at 325.7, the train coasted out of reach (0.9 →
+2.3 m). Over 24 runs: 3.0 impeded stops a run start inside a chase (55 s of chasing a run); nothing else comes close (the look
+after a skill 0.1).
+
+**M2, the impeded look does not judge a chase (host `--impeded-not-chasing`).** Not closing on a mover is the chase's own
+business (its lead, its pursuit), not evidence of an approach blocked. Byte-identical without the flag.
+
+**The drive the operator asks for (design, after M2): a stalk loop.** A hunter's attention to motion is not a tie-break; it is
+a need that holds the body until it spends itself. As a loop:
+- infers: whether something is moving that the body could get to;
+- senses: the mover evidence (the cloud's mover candidates, the chase and its coasting, the mover in mind, the fix's drift —
+  M1's cue);
+- predicts: where the mover will be (the chase's own prediction), and that looking/turning/following will find it again;
+- honest signal: a re-sighting where predicted (the chase re-acquires) or not;
+- need: mover salience — high on motion evidence, held through the losses that a pursuit can recover (the coasting, the
+  memory), spent by failed searches (each search that finds nothing removes some), not by a timer — "until truly bored".
+It sits in the arbiter above look and play (the look's gate already reads the mover in mind), owns the gaze while a mover is in
+mind, and every scaffold that stops the body (the impeded look, the arrival stop, the stuck stop) yields to it while its need
+stands. The phantom (O69) is its search phase.

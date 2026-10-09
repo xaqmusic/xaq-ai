@@ -1310,6 +1310,7 @@ bool g_tof_free_rays = false;
 // never fires: all 41 stops of 40 s or more on the T1 sweep held a walking cloud 99 % of the time and ran to the cap.  The
 // body knows it stopped (it commanded the stop: efference, not an oracle).  Off = byte-identical.
 bool g_stop_is_still = false;
+bool g_imp_not_moving = false;   // --impeded-not-chasing (§17.113 M2): the impeded look does not judge a chase -- a mover not closing is the chase's business
 // --freeze-walker (2026-10-03): the walker's learning off for the whole run (the learned chase's practice)
 bool g_freeze_walker = false;
 // --log-motion (2026-10-02, the chase push): on every tick a new ToF cast reached the graph's MotionField, the record gains
@@ -1667,6 +1668,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_head_forward != 0.0) std::fprintf(stderr, "  head forward: the neck and head pitch targets offset by %.2f rad (the head over the feet)\n", g_head_forward);
     if (g_body_pitch != 0.0) std::fprintf(stderr, "  body pitch: the walker's body_pitch command slot set to %.2f rad\n", g_body_pitch);
     if (g_stop.on_lost) std::fprintf(stderr, "  stop on lost: a stop starts when a chase is lost, its sweep centred on where the thing was last predicted (a look, not a walk)\n");
+    if (g_imp_not_moving) std::fprintf(stderr, "  impeded not chasing: the impeded look does not run while a mover is chased or coasted after\n");
     if (g_stop.by_look) std::fprintf(stderr, "  stop by look: a stop starts while the arbiter's look (the LookLoop's need) holds the body and ends when it loses (the cloud-end rule is not applied to these stops; the --stop-secs cap stays)\n");
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
@@ -2221,7 +2223,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (g_imp_s > 0.0) {
                 // IMPEDED: seek steers and its range has not closed by 5 cm for g_imp_s
                 const bool driving = stop_phase == StopPhase::None && !skill_active && unwind_left == 0 && imp_back_left == 0
-                                     && orient == Orient::None && t >= stop_from && brain.last_steer() == 3 && brain.seek_value() > 0.0;
+                                     && orient == Orient::None && t >= stop_from && brain.last_steer() == 3 && brain.seek_value() > 0.0
+                                     && !(g_imp_not_moving && (brain.chase_active() || brain.chase_coasting()));   // §17.113 M2
                 if (driving) {
                     const double r = brain.seek_range();
                     if (imp_prev < 0.0 || r > imp_prev + 0.2) { imp_best = r; imp_timer = 0; }        // a new target
@@ -3542,6 +3545,8 @@ int main(int argc, char** argv) {
             g_stop.on_lost = true;
         } else if (a == "--stop-on-chase") {
             g_stop.on_chase = true;
+        } else if (a == "--impeded-not-chasing") {
+            g_imp_not_moving = true;
         } else if (a == "--stop-by-look") {
             g_stop.by_look = true;
         } else if (a == "--stop-on-arrive") {
