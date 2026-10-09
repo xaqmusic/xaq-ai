@@ -50,6 +50,7 @@ std::vector<TopicSpec> BearingSeekLoop::output_topics() const {
     if (!range_topic_.empty()) v.push_back(TopicSpec{range_topic_, std::type_index(typeid(ProprioToken))});
     if (!mind_topic_.empty()) v.push_back(TopicSpec{mind_topic_, std::type_index(typeid(ProprioToken))});
     if (!target_out_topic_.empty()) v.push_back(TopicSpec{target_out_topic_, std::type_index(typeid(ProprioToken))});
+    if (!mover_pos_topic_.empty()) v.push_back(TopicSpec{mover_pos_topic_, std::type_index(typeid(ProprioToken))});
     if (!situation_out_topic_.empty()) v.push_back(TopicSpec{situation_out_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
@@ -90,6 +91,9 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"lead_eval_ticks", ParamMutability::HotMutable, "How long one option is tried before its outcome is recorded (ticks).", ParamValue{int64_t{50}}},
         {"lead_min_samples", ParamMutability::HotMutable, "An option with fewer outcomes than this in a situation is tried first.", ParamValue{int64_t{2}}},
         {"restore_lead_only", ParamMutability::ConstructionOnly, "A restored snapshot brings the lead table and nothing else.", ParamValue{false}},
+        {"mover_pos_topic", ParamMutability::ConstructionOnly,
+         "§17.113 A0: [x / 2, y / 2] (odometry, the place map's pose scale) on every confirmed sighting of a chased mover -- the "
+         "input of a motion map (an EPM over where movers pass).  Empty = not published.", ParamValue{std::string("")}},
         {"static_motion_check", ParamMutability::ConstructionOnly,
          "§17.113 M1: a static target's own re-sightings are judged by the chase's speed test -- over chase_v_window_s, a fix that "
          "drifts at chase_min_v or more is a thing MOVING: it becomes a chase (its velocity the drift's), never a place.  "
@@ -191,7 +195,7 @@ ParamMap BearingSeekLoop::current_params() const {
     ParamMap m;
     m["bearing_topic"] = ParamValue{bearing_topic_}; m["pose_topic"] = ParamValue{pose_topic_};
     m["output_topic"] = ParamValue{output_topic_}; m["value_topic"] = ParamValue{value_topic_};
-    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_}; m["target_out_topic"] = ParamValue{target_out_topic_}; m["release_topic"] = ParamValue{release_topic_}; m["static_motion_check"] = static_motion_check_;
+    m["range_topic"] = ParamValue{range_topic_}; m["mind_topic"] = ParamValue{mind_topic_}; m["target_out_topic"] = ParamValue{target_out_topic_}; m["release_topic"] = ParamValue{release_topic_}; m["static_motion_check"] = static_motion_check_; m["mover_pos_topic"] = ParamValue{mover_pos_topic_};
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
     m["pull_topic"] = ParamValue{pull_topic_}; m["publish_chase_flag"] = ParamValue{publish_chase_flag_};
@@ -224,6 +228,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "mind_topic",      [&](auto const& v){ mind_topic_    = get_string(v,"mind_topic"); });
     apply_param(params, "target_out_topic", [&](auto const& v){ target_out_topic_ = get_string(v,"target_out_topic"); });
     apply_param(params, "release_topic",   [&](auto const& v){ release_topic_ = get_string(v,"release_topic"); });
+    apply_param(params, "mover_pos_topic", [&](auto const& v){ mover_pos_topic_ = get_string(v,"mover_pos_topic"); });
     apply_param(params, "static_motion_check", [&](auto const& v){
         if (auto b = std::get_if<bool>(&v)) static_motion_check_ = *b; else static_motion_check_ = get_double(v,"static_motion_check") > 0.5; });
     apply_param(params, "proximity_range", [&](auto const& v){ proximity_range_ = get_double(v,"proximity_range"); });
@@ -572,6 +577,13 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
                 sight_.push_back({double(tick_id), fx, fy});
                 cand_x_ = fx; cand_y_ = fy; cand_tick_ = tick_id; ++cand_n_;
                 if (coasting_) { coasting_ = false; chasing_ = true; ++chases_reacquired_; }   // found where predicted: the chase resumes
+                if (chasing_ && !mover_pos_topic_.empty()) {
+                    // §17.113 A0: where a confirmed mover was seen -- the motion map's input (odometry / 2, the place map's pose scale)
+                    auto mp = std::make_shared<ProprioToken>();
+                    mp->tick_id = tick_id; mp->producer_id = id_.empty() ? std::string("seek") : id_; mp->sensor = "mover_pos";
+                    mp->values = Eigen::VectorXf(2); mp->values[0] = float(fx / 2.0); mp->values[1] = float(fy / 2.0);
+                    bus_->publish(mover_pos_topic_, mp);
+                }
             } else if (!chasing_ && !coasting_) {
                 // an unconfirmed candidate that did not follow: this sighting is the new candidate
                 if (miss <= chase_gate_m_) ++cand_fast_; else ++cand_replaced_;

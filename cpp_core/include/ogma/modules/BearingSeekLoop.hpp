@@ -76,6 +76,7 @@ private:
     std::string mind_topic_    = "";
     std::string target_out_topic_ = "";            // §17.113: [have, x, y, set tick, chasing]
     std::string release_topic_ = "";               // §17.113 T2: the thing belief's refutation
+    std::string mover_pos_topic_ = "";             // §17.113 A0: where confirmed movers were seen
     bool have_release_ = false; double release_x_ = 0.0, release_y_ = 0.0; uint64_t release_tick_ = 0;
     int released_ = 0, release_refusals_ = 0;                 // §17.112 lever 1: [a mover in mind]
     uint64_t    mind_from_ = 0; bool have_mind_ = false;

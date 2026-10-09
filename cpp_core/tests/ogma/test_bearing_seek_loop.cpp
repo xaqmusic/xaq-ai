@@ -703,3 +703,16 @@ TEST(BearingSeekLoop, AStaticSightingThatDriftsIsChasedNotFixed) {
         else        { EXPECT_FALSE(r.m.chasing()) << "still: a place"; EXPECT_EQ(r.m.static_promoted(), 0); EXPECT_TRUE(r.m.have_target()); }
     }
 }
+
+TEST(BearingSeekLoop, AChasedMoversSightingsArePublishedForTheMotionMap) {
+    ogma::ParamMap p = chase_params(); p["mover_pos_topic"] = std::string("reality.proprio.mover_pos");
+    Rig r(p); int fresh = 0;
+    for (int k = 0; k < 14; ++k) {
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        auto mp = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.proprio.mover_pos"));
+        if (mp && mp->tick_id == r.t - 1) { ++fresh; EXPECT_NEAR(mp->values[1], 0.0f, 1e-3f); EXPECT_GT(mp->values[0], 0.5f); }
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(r.m.chasing());
+    EXPECT_GE(fresh, 3) << "one token per confirmed sighting once chased, none before";
+}

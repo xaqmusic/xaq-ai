@@ -606,6 +606,14 @@ double IntentAdapter::look_gain() const {
     auto g = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("arbiter.gain.look"));
     return (g && g->values.size() > 0) ? double(g->values[0]) : 0.0;
 }
+std::vector<double> IntentAdapter::mover_pos_now() const {
+    auto mp = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.proprio.mover_pos"));
+    if (!mp || mp->values.size() < 2 || mp->tick_id == mover_pos_seen_) return {};
+    mover_pos_seen_ = mp->tick_id;                 // each sighting reported once (the adapter's own tick has moved on by the log)
+    double w = -1.0, n = 0.0;
+    if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(instance_->bus()->last_value("reality.cognitive.motion_map"))) { w = rt->winner_id; n = rt->node_count; }
+    return {double(mp->values[0]), double(mp->values[1]), w, n};
+}
 std::vector<double> IntentAdapter::thing_belief_now() const {
     auto b = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.cognitive.thing_belief"));
     if (!b || b->values.size() < 5) return {};
