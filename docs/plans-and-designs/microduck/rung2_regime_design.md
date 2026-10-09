@@ -7530,3 +7530,34 @@ the wait, the interest are the map's record. Unit-tested; A0 and ★ F5 byte-ide
 - **Verdict `PARTIAL`: the hunter waits and it sometimes pays (one ambush in eight); the chase and the walls lean the right
   way, boring and the interactions with things lean the wrong way — all inside the noise.** The eye decides; preset "A1"
   (seed 10: waits that pay at 73, 348, 539, 571 s).
+
+**The operator's eye on A1 (2026-10-09):** "The ambush is showing promise, and the robot's behaviour is already more interesting
+because of it. Movements with the head and looking in the direction of the moving object give the impression that the robot is
+really paying attention to things that are changing in the environment." Before promotion, two issues: (1) the head tilted up
+entering the look → a fall backwards, the chase lost; (2) the turning radius — and an idea for it: a DASH (lean the centre of
+mass forward with the standing brain, release, the policy catches the fall running; seen organically).
+
+**The backward falls at a stop's start (A1, `log/ten/tc7`; instrument `mj_host/tools/stop_falls.py`).** 1.12 backward falls a run
+come within 4 s of a stop's start (0.29 forward). The anatomy (the head's own gravity, the measured joints): at the hand-back to
+the standing brain the head pitch joint goes +0.30 → −0.53 rad in 0.2 s (up), the head's gravity reading 0.04 → 0.83, and the
+duck goes over 0.7 s later. On the walk and through the settle the head sits near its walking angle while the head brain's pitch
+command reads −0.9 to −1.1; at the stand the joints are driven to home + that command (`ctrl = head_targets` under
+`--stop-keep-head`), so a stale command takes effect at once. Stops that stood had a command near 0.
+- **H1, the record's protocol (`--head-slew 1.0 --head-home 1.5`, from the six-motor arm, §17.86): `REGRESSION`, killed** —
+  falls 3.67 → 11.33 a run, backward at a stop's start 1.12 → 7.25 (`log/ten/tc8`). The home pose is not a safe stance in this
+  embodiment; the protocol does not transfer.
+- **H2, the head held at the stand (`--stop-head-hold`: the neck, head pitch and roll held where the walk left them; the yaw
+  free; `log/ten/tc9`):** backward falls at a stop's start 1.12 → 0.88, total 3.67 → 4.17 (tie); outcomes observed 67 → 55 %
+  (CI [−23, −4]: the stop's look can no longer pitch down to watch an answer), skills 9.5 → 7.7. The head no longer swings
+  (moved 0.02–0.07 rad in most falls), and the duck still goes over backwards ~0.9 a run, the trunk tipping 0.3–0.4 rad by
+  itself: most of what is left is the standing brain's takeover, not the head. **`PARTIAL`, not promoted.** Re-use: the hold of
+  the pitch only through the takeover's first second, the look's pitch free after.
+
+**D1, the dash (host `--dash [SIN]`; probes, ★ M2 + A1 + H2):** a chase confirmed while the standing brain holds the legs, the
+mover in the forward half-plane, sets the standing brain's pitch prior (sense slot −12, the trunk's g_x) to a forward target
+(`OgmaBrainAdapter::set_prior_target`); the lean hand-off (6.5°) ends the stop at once and the walker catches the fall under
+the chase's forward command; no release in 1.5 s ends the stop as a chase does; the target is reset at every stop's end. At
+1.5 × the hand-off lean (sin 9.75° = 0.17) the body leans only ~3° in 1.5 s (2 of 2 timed out); at 0.5–0.7 it reaches 7–8° in
+0.5–0.7 s and is released (7 of 7 on seeds 14, 18; no falls). The first second after release: peak 0.19–0.23 m/s, mean 0.12–0.17
+(the walk's 0.14) — **a burst, not yet the organic run**: the hand-off releases at 6.5°, before the lean the policy answers with a
+sprint. Open: release later during a dash (a larger lean), the operator's call on how far.
