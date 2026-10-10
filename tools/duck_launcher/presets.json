@@ -24,6 +24,30 @@
   }
  },
  {
+  "name": "K1 · ★ E4 + THE KICK RESTORED (2026-10-10, a fix; awaiting the eye)",
+  "hint": "The operator: 'the kick ... is not firing'. Since ★ P2 a kick started after the stillness wait with the head pitched down at the thing (+0.91 rad vs +0.33), and Pollen's kick network, trained from the stand, held the leg still (swing 0.12-0.16 rad vs 0.47-0.49 before P2); masking the head in its observation gave the kick back (0.19 -> 0.57), confirming it. --kick-head-home: the kick waits (at most 1 s) with the head driven home, then fires from the posture it knows. n = 24 on ★ E4: swing 0.12-0.16 -> 0.45-0.47 rad over 103 kicks, no timeouts; skills touching 15 -> 22 %, the block touched in the first minute 0.50 -> 0.75; everything else ties. WATCH seed 2: kicks at 8, 64, 175, 192, 284 s.",
+  "state": {
+   "config": "a1v2_s1_sit.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 2,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 0 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.12 8 0 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest --stop-by-look --impeded-not-chasing --chase-yaw-range 1.5 --stop-saccade 2.0 --stop-walker-hold --stop-skill-settle --sit-on-stall 0.2 --sit-settle --sit-then-escape --escape-authority --escape-commit --escape-vx 0.3 --kick-head-home",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
   "name": "D1c · ★ E4 + THE TURN-IN-REVERSE DETOUR (§17.117, awaiting the eye)",
   "hint": "§17.117 D1c (2026-10-10, the operator: 'the most effective escapes seem to be achieved by turn-in-reverse manoeuvres'): walking to a target with something nearer than the target in its way for 0.5 s (G1: the seek gate no longer hides it), the duck backs while turning toward the freer side until ahead reads clear, walks out on that heading, and turns again the same way if the way closes; repeated detours commit to one way around. n = 24 vs the placebo: traps 3.6 -> 1.9 a run, first-time traps 2.8 -> 1.5, walls 12.3 -> 7.5 a minute, open floor 39 -> 52 %, corners 5.0 -> 1.5 %, boring -4.4; COST: interesting -9.8 points, skills -2.4 a run (things at the foot of a chair or wall are turned away from). WATCH seed 3 from 160 s: detours at 171-203 s along the -x wall where ★ E4 sits four times (173-238 s); seed 16 from 240 s (★ E4 sits at 253 and 291 s).",
   "state": {
@@ -43,6 +67,30 @@
    "seed_random": false,
    "arena_shift": 0.0,
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 0 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.12 8 0 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest --stop-by-look --impeded-not-chasing --chase-yaw-range 1.5 --stop-saccade 2.0 --stop-walker-hold --stop-skill-settle --sit-on-stall 0.2 --sit-settle --sit-then-escape --escape-authority --escape-commit --escape-vx 0.3 --seek-gate-near 0.15 --detour 0.15 --detour-commit --detour-reopen 0.5",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
+  "name": "SD · D1c + THE STAND-DOWN AT THINGS BY STRUCTURE (§17.117, awaiting the eye)",
+  "hint": "D1c's detour stands down when the cloud sees tall structure within 0.35 m of the target and the nearer return lies within that of it (the thing's own setting). n = 24 vs the placebo: traps -1.7, open floor +11.7 %, boring -5.2, escapes -1.1 (as D1c); interesting -5.0 (D1c -9.8), stops at things -3.1 (D1c -8.6); but walls 15.0 a minute (D1c 7.5), three seeds with the detour's reverse turn rubbing a wall (seed 22: 84 a minute). WATCH seed 3 from 160 s.",
+  "state": {
+   "config": "a1v2_s1_sit.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 3,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 0 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.12 8 0 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest --stop-by-look --impeded-not-chasing --chase-yaw-range 1.5 --stop-saccade 2.0 --stop-walker-hold --stop-skill-settle --sit-on-stall 0.2 --sit-settle --sit-then-escape --escape-authority --escape-commit --escape-vx 0.3 --seek-gate-near 0.15 --detour 0.15 --detour-commit --detour-reopen 0.5 --detour-stand-down",
    "fast_until": 0,
    "checkpoint": "duck_forebody_s1.brain.json"
   }

@@ -8131,3 +8131,38 @@ along the −x wall where ★ E4 sits four times at 173–238 s; seed 16 from 24
 lever — a thing at the foot of a structure is a return AT the target's range with structure behind it, which the cloud's
 target-tall count (`target_tall_topic`, the static yield's signal) already reports; the detour could stand down when the
 target's own cluster is the nearest return (the arrival's range), or M could grow with the target's measured extent.
+
+**The kick, restored (the operator, 2026-10-10: "we also need to investigate the kick skill — it seems like it is not firing
+after one of the past changes").** Kicks still START at every arm's rate (4.0–4.4 a run from S0 to D1c), but the kicking leg's
+swing (the largest joint excursion of that leg in the window, from the tick before) fell at ★ P2: S0 0.47 / L1 0.45–0.49 /
+P1b and P2-without-the-skill-settle 0.49–0.58 rad → ★ P2, E4, D1c 0.12–0.16 rad. The kick's branch runs (a trace: the joint
+targets are the network's), and the network's observation is the body alone — so the body differed: ★ P2's kicks start after
+the stillness wait with the head pitched down at the thing (+0.91 rad on average, against +0.33 at the stander's stop and
++0.24 without the wait), a posture Pollen's kick networks (trained from the stand, head home) answer by holding the leg still.
+Confirmed by masking: with the head joints read as home in the kick's observation (a debug run, not kept), seed 1's kick swung
+0.57 rad against 0.19. **`--kick-head-home`**: a kick at a walker-held stop waits with the head driven home until neck and
+head pitch are within 0.15 rad (at most 1 s), then fires from the posture it knows. Byte-identical off (E4, P2). `log/ten/pkh`
+(★ E4 + the fix, n = 24): the swing 0.45 (right) / 0.47 (left) over 103 kicks, 4.3 waits a run, no timeouts; against the
+placebo everything ties — skills touching 22.2 % (★ E4 15.1, placebo 19.1), the block touched in the first minute 0.75
+(0.50, 0.58), falls 3.1 (2.6, 2.8). A defect fix, not a lever; preset K1 (seed 2: kicks at 8, 64, 175, 192, 284 s).
+
+**SD — the stand-down at things by structure** (the operator: "go ahead with the stand-down lever for things at a wall").
+Where D1c's detours were aimed (truth labels): 36 % at a target position with no thing within 0.2 m, 28 % at a thing in open
+floor, 16 % at a thing by structure; at the things in open floor the nearer return lies a median 0.58 m in front of the thing
+(a real obstacle), at the things by structure 0.26 m (the structure itself). `--detour-stand-down`: with tall structure within
+the cloud's `target_iso_radius` (0.35 m, the static yield's reach) of the seek target and the nearer return within that of it,
+the gate erases the return as before G1. Byte-identical off (E4, P2, D1c seed 16). `log/ten/psd` (D1c + SD, n = 24; 25.3
+detours a run, 436 stood-down ticks):
+
+| vs placebo, paired | traps | open % | boring | interesting | stops at things | skills | walls / min (mean) | escapes |
+|---|---|---|---|---|---|---|---|---|
+| D1c | −1.7 | +12.3 | −4.4 | **−9.8** | −8.6 | −2.4 | 7.5 (−4.8) | −1.4 |
+| D1c + SD | −1.7 | +11.7 | −5.2 | **−5.0** | −3.1 | −2.8 | **15.0 (+2.7)** | −1.1 |
+
+Against D1c every places measure ties. The stand-down halves the engagement cost (interesting −9.8 → −5.0, stops at things
+−8.6 → −3.1), but the detours aimed at blocks by a chair did not fall (58 → 65) — the walking cloud (reset every metre) often
+holds no structure around the target yet — and the walls rose on three seeds (22: 84 a minute, 10: 58, 11: 39; the medians
+~9 and ~5), the contact almost all during a detour or escape (seed 22: 4 164 of 4 736 wall ticks under the held heading, bursts
+under 3 s): **the turn-in-reverse rubbing a wall it backs into**, a detour defect the stand-down's changed trajectories met on
+more seeds. **`PARTIAL`**. Next: the reverse leg — a detour turns in place (no backing) when the last one ended in wall
+contact, or backs only for its first half second; then SD and the kick fix stacked on it. Preset SD (seed 3 from 160 s).
