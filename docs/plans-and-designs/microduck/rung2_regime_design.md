@@ -7846,7 +7846,7 @@ fall within 7 s, 12 of them while sitting down or rising, mostly backward — th
 
 **S2 = S1b + `--sit-settle`:** the walker holds still before the sit (the settle's stillness test, at most 2 s), the rule
 ★ P2 gave the kicks; and the sit **habituates** — each sit halves the stall needed for the next, recovering over ~60 s (the
-chase pull's habituation, §17.6x). `log/ten/st2`, n = 24, against ★ P2 `p2a`:
+form of the chase's own habituation, `BearingSeekLoop.chase_pull_decay`). `log/ten/st2`, n = 24, against ★ P2 `p2a`:
 
 | n = 24 | S1b | S2 |
 |---|---|---|
