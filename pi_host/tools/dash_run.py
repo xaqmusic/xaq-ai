@@ -54,6 +54,17 @@ except ImportError:  # the monitoring dash degrades without it; running needs it
 REPO = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO / "godot_host/project/addons/ami_ogma/configs"
 LAUNCHER_GD = REPO / "godot_host/project/scripts/launcher.gd"
+# SERVO SPEED (2026-10-10).  A config declares its servo speed for the sim in body_env
+# (OGMA_PICRAWLER_MAX_SERVO_SPEED, rad/s).  On the robot the same speed is benchd's brain slew, in
+# us per 50 Hz tick at the MEASURED us/rad, so one number drives both.  P-e·h0's 3.668 rad/s is
+# the deployed 40 us/tick.  The slew is a brownout lever, so it is set only for the run (in bench
+# mode, before the brain mode: benchd refuses limits.set while the brain holds the servos) and the
+# previous value is restored at cleanup.
+TICK_HZ = 50.0
+try:
+    US_PER_RAD = float(json.loads((REPO / "pi_host/calib/sensors.json").read_text())["servo"]["us_per_rad"])
+except (OSError, ValueError, KeyError):
+    US_PER_RAD = 545.2
 OGMA_HOST = REPO / "pi_host/build/ogma_host"
 LOG_DIR = REPO / "pi_host/log"
 
@@ -73,6 +84,8 @@ class ConfigEntry:
     name: str
     faithful: bool
     phase: str = ""
+    speed_rad_s: Optional[float] = None    # body_env OGMA_PICRAWLER_MAX_SERVO_SPEED
+    slew_us: Optional[int] = None          # the same speed as benchd's brain slew (us per tick)
 
 
 def allowlist(launcher_gd: Path = LAUNCHER_GD) -> list[str]:
@@ -100,9 +113,14 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
         except (OSError, ValueError):
             continue                                    # listed but absent: not offered
         be = md.get("body_env") or {}
+        try:
+            spd = float(be["OGMA_PICRAWLER_MAX_SERVO_SPEED"])
+        except (KeyError, ValueError):
+            spd = None
         out.append(ConfigEntry(file=f, path=p, name=str(md.get("name", f)),
                                faithful=str(be.get("OGMA_PICRAWLER_HONEST_JOINTS", "")) == "1",
-                               phase=str(md.get("phase_tag", ""))))
+                               phase=str(md.get("phase_tag", "")), speed_rad_s=spd,
+                               slew_us=int(round(spd * US_PER_RAD / TICK_HZ)) if spd else None))
     # Robot-faithful first; otherwise the launcher's own order.
     return sorted(out, key=lambda c: not c.faithful)
 
@@ -315,6 +333,7 @@ class RunController:
         self._end = threading.Event()          # operator asked to end the run
         self._host = None
         self._svc_was_active = False
+        self._slew_restore: Optional[int] = None
         self._thread: Optional[threading.Thread] = None
         self.resets = 0
         # The end sequence runs exactly once, from whichever thread gets there first: the
@@ -494,6 +513,21 @@ class RunController:
         if self.record and self._audio is not None:
             if self._sync_taps(us) is None:
                 return False
+        # ---- the config's servo speed, as benchd's brain slew (bench mode only) ----
+        if self.cfg.slew_us:
+            cur = self.io.bench.call("limits.set", confirm=True)        # no fields: reports the current values
+            prev = (cur or {}).get("slew_us") if cur and cur.get("ok") else None
+            if prev is None:
+                self._ev(f"could not read benchd's slew: {(cur or {}).get('error', 'no reply')} — not starting")
+                return False
+            if prev != self.cfg.slew_us:
+                r = self.io.bench.call("limits.set", slew_us=self.cfg.slew_us, confirm=True)
+                if not r or not r.get("ok"):
+                    self._ev(f"servo slew {self.cfg.slew_us} us/tick refused: {(r or {}).get('error', 'no reply')}")
+                    return False
+                self._slew_restore = prev
+            self._ev(f"servo speed {self.cfg.speed_rad_s:.2f} rad/s = benchd slew {self.cfg.slew_us} us/tick"
+                     + (f" (was {prev}; restored at the end)" if prev != self.cfg.slew_us else ""))
         # ---- brain mode, latched STOP, then the brain ----
         m = self.io.ctl.call("mode.set", mode=self.run_mode)
         if not m or not m.get("ok"):
@@ -659,6 +693,12 @@ class RunController:
                 except Exception:
                     pass
         self.io.ctl.call("mode.set", mode="bench")
+        if self._slew_restore is not None:
+            r = self.io.bench.call("limits.set", slew_us=self._slew_restore, confirm=True)
+            self._ev(f"servo slew restored to {self._slew_restore} us/tick" if r and r.get("ok")
+                     else f"⚠ could not restore the servo slew to {self._slew_restore}: {(r or {}).get('error', 'no reply')}")
+            if r and r.get("ok"):
+                self._slew_restore = None
         # The rescue pose needs a live HAT; after an outage, wait for it rather than sending
         # a pose into the void (the operator may be switching it back on).
         self._wait(lambda: not (self._status().get("hat") or {}).get("outage"), 20.0, ping=True, abortable=False)

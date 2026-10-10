@@ -422,6 +422,11 @@ class Dash:
             self._line(scr, y, 3, "⚠ SIM INPUTS: tuned on inputs the robot cannot publish (achieved joint "
                                   "angles, god's-eye signals). On hardware it runs partly blind.",
                        C(BAD) | curses.A_BOLD); y += 2
+        if c.slew_us:
+            fast = c.slew_us > 40
+            self._line(scr, y, 3, f"servo speed: {c.speed_rad_s:.2f} rad/s = benchd slew {c.slew_us} µs/tick for this run"
+                                  + ("  (FASTER than the deployed 40 — a brownout lever; restored after)" if fast else ""),
+                       C(WARN if fast else OK)); y += 1
         self._line(scr, y, 3, f"start pose: {self.poses[self.pose_idx]}   (P cycles saved poses)", C(OK)); y += 1
         self._line(scr, y, 3, f"mode: autonomous — after a HAT reset the robot returns to '{self.poses[self.pose_idx]}' "
                               f"and the run continues (warning shown)", C(DIM)); y += 1

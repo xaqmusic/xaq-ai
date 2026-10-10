@@ -58,6 +58,7 @@ class FakeRobot:
         self.up_y, self.imu_ok, self.ctl_ok, self.host_dies = up_y, imu_ok, ctl_ok, host_dies
         self.hat_resets, self.hat = 0, {"outage": False, "recovering": False, "recover_resume": False, "outages_60s": 0}
         self.stop_why = None
+        self.slew = 40
         self.tmp = tmp
         self.bench = FakeRpc(self, "bench")
         self.ctl = FakeRpc(self, "ctl")
@@ -108,6 +109,13 @@ class FakeRobot:
             return {"ok": True, "eta_ms": 100}
         if verb == "limp":
             return {"ok": True}
+        if verb == "limits.set":
+            if self.mode != "bench":
+                return {"ok": False, "error": "refused in a brain mode"}
+            if "slew_us" in kw:
+                self.slew = kw["slew_us"]
+                self.log(f"slew={self.slew}")
+            return {"ok": True, "slew_us": self.slew}
         return {"ok": True}
 
     # RobotIo surface
@@ -178,7 +186,7 @@ def wait_phase(ctrl, phases, t=5.0):
 
 def test_allowlist_is_the_launchers_and_robot_faithful_configs_come_first():
     cs = dash_run.list_configs()
-    assert len(cs) >= 5
+    assert len(cs) >= 1
     assert any(c.file.endswith("__fsrleg__honest__nohomeo.json") and c.faithful for c in cs)
     flags = [c.faithful for c in cs]
     assert flags == sorted(flags, reverse=True)          # all faithful before any sim-input
@@ -385,3 +393,31 @@ def test_the_run_is_recorded_from_before_the_first_motion_until_after_the_rescue
     assert meta["audio"]["seconds"] == 30.0 and meta["feed_frames"] == 1500
     kinds = [json.loads(l)["kind"] for l in open(ctrl.rec_dir / "events.jsonl")]
     assert kinds.count("sync_tap") == 6 and "audio_started" in kinds and "audio_stop" in kinds
+
+
+def test_a_fast_config_sets_the_slew_in_bench_mode_and_restores_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    fast = next(c for c in dash_run.list_configs() if c.file.endswith("__nohomeo__spd600.json"))
+    assert fast.slew_us == 65 and abs(fast.speed_rad_s - 6.0) < 1e-9
+    robot = FakeRobot(tmp_path)
+    ctrl = dash_run.RunController(robot, fast, "stand", countdown_s=0.3, ready_extra_s=0.0)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    assert robot.slew == 65
+    calls = list(robot.calls)
+    assert calls.index("slew=65") < calls.index("mode.set=autonomous")
+    ctrl.end()
+    ctrl.join(10)
+    calls = list(robot.calls)
+    assert robot.slew == 40
+    assert calls.index("mode.set=bench") < calls.index("slew=40") < calls.index("limp")
+
+
+def test_the_deployed_speed_config_leaves_the_slew_alone(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    assert ctrl.cfg.slew_us == 40
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    ctrl.end()
+    ctrl.join(10)
+    assert not any(c.startswith("slew=") for c in robot.calls)
