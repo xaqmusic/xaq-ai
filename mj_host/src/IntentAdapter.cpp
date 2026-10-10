@@ -161,8 +161,12 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         // (slots 12/13/14 = columns 0-2 / 3-4 / 5-7 = left / ahead / right; the sector by the bearing)
         const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1);
         // §17.117 G1: the slot's proximity is 1 - range / 1 m; a return nearer than the target by M is not the target
-        const bool nearer = seek_gate_near_m_ > 0.0 && tof_s[size_t(slot)] > 0.0f && seek_range_ > 0.0
+        bool nearer = seek_gate_near_m_ > 0.0 && tof_s[size_t(slot)] > 0.0f && seek_range_ > 0.0
                             && 1.0 - double(tof_s[size_t(slot)]) < seek_range_ - seek_gate_near_m_;
+        // §17.117 SD: structure at the target, and the return within its radius of it: the thing's own setting
+        if (nearer && stand_down_r_ > 0.0 && cloud_target_tall() > 0 && seek_range_ - (1.0 - double(tof_s[size_t(slot)])) <= stand_down_r_) {
+            nearer = false; ++stand_downs_;
+        }
         seek_nearer_now_ = nearer;
         if (nearer) ++seek_gate_kept_;
         else if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
@@ -590,6 +594,14 @@ const ogma::MotionField* IntentAdapter::motion_field() const {
     return nullptr;
 }
 int    IntentAdapter::cloud_target_tall()  const { auto* c = find_cloud(*instance_); return c ? c->target_tall() : 0; }
+double IntentAdapter::cloud_iso_radius() const {
+    auto* c = find_cloud(*instance_);
+    if (!c) return 0.35;
+    const auto p = c->current_params();
+    auto it = p.find("target_iso_radius");
+    if (it != p.end()) if (auto d = std::get_if<double>(&it->second)) return *d;
+    return 0.35;
+}
 int    IntentAdapter::cloud_target_small() const { auto* c = find_cloud(*instance_); return c ? c->target_small() : 0; }
 std::array<int, 4> IntentAdapter::chase_cand_fates() const { auto* q = find_seek(*instance_); return q ? std::array<int, 4>{q->cand_replaced(), q->cand_fast(), q->cand_still(), q->cand_timeout()} : std::array<int, 4>{0, 0, 0, 0}; }
 std::array<double, 3> IntentAdapter::chase_last_judgement() const { auto* q = find_seek(*instance_); return q ? std::array<double, 3>{q->last_miss(), q->last_speed(), double(q->last_decision())} : std::array<double, 3>{0.0, 0.0, 0.0}; }

@@ -1425,7 +1425,8 @@ bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the refer
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
 double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
-double g_detour_vx = 0.0, g_detour_max_s = 3.0, g_detour_out_s = 1.5; bool g_detour_commit = false; double g_detour_reopen = 0.0;   // --detour-reopen P (§17.117 D1c)   // --detour-commit (§17.117 D1b)   // --detour BACK_VX [MAX_S [OUT_S]] (§17.117 D1)
+double g_detour_vx = 0.0, g_detour_max_s = 3.0, g_detour_out_s = 1.5; bool g_detour_stand_down = false;   // --detour-stand-down (§17.117 SD)
+bool g_detour_commit = false; double g_detour_reopen = 0.0;   // --detour-reopen P (§17.117 D1c)   // --detour-commit (§17.117 D1b)   // --detour BACK_VX [MAX_S [OUT_S]] (§17.117 D1)
 double g_seek_gate_near = 0.0;      // --seek-gate-near M (§17.117 G1): the gate erases only returns no nearer than the target less M
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
@@ -1730,6 +1731,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_seek_gate_near <= 0.0) { std::fprintf(stderr, "--detour needs --seek-gate-near (its trigger is G1's condition)\n"); return 2; }
         brain.set_detour(g_detour_vx, 25, int(g_detour_max_s * kBrainHz), int(g_detour_out_s * kBrainHz));
         if (g_detour_reopen > 0.0) { brain.set_detour_reopen(g_detour_reopen); std::fprintf(stderr, "  detour reopen: the walk out ends when the ahead sector reads above %.2f, and the turn starts again (§17.117 D1c)\n", g_detour_reopen); }
+        if (g_detour_stand_down) {
+            const double r = brain.cloud_iso_radius();   // the same reach the static yield counts structure in
+            brain.set_detour_stand_down(r);
+            std::fprintf(stderr, "  detour stand-down: structure within %.2f m of the target and the nearer return within that of it -> the gate erases it as before (§17.117 SD)\n", r);
+        }
         if (g_detour_commit) { brain.set_detour_commit(true); std::fprintf(stderr, "  detour commit: a detour within 10 s of the last turns the same way and walks out twice as long (§17.117 D1b)\n"); }
         std::fprintf(stderr, "  detour: a return nearer than the target for 0.5 s -> back at %.2f m/s turning to the freer side until ahead is clear (max %.1f s), then %.1f s on that heading (§17.117 D1)\n", g_detour_vx, g_detour_max_s, g_detour_out_s);
     }
@@ -3477,7 +3483,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                          sweep_moves, 100.0 * sweep_cover_sum / std::max(1, sweep_cover_n), sweep_cover_n);
         if (g_sit_k > 0.0) if (g_sit_escape) std::fprintf(stderr, "  sit then escape: %d turn-abouts\n", sit_turnabouts);
         if (g_kick_head_home) std::fprintf(stderr, "  kick head home: %d kicks waited for the head, %d fired at the 1 s timeout\n", kick_home_waits, kick_home_timeouts);
-        if (g_detour_vx > 0.0) std::fprintf(stderr, "  detour: %d detours, %d ended by the ahead sector reading clear, %d repeats, %d reopened\n", brain.detours(), brain.detour_clear(), brain.detour_repeats(), brain.detour_reopens());
+        if (g_detour_vx > 0.0) std::fprintf(stderr, "  detour: %d detours, %d ended by the ahead sector reading clear, %d repeats, %d reopened, %d stand-down ticks\n", brain.detours(), brain.detour_clear(), brain.detour_repeats(), brain.detour_reopens(), brain.stand_downs());
         if (g_sit_k > 0.0) std::fprintf(stderr, g_sit_progress ? "  sit on stall: %d sits (progress under %.2f of its own prediction for %.1f s; %.1f s seated)\n" : "  sit on surprise: %d sits (the traversal TLE above %.1f x its running mean for %.1f s; %.1f s seated)\n", sits, g_sit_k, g_sit_need_s, g_sit_hold_s);
         if (sweep_on && g_saccade_speed > 0.0)
             std::fprintf(stderr, "  saccade and fixate: %d fixations, mean %.2f s (saccades at %.2f rad/s)\n", fix_n, fix_len_sum / std::max(1, fix_n), g_saccade_speed);
@@ -3848,6 +3854,8 @@ int main(int argc, char** argv) {
             g_stop.gaze_at_thing = true;
         } else if (a == "--detour-reopen") {
             g_detour_reopen = std::stod(next("--detour-reopen"));
+        } else if (a == "--detour-stand-down") {
+            g_detour_stand_down = true;
         } else if (a == "--detour-commit") {
             g_detour_commit = true;
         } else if (a == "--detour") {

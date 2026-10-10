@@ -182,6 +182,13 @@ public:
     // nearest return is no nearer than the target's range less M; a return clearly nearer than the target is something on
     // the approach, and the walker keeps seeing it (and the free-space gate keeps releasing the reference into it).  0 = off.
     void set_seek_gate_near(double m) { seek_gate_near_m_ = m; }
+    // §17.117 SD (--detour-stand-down): a thing at the foot of a chair or a wall -- the cloud counts tall structure within its
+    // target_iso_radius of the seek target (the static yield's signal) -- has that structure in front of it: the nearer return
+    // within the radius of the target is the thing's own setting, not something on the approach, and the gate erases it as
+    // before G1 (no detour).  D1c turned away from these: in its detours at things by structure the return lay a median
+    // 0.26 m in front of the thing.  R <= 0 = off, byte-identical.
+    void set_detour_stand_down(double r) { stand_down_r_ = r; }
+    int  stand_downs() const { return stand_downs_; }
     int  seek_gate_kept() const { return seek_gate_kept_; }   // ticks a nearer return was left visible
     // §17.117 D1, THE DETOUR (the operator, 2026-10-10: "the most effective escapes seem to be achieved by turn-in-reverse
     // manoeuvres ... so the robot can turn in place to find an escape vector").  A SCAFFOLD, the escape's kind: with G1 on,
@@ -291,6 +298,7 @@ public:
     int    mover_cands()   const;
     const ogma::MotionField* motion_field() const;   // the graph's MotionField, or nullptr (--log-motion)
     int    cloud_target_tall()  const;   // the cloud's tall voxels around the seek target (CloudMap target_tall)
+    double cloud_iso_radius()   const;   // CloudMap target_iso_radius (0.35 m default): the reach target_tall counts structure in
     int    cloud_target_small() const;   // ...and the small things there (the impeded look's wall-or-thing)
     double chase_gaze_ego() const;
     std::array<int, 4> chase_cand_fates() const;   // replaced, too fast, still, timed out
@@ -450,6 +458,7 @@ private:
     double translate_frac_ = 0.0, fore_target_ = 0.0, head_fore_ = 0.0; bool fore_sense_ = false;
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
     double seek_gate_near_m_ = 0.0; int seek_gate_kept_ = 0;   // §17.117 G1
+    double stand_down_r_ = 0.0; int stand_downs_ = 0;           // §17.117 SD
     bool seek_nearer_now_ = false;                              // G1's condition this tick
     double detour_back_vx_ = 0.0; int detour_arm_ticks_ = 25, detour_max_ticks_ = 150, detour_out_ticks_ = 75;   // §17.117 D1
     double detour_reopen_ = 0.0; int detour_reopens_ = 0; bool detour_walking_ = false;   // §17.117 D1c
