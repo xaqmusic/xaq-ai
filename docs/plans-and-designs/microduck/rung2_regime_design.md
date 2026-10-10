@@ -7887,3 +7887,57 @@ stuck less, so it sits less. Against S2 every ten-minute measure ties (boring �
 +0.12, the first minute, skills, outcomes). **`WORKING` on the way out: the sit is followed by a look and a walk into the
 open, 7 s sooner at the median.** Preset E4 (seed 16 from 250 s) for the eye. Re-use: the escapes of the stuck stop and the
 impeded look share the authority, the commitment and the floor (they are on for every escape under these flags).
+
+**★ E4 PROMOTED (the operator's eye, 2026-10-10): "E4 looks good. The sit works as long as the robot is not backed against the
+wall (the wall keeps it standing). This should translate well to a real environment."** Launcher first row.
+
+### 17.116 Places — what the walk remembers of where it was (plan, 2026-10-10)
+
+**The operator, 2026-10-10:** "the next improvement is in the play loop and how we handle places. I believe we are only holding
+onto the map for a short period of time. I am wondering how we can hold the walls in memory more permanently (don't let baked
+nodes decay) so the robot can avoid areas it has been stuck in or are simply corners without objects to interact with."
+
+**What holds and what fades, read from ★ E4 (`se4`, n = 24, 600 s).**
+- **The place map does not forget.** The map EPM's nodes grow monotonically, 12 at 1 min to 38 at 9 min (max 50 of 128);
+  `health_death_spares_baked` is on, and insertion is shut on the walk (`--map-on-stop`), so the vocabulary only grows at stops.
+- **The walls as voxels do.** `CloudMap` caches the clouds of the 8 most recently filed places (LRU); the walking cloud resets
+  every metre and is never cached. Nothing steers from the cache: it feeds `revisit_change` only. A larger cache alone would
+  change no behaviour.
+- **Play's memory of where it has been does.** `PlayLoop.hab_decay` 0.002 a tick: a visited place is "recent, boring" for ~10 s.
+- **Nothing remembers where the walk stalled.** The progress prediction (the sit's signal, §17.114) is host-side and per tick.
+
+**Where the duck is, and whether it goes back** — new instrument `mj_host/tools/places.py` (truth labels only: corner = within
+0.5 m of two walls; open = 0.5 m from every wall and every piece of furniture's edge; traps = sits and stuck stops; back =
+within 0.4 m of an earlier trap):
+
+| n = 24 | corner % | open % | cells | traps | back | back > 60 s | skills |
+|---|---|---|---|---|---|---|---|
+| ★ P2 (`p2a`) | 3.5 | 43.1 | 112 | 0 | 0 | 0 | 9.5 |
+| ★ E4 (`se4`) | 3.0 | 42.3 | 113 | 2.6 | 0.6 | 0.2 | 10.5 |
+
+Room corners hold the duck 3 % of the time; it is in open floor 42 %, about the same under every steering loop (play 40–43 %,
+seek 33–47 %, the escape 22–29 %). It rarely returns to a trap after a minute (0.2 a run); the returns are the same episode
+re-firing (0.6 a run, median 24 s apart). 39 of 62 sits come while the seek loop walks to a remembered thing; play steers 24 %
+of the time, as everywhere. Sweeps 33–35 (§17.81) refused targets at places the walk had failed: the loop went without a
+target a quarter more of the walk and play's walk doubled the walls. So the lever belongs to play's walk, as the operator says.
+
+**The levers, one at a time against ★ E4, n = 24, judged on `places.py` + `fx_study.py`:**
+- **M2 — places stay boring** (config only): `play.hab_decay` 0.002 → 0.0002, a visited place recent for ~100 s instead of
+  ~10 s. The error: play's novelty field is the place EPM's TLE, which a known place no longer raises; the habituation is what
+  keeps a learned empty place from pulling play back. Predicted: cells ↑, back ↓, play's share ↓ (its value falls on known
+  ground).
+- **M1 — the stuck place** (`PlayLoop.stall_topic`, gain `stall_weight`, 0 = off and byte-identical): the walk's progress
+  error (1 − progress / predicted progress, the sit's own signal) attached to the map node the walk is at, an EMA per node
+  that never decays (a node is permanent, so is what it taught). Play's value iteration multiplies each node's value by
+  (1 − stall_weight × stall): a place where the walk stalls is a hole in the field, and the climb routes around it, which is
+  what avoiding it means. The error minimised: the expected progress error along play's route. Predicted: traps ↓, back ↓,
+  walls ↓, open % ↑, the rest ties.
+
+**M2 measured (`log/ten/pm2`, n = 24, against ★ E4 `se4`; `hab_decay` read back 0.0002): `NULL`, leaning the wrong way.**
+Paired: cells −8.1 [−18.9, +2.7], traps +1.2 [−0.1, +2.5], back +0.5 [−0.1, +1.2], open % −2.5, walls +3.2 a minute
+[−1.7, +8.1], escapes +1.4 [+0.1, +2.7] (the one beyond the noise); boring, interesting, skills, falls, the train, outcomes tie.
+Play's share of the steering did not move (24.3 → 25.1 %): the longer habituation did not hand the walk to anything else, it
+sent play's climb to other places, and those were no better. The likely reason is the place vocabulary itself: the map's nodes
+are VIEWS (pose, head yaw and the ToF columns), so the least-habituated nodes near a known region are often close views of a
+wall. A longer memory of "recent" without a memory of what the place costs pushes play toward exactly those — which is M1's
+question. Re-use: on top of M1, once a stuck place is a hole in the field, a longer habituation may sweep the open ground.
