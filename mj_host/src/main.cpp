@@ -3653,8 +3653,8 @@ int main(int argc, char** argv) {
             g_stop_walker_hold = true;
         } else if (a == "--stop-saccade") {
             g_saccade_speed = std::stod(next("--stop-saccade"));
-            if (i + 1 < argc && argv[i + 1][0] != '-') g_fix_min_s = std::stod(next("--stop-saccade"));
-            if (i + 1 < argc && argv[i + 1][0] != '-') g_fix_max_s = std::stod(next("--stop-saccade"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_fix_min_s = std::stod(next("--stop-saccade"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_fix_max_s = std::stod(next("--stop-saccade"));
         } else if (a == "--gaze-mover-memory") {
             g_gaze_mover_memory = true;
         } else if (a == "--chase-yaw-range") {
