@@ -1,0 +1,714 @@
+"""dash_run — run a brain config on the robot from picrawler_dash (ON THE PI only).
+
+The sequence, and why each step is where it is:
+
+  pick     a config from the Godot launcher's own allowlist (launcher.gd), tagged
+           ROBOT-FAITHFUL when its body_env says the sim fed it only inputs the robot can
+           publish (HONEST_JOINTS).  Anything else runs partly blind on hardware.
+  confirm  preflight checks, start pose, the servo lag benchd will apply.
+  COUNTDOWN 10 s, abortable by any key.  NOTHING is sent to the robot before it ends: the
+           countdown is the operator's chance to make sure the robot is placed and clear.
+  prepare  stop the senses-only ogma-host service (it holds the inspector port) -> pose the
+           robot in bench mode, pinging so the bench deadman stays quiet -> benchd to `dev`
+           (which latches STOP) -> start ogma_host --actuate.  ⚠ ogma_host starts AFTER the
+           mode change, so the brain is paused from its first tick: brain_run/arm.sh started
+           it in bench mode, where it ticked ~12 s with its commands ignored.
+  run      resume.  The run is AUTONOMOUS (operator, 2026-10-03): benchd recovers a HAT reset
+           by itself — disarm, wait for the HAT, re-arm one channel at a time and RAMP to the
+           run's start pose (benchd `recover.pose`; restoring the saved pulses brought back a
+           hip1 pinned at its limit, and the robot circled), resume — and the
+           dashboard shows a warning each time.  A tilt guard (80 deg, the operator's limit)
+           STOPs the robot; benchd handles a lost brain stream (hold, then rescue) and low
+           battery.  Pause -> HAT off -> move the robot -> HAT on -> SPACE resumes (benchd
+           re-arms first).  SPACE is
+           the dashboard's STOP/resume, on its own socket, independent of this thread.
+  reset    R: stop -> benchd `pose.recall` of the start pose (control socket, STOPPED only).
+           The body goes home; the brain stays paused, not reset, and SPACE resumes it once
+           the pose has landed — the robot version of the sim's body reset after a fall.
+  end      stop -> SIGTERM ogma_host -> bench mode -> rescue pose -> restart ogma-host.
+
+Port doc SPEC §1.1, as amended by the operator 2026-10-03: the brain may be started from
+this Pi-local console, through benchd's LOOPBACK control socket.  Nothing on the network,
+the laptop's Godot dashboard included, has a path to start a brain or set the run mode —
+and this module refuses to run unless the control socket answers on 127.0.0.1.
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+import re
+import signal
+import subprocess
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+try:
+    import zmq
+except ImportError:  # the monitoring dash degrades without it; running needs it
+    zmq = None
+
+REPO = Path(__file__).resolve().parents[2]
+CONFIG_DIR = REPO / "godot_host/project/addons/ami_ogma/configs"
+LAUNCHER_GD = REPO / "godot_host/project/scripts/launcher.gd"
+# SERVO SPEED (2026-10-10).  A config declares its servo speed for the sim in body_env
+# (OGMA_PICRAWLER_MAX_SERVO_SPEED, rad/s).  On the robot the same speed is benchd's brain slew, in
+# us per 50 Hz tick at the MEASURED us/rad, so one number drives both.  P-e·h0's 3.668 rad/s is
+# the deployed 40 us/tick.  The slew is a brownout lever, so it is set only for the run (in bench
+# mode, before the brain mode: benchd refuses limits.set while the brain holds the servos) and the
+# previous value is restored at cleanup.
+TICK_HZ = 50.0
+try:
+    US_PER_RAD = float(json.loads((REPO / "pi_host/calib/sensors.json").read_text())["servo"]["us_per_rad"])
+except (OSError, ValueError, KeyError):
+    US_PER_RAD = 545.2
+OGMA_HOST = REPO / "pi_host/build/ogma_host"
+LOG_DIR = REPO / "pi_host/log"
+
+COUNTDOWN_S = 10.0
+TILT_LIMIT_DEG = 80.0                         # operator, 2026-10-03: 60 was too tight
+TILT_LIMIT_UP_Y = math.cos(math.radians(TILT_LIMIT_DEG))
+BENCH_PORT, CTL_PORT, CMD_PORT = 5590, 5593, 5594
+VBAT_WARN = 7.0                               # limp is 6.4 sustained; belly-up draws ~1.5 A
+
+
+# --------------------------------------------------------------------------- configs
+
+@dataclass
+class ConfigEntry:
+    file: str
+    path: Path
+    name: str
+    faithful: bool
+    phase: str = ""
+    speed_rad_s: Optional[float] = None    # body_env OGMA_PICRAWLER_MAX_SERVO_SPEED
+    slew_us: Optional[int] = None          # the same speed as benchd's brain slew (us per tick)
+
+
+def allowlist(launcher_gd: Path = LAUNCHER_GD) -> list[str]:
+    """The picrawler allowlist exactly as the Godot launcher shows it."""
+    files, inside = [], False
+    for line in launcher_gd.read_text().splitlines():
+        if "_PICRAWLER_CONFIG_ALLOWLIST" in line and "[" in line:
+            inside = True
+            continue
+        if inside:
+            if line.strip().startswith("]"):
+                break
+            m = re.match(r'\s*"([^"]+\.json)"', line)
+            if m:
+                files.append(m.group(1))
+    return files
+
+
+def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD) -> list[ConfigEntry]:
+    out = []
+    for f in allowlist(launcher_gd):
+        p = config_dir / f
+        try:
+            md = json.loads(p.read_text()).get("metadata", {})
+        except (OSError, ValueError):
+            continue                                    # listed but absent: not offered
+        be = md.get("body_env") or {}
+        try:
+            spd = float(be["OGMA_PICRAWLER_MAX_SERVO_SPEED"])
+        except (KeyError, ValueError):
+            spd = None
+        out.append(ConfigEntry(file=f, path=p, name=str(md.get("name", f)),
+                               faithful=str(be.get("OGMA_PICRAWLER_HONEST_JOINTS", "")) == "1",
+                               phase=str(md.get("phase_tag", "")), speed_rad_s=spd,
+                               slew_us=int(round(spd * US_PER_RAD / TICK_HZ)) if spd else None))
+    # Robot-faithful first; otherwise the launcher's own order.
+    return sorted(out, key=lambda c: not c.faithful)
+
+
+# --------------------------------------------------------------------------- I/O
+
+class Rpc:
+    """One ZMQ REQ socket with a timeout; recreated after any failure (a REQ that missed
+    its reply is stuck by protocol).  Returns None instead of raising."""
+
+    def __init__(self, port: int, host: str = "127.0.0.1", timeout_ms: int = 1000):
+        self.port, self.host, self.timeout_ms = port, host, timeout_ms
+        self._ctx = zmq.Context.instance() if zmq else None
+        self._s = None
+
+    def call(self, verb: str, **kw: Any) -> Optional[dict]:
+        if not zmq:
+            return None
+        try:
+            if self._s is None:
+                s = self._ctx.socket(zmq.REQ)
+                s.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
+                s.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
+                s.setsockopt(zmq.LINGER, 0)
+                s.connect(f"tcp://{self.host}:{self.port}")
+                self._s = s
+            self._s.send_string(json.dumps({"verb": verb, **kw}))
+            return json.loads(self._s.recv_string())
+        except Exception:
+            self.close()
+            return None
+
+    def close(self) -> None:
+        if self._s is not None:
+            self._s.close(0)
+            self._s = None
+
+
+class RobotIo:
+    """Everything the controller does to the world.  Tests substitute a fake."""
+
+    def __init__(self) -> None:
+        self.bench = Rpc(BENCH_PORT)
+        self.ctl = Rpc(CTL_PORT)            # loopback-only by benchd's bind address
+
+    def new_ctl(self) -> "Rpc":
+        """A second control socket, for the UI thread (REQ sockets are single-threaded)."""
+        return Rpc(CTL_PORT)
+
+    def systemctl(self, action: str, unit: str) -> bool:
+        r = subprocess.run(["sudo", "-n", "systemctl", action, unit],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        return r.returncode == 0
+
+    def unit_active(self, unit: str) -> bool:
+        r = subprocess.run(["systemctl", "is-active", "--quiet", unit], timeout=10)
+        return r.returncode == 0
+
+    def can_sudo(self) -> bool:
+        return subprocess.run(["sudo", "-n", "true"], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=10).returncode == 0
+
+    # ---- run recording: the mic and the 50 Hz state feed, on CLOCK_MONOTONIC --------------
+    def start_audio(self, path: Path):
+        """arecord on the robot's USB mic (the device ogma_host's AudioCapture uses).  Returns
+        a handle with stop() -> seconds recorded, or None if the mic could not be opened."""
+        p = subprocess.Popen(["arecord", "-q", "-D", "plughw:CARD=Device,DEV=0", "-c", "1", "-f", "S16_LE",
+                              "-r", "48000", str(path)], stderr=subprocess.PIPE)
+        time.sleep(0.3)
+        if p.poll() is not None:                      # exited at once: busy or absent
+            return None
+
+        class H:
+            def stop(self_inner) -> float:
+                p.send_signal(signal.SIGINT)          # arecord finalises the WAV header on SIGINT
+                try:
+                    p.wait(5)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                return max(0.0, (path.stat().st_size - 44) / (2 * 48000)) if path.exists() else 0.0
+        return H()
+
+    def start_feed(self, path: Path):
+        """benchd's 50 Hz state feed -> JSONL.  Returns a handle with stop() -> frames."""
+        if not zmq:
+            return None
+        run = threading.Event(); run.set()
+        count = [0]
+        f = open(path, "w")
+
+        def loop():
+            sub = zmq.Context.instance().socket(zmq.SUB)
+            sub.setsockopt(zmq.RCVTIMEO, 300); sub.setsockopt_string(zmq.SUBSCRIBE, "state ")
+            sub.connect("tcp://127.0.0.1:5592")
+            while run.is_set():
+                try:
+                    m = sub.recv_string()
+                except zmq.Again:
+                    continue
+                f.write(m[6:] + "\n"); count[0] += 1
+            sub.close(0)
+        t = threading.Thread(target=loop, daemon=True); t.start()
+
+        class H:
+            def stop(self_inner) -> int:
+                run.clear(); t.join(2); f.close()
+                return count[0]
+        return H()
+
+    def host_exists(self) -> bool:
+        return OGMA_HOST.exists()
+
+    def spawn_host(self, cfg: Path, log_path: Path):
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        lf = open(log_path, "w")
+        # Own session: Ctrl-C in the dashboard must not reach the brain mid-run; the end
+        # sequence stops it deliberately.
+        return subprocess.Popen(
+            [str(OGMA_HOST), "--config", str(cfg), "--imu", "--brain-inputs",
+             "--actuate", f"tcp://127.0.0.1:{CMD_PORT}", "--listen", "0.0.0.0", "--rt",
+             "--dump-inputs", "50"],
+            cwd=str(REPO), stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            start_new_session=True)
+
+    def now(self) -> float:
+        return time.monotonic()
+
+    def sleep(self, s: float) -> None:
+        time.sleep(s)
+
+
+# --------------------------------------------------------------------------- preflight
+
+@dataclass
+class Check:
+    ok: bool
+    text: str
+    blocking: bool = True
+
+
+def preflight(io, pose: str) -> list[Check]:
+    out: list[Check] = []
+    ctl = io.ctl.call("mode.get")
+    out.append(Check(ctl is not None and ctl.get("ok", False),
+                     "benchd control socket answers on 127.0.0.1 (run ON the robot)"
+                     if ctl else "no benchd control socket on 127.0.0.1:5593 — run this on the robot, "
+                     "with benchd started with --ctl-port (pi_host/systemd/ogma-benchd.service)"))
+    st = io.bench.call("status")
+    ok = st is not None and st.get("ok", True)
+    out.append(Check(ok, "benchd reachable" if ok else "benchd unreachable on :5590"))
+    if not ok:
+        return out
+    out.append(Check(st.get("brain") is not None,
+                     "benchd has the brain command path (--cmd-port)" if st.get("brain") is not None
+                     else "benchd has NO brain command path — needs --state-pub 5592 --cmd-port 5594 --ctl-port 5593"))
+    out.append(Check(st.get("mode") == "bench",
+                     f"benchd in bench mode" if st.get("mode") == "bench"
+                     else f"benchd is in '{st.get('mode')}' mode — another run may be live"))
+    out.append(Check(not st.get("stopped"),
+                     "benchd not STOPPED" if not st.get("stopped")
+                     else f"benchd is STOPPED ({st.get('stop_why')}) — SPACE in monitoring resumes, then R re-checks"))
+    imu = st.get("imu") or {}
+    out.append(Check(bool(imu.get("ok")) and bool(imu.get("up_fused")),
+                     "benchd has attitude (the tilt guard can see)" if imu.get("ok")
+                     else "benchd has no IMU — the tilt guard would be blind; sudo systemctl restart ogma-benchd"))
+    vb = float(st.get("vbat", 0.0))
+    out.append(Check(not st.get("low_battery") and vb > 6.4,
+                     f"battery {vb:.2f} V" + (" — LOW: belly-up draws ~1.5 A, limp is 6.4 V" if vb < VBAT_WARN else ""),
+                     blocking=bool(st.get("low_battery")) or vb <= 6.4))
+    lag = st.get("servo_lag_alpha")
+    out.append(Check(True, f"servo output lag in brain modes: set by benchd --servo-lag-alpha "
+                           f"(frame reports {lag} now; it applies once in dev)", blocking=False))
+    poses = (io.bench.call("pose.list") or {}).get("poses", [])
+    out.append(Check(pose in poses, f"start pose '{pose}' saved" if pose in poses
+                     else f"no saved pose '{pose}'"))
+    out.append(Check(io.host_exists(), "ogma_host built" if io.host_exists()
+                     else f"{OGMA_HOST} missing — build with PI_HOST_BUILD_BRAIN=ON"))
+    out.append(Check(io.can_sudo(), "passwordless sudo (to stop/start the ogma-host service)"
+                     if io.can_sudo() else "sudo -n fails — cannot stop the ogma-host service"))
+    return out
+
+
+# --------------------------------------------------------------------------- controller
+
+@dataclass
+class RunState:
+    phase: str = "idle"           # idle countdown prepare running ending done aborted
+    detail: str = ""
+    countdown_left: float = 0.0
+    started_at: float = 0.0       # monotonic, when the brain got the servos
+    events: list = field(default_factory=list)
+    log_path: Optional[Path] = None
+    hat_resets: int = 0           # HAT outages seen during this run
+    hat_warning: str = ""         # the latest, shown persistently on the run panel
+    recovering: bool = False
+    belly_mm: Optional[float] = None
+    tilt_deg: Optional[float] = None
+    vbat: Optional[float] = None
+    stopped: Optional[bool] = None
+
+
+class RunController:
+    def __init__(self, io, cfg: ConfigEntry, pose: str = "stand",
+                 countdown_s: float = COUNTDOWN_S, ready_extra_s: float = 4.0,
+                 run_mode: str = "autonomous"):
+        self.io, self.cfg, self.pose, self.run_mode = io, cfg, pose, run_mode
+        self.countdown_s, self.ready_extra_s = countdown_s, ready_extra_s
+        self.st = RunState()
+        self._abort = threading.Event()        # before the brain has the servos: abort
+        self._end = threading.Event()          # operator asked to end the run
+        self._host = None
+        self._svc_was_active = False
+        self._slew_restore: Optional[int] = None
+        self._thread: Optional[threading.Thread] = None
+        self.resets = 0
+        # The end sequence runs exactly once, from whichever thread gets there first: the
+        # controller after E, or the dashboard's fallback if the controller does not respond.
+        self._cleanup_lock = threading.Lock()
+        self._cleanup_started = False
+        # ⚠ EVERY STEP IS WRITTEN TO DISK.  The first dash-launched run (2026-10-03) ignored E
+        # and nothing recorded what the controller was doing, so it could not be diagnosed.
+        stamp = time.strftime('%Y%m%d_%H%M%S')
+        self.events_path = LOG_DIR / f"dashrun_{stamp}.events"
+        # RUN RECORDING (operator, 2026-10-04: "record the audio during our tests"): the mic and
+        # the 50 Hz state feed, on the same clock as the events, for the stall witnesses and
+        # the sim's servo sounds.  Short single-joint probe taps did not sound like the brain.
+        self.record = True
+        self.rec_dir = LOG_DIR / f"dashrun_{stamp}"
+        self._audio = None
+        self._feed = None
+        self._inacap = None
+
+    # ---- operator actions (UI thread) ----
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def abort(self) -> None:
+        self._abort.set()
+
+    def end(self) -> None:
+        self._end.set()
+        self._abort.set()
+        self._ev("E pressed: end requested")
+
+    def ending_started(self) -> bool:
+        return self._cleanup_started
+
+    def end_now(self) -> None:
+        """Run the end sequence in the CALLER's thread — the dashboard's fallback when the
+        controller has not started it after E.  A no-op if it already ran or is running."""
+        self._end.set(); self._abort.set()
+        self._ev("end sequence run by the dashboard (controller did not respond)")
+        self._cleanup()
+
+    def reset(self) -> bool:
+        """R: freeze, then move back to the start pose; stays STOPPED.  Called from the UI
+        thread, so it uses its own socket rather than the controller's."""
+        if self.st.phase not in ("running", "prepare") or not self.st.started_at:
+            self._ev("reset: only once the brain has the servos (E ends a run that has not started)")
+            return False
+        rpc = self.io.new_ctl()
+        rpc.call("stop")
+        r = rpc.call("pose.recall", name=self.pose)
+        rpc.close()
+        if r and r.get("ok"):
+            self.resets += 1
+            self._ev(f"RESET #{self.resets}: moving to '{self.pose}' — STOPPED, brain paused (not reset). "
+                     "SPACE resumes once it lands")
+            return True
+        self._ev(f"reset refused: {(r or {}).get('error', 'no reply')}")
+        return False
+
+    def busy(self) -> bool:
+        return self.st.phase in ("countdown", "prepare", "running", "ending")
+
+    def join(self, timeout: float = None) -> None:
+        if self._thread:
+            self._thread.join(timeout)
+
+    # ---- the sequence (controller thread) ----
+    def _ev(self, text: str) -> None:
+        self.st.detail = text
+        self.st.events.append((round(self.io.now(), 2), text))
+        try:
+            with open(self.events_path, "a") as f:
+                f.write(f"{time.strftime('%H:%M:%S')} [{self.st.phase}] {text}\n")
+        except OSError:
+            pass                                  # a full disk must not stop a STOP
+
+    def _run(self) -> None:
+        try:
+            if not self._countdown():
+                self.st.phase = "aborted"
+                self._ev("aborted during the countdown — nothing was sent to the robot")
+                return
+            moved = self._prepare()
+            if moved is None:                     # aborted before anything moved
+                self.st.phase = "aborted"
+                return
+            if moved:
+                self._running()
+        except Exception as e:                    # never leave a brain driving on a crash
+            self._ev(f"controller error: {e!r}")
+        if self.st.phase not in ("aborted",):
+            self._cleanup()
+
+    def _countdown(self) -> bool:
+        self.st.phase = "countdown"
+        t_end = self.io.now() + self.countdown_s
+        while True:
+            left = t_end - self.io.now()
+            self.st.countdown_left = max(0.0, left)
+            if self._abort.is_set():
+                return False
+            if left <= 0:
+                return True
+            self.io.sleep(0.05)
+
+    def _wait(self, cond: Callable[[], bool], timeout: float, ping: bool = False,
+              abortable: bool = True) -> Optional[bool]:
+        """Poll cond until true; None if aborted, False on timeout.  ⚠ The END sequence must
+        pass abortable=False: E sets the abort flag, so its waits used to return at once —
+        the rescue never got to land with the deadman pinged, and benchd's deadman fired a
+        second rescue on every run."""
+        t_end = self.io.now() + timeout
+        while self.io.now() < t_end:
+            if abortable and self._abort.is_set():
+                return None
+            if ping:
+                self.io.bench.call("ping")        # bench deadman: a controlling client
+            if cond():
+                return True
+            self.io.sleep(0.2)
+        return False
+
+    def _status(self) -> dict:
+        return self.io.bench.call("status") or {}
+
+    def _prepare(self) -> Optional[bool]:
+        """Returns None if aborted before anything moved, False if the run could not start
+        (cleanup still runs), True when the brain has the servos."""
+        self.st.phase = "prepare"
+        bad = [c for c in preflight(self.io, self.pose) if c.blocking and not c.ok]
+        if bad:
+            self._ev("preflight failed: " + bad[0].text)
+            return None
+        if self._abort.is_set():
+            return None
+        self._svc_was_active = self.io.unit_active("ogma-host")
+        if self._svc_was_active:
+            self._ev("stopping the senses-only ogma-host service")
+            if not self.io.systemctl("stop", "ogma-host"):
+                self._ev("could not stop ogma-host — not starting")
+                return False
+        # ---- recording starts the moment the mic is free, so the pose move is on it too ----
+        if self.record:
+            try:
+                self.rec_dir.mkdir(parents=True, exist_ok=True)
+                self._feed = self.io.start_feed(self.rec_dir / "feed.jsonl")
+                self._ev_rec("audio_start_request")
+                self._audio = self.io.start_audio(self.rec_dir / "audio.wav")
+                self._ev_rec("audio_started" if self._audio else "audio_FAILED")
+                self._ev(f"recording audio + 50 Hz feed -> {self.rec_dir}" if self._audio
+                         else "⚠ could not open the mic — recording the feed only")
+                # Fast current + pack voltage (~940 Hz, benchd ina.capture sag): the 140 ms
+                # telemetry average cannot see what browns the HAT out.
+                rc = self.io.bench.call("ina.capture", mode="sag", seconds=3600)
+                self._inacap = (rc or {}).get("file") if rc and rc.get("ok") else None
+                self._ev_rec("ina_capture_start", file=self._inacap)
+                if not self._inacap:
+                    self._ev(f"⚠ fast current capture not started: {(rc or {}).get('error', 'no reply')}")
+            except Exception as e:
+                self._ev(f"⚠ recording not started: {e!r}")
+        # ---- pose: the first motion ----
+        us = (self.io.bench.call("pose.get", name=self.pose) or {}).get("us")
+        r = self.io.bench.call("pose.set", us=us) if us else None
+        if not r or not r.get("ok"):
+            self._ev(f"pose.set {self.pose} refused: {(r or {}).get('error', 'no reply')}")
+            return False
+        self._ev(f"moving to '{self.pose}' (staggered, slow)")
+        started = self._wait(lambda: bool(self._status().get("pose_move_active")),
+                             min(3.0, 1.0 + r.get("eta_ms", 0) / 1000.0), ping=True)
+        if started is None:
+            return False
+        landed = self._wait(lambda: not self._status().get("pose_move_active"), 30.0, ping=True)
+        if not landed:
+            self._ev("pose did not land" if landed is False else "aborted while posing")
+            return False
+        if self.record and self._audio is not None:
+            if self._sync_taps(us) is None:
+                return False
+        # ---- the config's servo speed, as benchd's brain slew (bench mode only) ----
+        if self.cfg.slew_us:
+            cur = self.io.bench.call("limits.set", confirm=True)        # no fields: reports the current values
+            prev = (cur or {}).get("slew_us") if cur and cur.get("ok") else None
+            if prev is None:
+                self._ev(f"could not read benchd's slew: {(cur or {}).get('error', 'no reply')} — not starting")
+                return False
+            if prev != self.cfg.slew_us:
+                r = self.io.bench.call("limits.set", slew_us=self.cfg.slew_us, confirm=True)
+                if not r or not r.get("ok"):
+                    self._ev(f"servo slew {self.cfg.slew_us} us/tick refused: {(r or {}).get('error', 'no reply')}")
+                    return False
+                self._slew_restore = prev
+            self._ev(f"servo speed {self.cfg.speed_rad_s:.2f} rad/s = benchd slew {self.cfg.slew_us} us/tick"
+                     + (f" (was {prev}; restored at the end)" if prev != self.cfg.slew_us else ""))
+        # ---- brain mode, latched STOP, then the brain ----
+        m = self.io.ctl.call("mode.set", mode=self.run_mode)
+        if not m or not m.get("ok"):
+            self._ev(f"mode {self.run_mode} refused: {(m or {}).get('error', 'no reply')}")
+            return False
+        rp = self.io.ctl.call("recover.pose", name=self.pose)
+        if not rp or not rp.get("ok"):
+            self._ev(f"⚠ could not set the HAT-recovery pose: {(rp or {}).get('error', 'no reply')} — "
+                     "a reset would restore the saved pulses instead")
+        self._ev(f"benchd in {self.run_mode}, STOPPED, HAT recovery → '{self.pose}'; starting the brain (paused until resume)")
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        self.st.log_path = LOG_DIR / f"dashrun_{stamp}_{Path(self.cfg.file).stem[-40:]}.log"
+        self._host = self.io.spawn_host(self.cfg.path, self.st.log_path)
+
+        def ready() -> bool:
+            if self._host.poll() is not None:
+                raise RuntimeError("ogma_host exited during start — see " + str(self.st.log_path))
+            try:
+                return "ACTUATION ON" in self.st.log_path.read_text(errors="replace")
+            except OSError:
+                return False
+        ok = self._wait(ready, 60.0)
+        if not ok:
+            self._ev("ogma_host did not come up" if ok is False else "aborted while the brain started")
+            return False
+        # The IMU's gyro bias seeds from the first still window; the robot is frozen now.
+        if self._wait(lambda: False, self.ready_extra_s) is None:
+            return False
+        r = self.io.ctl.call("resume")
+        if not r or not r.get("ok"):
+            self._ev(f"resume refused: {(r or {}).get('error', 'no reply')}")
+            return False
+        self.st.started_at = self.io.now()
+        self.st.phase = "running"
+        self._ev(f"RUNNING {self.cfg.name[:50]}")
+        return True
+
+    def _running(self) -> None:
+        hat0 = None
+        rec_prev = None
+        while not self._end.is_set():
+            f = self._status()
+            if f:
+                # HAT outages: benchd disarms, waits for the HAT, re-arms one channel at a time
+                # and (autonomous, the reset's own stop) resumes.  Say so every time.
+                hr, hat = f.get("hat_resets"), (f.get("hat") or {})
+                self.st.recovering = bool(hat.get("recovering"))
+                if hr is not None:
+                    if hat0 is None:
+                        hat0 = hr
+                    elif hr > hat0:
+                        self.st.hat_resets += hr - hat0
+                        hat0 = hr
+                        auto = f.get("stopped") and f.get("stop_why") == "HAT reset" and hat.get("recover_resume")
+                        self.st.hat_warning = (f"⚠ HAT RESET #{self.st.hat_resets} at {time.strftime('%H:%M:%S')} — "
+                                               + (f"auto-recovering: re-arming one servo at a time, back to '{self.pose}', then the run continues"
+                                                  if auto else f"servos disarmed; SPACE returns to '{self.pose}' and resumes, E ends"))
+                        self._ev(self.st.hat_warning)
+                    if rec_prev and not self.st.recovering and not f.get("stopped"):
+                        self._ev(f"recovered from HAT reset #{self.st.hat_resets} — run continues")
+                        self.st.hat_warning = f"⚠ {self.st.hat_resets} HAT reset(s) this run, last recovered at {time.strftime('%H:%M:%S')}"
+                    rec_prev = self.st.recovering
+                    if hat.get("outage") and f.get("stopped") and f.get("stop_why") == "HAT reset" \
+                            and not hat.get("recover_resume") and "backed off" not in self.st.hat_warning \
+                            and hat.get("outages_60s", 0) > 3:
+                        self.st.hat_warning = "⚠ HAT reset 3+ times in 60 s — auto-recovery backed off. SPACE re-arms and resumes"
+                        self._ev(self.st.hat_warning)
+                imu = f.get("imu") or {}
+                tof = f.get("tof") or {}
+                up = imu.get("up_fused")
+                self.st.stopped = bool(f.get("stopped"))
+                self.st.vbat = f.get("vbat")
+                self.st.belly_mm = tof.get("m", 0) * 1000.0 if tof.get("valid") else None
+                if not imu.get("ok") or not up:
+                    self.st.tilt_deg = None
+                    if not f.get("stopped"):
+                        self.io.ctl.call("stop")
+                        self._ev("attitude lost — STOPPED (the tilt guard cannot see). SPACE resumes, E ends")
+                else:
+                    self.st.tilt_deg = math.degrees(math.acos(max(-1.0, min(1.0, up[1]))))
+                    if up[1] < TILT_LIMIT_UP_Y and not f.get("stopped"):
+                        self.io.ctl.call("stop")
+                        self._ev(f"tilt guard: {self.st.tilt_deg:.0f}° > {TILT_LIMIT_DEG:.0f}° — STOPPED. "
+                                 "SPACE resumes, E ends")
+            if self._host is not None and self._host.poll() is not None and "brain exited" not in self.st.detail:
+                self._ev(f"brain exited (code {self._host.returncode}) — benchd freezes the robot; E ends")
+            self.io.sleep(0.2)
+
+    # ---- run recording helpers ----
+    def _ev_rec(self, kind: str, **kw) -> None:
+        """A machine-readable event on CLOCK_MONOTONIC for the recording's alignment."""
+        try:
+            self.rec_dir.mkdir(parents=True, exist_ok=True)
+            with open(self.rec_dir / "events.jsonl", "a") as f:
+                f.write(json.dumps({"mono_ms": round(time.monotonic() * 1000.0, 2), "kind": kind, **kw}) + "\n")
+        except OSError:
+            pass
+
+    SYNC_PHYS_LEG, SYNC_JOINT, SYNC_US, SYNC_N = "FR", "hip1", 150, 3
+
+    def _sync_taps(self, pose_us) -> Optional[bool]:
+        """Three audible hip1 taps, timestamped: the audio is aligned to the commands by
+        measurement (motion whines in 4-8 kHz, stall_probe #1), not by arecord's latency."""
+        try:
+            smap = json.loads((REPO / "pi_host/calib/servo_map.json").read_text())
+            sim = {"FL": "fr", "FR": "fl", "RL": "rr", "RR": "rl"}[self.SYNC_PHYS_LEG]
+            ch = next(s["ch"] for s in smap["servos"] if s.get("sim_leg") == sim and s.get("joint") == self.SYNC_JOINT)
+        except (OSError, StopIteration, ValueError, KeyError):
+            self._ev("⚠ sync taps skipped: no servo map entry")
+            return True
+        base = int(pose_us[ch])
+        for k in range(self.SYNC_N):
+            for to in (base + self.SYNC_US, base):
+                r = self.io.bench.call("servo.set", ch=ch, us=to)
+                if not r or not r.get("ok"):
+                    self._ev(f"⚠ sync tap refused: {(r or {}).get('error', 'no reply')}")
+                    return True
+                self._ev_rec("sync_tap", ch=ch, to_us=to, base_us=base, k=k)
+                if self._wait(lambda: False, 0.35, ping=True) is None:
+                    return None
+        self._ev(f"{self.SYNC_N} sync taps on {self.SYNC_PHYS_LEG} {self.SYNC_JOINT} recorded")
+        return True
+
+    def _stop_recording(self) -> None:
+        secs = frames = 0
+        if self._audio is not None:
+            secs = self._audio.stop(); self._audio = None
+            self._ev_rec("audio_stop")
+        if self._feed is not None:
+            frames = self._feed.stop(); self._feed = None
+        if self._inacap:
+            self.io.bench.call("ina.capture", mode="off")
+            self._ev_rec("ina_capture_stop", file=self._inacap)
+        if self.record and self.rec_dir.exists():
+            meta = {"config": self.cfg.file, "name": self.cfg.name, "pose": self.pose, "run_mode": self.run_mode,
+                    "audio": {"device": "plughw:CARD=Device,DEV=0", "rate": 48000, "seconds": round(secs, 1)},
+                    "feed_frames": frames, "hat_resets": self.st.hat_resets,
+                    "ina_capture": self._inacap,
+                    "brain_seconds": round(self.io.now() - self.st.started_at, 1) if self.st.started_at else 0.0,
+                    "sync": {"leg": self.SYNC_PHYS_LEG, "joint": self.SYNC_JOINT, "us": self.SYNC_US, "n": self.SYNC_N}}
+            try:
+                (self.rec_dir / "meta.json").write_text(json.dumps(meta, indent=1))
+            except OSError:
+                pass
+            self._ev(f"recorded {secs:.0f} s of audio, {frames} feed frames -> {self.rec_dir}"
+                     + ("" if secs > 1 and frames > 0 else "  ⚠ A CHANNEL RECORDED NOTHING"))
+
+    def _cleanup(self) -> None:
+        with self._cleanup_lock:
+            if self._cleanup_started:
+                return
+            self._cleanup_started = True
+        self.st.phase = "ending"
+        self._ev("ending: stop, brain off, bench mode, rescue pose")
+        self.io.ctl.call("stop")
+        if self._host is not None and self._host.poll() is None:
+            try:
+                self._host.send_signal(signal.SIGTERM)
+                self._host.wait(timeout=8)
+            except Exception:
+                try:
+                    self._host.kill()
+                except Exception:
+                    pass
+        self.io.ctl.call("mode.set", mode="bench")
+        if self._slew_restore is not None:
+            r = self.io.bench.call("limits.set", slew_us=self._slew_restore, confirm=True)
+            self._ev(f"servo slew restored to {self._slew_restore} us/tick" if r and r.get("ok")
+                     else f"⚠ could not restore the servo slew to {self._slew_restore}: {(r or {}).get('error', 'no reply')}")
+            if r and r.get("ok"):
+                self._slew_restore = None
+        # The rescue pose needs a live HAT; after an outage, wait for it rather than sending
+        # a pose into the void (the operator may be switching it back on).
+        self._wait(lambda: not (self._status().get("hat") or {}).get("outage"), 20.0, ping=True, abortable=False)
+        r = self.io.bench.call("limp")
+        self._ev("rescue pose commanded" if r and r.get("ok") else "rescue pose: no reply")
+        self._wait(lambda: not self._status().get("rescue_active"), 20.0, ping=True, abortable=False)
+        self._stop_recording()                 # after the rescue landed: the end is on the recording
+        if self._svc_was_active:
+            ok = self.io.systemctl("start", "ogma-host")
+            self._ev("ogma-host service restarted" if ok else "⚠ could not restart ogma-host")
+        dur = self.io.now() - self.st.started_at if self.st.started_at else 0.0
+        self.st.phase = "done"
+        self._ev(f"done — brain drove {dur:.0f} s; log {self.st.log_path}")

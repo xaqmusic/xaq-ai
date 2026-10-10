@@ -12,17 +12,32 @@ allocates nothing, so the two tools cannot interfere no matter the order they st
 ControlServer already handles each client on its own thread, so a second connection is
 expected, not tolerated.
 
-Read-only throughout: no verb here can move a servo or change a parameter.
+Monitoring by default.  Two ways it can act on the robot:
+
+- SPACE stops the robot, and SPACE again resumes it (benchd's `stop` / `resume`).  STOP
+  freezes every servo where it is; it moves nothing.  The STOP request goes on its own
+  socket and the screen polls on a background thread, so the key is never stuck behind a
+  slow brain query.
+- C "run config" (2026-10-03, operator): pick a brain config from the Godot launcher's
+  allowlist, confirm, and after a 10 s COUNTDOWN — any key aborts, and nothing reaches the
+  robot before it ends — the robot is posed and the brain gets the servos (dash_run.py).
+  E ends the run (rescue pose).  This works ONLY on the robot: it needs benchd's
+  loopback control socket, so a dash run over ssh from elsewhere cannot start a brain
+  (port doc SPEC §1.1 as amended 2026-10-03).
 """
 from __future__ import annotations
 
 import argparse
 import curses
 import json
+import math
 import os
 import socket
+import threading
 import time
 from typing import Any, Optional
+
+import dash_run  # beside this file
 
 try:
     import zmq
@@ -31,6 +46,58 @@ except ImportError:                      # bench metrics need it; the brain half
 
 
 # --------------------------------------------------------------------------- transports
+
+class LineSpeed:
+    """Joint line speed from benchd's 50 Hz state feed: the pulse on the line (out_us), sampled
+    over exact 100 ms spans, mean |change| per second over the armed channels, in rad/s.
+
+    The sim's HUD power panel measures its joints the same way (10 Hz, mean over 12), so the two
+    numbers are comparable with each other.  Neither sees reversals inside 100 ms, so neither is
+    the brain's own command rate.  The feed is loopback-only on the Pi, so this reads it where
+    benchd runs and is quietly absent elsewhere.
+    """
+
+    def __init__(self, port: int = 5592):
+        self.speed: Optional[float] = None
+        self.speed_max: Optional[float] = None
+        self.t_last = 0.0
+        try:
+            cal = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                              "..", "calib", "sensors.json")))
+            self.us_per_rad = float(cal["servo"]["us_per_rad"])
+        except Exception:
+            self.us_per_rad = 545.2
+        if zmq is not None:
+            threading.Thread(target=self._loop, args=(port,), daemon=True).start()
+
+    def _loop(self, port: int) -> None:
+        s = zmq.Context.instance().socket(zmq.SUB)
+        s.setsockopt(zmq.RCVTIMEO, 500)
+        s.setsockopt_string(zmq.SUBSCRIBE, "state ")
+        s.connect(f"tcp://127.0.0.1:{port}")
+        hist: list = []                                       # (t_ms, out[12], armed bitmask)
+        while True:
+            try:
+                d = json.loads(s.recv_string()[6:])
+            except Exception:
+                continue
+            out, t = d.get("out"), float(d.get("t", 0))
+            if not out:
+                continue
+            hist.append((t, out, int(d.get("armed", 0))))
+            while hist and t - hist[0][0] > 400:
+                hist.pop(0)
+            old = next((h for h in hist if t - h[0] >= 100), None)
+            if old is None or t - old[0] > 140:
+                continue
+            dt = (t - old[0]) / 1000.0
+            v = [abs(out[c] - old[1][c]) / dt / self.us_per_rad
+                 for c in range(len(out)) if (hist[-1][2] >> c) & 1 and out[c] > 0 and old[1][c] > 0]
+            if v:
+                self.speed, self.speed_max, self.t_last = sum(v) / len(v), max(v), time.time()
+
+    def fresh(self) -> bool:
+        return self.speed is not None and time.time() - self.t_last < 1.0
 
 class Control:
     """Plain-TCP newline-JSON client for ogma_host's ControlServer. No dependencies."""
@@ -99,17 +166,20 @@ class Bench:
             self._sock.close(0)
             self._sock = None
 
-    def status(self) -> Optional[dict]:
+    def call(self, verb: str, **kw: Any) -> Optional[dict]:
         if not zmq:
             return None
         try:
             self._connect()
-            self._sock.send_string(json.dumps({"verb": "status"}))
+            self._sock.send_string(json.dumps({"verb": verb, **kw}))
             return json.loads(self._sock.recv_string())
         except Exception:
             # A REQ that missed its reply is stuck by protocol; recreate it.
             self.close()
             return None
+
+    def status(self) -> Optional[dict]:
+        return self.call("status")
 
 
 # --------------------------------------------------------------------------- rendering
@@ -161,6 +231,23 @@ class Dash:
     def __init__(self, host: str, ctl_port: int, bench_port: int, interval: float):
         self.control = Control(host, ctl_port)
         self.bench = Bench(host, bench_port)
+        # STOP gets its OWN socket: a REQ waiting on a status reply cannot send, and the
+        # stop key must never queue behind the poller.
+        self.stopper = Bench(host, bench_port, timeout_ms=500)
+        self.st_time = 0.0                    # when self.st last arrived
+        self.stop_reply: Optional[dict] = None
+        self.stop_reply_time = 0.0
+        self.msg = ""                         # the last STOP/RESUME outcome, shown on screen
+        self.msg_bad = False
+        # ---- run config ----
+        self.ui = "monitor"                  # monitor | pick | confirm | run
+        self.configs: list = []
+        self.sel = 0
+        self.poses: list = ["stand"]
+        self.pose_idx = 0
+        self.checks: list = []
+        self.ctrl: Optional[dash_run.RunController] = None
+        self.end_requested_at = 0.0          # E pressed; the fallback fires if nothing happens
         self.interval = interval
         self.host = host
         self.modules: list[dict] = []
@@ -170,9 +257,39 @@ class Dash:
         self.st: Optional[dict] = None
         self.info: Optional[dict] = None      # host_info: fetched once, it is static
         self.t0 = time.time()
+        self.line = LineSpeed()
+
+    def known_stopped(self) -> bool:
+        """Is the robot KNOWN to be stopped right now?  Only fresh evidence counts; when it
+        is unknown the answer is False, so an uncertain press sends STOP, never RESUME."""
+        now = time.time()
+        fresh = max(1.0, 1.5 * self.interval)
+        if self.stop_reply is not None and now - self.stop_reply_time < fresh \
+                and self.stop_reply_time >= self.st_time:
+            return bool(self.stop_reply.get("stopped"))
+        if self.st is not None and self.st.get("ok", True) and now - self.st_time < fresh:
+            return bool(self.st.get("stopped"))
+        return False
+
+    def toggle_stop(self) -> None:
+        resuming = self.known_stopped()
+        r = self.stopper.call("resume" if resuming else "stop")
+        if r is not None and r.get("ok"):
+            self.stop_reply, self.stop_reply_time = r, time.time()
+            self.msg = ("re-arming the servos one at a time after the HAT reset — the run resumes when they land"
+                        if resuming and r.get("recovering")
+                        else f"RESUMED ({r.get('mode', '?')} mode)" if resuming
+                        else "STOPPED — every servo frozen where it is.  SPACE to resume.")
+            self.msg_bad = False
+        else:
+            err = (r or {}).get("error", "no reply from ogma_benchd")
+            self.msg = (f"resume refused: {err}" if resuming
+                        else f"STOP FAILED: {err} — cut power if the robot is at risk")
+            self.msg_bad = True
 
     def poll(self) -> None:
-        self.st = self.bench.status()
+        st = self.bench.status()
+        self.st, self.st_time = st, time.time()
         self.brain = self.control.call("ping")
         if self.brain is not None:
             # Static for the life of the process, so fetch it once — and re-fetch after a
@@ -203,11 +320,175 @@ class Dash:
             except curses.error:
                 pass
 
+    # ---------------------------------------------------------------- run config UI
+    def open_picker(self) -> None:
+        try:
+            self.configs = dash_run.list_configs()
+        except OSError as e:
+            self.msg, self.msg_bad = f"cannot read the config list: {e}", True
+            return
+        self.sel = 0
+        self.ui = "pick"
+
+    def open_confirm(self) -> None:
+        io = dash_run.RobotIo()
+        self.poses = (io.bench.call("pose.list") or {}).get("poses") or ["stand"]
+        self.pose_idx = self.poses.index("stand") if "stand" in self.poses else 0
+        self.checks = dash_run.preflight(io, self.poses[self.pose_idx])
+        io.bench.close(); io.ctl.close()
+        self.ui = "confirm"
+
+    def open_confirm_keep_pose(self) -> None:
+        io = dash_run.RobotIo()
+        self.checks = dash_run.preflight(io, self.poses[self.pose_idx])
+        io.bench.close(); io.ctl.close()
+
+    def start_run(self) -> None:
+        cfg = self.configs[self.sel]
+        self.ctrl = dash_run.RunController(dash_run.RobotIo(), cfg, self.poses[self.pose_idx])
+        self.ctrl.start()
+        self.ui = "run"
+
+    def handle_run_key(self, ch: int) -> bool:
+        """Keys while a run screen is up.  Returns True if the poller should refresh."""
+        if self.ui == "pick":
+            if ch in (curses.KEY_UP, ord("k")):
+                self.sel = max(0, self.sel - 1)
+            elif ch in (curses.KEY_DOWN, ord("j")):
+                self.sel = min(len(self.configs) - 1, self.sel + 1)
+            elif ch in (10, 13, curses.KEY_ENTER) and self.configs:
+                self.open_confirm()
+            elif ch in (27, ord("q")):
+                self.ui = "monitor"
+            return False
+        if self.ui == "confirm":
+            blocked = any(ck.blocking and not ck.ok for ck in self.checks)
+            faithful = self.configs[self.sel].faithful
+            if ch in (ord("p"), ord("P")) and self.poses:
+                self.pose_idx = (self.pose_idx + 1) % len(self.poses)
+                self.open_confirm_keep_pose()
+            elif ch in (ord("r"), ord("R")):
+                self.open_confirm_keep_pose()
+            elif not blocked and ((faithful and ch in (10, 13, curses.KEY_ENTER)) or (not faithful and ch == ord("Y"))):
+                self.start_run()
+            elif ch in (27, ord("q")):
+                self.ui = "pick"
+            return False
+        if self.ui == "run" and self.ctrl is not None:
+            ph = self.ctrl.st.phase
+            if ph == "countdown":
+                self.ctrl.abort()                       # ANY key: nothing has moved yet
+            elif ph in ("prepare", "running"):
+                if ch == ord(" "):
+                    # Resuming mid-reset would hand the brain a body that is still moving.
+                    if self.known_stopped() and (self.st or {}).get("pose_move_active"):
+                        self.msg, self.msg_bad = "wait: the reset pose is still moving (SPACE when it lands)", True
+                        return True
+                    self.toggle_stop()
+                    return True
+                if ch in (ord("r"), ord("R")):
+                    self.ctrl.reset()
+                elif ch in (ord("e"), ord("E")):
+                    self.ctrl.end()
+                    self.end_requested_at = time.time()
+                    self.msg, self.msg_bad = "ending the run…", False
+                elif ch in (ord("q"), ord("Q")):
+                    self.msg, self.msg_bad = "a run is live: E ends it (rescue pose), then q quits", True
+            elif ph in ("done", "aborted"):
+                self.ui, self.ctrl = "monitor", None
+            return True
+        return False
+
+    def draw_pick(self, scr, C) -> None:
+        h, w = scr.getmaxyx()
+        self._line(scr, 0, 1, "RUN CONFIG — the Godot launcher's picrawler allowlist", C(HEAD) | curses.A_BOLD)
+        self._line(scr, 1, 1, "↑/↓ select   ENTER confirm   ESC back      ✓ ROBOT = robot-faithful inputs "
+                              "(the only kind validated on hardware)", C(DIM))
+        rows = max(1, h - 4)
+        top = max(0, min(self.sel - rows + 1, len(self.configs) - rows)) if self.sel >= rows else 0
+        for i, c in enumerate(self.configs[top:top + rows]):
+            k = top + i
+            tag = "✓ ROBOT " if c.faithful else "  sim   "
+            attr = (curses.A_REVERSE if k == self.sel else 0) | C(OK if c.faithful else WARN)
+            self._line(scr, 3 + i, 1, f"{tag} {c.name[:max(10, w - 12)]}", attr)
+
+    def draw_confirm(self, scr, C) -> None:
+        c = self.configs[self.sel]
+        y = 0
+        self._line(scr, y, 1, "RUN CONFIG — confirm", C(HEAD) | curses.A_BOLD); y += 2
+        self._line(scr, y, 3, c.name, C(OK if c.faithful else WARN) | curses.A_BOLD); y += 1
+        self._line(scr, y, 3, c.file, C(DIM)); y += 2
+        if not c.faithful:
+            self._line(scr, y, 3, "⚠ SIM INPUTS: tuned on inputs the robot cannot publish (achieved joint "
+                                  "angles, god's-eye signals). On hardware it runs partly blind.",
+                       C(BAD) | curses.A_BOLD); y += 2
+        if c.slew_us:
+            fast = c.slew_us > 40
+            self._line(scr, y, 3, f"servo speed: {c.speed_rad_s:.2f} rad/s = benchd slew {c.slew_us} µs/tick for this run"
+                                  + ("  (FASTER than the deployed 40 — a brownout lever; restored after)" if fast else ""),
+                       C(WARN if fast else OK)); y += 1
+        self._line(scr, y, 3, f"start pose: {self.poses[self.pose_idx]}   (P cycles saved poses)", C(OK)); y += 1
+        self._line(scr, y, 3, f"mode: autonomous — after a HAT reset the robot returns to '{self.poses[self.pose_idx]}' "
+                              f"and the run continues (warning shown)", C(DIM)); y += 1
+        self._line(scr, y, 3, f"tilt guard: STOP past {dash_run.TILT_LIMIT_DEG:.0f}°    STOP/resume: SPACE    "
+                              f"reset to start pose: R    end: E (rescue pose)", C(DIM)); y += 1
+        self._line(scr, y, 3, "HAT off mid-run: SPACE (pause) → HAT off → move the robot → HAT on → SPACE "
+                              "(back to the start pose, one servo at a time, then continues)", C(DIM)); y += 2
+        for ck in self.checks:
+            col = OK if ck.ok else (BAD if ck.blocking else WARN)
+            self._line(scr, y, 3, ("✓ " if ck.ok else ("✗ " if ck.blocking else "! ")) + ck.text, C(col)); y += 1
+        y += 1
+        if any(ck.blocking and not ck.ok for ck in self.checks):
+            self._line(scr, y, 3, "cannot run: fix the ✗ items (R re-checks)   ESC back", C(BAD) | curses.A_BOLD)
+        else:
+            go = "ENTER" if c.faithful else "Y (capital — sim-input config)"
+            self._line(scr, y, 3, f"{go}: start the {dash_run.COUNTDOWN_S:.0f} s countdown   R re-check   ESC back",
+                       C(HEAD) | curses.A_BOLD)
+
+    def draw_run_panel(self, scr, C, y: int) -> int:
+        st = self.ctrl.st
+        h, w = scr.getmaxyx()
+        if st.phase == "countdown":
+            n = int(math.ceil(st.countdown_left))
+            self._line(scr, y, 1, f" RUN {self.ctrl.cfg.name[:60]} ", C(HEAD) | curses.A_BOLD); y += 2
+            self._line(scr, y, 3, f"  STARTING IN  {n:2d} s  — the robot will move to '{self.ctrl.pose}' "
+                                  f"and the brain will take the servos  ",
+                       C(BAD) | curses.A_BOLD | curses.A_REVERSE); y += 2
+            self._line(scr, y, 3, "ANY KEY ABORTS — nothing has been sent to the robot yet", C(WARN) | curses.A_BOLD)
+            return y + 2
+        col = {"prepare": WARN, "running": OK, "ending": WARN, "done": HEAD, "aborted": WARN}.get(st.phase, DIM)
+        el = (time.monotonic() - st.started_at) if st.started_at and st.phase == "running" else 0
+        belly = f"{st.belly_mm:.0f} mm" if st.belly_mm is not None else "—"
+        tilt = f"{st.tilt_deg:.0f}°" if st.tilt_deg is not None else "—"
+        vb = f"{st.vbat:.2f} V" if st.vbat is not None else "—"
+        self._line(scr, y, 1, f" RUN {st.phase.upper():8} {self.ctrl.cfg.name[:44]}  {el:4.0f} s   "
+                              f"belly {belly}  tilt {tilt}  vbat {vb} ", C(col) | curses.A_BOLD | curses.A_REVERSE); y += 1
+        self._line(scr, y, 3, st.detail, C(col)); y += 1
+        if st.recovering:
+            self._line(scr, y, 3, " RECOVERING FROM A HAT RESET — re-arming servos one at a time ",
+                       C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
+        if st.hat_warning:
+            self._line(scr, y, 3, st.hat_warning, C(BAD) | curses.A_BOLD); y += 1
+        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)"
+                if st.phase in ("prepare", "running")
+                else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
+        self._line(scr, y, 3, keys, C(DIM)); y += 1
+        self._line(scr, y, 0, "─" * max(0, w - 1), C(DIM))
+        return y + 1
+
     def draw(self, scr) -> None:
         scr.erase()
         h, w = scr.getmaxyx()
         C = curses.color_pair
         y = 0
+        if self.ui == "pick":
+            self.draw_pick(scr, C); scr.refresh(); return
+        if self.ui == "confirm":
+            self.draw_confirm(scr, C); scr.refresh(); return
+        if self.ui == "run" and self.ctrl is not None:
+            y = self.draw_run_panel(scr, C, y)
+            if self.ctrl.st.phase == "countdown":
+                scr.refresh(); return
         # Uptimes that mean something: the daemons', not this viewer's.
         bench_up = float((self.st or {}).get("uptime_s", 0.0))
         brain_up = float((self.sensors or {}).get("uptime_s", 0.0))
@@ -221,9 +502,33 @@ class Dash:
         y += 1
         self._line(scr, y, 0, "─" * max(0, w - 1), C(DIM)); y += 1
 
-        # ---- bench ----
+        # ---- STOP / mode: the first thing on the screen ----
         st = self.st
         ok = st is not None and st.get("ok", True)
+        if ok:
+            mode = str(st.get("mode", "?"))
+            if self.known_stopped():
+                txt = (f" ■ STOPPED ({st.get('stop_why', '?')}, {float(st.get('stopped_ms', 0)) / 1000:.0f} s)"
+                       f" — SPACE to resume ")
+                self._line(scr, y, 1, txt, C(BAD) | curses.A_BOLD | curses.A_REVERSE)
+            else:
+                self._line(scr, y, 1, " ● RUNNING — SPACE stops every servo where it is ", C(OK) | curses.A_BOLD)
+            if mode == "bench":
+                self._line(scr, y, 60, "MODE bench — link loss ⇒ rescue pose", C(WARN))
+            else:
+                br = st.get("brain") or {}
+                state = ("HOLDING (stream lost)" if br.get("holding")
+                         else "streaming" if br.get("have_stream") else "silent")
+                self._line(scr, y, 60, f"MODE {mode.upper()} — the brain drives, no deadman;"
+                                       f" brain {state}, {br.get('applied', 0)} applied", C(BAD) | curses.A_BOLD)
+        else:
+            self._line(scr, y, 1, " ⚠ benchd unreachable — SPACE cannot stop the robot from here ", C(BAD) | curses.A_BOLD)
+        y += 1
+        if self.msg:
+            self._line(scr, y, 1, self.msg, C(BAD if self.msg_bad else OK))
+        y += 1
+
+        # ---- bench ----
         self._line(scr, y, 1, "BENCH  ogma_benchd  ", C(HEAD))
         if not zmq:
             self._line(scr, y, 21, "no pyzmq — apt install python3-zmq", C(WARN))
@@ -241,6 +546,74 @@ class Dash:
                                   f"   watchdog {f.get('watchdog_trips', '?')}"
                                   f"   throttled {f.get('pi_throttled', '?')}", C(vcol))
             y += 1
+            # Whole-robot current (BOM 3): Pi + the 5 V regulator + all 12 servos.
+            # Colours track the HAT's 3 A rail rating, which is a datasheet fact --
+            # NOT the duty budget, which BOM 3.9 measured to be surface-dependent.
+            ina = f.get("ina") or {}
+            if ina.get("ok"):
+                cur = float(ina.get("i_a", 0.0))
+                charging = bool(ina.get("charging"))
+                icol = DIM if charging else (BAD if cur > 2.7 else WARN if cur > 2.0 else OK)
+                rail = f.get("rail") or {}
+                rail_txt = (f"   rail {float(rail.get('v', 0.0)):4.2f} V (min1s {float(rail.get('min_1s', 0.0)):4.2f})"
+                            if rail.get("v") else "")
+                self._line(scr, y, 3,
+                           f"power {cur:+6.3f} A [{bar(cur / 3.0, 16)}]"
+                           f"   ina {float(ina.get('v', 0.0)):5.3f} V" + rail_txt
+                           + ("   CHARGING — energy numbers are confounded" if charging else ""),
+                           C(icol))
+                y += 1
+                # The SLOW metric: a 30 s mean, a 60 s decaying worst, and what the
+                # robot has actually spent.  Instantaneous current says nothing about duty.
+                self._line(scr, y, 3,
+                           f"slow   ema30 {float(ina.get('i_ema', 0.0)):+6.3f} A"
+                           f"   peak60 {float(ina.get('i_peak', 0.0)):5.3f}"
+                           f"   max {float(ina.get('i_max', 0.0)):5.3f}"
+                           f"   spent {float(ina.get('energy_j', 0.0)) / 1000.0:+7.3f} kJ"
+                           f" / {float(ina.get('charge_as', 0.0)):+7.1f} A·s", C(DIM))
+                y += 1
+                # The same measure as the sim HUD's "joints" line, for the faster-than-sim check.
+                if self.line.fresh():
+                    self._line(scr, y, 3, f"joints line speed {self.line.speed:4.2f} rad/s mean, "
+                                          f"{self.line.speed_max:4.2f} max (10 Hz, pulse on the line)", C(DIM))
+                    y += 1
+            elif ina:
+                self._line(scr, y, 3, f"power  INA219 not reading (errors {ina.get('errors', '?')})", C(BAD))
+                y += 1
+            # Belly clearance (BOM 2 #4).  The status and the invalid rate sit ON the
+            # same lines as the millimetres deliberately: a ToF reading that failed the
+            # part's own checks is an arbitrary number, not a large or small one, and it
+            # is indistinguishable from a good one if the distance is shown alone.
+            tof = f.get("tof") or {}
+            if tof.get("ok"):
+                mm = float(tof.get("m", 0.0)) * 1000.0
+                bad = float(tof.get("bad_frac", 0.0))
+                age = int(tof.get("age_ms", -1))
+                stale = age < 0 or age > 2000
+                valid = bool(tof.get("valid"))
+                # Red is for a channel that is not reporting the belly: stopped, or the
+                # belly is actually down.  Amber is for one whose word is getting weaker.
+                bcol = (BAD if stale or (valid and mm <= 5.0)
+                        else WARN if not valid or bad > 0.25 else OK)
+                self._line(scr, y, 3,
+                           f"belly {mm:6.1f} mm [{bar(mm / 60.0, 16)}]"
+                           f"   raw {int(tof.get('raw_mm', 0)):4d} - {float(tof.get('offset_mm', 0.0)):.0f} off"
+                           f"   {str(tof.get('status', '?')):8s}"
+                           + ("   STALE — ranging stopped" if stale else ""), C(bcol))
+                y += 1
+                # The SLOW metric.  worst60 is a MIN-hold, not a peak: on this channel
+                # LOW is the dangerous end, so a peak-hold would report the safe extreme.
+                self._line(scr, y, 3,
+                           f"slow   ema30 {float(tof.get('m_ema', 0.0)) * 1000.0:6.1f} mm"
+                           f"   worst60 {float(tof.get('m_min', 0.0)) * 1000.0:5.1f}"
+                           f"   min {float(tof.get('m_min_all', 0.0)) * 1000.0:5.1f}"
+                           f"   invalid {bad * 100.0:3.0f}%"
+                           f"   sig {float(tof.get('signal_mcps', 0.0)):5.2f}"
+                           f" / amb {float(tof.get('ambient_mcps', 0.0)):5.2f} Mcps", C(DIM))
+                y += 1
+            elif tof:
+                self._line(scr, y, 3, f"belly  VL53L0X not reading (errors {tof.get('errors', '?')})", C(BAD))
+                y += 1
             adc = f.get("adc", [])
             self._line(scr, y, 3, "adc   " + "  ".join(f"A{i} {v}" for i, v in enumerate(adc)), C(DIM))
             y += 1
@@ -354,7 +727,7 @@ class Dash:
         self._line(scr, h - 2, 36,
                    "— EPM amber = under 30% baked (still earning its vocabulary)", C(DIM))
         self._line(scr, h - 1, 1,
-                   f"q quit   r refresh   every {self.interval:.1f}s"
+                   f"SPACE stop/resume   C run config   q quit   r refresh   every {self.interval:.1f}s"
                    f"   baked = visits >= baking_threshold", C(DIM))
         scr.refresh()
 
@@ -366,24 +739,68 @@ class Dash:
                      (WARN, curses.COLOR_YELLOW), (BAD, curses.COLOR_RED),
                      (HEAD, curses.COLOR_CYAN)):
             curses.init_pair(i, c, -1)
-        last = 0.0
-        while True:
-            now = time.time()
-            if now - last >= self.interval:
-                self.poll()
-                last = now
+        # The poll (benchd status + every EPM snapshot) can take seconds when the brain is
+        # slow or gone; on the key loop it would delay STOP by that much.  So it runs on its
+        # own thread and the key loop only draws and reads keys.
+        wake = threading.Event()
+        quit_ = threading.Event()
+
+        def poller() -> None:
+            while not quit_.is_set():
+                try:
+                    self.poll()
+                except Exception:
+                    pass
+                wake.wait(self.interval)
+                wake.clear()
+
+        threading.Thread(target=poller, daemon=True).start()
+
+        def draw() -> None:
+            # The poller mutates state while this reads it; a drawing glitch must never
+            # take the STOP key down with it.
+            try:
                 self.draw(scr)
+            except Exception:
+                pass
+
+        last_draw = 0.0
+        while True:
             try:
                 ch = scr.getch()
             except curses.error:
                 ch = -1
-            if ch in (ord("q"), ord("Q"), 27):
+            if ch != -1 and self.ui != "monitor":
+                if self.handle_run_key(ch):
+                    wake.set()
+                draw()
+            elif ch == ord(" "):
+                self.toggle_stop()
+                wake.set()                       # re-poll now so the banner catches up
+                draw()
+            elif ch in (ord("c"), ord("C")):
+                self.open_picker()
+                draw()
+            elif ch in (ord("q"), ord("Q"), 27):
+                quit_.set(); wake.set()
                 return
-            if ch in (ord("r"), ord("R")):
-                last = 0.0
+            elif ch in (ord("r"), ord("R")):
+                wake.set()
             elif ch == curses.KEY_RESIZE:
-                self.draw(scr)
-            time.sleep(0.05)
+                draw()
+            now = time.time()
+            # E fallback: if the controller has not started the end sequence 2 s after E,
+            # run it from here.  It is guarded to run exactly once.
+            c = self.ctrl
+            if c is not None and self.end_requested_at and now - self.end_requested_at > 2.0:
+                self.end_requested_at = 0.0
+                if not c.ending_started():
+                    self.msg, self.msg_bad = "controller did not respond to E — ending the run from the dash", True
+                    threading.Thread(target=c.end_now, daemon=True).start()
+            if now - last_draw >= 0.25:
+                draw()
+                last_draw = now
+            time.sleep(0.02)
 
 
 def main() -> None:
@@ -407,6 +824,17 @@ def main() -> None:
             print(f"  build {i.get('git_sha')}  binary {i['binary']['stat'].get('mtime')}"
                   f"  {i.get('hz')}Hz {'SCHED_FIFO' if i.get('realtime') else 'SCHED_OTHER'}")
         if st:
+            _ina = st.get("ina") or {}
+            if _ina.get("ok"):
+                print(f"  power {float(_ina.get('i_a', 0)):+.3f} A  ema30 {float(_ina.get('i_ema', 0)):+.3f}"
+                      f"  peak60 {float(_ina.get('i_peak', 0)):.3f}  spent {float(_ina.get('energy_j', 0)) / 1000:.3f} kJ"
+                      + ("  CHARGING" if _ina.get("charging") else ""))
+            _tof = st.get("tof") or {}
+            if _tof.get("ok"):
+                print(f"  belly {float(_tof.get('m', 0)) * 1000:.1f} mm  ema30 {float(_tof.get('m_ema', 0)) * 1000:.1f}"
+                      f"  worst60 {float(_tof.get('m_min', 0)) * 1000:.1f}"
+                      f"  {_tof.get('status', '?')}  invalid {float(_tof.get('bad_frac', 0)) * 100:.0f}%")
+            print(f"  mode {st.get('mode', '?')}  {'STOPPED (' + str(st.get('stop_why')) + ')' if st.get('stopped') else 'running'}")
             print(f"  vbat {float(st.get('vbat', 0)):.2f} V  tick {float(st.get('tick_hz', 0)):.2f} Hz"
                   f"  overruns {st.get('overruns')}")
         if d.sensors:
@@ -421,10 +849,15 @@ def main() -> None:
     try:
         curses.wrapper(d.run)
     except KeyboardInterrupt:
-        pass
+        # Ctrl-C must not leave a brain driving the robot with no console: end the run.
+        if d.ctrl is not None and d.ctrl.busy():
+            print("Ctrl-C during a live run: ending it (stop, brain off, bench, rescue pose)…", flush=True)
+            d.ctrl.end_now()
+            print(f"ended. events: {d.ctrl.events_path}", flush=True)
     finally:
         d.control.close()
         d.bench.close()
+        d.stopper.close()
 
 
 if __name__ == "__main__":

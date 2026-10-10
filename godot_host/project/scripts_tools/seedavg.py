@@ -19,6 +19,21 @@ PROJ = str(pathlib.Path(__file__).resolve().parents[1])
 SP   = os.environ.get("SEEDAVG_OUT", "/tmp/xaq_seedavg")
 os.makedirs(SP, exist_ok=True)
 
+def config_body_env(cfg):
+    """The config's declared body env (metadata.body_env), applied as the launcher applies it.
+
+    ⚠ 2026-10-06: this harness used to IGNORE it.  Only the launcher applied body_env, so every
+    headless run of a robot-faithful config (P-e·h0 declares a solid chassis, honest joints / IMU /
+    upright / distress, the boom ToF and 3.668 rad/s) ran on the DEFAULT body instead: 6.0 rad/s,
+    ghost chassis, raw joints.  An env var already exported, or passed as K=V, still wins."""
+    try:
+        meta = json.load(open(f"{PROJ}/addons/ami_ogma/configs/{cfg}")).get("metadata", {})
+        benv = meta.get("body_env", {})
+        return {str(k): str(v) for k, v in benv.items()} if isinstance(benv, dict) else {}
+    except Exception:
+        return {}
+
+
 def run_one(cfg, seed, max_steps, difficulty, extra):
     # 2026-08-03 — arms differentiated ONLY by extra env vars (e.g. two damping levels on
     # one config) previously collided on this filename and silently OVERWROTE each other's
@@ -34,6 +49,9 @@ def run_one(cfg, seed, max_steps, difficulty, extra):
                OGMA_PICRAWLER_GYM_DIFFICULTY=str(difficulty),
                OGMA_PICRAWLER_CONFIG=f"res://addons/ami_ogma/configs/{cfg}",
                OGMA_RESET_MODE="continuous", OGMA_PICRAWLER_MAX_STEPS=str(max_steps))
+    for k, v in config_body_env(cfg).items():
+        if k not in os.environ:
+            env[k] = v
     for kv in extra:
         k,_,v = kv.partition("="); env[k]=v
     with open(out,"w") as f:

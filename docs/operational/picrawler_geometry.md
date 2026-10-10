@@ -196,6 +196,26 @@ mass-weighted CoG from the sim's own segment masses and positions. Feed it the c
 masses and geometry, and it must land ≈15 mm above hip2 at the standing pose. If it doesn't,
 the mass distribution is wrong somewhere the tape measure can't see.
 
+## ⚠ 2026-09-27 — the FSR foot mod changes `L3` by more than any correction here
+
+The printed foot/toe assembly adds **19.90 mm** from the leg-socket mouth to the ground
+contact, and it replaces no existing foot part, so it is all new reach. Insertion depth `d` is
+set by where the leg wedges on the socket's taper, and
+
+```
+L3_new = 76.5 + (19.90 − d)
+```
+
+At the likely d ≈ 3 mm that is **L3 ≈ 93.4 mm (+22 %)** and total reach ≈ 173.4 mm (+11 %).
+
+Two further changes come with it. The contact is now a **R7.00 hemisphere, not a point**, so
+the right FK is "axis length to the sphere centre, then a fixed 7.00 mm vertical drop" — the
+ball touches directly beneath its centre at any leg angle, and the contact point rolls as the
+leg swings. And **+2 g at the tip adds roughly 37 % to the lower leg's inertia about the
+knee**, so a gait tuned before the mod should not be assumed to transfer.
+
+Full record: [`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §5.
+
 ## ⚠ Updating these constants is a re-baseline, not a bug fix
 
 `L1`/`L2`/`L3` are inputs to the FK chain that produces **`feet_y_gravity_cmd`** — the promoted

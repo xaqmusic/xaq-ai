@@ -3,6 +3,7 @@
 // 2026-08-28 (ADC read of A4 = 7.65 V pack; P0 moved at 1300/1500/1700 us).
 #include "ogma/hw/ServoDriver.hpp"
 #include "ogma/hw/Ina219.hpp"
+#include "ogma/hw/Vl53l0x.hpp"
 #include "ogma/hw/ResourceMonitor.hpp"
 #include <cstdlib>
 #include <fstream>
@@ -158,6 +159,152 @@ TEST(Ina219Protocol, RejectsAShuntThatCannotBeCalibrated) {
     EXPECT_THROW(Ina219::calibration_word(1e-9, 1e-9), std::invalid_argument);
 }
 
+// ---------------------------------------------------------------------------
+// VL53L0X — belly ToF (BOM §2 #4).  The encodings below are the datasheet's and
+// ST's API's; nothing here needs the part present.
+// ---------------------------------------------------------------------------
+
+struct TofFixture {
+    FakeI2cBus  bus;
+    Vl53l0x     tof{bus, Vl53l0xConfig{}, Vl53l0x::ADDR_DEFAULT};
+    TofFixture() { bus.expect_addr = Vl53l0x::ADDR_DEFAULT; }
+    // One measurement as the part lays it out at 0x14: 12 bytes, big-endian fields.
+    static std::vector<uint8_t> result(uint8_t dev_status, uint16_t mm, uint16_t spads_88,
+                                       uint16_t signal_97, uint16_t ambient_97) {
+        std::vector<uint8_t> b(12, 0);
+        b[0]  = uint8_t(dev_status << 3);
+        b[2]  = uint8_t(spads_88 >> 8);   b[3]  = uint8_t(spads_88 & 0xFF);
+        b[6]  = uint8_t(signal_97 >> 8);  b[7]  = uint8_t(signal_97 & 0xFF);
+        b[8]  = uint8_t(ambient_97 >> 8); b[9]  = uint8_t(ambient_97 & 0xFF);
+        b[10] = uint8_t(mm >> 8);         b[11] = uint8_t(mm & 0xFF);
+        return b;
+    }
+};
+
+TEST(Vl53l0xEncoding, TimeoutIsAByteMantissaWithAByteExponentAndRoundTrips) {
+    // decode is (LS << MS) + 1, so encode must be its inverse for any representable
+    // value.  Off-by-one here shifts the whole timing budget without failing loudly.
+    for (uint32_t mclks : {1u, 2u, 255u, 256u, 1000u, 4095u, 65535u}) {
+        const uint16_t enc = Vl53l0x::encode_timeout(mclks);
+        EXPECT_LE(Vl53l0x::decode_timeout(enc), mclks + (mclks >> 8) + 1) << "mclks " << mclks;
+        EXPECT_GE(Vl53l0x::decode_timeout(enc), mclks > 1 ? (mclks >> 1) : 1u) << "mclks " << mclks;
+    }
+    EXPECT_EQ(Vl53l0x::decode_timeout(Vl53l0x::encode_timeout(200)), 200);
+    EXPECT_EQ(Vl53l0x::encode_timeout(0), 0);
+}
+
+TEST(Vl53l0xEncoding, MacroPeriodAndVcselPeriodMatchTheDatasheet) {
+    // VCSEL period is stored as (pclks/2 - 1), so decoding is (reg + 1) << 1.  The
+    // part's defaults are 14 pclks pre-range and 10 final-range; both are read back off
+    // the die by the timing-budget code, so a wrong decode silently rescales the budget.
+    EXPECT_EQ(Vl53l0x::decode_vcsel_period(0x06), 14);
+    EXPECT_EQ(Vl53l0x::decode_vcsel_period(0x04), 10);
+    EXPECT_EQ(Vl53l0x::decode_vcsel_period(0x0E), 30);   // the widest ST allows
+    // macro period ns = (2304 * pclks * 1655 + 500) / 1000, worked out by hand at the
+    // pre-range default rather than restated as the formula.
+    EXPECT_EQ(Vl53l0x::calc_macro_period_ns(14), 53384u);
+    // us <-> mclks are inverses to within one macro period, which is the resolution.
+    const uint32_t us = Vl53l0x::timeout_mclks_to_us(1000, 14);
+    EXPECT_NEAR(double(Vl53l0x::timeout_us_to_mclks(us, 14)), 1000.0, 1.0);
+}
+
+TEST(Vl53l0xEncoding, RateFieldsAre97FixedPointNotIntegerMcps) {
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint97_to_mcps(128), 1.0);
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint97_to_mcps(32), 0.25);
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint97_to_mcps(0), 0.0);
+    // The SPAD field in the SAME 12 bytes is 8.8, not 9.7.  Reading it with the rates'
+    // scale is what turns 105 effective SPADs into "26884" on a dashboard.
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint88_to_count(26884), 105.015625);
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint88_to_count(256), 1.0);
+}
+
+TEST(Vl53l0xStatus, DeviceCodesMapToStsPalStatusAndNoneIsNotAFailureReason) {
+    using S = Vl53l0x::Status;
+    // The NoneFlag set: no measurement was produced.  Reporting these as SignalFail
+    // would invent a cause the part never claimed.
+    for (uint8_t c : {0, 5, 7, 12, 13, 14, 15}) EXPECT_EQ(Vl53l0x::decode_status(c), S::NoUpdate) << int(c);
+    for (uint8_t c : {1, 2, 3})                 EXPECT_EQ(Vl53l0x::decode_status(c), S::HardwareFail) << int(c);
+    for (uint8_t c : {6, 9})                    EXPECT_EQ(Vl53l0x::decode_status(c), S::PhaseFail) << int(c);
+    for (uint8_t c : {8, 10})                   EXPECT_EQ(Vl53l0x::decode_status(c), S::MinRangeFail) << int(c);
+    EXPECT_EQ(Vl53l0x::decode_status(4),  S::SignalFail);
+    EXPECT_EQ(Vl53l0x::decode_status(11), S::Valid);
+}
+
+TEST(Vl53l0xMount, ClearanceIsRawMinusTheFittedOffsetAndNeverGoesNegative) {
+    // The offset is calibration data, so the record keeps raw mm and this re-derives.
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(76, 20.0), 0.056);   // standing, 20 mm recess
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(30, 20.0), 0.010);   // near the crouch gate
+    // Belly on the floor reads the recess itself; a fit that is a hair long must floor
+    // at zero rather than report the chassis below the ground it is sitting on.
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(18, 20.0), 0.0);
+}
+
+TEST(Vl53l0xProtocol, ModelIdIsAPointerWriteThenAOneByteRead) {
+    TofFixture f;
+    f.bus.read_queue = {0xEE};
+    EXPECT_TRUE(f.tof.model_id_ok());
+    EXPECT_EQ(f.bus.writes.at(0), (std::vector<uint8_t>{Vl53l0x::REG_MODEL_ID}));
+    EXPECT_EQ(f.bus.byte_reads, 1);
+}
+
+TEST(Vl53l0xProtocol, InitRefusesAPartThatIsNotAVl53l0x) {
+    // An address that ACKs proves something is wired; only 0xEE proves it is this part.
+    TofFixture f;
+    f.bus.read_queue = {0x00};
+    EXPECT_THROW(f.tof.init(), std::runtime_error);
+}
+
+TEST(Vl53l0xProtocol, AMeasurementIsOneBlockReadSoStatusCannotPairWithTheNextRange) {
+    TofFixture f;
+    f.bus.read_queue = {0x04};                       // RESULT_INTERRUPT_STATUS: ready
+    const auto r12 = TofFixture::result(11, 75, 32 * 256, 256, 64);
+    f.bus.read_queue.insert(f.bus.read_queue.end(), r12.begin(), r12.end());
+
+    Vl53l0x::Reading r;
+    ASSERT_TRUE(f.tof.read_ready(r));
+    EXPECT_EQ(f.bus.block_reads, 1);                 // ONE transaction, not six
+    EXPECT_EQ(r.raw_mm, 75);
+    EXPECT_TRUE(r.valid);
+    EXPECT_EQ(r.status, Vl53l0x::Status::Valid);
+    EXPECT_DOUBLE_EQ(r.spads, 32.0);
+    EXPECT_DOUBLE_EQ(r.signal_mcps, 2.0);
+    EXPECT_DOUBLE_EQ(r.ambient_mcps, 0.5);
+    // The interrupt must be cleared, or every later read returns this same sample.
+    EXPECT_EQ(f.bus.writes.back(), (std::vector<uint8_t>{0x0B, 0x01}));
+}
+
+TEST(Vl53l0xProtocol, NotReadyReturnsFalseWithoutBlockingOrConsumingAResult) {
+    // benchd polls this while holding the bus mutex the 50 Hz servo tick also wants,
+    // so a not-ready poll must cost one register read and nothing else.
+    TofFixture f;
+    f.bus.read_queue = {0x00};
+    Vl53l0x::Reading r;
+    EXPECT_FALSE(f.tof.read_ready(r));
+    EXPECT_EQ(f.bus.block_reads, 0);
+    EXPECT_EQ(r.status, Vl53l0x::Status::NoUpdate);
+}
+
+TEST(Vl53l0xProtocol, AnInvalidReadingReportsTheFarLimitNotZero) {
+    // Zero would map "saw nothing" onto "something against the belly" — the opposite
+    // extreme, and the reading the height homeostat would react hardest to.
+    Vl53l0xConfig cfg; cfg.max_range_m = 1.2; cfg.mount_offset_mm = 20.0;
+    FakeI2cBus bus; bus.expect_addr = Vl53l0x::ADDR_DEFAULT;
+    Vl53l0x tof(bus, cfg);
+    bus.read_queue = {0x04};
+    const auto r12 = TofFixture::result(4, 8190, 0, 2, 900);   // signal fail, starved return
+    bus.read_queue.insert(bus.read_queue.end(), r12.begin(), r12.end());
+
+    Vl53l0x::Reading r;
+    ASSERT_TRUE(tof.read_ready(r));
+    EXPECT_FALSE(r.valid);
+    EXPECT_EQ(r.status, Vl53l0x::Status::SignalFail);
+    EXPECT_DOUBLE_EQ(r.distance_m, 1.2);
+    EXPECT_EQ(r.raw_mm, 8190);                       // the raw number still gets recorded
+    EXPECT_EQ(tof.invalid(), 1u);
+    // The confound is published, not swallowed: ambient swamping signal is the cause.
+    EXPECT_GT(r.ambient_mcps, r.signal_mcps);
+}
+
 TEST(RobotHatProtocol, TimerSetupWritesPrescalerAndPeriod) {
     FakeI2cBus bus; RobotHat hat(bus);
     hat.setup_servo_timer(5);                       // channel 5 -> timer 1
@@ -214,6 +361,126 @@ TEST(ServoDriver, SlewLimitsRateAndFirstCommandDoesNotSweepIn) {
     for (int i = 0; i < 10; ++i) d.tick();
     EXPECT_EQ(d.current_us(0), 1700);
     EXPECT_EQ(bus.last(), (std::vector<uint8_t>{0x20, 0x01, 0x5C}));       // 1700us -> 348 = 0x15C
+}
+
+TEST(ServoDriver, FirstCommandRampsFromAKnownPulseInsteadOfJumping) {
+    // Robot, 2026-10-03: a fresh benchd's first pose jumped all 12 servos at full speed.
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.seed_known_pulse(0, 1200);                   // what the HAT was left holding
+    d.command(0, 1500);
+    EXPECT_EQ(d.current_us(0), 1200);              // starts where the servo is
+    d.tick(); EXPECT_EQ(d.current_us(0), 1240);    // and slews
+    for (int i = 0; i < 20; ++i) d.tick();
+    EXPECT_EQ(d.current_us(0), 1500);
+    EXPECT_EQ(d.last_sent_us(0), 1500);
+}
+
+TEST(ServoDriver, ReArmAfterLimpRampsFromTheLastWrittenPulse) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();                  // unknown start: legacy, at the target
+    EXPECT_EQ(d.last_sent_us(0), 1500);
+    d.limp_all();                                  // this HAT ignores pulse 0: 1500 stays on
+    EXPECT_FALSE(d.armed(0));
+    d.command(0, 1800);
+    EXPECT_EQ(d.current_us(0), 1500);              // no jump on re-arm
+    d.tick(); EXPECT_EQ(d.current_us(0), 1540);
+}
+
+TEST(ServoDriver, AnMcuResetForgetsTheKnownPulse) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.seed_known_pulse(0, 1200);
+    d.forget_timers();                             // MCU reset: PWM stopped, pulse unknown
+    EXPECT_EQ(d.last_sent_us(0), 0);
+    d.command(0, 1500);
+    EXPECT_EQ(d.current_us(0), 1500);              // falls back to the legacy start
+}
+
+TEST(ServoDriver, OutputLagOffIsTheUnlaggedPulse) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    EXPECT_EQ(d.output_lag(), 0.0);
+    d.command(0, 1500); d.tick(); d.command(0, 1700); d.tick();
+    EXPECT_EQ(d.output_us(0), d.current_us(0));
+    EXPECT_EQ(d.last_sent_us(0), 1540);
+}
+
+TEST(ServoDriver, OutputLagFollowsTheSlewedPulseFirstOrder) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();
+    d.set_output_lag(0.2);
+    d.command(0, 1700);
+    d.tick();                                      // current 1540; out 1500 + 0.2*40 = 1508
+    EXPECT_EQ(d.current_us(0), 1540);              // the efference copy is unchanged
+    EXPECT_EQ(d.output_us(0), 1508);
+    EXPECT_EQ(d.last_sent_us(0), 1508);            // and the HAT gets the lagged pulse
+    for (int i = 0; i < 60; ++i) d.tick();
+    EXPECT_EQ(d.output_us(0), 1700);               // converges on the target
+}
+
+TEST(ServoDriver, OutputLagSmoothsAFullSlewReversal) {
+    // The robot's thrash: the command reverses at full slew every tick or two.  The lagged
+    // output must move less than the slewed pulse does.
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();
+    d.set_output_lag(0.2);
+    int cur_span = 0, out_span = 0, lo_c = 9999, hi_c = 0, lo_o = 9999, hi_o = 0;
+    for (int i = 0; i < 40; ++i) {
+        d.command(0, (i % 2) ? 1400 : 1600);
+        d.tick();
+        if (i < 20) continue;                      // steady oscillation only, not the rise
+        lo_c = std::min(lo_c, d.current_us(0)); hi_c = std::max(hi_c, d.current_us(0));
+        lo_o = std::min(lo_o, d.output_us(0));  hi_o = std::max(hi_o, d.output_us(0));
+    }
+    cur_span = hi_c - lo_c; out_span = hi_o - lo_o;
+    EXPECT_EQ(cur_span, 40);
+    EXPECT_LT(out_span, cur_span / 2);
+}
+
+TEST(ServoDriver, FreezeHoldsThePulseOnTheLineNotTheCommand) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();
+    d.set_output_lag(0.2);
+    d.command(0, 2000);
+    for (int i = 0; i < 5; ++i) d.tick();          // current runs ahead of the output
+    ASSERT_GT(d.current_us(0), d.output_us(0));
+    const int on_line = d.output_us(0);
+    d.freeze(0);
+    for (int i = 0; i < 20; ++i) d.tick();
+    EXPECT_EQ(d.output_us(0), on_line);            // STOP stops where the servo IS
+    EXPECT_EQ(d.current_us(0), on_line);
+}
+
+TEST(ServoDriver, ChangingTheLagNeverJumpsTheOutput) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();
+    d.set_output_lag(0.2);
+    d.command(0, 2000);
+    for (int i = 0; i < 3; ++i) d.tick();
+    const int out = d.output_us(0);
+    d.freeze(0);                                   // benchd freezes before changing the lag
+    d.set_output_lag(0.0);
+    d.tick();
+    EXPECT_EQ(d.last_sent_us(0), out);
+}
+
+TEST(ServoDriver, AfterAnMcuResetArmedChannelsGetTheirTimerReprogrammedBeforeAnyPulse) {
+    // Robot, 2026-10-03: a HAT brownout reset the MCU mid-run; the driver kept writing pulses
+    // to still-armed channels whose timers the reset had unprogrammed — garbage PWM, servos
+    // to their end stops.  The timer must be set up again before the first pulse after it.
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(5, 1500); d.tick();                  // ch 5 is timer group 1
+    ASSERT_TRUE(d.armed(5));
+    d.forget_timers();                             // what benchd does after mcu->reset()
+    bus.writes.clear();
+    d.tick();                                      // still armed: writes its pulse...
+    ASSERT_FALSE(bus.writes.empty());
+    int psc = -1, chn = -1;
+    for (int i = 0; i < int(bus.writes.size()); ++i) {
+        if (bus.writes[size_t(i)][0] == RobotHat::REG_PSC + 1 && psc < 0) psc = i;
+        if (bus.writes[size_t(i)][0] == RobotHat::REG_CHN + 5 && chn < 0) chn = i;
+    }
+    EXPECT_GE(psc, 0) << "timer group 1 was never re-programmed";
+    EXPECT_GE(chn, 0);
+    EXPECT_LT(psc, chn) << "...and only after its timer is programmed again";
 }
 
 TEST(ServoDriver, WatchdogLimpsWhenCommandsStop) {
@@ -439,3 +706,246 @@ TEST(CameraCapture, StrideIsTheRowPitchAndPaddingNeverEntersTheAverage) {
     for (uint8_t v : dst) EXPECT_EQ(int(v), 0) << "ISP padding leaked into the image";
 }
 #endif  // PI_HOST_HAVE_SENSORS
+
+// ---------------------------------------------------------------------------
+// The I2C bus claim.  LinuxI2cBus's constructor is open() + flock(LOCK_EX|LOCK_NB),
+// and nothing else touches the device, so a regular file exercises the guard exactly.
+#include "ogma/hw/I2cBus.hpp"
+
+TEST(LinuxI2cBus, SecondOpenerIsRefusedRatherThanInterleaved) {
+    // ⚠ WHY THIS IS A TEST AND NOT A COMMENT.  Two processes on one I2C device do not
+    // collide visibly: a register read is write(pointer) then read, and another
+    // transaction landing between them returns a DIFFERENT register's contents as a
+    // perfectly plausible number.  The failure mode is a good-looking wrong value, so
+    // the guard has to be asserted rather than assumed.
+    const auto path = std::filesystem::temp_directory_path() / "ogma_i2c_claim_test";
+    { std::ofstream mk(path); mk << "x"; }
+
+    ogma::hw::LinuxI2cBus first(path.string());              // takes the claim
+    EXPECT_THROW({ ogma::hw::LinuxI2cBus second(path.string()); }, std::runtime_error);
+
+    std::filesystem::remove(path);
+}
+
+TEST(LinuxI2cBus, TheClaimIsReleasedWhenTheOwnerGoesAway) {
+    // A lock that outlived its holder would be worse than none: the bus would be
+    // permanently unavailable after any crash, and the fix would look like a reboot.
+    // flock is tied to the descriptor, so close() releases it — assert that, because
+    // the whole design rests on a crash not wedging the robot.
+    const auto path = std::filesystem::temp_directory_path() / "ogma_i2c_release_test";
+    { std::ofstream mk(path); mk << "x"; }
+
+    { ogma::hw::LinuxI2cBus owner(path.string()); }          // scope ends -> close()
+    EXPECT_NO_THROW({ ogma::hw::LinuxI2cBus after(path.string()); });
+
+    std::filesystem::remove(path);
+}
+
+// ---------------------------------------------------------------------------
+// ToF stall recovery policy.  The failure this guards is a sensor that keeps
+// publishing a HEALTHY-LOOKING reading forever (ok=true, status=valid) that is
+// minutes old, on the promoted height homeostat's input.
+#include "ogma/hw/TofRecovery.hpp"
+using ogma::hw::TofRecoveryPolicy;
+
+TEST(TofRecovery, FreshReadingsAreNeverRecovered) {
+    TofRecoveryPolicy p;
+    EXPECT_EQ(p.decide(0,    10000, 0, 0), TofRecoveryPolicy::Action::None);
+    EXPECT_EQ(p.decide(999,  10000, 0, 0), TofRecoveryPolicy::Action::None);
+    // Exactly at the threshold is still not stale — the comparison is strict, so a part
+    // ranging right at the budget cannot be restarted out of a working state.
+    EXPECT_EQ(p.decide(1000, 10000, 0, 0), TofRecoveryPolicy::Action::None);
+}
+
+TEST(TofRecovery, TheFirstStallGetsTheCHEAPFixAndTheSecondGetsTheExpensiveOne) {
+    TofRecoveryPolicy p;
+    // A stop/start is a couple of register writes; init() is the whole boot sequence, and
+    // both run under the bus mutex the servo tick shares.  Reaching for the expensive one
+    // first would stall the servo loop on every transient.
+    EXPECT_EQ(p.decide(1500, 10000, 0, 0), TofRecoveryPolicy::Action::Restart);
+    EXPECT_EQ(p.decide(1500, 10000, 0, 1), TofRecoveryPolicy::Action::Reinit);
+    EXPECT_EQ(p.decide(1500, 10000, 0, 5), TofRecoveryPolicy::Action::Reinit);
+}
+
+TEST(TofRecovery, ANeverAttemptedRecoveryIsNotInsideACooldown) {
+    // ⚠ last_attempt_ms == 0 means "never tried", not "tried at time zero".  Read the
+    // other way, the FIRST stall after boot waits out a cooldown that never happened —
+    // and the first stall is the one that matters, because nothing is recovering yet.
+    TofRecoveryPolicy p;
+    EXPECT_EQ(p.decide(1500, 500, 0, 0), TofRecoveryPolicy::Action::Restart);
+}
+
+TEST(TofRecovery, TheCooldownStopsADeadPartBeingHammeredEveryFrame) {
+    // Each attempt costs the servo loop bus time.  A part that will never come back must
+    // not convert into a permanent stall of the thing that still works.
+    TofRecoveryPolicy p;
+    EXPECT_EQ(p.decide(9000, 11000, 10000, 1), TofRecoveryPolicy::Action::None);   // 1 s later
+    EXPECT_EQ(p.decide(9000, 13000, 10000, 1), TofRecoveryPolicy::Action::None);   // exactly 3 s
+    EXPECT_EQ(p.decide(9000, 13001, 10000, 1), TofRecoveryPolicy::Action::Reinit); // past it
+}
+
+TEST(Vl53l0xValidity, ARawOfZeroIsNotAMeasurementAndMustNotReadAsZeroClearance) {
+    // ⚠ THE FAILURE THIS PINS.  A stopped part emitted raw_mm = 0 with status = Valid, and
+    // the clearance conversion floors a negative at 0.0 — so the channel published a
+    // confident 0.000 m, "belly on the floor", into the promoted height homeostat for a
+    // full second.  Absence would have been safe; a plausible extreme was not.
+    //
+    // The conversion itself is what makes zero dangerous rather than merely wrong, so it
+    // is asserted directly: below the recess it floors, and the floor is the alarm value.
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(0, 64.8), 0.0);
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(60, 64.8), 0.0);
+    // ...and a genuine belly touch sits at the recess itself, which is why the validity
+    // bound is zero and NOT "at or below the offset": that rule would discard exactly the
+    // reading this channel exists to make.
+    EXPECT_NEAR(Vl53l0x::raw_to_clearance_m(65, 64.8), 0.0002, 1e-6);
+    EXPECT_NEAR(Vl53l0x::raw_to_clearance_m(120, 64.8), 0.0552, 1e-6);
+}
+
+// ---------------------------------------------------------------------------
+#include "ogma/hw/RailGuard.hpp"
+#include "ogma/body/StrideOdometry.hpp"
+using ogma::body::Vec3f;
+using ogma::hw::RailGuard;
+
+TEST(TofBoom, AtZeroTiltCompensatedEqualsUncompensated) {
+    // The whole point of the correction is that it does NOTHING when level -- that is what
+    // makes the fitted level-pose offset still the right anchor (BOM §9.2).
+    const Vec3f up(0.0f, 1.0f, 0.0f);
+    const double d = 0.120, H = 0.0648, z = -0.070;
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(d, up, H, z),
+                ogma::body::ground_clearance_boom_uncomp(d, H), 1e-12);
+}
+TEST(TofBoom, BellyDownReadsZeroWhenTheOffsetMatchesTheStandoff) {
+    // BOM §9.9 measured the standoff at 68.0 mm in the X pose, belly ON the floor, and the
+    // stored 64.8 therefore reports +3.2 mm of clearance with the belly flat.  Pinned so the
+    // permissive direction cannot be forgotten: a threshold of "clearance < 0" never fires.
+    const Vec3f up(0.0f, 1.0f, 0.0f);
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(0.068, up, 0.068, -0.070), 0.0, 1e-12);
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(0.068, up, 0.0648, -0.070), 0.0032, 1e-9);
+}
+TEST(TofBoom, PitchMovesTheRawReadingFarMoreThanTheBelly) {
+    // The measurement that justifies the correction existing.  Hold the belly at a true
+    // 20 mm and pitch the body 10°; the naive reading moves by ~12 mm, the corrected one
+    // does not move at all.
+    const double H = 0.0648, z = -0.070, true_clear = 0.020;
+    const double th = 10.0 * M_PI / 180.0;
+    // up in the body frame for a pitch of th about X: pitch = atan2(-up.z, up.y)
+    const Vec3f up(0.0f, float(std::cos(th)), float(-std::sin(th)));
+    // the along-ray range that a body at this attitude with this clearance would return
+    const double d = (true_clear + H * std::cos(th) + z * (-std::sin(th))) / std::cos(th);
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(d, up, H, z), true_clear, 1e-9);
+    const double naive = ogma::body::ground_clearance_boom_uncomp(d, H);
+    EXPECT_GT(std::fabs(naive - true_clear), 0.010);   // the naive reading is >10 mm out
+}
+TEST(TofBoom, TheAftBoomSignIsNoseDownReadsHigh) {
+    // ⚠ A SIGN ERROR HERE DOUBLES THE ARTEFACT INSTEAD OF REMOVING IT, and still looks
+    // plausible.  Boom is AFT (z<0): nose-DOWN lifts the tail, so the sensor rises and the
+    // naive reading grows.  Pinned as an inequality on the naive arm so the fixture states
+    // which way the hardware actually leans.
+    const double H = 0.0648, z = -0.070;
+    const double th = 8.0 * M_PI / 180.0;             // nose-down
+    const Vec3f up(0.0f, float(std::cos(th)), float(std::sin(th)));
+    const double true_clear = 0.020;
+    const double d = (true_clear + H * std::cos(th) + z * std::sin(th)) / std::cos(th);
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(d, up, H, z), true_clear, 1e-9);
+}
+TEST(RailGuard, BitsAlreadySetAtStartupAreHistoryAndNeverFire) {
+    // The sticky mask survives until a reboot, so a robot started after an earlier event
+    // begins life with bits set.  Treating those as "it just happened" would rescue-pose
+    // the robot on every single start.
+    RailGuard g;
+    EXPECT_EQ(g.update(0x50000u), 0u);
+    EXPECT_EQ(g.update(0x50000u), 0u);
+}
+
+TEST(RailGuard, ANewlyAppearingStickyBitIsTheEvent) {
+    RailGuard g;
+    g.update(0x0u);                                   // clean boot
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);          // under-voltage HAS OCCURRED
+}
+
+TEST(RailGuard, OneEventFiresOnceRatherThanOnEveryPoll) {
+    // The bit stays set for the rest of the boot, so a naive test fires ~once a second
+    // forever — which would hold the robot in rescue and look like a dead servo bus.
+    RailGuard g;
+    g.update(0x0u);
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);
+    EXPECT_EQ(g.update(0x10000u), 0u);
+    EXPECT_EQ(g.update(0x10000u), 0u);
+}
+
+TEST(RailGuard, TheBaselineTRACKSTheMaskAndDoesNotAccumulate) {
+    // update() does `baseline_ = mask`, not `baseline_ |= mask`.  On real hardware the two
+    // are identical, because the sticky bits are monotonic within a boot -- the mask never
+    // loses a bit, so replacing and OR-ing give the same answer.  They diverge only when a
+    // bit can go away, and then REPLACING is the behaviour we want: the live bits (0-3) do
+    // clear, and a second under-voltage dip is a second event that deserves a second
+    // back-off, not a repeat to be swallowed.
+    //
+    // ⚠ This is pinned because the fault-injection drill depends on it and it is otherwise
+    // invisible: injected bits CAN be withdrawn, so the drill is re-runnable without
+    // restarting the daemon.  A later change to |= would silently make the drill a
+    // one-shot-per-boot tool, passing its first run and reporting "the poll never calls
+    // update()" on every run after.
+    RailGuard g;
+    g.update(0x0u);
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);
+    EXPECT_EQ(g.baseline(), 0x10000u);
+    EXPECT_EQ(g.update(0x0u), 0u);            // the bit withdrawn: not an event ...
+    EXPECT_EQ(g.baseline(), 0x10000u);        // ... and the baseline does NOT follow it down
+    EXPECT_EQ(g.update(0x40000u), 0x40000u);  // a different bit fires ...
+    EXPECT_EQ(g.baseline(), 0x40000u);        // ... and REPLACES the baseline, dropping 0x10000
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);  // so the first bit can fire a second time
+}
+TEST(RailGuard, ASecondDistinctBitIsASecondEvent) {
+    // 0x50000 is bits 16 and 18 together, which is what the field failure actually showed.
+    // Throttling appearing after under-voltage is new information, not a repeat.
+    RailGuard g;
+    g.update(0x0u);
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);
+    EXPECT_EQ(g.update(0x50000u), 0x40000u);
+    EXPECT_EQ(g.update(0x50000u), 0u);
+}
+
+// ---- HatHealth: a reset vs a glitch (robot, 2026-10-05) ----
+#include "ogma/hw/HatHealth.hpp"
+
+TEST(HatHealth, OneBadReadOfThreeIsAGlitchTwoAreAReset) {
+    EXPECT_FALSE(garbage_confirmed(0));
+    EXPECT_FALSE(garbage_confirmed(1));
+    EXPECT_TRUE(garbage_confirmed(2));
+    EXPECT_TRUE(garbage_confirmed(3));
+}
+
+TEST(HatHealth, SporadicErrorsOverARunNeverResetTheMcu) {
+    // The 2026-10-05 run: ~600 NACKs spread over 19 minutes, with transactions succeeding
+    // in between.  The old rule (every 20th cumulative error) reset the MCU three times.
+    BusBurst b;
+    int resets = 0;
+    for (int64_t t = 0; t < 19 * 60 * 1000; t += 20) {      // the 50 Hz tick
+        if (t % 1900 == 0) b.error(t);                       // ~600 errors over the run
+        else b.ok(t);
+        if (b.should_reset(t)) { ++resets; b.did_reset(t); }
+    }
+    EXPECT_EQ(resets, 0);
+}
+
+TEST(HatHealth, AHungMcuIsResetOnceThenRateLimited) {
+    BusBurst b;
+    b.ok(0);
+    int resets = 0;
+    for (int64_t t = 1000; t < 7000; t += 20) {              // every transaction fails for 6 s
+        b.error(t);
+        if (b.should_reset(t)) { ++resets; b.did_reset(t); }
+    }
+    EXPECT_EQ(resets, 2);                                     // at ~1.5 s, then >= 5 s later
+}
+
+TEST(HatHealth, ABurstWithSuccessesInBetweenIsNotAHang) {
+    BusBurst b;
+    for (int64_t t = 0; t < 1000; t += 20) {                 // 50 errors in 1 s, but ...
+        b.error(t);
+        b.ok(t + 5);                                          // ... the bus keeps answering
+        EXPECT_FALSE(b.should_reset(t + 5));
+    }
+}

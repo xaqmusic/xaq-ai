@@ -1,1 +1,13 @@
+# Runtime artifacts, not records.  The telemetry JSONL is the deliberate local record
+# (SPEC §3: "the record is not the view"), and the .stdout files are what the systemd
+# units append to — both units carry StandardOutput=append: into this directory.
+#
+# ⚠ WHY THE .stdout PATTERNS WERE ADDED.  A daemon appending to an untracked file leaves
+# the robot's working tree permanently dirty, and a permanently dirty tree makes
+# `git status` useless for the one question it gets asked on a remote machine: is this
+# checkout clean, and does it match the laptop?  A session read that dirt as uncommitted
+# WORK, concluded the robot had diverged, and came close to committing 19 duplicates of
+# already-merged history on the strength of it.  Noise in a status line is not free.
 *.jsonl
+*.stdout
+*.out

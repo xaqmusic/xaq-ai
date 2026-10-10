@@ -1,0 +1,91 @@
+{
+  "name": "measured_fsr",
+  "source": "measured.json + the printed FSR foot: L3 knee-axis -> toe tip 87 mm, operator, 2026-10-01",
+  "notes": [
+    "The measured body WITH the FSR toe modules fitted. Everything except the three",
+    "values below is measured.json unchanged, so an A/B against it isolates the leg.",
+    "",
+    "links.l3 0.0765 -> 0.087: knee axis to the toe tip, measured by the operator on the",
+    "  assembled foot (2026-10-01). One value for all four feet. The toe is a R7 ball,",
+    "  but the sim keeps its point toe at the end of L3 (foot_fsr_mod.md 5.2: the",
+    "  error is +0.10 mm at 10 deg of sweep and +0.94 mm at 30 deg).",
+    "chassis.standing_y 0.0823 -> 0.0927: the same construction measured.json uses,",
+    "  coxa_z_drop + L3*sin(80 deg) = 7.0 + 85.7 mm, so the toes touch the floor at spawn.",
+    "masses.lower +0.002: the printed foot, ~2 g each (foot_fsr_mod.md 5.5).",
+    "",
+    "NOT changed, deliberately: ground_clearance stand_m stays 0.06 in both the sim",
+    "(GROUND_CLEARANCE_STAND) and the robot (pi_host/calib/sensors.json), because it must",
+    "match across the two. The taller stance spends more of its range near the clamp at 1.0;",
+    "making it adaptive is its own lever (foot_fsr_mod.md 5.3)."
+  ],
+  "links": {
+    "l1": 0.032,
+    "l2": 0.048,
+    "l3": 0.087,
+    "coxa_z_drop": 0.007
+  },
+  "chassis": {
+    "x": 0.098,
+    "y": 0.103,
+    "z": 0.098,
+    "hip_x_span": 0.076,
+    "hip_z_span": 0.076,
+    "standing_y": 0.0927,
+    "boxes": [
+      {
+        "name": "base",
+        "size": [
+          0.098,
+          0.041,
+          0.098
+        ],
+        "offset": [
+          0.0,
+          -0.0055,
+          0.0
+        ]
+      },
+      {
+        "name": "electronics",
+        "size": [
+          0.09,
+          0.062,
+          0.056
+        ],
+        "offset": [
+          0.0,
+          0.046,
+          0.0
+        ]
+      }
+    ],
+    "center_of_mass": [
+      0.0,
+      0.008,
+      0.0
+    ]
+  },
+  "rest": {
+    "hip1": 0.0,
+    "hip2": 0.0,
+    "knee": -1.6,
+    "lower_leg_drop_angle": -1.396
+  },
+  "limits": {
+    "hip1": 1.4,
+    "hip2": 1.4,
+    "knee_low": -2.5,
+    "knee_high": 1.7,
+    "knee_low_narrow": -1.7
+  },
+  "masses": {
+    "chassis": 0.342,
+    "coxa": 0.020667,
+    "upper": 0.020667,
+    "lower": 0.022667
+  },
+  "radii": {
+    "coxa": 0.02,
+    "leg": 0.012
+  }
+}

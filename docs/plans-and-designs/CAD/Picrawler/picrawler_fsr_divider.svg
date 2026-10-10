@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 512" width="980" height="512">
+<title>PiCrawler FSR divider — correct wiring vs as-built</title>
+<style>
+ text{font-family:ui-sans-serif,system-ui,sans-serif;fill:#1d2530}
+ .w{stroke:#2b3542;stroke-width:2;fill:none;stroke-linecap:round}
+ .part{fill:#fff;stroke:#2b3542;stroke-width:2}
+ .pin{fill:#2b3542}
+ .node{fill:#1f7a3a}
+ .lbl{font-size:13px}
+ .sm{font-size:11.5px;fill:#5b6674}
+ .pn{font-size:13px;font-weight:600}
+ .ok{font-size:14px;font-weight:700;fill:#1f7a3a}
+ .bad{font-size:14px;font-weight:700;fill:#b03030}
+ .ttl{font-size:15px;font-weight:600}
+ .sub{font-size:11.5px;fill:#5b6674}
+ .nodelbl{font-size:12.5px;font-weight:700;fill:#1f7a3a}
+</style>
+<rect width="980" height="512" fill="#fbfbf9"/>
+<text x="24" y="26" class="ttl">PiCrawler FSR divider — the 15 kΩ / 1 µF channel</text>
+<text x="24" y="44" class="sub">R_g and C go between the SAME two points. Nothing is ever in series with the signal.</text>
+
+<text x="24" y="80" class="ok">✓ CORRECT</text>
+<text x="112" y="80" class="sm">SIG lands on the FSR's lower terminal; R_g and C both hang from that point down to GND</text>
+
+<!-- pins: dot, label above the wire -->
+<circle cx="46" cy="130" r="5" class="pin"/>
+<text x="40" y="118" class="pn">VCC</text><text x="80" y="118" class="sm">3.3 V</text>
+<circle cx="46" cy="260" r="5" class="pin"/>
+<text x="40" y="248" class="pn">SIG</text><text x="76" y="248" class="sm">A0 on the HAT</text>
+<circle cx="46" cy="390" r="5" class="pin"/>
+<text x="40" y="378" class="pn">GND</text>
+
+<!-- VCC -> FSR -> node -->
+<path class="w" d="M46 130 H300"/>
+<rect x="300" y="114" width="130" height="32" rx="3" class="part"/>
+<text x="365" y="135" class="lbl" text-anchor="middle">FSR</text>
+<text x="365" y="106" class="sm" text-anchor="middle">up the leg, in the foot</text>
+<path class="w" d="M430 130 H470 V260"/>
+
+<!-- SIG -> node -->
+<path class="w" d="M46 260 H470"/>
+<circle cx="470" cy="260" r="6.5" class="node"/>
+<text x="486" y="253" class="nodelbl">NODE</text>
+<text x="486" y="269" class="sm">three things meet here, and only here</text>
+
+<!-- node -> R_g and C, side by side -->
+<path class="w" d="M470 260 V304 M355 304 H615 M355 304 V324 M615 304 V324"/>
+<rect x="290" y="324" width="130" height="38" rx="3" class="part"/>
+<text x="355" y="348" class="lbl" text-anchor="middle">R_g = 15 kΩ</text>
+<rect x="550" y="324" width="130" height="38" rx="3" class="part"/>
+<text x="615" y="348" class="lbl" text-anchor="middle">C = 1 µF</text>
+<path class="w" d="M355 362 V390 M615 362 V390 M46 390 H615"/>
+
+<text x="720" y="130" class="sm">FSR : 3V3 → NODE</text>
+<text x="720" y="150" class="sm">R_g : NODE → GND</text>
+<text x="720" y="170" class="sm">C   : NODE → GND</text>
+<text x="720" y="200" class="sm">R_g and C are in</text>
+<text x="720" y="217" class="sm">parallel with each</text>
+<text x="720" y="234" class="sm">other, never in the</text>
+<text x="720" y="251" class="sm">signal's path.</text>
+
+<line x1="24" y1="424" x2="956" y2="424" stroke="#d6d9dd" stroke-width="1"/>
+<text x="24" y="452" class="bad">✗ AS BUILT (found 2026-09-29)</text>
+<text x="232" y="452" class="sm">R_g and C had swapped places: 3V3 → FSR → C → GND, with R_g from GND to SIG.</text>
+<text x="24" y="472" class="sm">SIG then touches the sensor branch nowhere — an open, not a high-pass, which is why a press produced no transient at all.</text>
+<text x="24" y="492" class="sm">Reads: VCC↔SIG = OL (only route is through C) · VCC↔GND = OL (same cap) · SIG↔GND = 15 kΩ (R_g alone) · A0 = 0, unresponsive.</text>
+</svg>
