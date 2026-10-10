@@ -7810,3 +7810,9 @@ the skill settle, `p2b`, to isolate it).**
 chance to move on; the kicks fire from a stiller trunk (0.010 against 0.026 m/s) at the same distance and bearing from the thing
 (edge 0.12 m, 32–34°), and move as many things. The contact flag during the skill window halves while the things moved tie —
 the stander's stance rested against things more; the outcome is what the eye should judge. Preset P2 for the eye.
+
+**★ P2 PROMOTED on the operator's eye (2026-10-10):** "accuracy of pecks and kicks seems similar while the look has improved."
+The stack: ★ L1 + `--stop-walker-hold --stop-skill-settle` (preset ★ P2, first row). The operator, next: "we may be getting to
+the end of what we can accomplish in sim, so I would like to try adding the sit skill for a bit of flavour. There are still
+cases where the robot backs into walls or chairs or otherwise collides with an object unexpectedly. It would be fun if, when the
+robot has a big TLE spike from not traversing when expected, it sits down for a few seconds, then stands back up and continues."
