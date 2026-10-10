@@ -197,6 +197,12 @@ public:
     // way: it turns the same way as the last, and its walk out is twice the last's (at most 4 x OUT) -- one way around, held
     // longer each time the obstacle persists; a detour after 10 s free starts fresh.  Off = byte-identical to D1.
     void set_detour_commit(bool on) { detour_commit_ = on; }
+    // §17.117 D1c (--detour-reopen P): a detour's walk out ends when the way ahead closes -- the ahead sector's proximity
+    // above P (P 0.5 = a return within 0.5 m) -- and the turn starts again the same way (a repeat): the heading found is held
+    // only while it stays open (D1b's long walk outs walked into the next wall: traps led by the held heading 0.3 -> 1.9 a
+    // run).  0 = off, byte-identical to D1b.
+    void set_detour_reopen(double p) { detour_reopen_ = p; }
+    int  detour_reopens() const { return detour_reopens_; }
     int  detour_repeats() const { return detour_repeats_; }
     int  detours() const { return detours_; }
     int  detour_clear() const { return detour_clear_; }        // turns ended by the ahead sector reading clear
@@ -446,6 +452,7 @@ private:
     double seek_gate_near_m_ = 0.0; int seek_gate_kept_ = 0;   // §17.117 G1
     bool seek_nearer_now_ = false;                              // G1's condition this tick
     double detour_back_vx_ = 0.0; int detour_arm_ticks_ = 25, detour_max_ticks_ = 150, detour_out_ticks_ = 75;   // §17.117 D1
+    double detour_reopen_ = 0.0; int detour_reopens_ = 0; bool detour_walking_ = false;   // §17.117 D1c
     bool detour_commit_ = false; int detour_out_now_ = 0, detour_last_end_ = -1000000, detour_repeats_ = 0;   // §17.117 D1b
     int detour_arm_ = 0, detour_left_ = 0, detour_age_ = 0, detours_ = 0, detour_clear_ = 0; double detour_dir_ = 0.0; bool detour_started_ = false;
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;

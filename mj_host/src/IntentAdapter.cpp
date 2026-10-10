@@ -421,6 +421,13 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     }
     if (detour_back_vx_ > 0.0) {   // §17.117 D1, the detour (see the header)
         detour_started_ = false;
+        if (detour_walking_ && ref_hold_left_ == 0) detour_walking_ = false;
+        if (detour_reopen_ > 0.0 && detour_walking_ && ref_hold_left_ > 0 && double(tof[1]) > detour_reopen_) {
+            // D1c: the way ahead closed on the walk out -- turn again, the same way, as a repeat
+            ref_hold_left_ = 0; detour_walking_ = false; ++detour_reopens_;
+            detour_left_ = detour_max_ticks_; detour_age_ = 0; ++detours_; ++detour_repeats_; detour_started_ = true;
+            detour_out_now_ = std::min(2 * detour_out_now_, 4 * detour_out_ticks_);
+        }
         if (detour_left_ == 0 && ref_hold_left_ == 0) {
             detour_arm_ = (last_steer_ == 3 && seek_nearer_now_) ? detour_arm_ + 1 : 0;
             if (detour_arm_ >= detour_arm_ticks_) {
@@ -443,6 +450,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                 detour_left_ = 0;
                 set_ref_hold(0.0, detour_commit_ ? detour_out_now_ : detour_out_ticks_);   // the heading found, held: the walk out
                 detour_last_end_ = int(tick_id_) + (detour_commit_ ? detour_out_now_ : detour_out_ticks_);
+                if (detour_reopen_ > 0.0) detour_walking_ = true;
             } else {
                 last_twist_[0] = -detour_back_vx_;
                 last_twist_[2] = detour_dir_ * yaw_range_;
