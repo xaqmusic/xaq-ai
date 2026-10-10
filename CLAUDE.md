@@ -252,7 +252,7 @@ godot4 --headless --fixed-fps 60 --quit-after 4000000 \
   `cell_perturbation_d.py --vary-world --lesion vision|stick|scent_noise|heading_drift`.
 - Body diagnostics are JSON-per-line on stdout (`fwd_v`, `gc_raw`/`gc_norm`/`cy_norm`,
   `h_ema`/`h_max`/`h_bias`, chassis `y`, `knee[]`, `feet_y[]`, `auto_reset_count`).
-- **UI:** `[P]` toggles the per-metre path trail; `[1]`/`[2]` live-swap arena/corridor; the
+- **UI:** `[P]` toggles the per-metre path trail; `[1]`/`[2]`/`[5]` live-swap arena/corridor/room; the
   MOTOR-EPM panel has live sliders for every lever. The live viewer is
   [`tools/xaq_inspector`](tools/xaq_inspector/README.md). **Operator/UI-driven diagnosis is
   first-class** — not a fallback.

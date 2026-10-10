@@ -98,6 +98,7 @@ void OgmaBrain::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_master_seed",  "seed"),                  &OgmaBrain::set_master_seed);
     ClassDB::bind_method(D_METHOD("tick",             "delta"),                 &OgmaBrain::tick);
     ClassDB::bind_method(D_METHOD("publish_proprio",  "values", "sensor"),      &OgmaBrain::publish_proprio);
+    ClassDB::bind_method(D_METHOD("publish_token",    "values", "topic", "sensor"), &OgmaBrain::publish_token);
     ClassDB::bind_method(D_METHOD("publish_event",    "name",   "intensity"),   &OgmaBrain::publish_event);
     ClassDB::bind_method(D_METHOD("publish_video",    "pixels", "height", "width", "channels", "modality"),
                                                                                  &OgmaBrain::publish_video);
@@ -476,6 +477,17 @@ void OgmaBrain::publish_proprio(PackedFloat64Array const& values, String const& 
     p->values.resize(values.size());
     for (int i = 0; i < values.size(); ++i) p->values[i] = float(values[i]);
     instance_->bus()->publish("reality.proprio." + std::string(sensor.utf8().get_data()), p);
+}
+
+void OgmaBrain::publish_token(PackedFloat64Array const& values, String const& topic, String const& sensor) {
+    if (!initialized_) return;
+    auto p = std::make_shared<ogma::ProprioToken>();
+    p->tick_id     = tick_id_;
+    p->producer_id = "host";
+    p->sensor      = std::string(sensor.utf8().get_data());
+    p->values.resize(values.size());
+    for (int i = 0; i < values.size(); ++i) p->values[i] = float(values[i]);
+    instance_->bus()->publish(std::string(topic.utf8().get_data()), p);
 }
 
 void OgmaBrain::publish_event(String const& name, double intensity) {

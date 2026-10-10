@@ -1583,6 +1583,51 @@ var _pending_teleport_flip: int = -1
 # Ramp-debug: last raw belly rangefinder reading (metres), cached at publish so the
 # diag can log the rangefinder output + homeostat state on the hump.
 var _dbg_gc_raw: float = 0.0
+# ---- FORWARD ULTRASONIC MODEL (S1 of the MicroDuck port plan, 2026-10-10) -----------
+# The robot's HC-SR04-class module on the front face: two transducer centres 11 mm
+# above the chassis bottom, 25 mm apart (operator's measurement; the model's "eyes"
+# sit there).  Level with the chassis: there is no downward pitch in the mount
+# (operator, 2026-10-10).  Published as `sense.range` = [distance_m, valid], the
+# robot's exact format (pi_host/src/ogma_host.cpp): a no-echo ping reads max_range_m
+# with valid = 0, never 0 (zero would map "saw nothing" onto "something against the
+# sensor").  Cadence 20 Hz, the driver's measured reliable ceiling (Ultrasonic.hpp);
+# the held reading is published every brain tick, as ground_clearance is.
+# What the model does, and does not do:
+#   * a fan of rays inside the ~15 deg lobe; the nearest echo wins (the real lobe
+#     "reports the nearest thing in a fat lobe", BOM §7);
+#   * an echo returns only from a surface inside the glancing limit: past ~30 deg
+#     off-normal the real echo "reflects away" (BOM §7) and the ping reads empty.
+#     That is the channel's built-in confound: a wall at a glancing angle and open
+#     floor read the same, and only `valid` plus the body's other senses can tell
+#     them apart.  Deliberate (memory: confounds ride in the channel).  It is also
+#     why the level beam does not see the floor: the -5 deg rays reach it ~1 m out
+#     at 85 deg incidence.  A nose-down pitch past ~25 deg would, as on the robot;
+#   * no absorption (carpet), no noise, no servo-whine coupling.  Each is a later
+#     lever with its own switch.
+# OFF by default: with ultrasonic_model false nothing is cast, registered or
+# published and the JSONL carries no range field, so every existing run is
+# byte-identical.
+@export var ultrasonic_model: bool = false      # OGMA_PICRAWLER_ULTRASONIC=1
+const ULTRASONIC_MAX_RANGE_M: float = 1.5       # driver max_range_m; a no-echo ping reads this, valid 0
+const ULTRASONIC_MIN_RANGE_M: float = 0.02338   # commissioned floor (picrawler_senses.json dim_min)
+const ULTRASONIC_HZ: float = 20.0               # driver Config.hz, measured 2026-09-01
+const ULTRASONIC_GLANCE_DEG: float = 30.0       # past this incidence the echo reflects away
+const ULTRASONIC_MOUNT_ABOVE_BOTTOM: float = 0.011   # transducer centre above the chassis bottom
+const _US_AZ_DEG: Array = [-7.5, -3.75, 0.0, 3.75, 7.5]   # the ~15 deg lobe, 5 x 3 rays
+const _US_EL_DEG: Array = [-5.0, 0.0, 5.0]
+var _us_range: float = 1.5
+var _us_valid: float = 0.0
+var _us_true: float = -1.0          # INSTRUMENT (god's-eye): nearest world surface along the body axis at ANY incidence; -1 = none within 5 m
+var _us_last_slot: int = -1
+var _us_pings: int = 0
+var _us_hud: Label = null
+# ---- THE ROOM (gym "room"): a flat floor inside vertical walls, with boxes ----------
+@export var room_size: float = 3.0              # OGMA_PICRAWLER_ROOM_SIZE, metres inside the walls
+var _room_bodies: Array = []                    # the walls and boxes (StaticBody3D), for the contact instrument
+var _room_contact_ticks: int = 0                # INSTRUMENT: ticks with the chassis or a lower leg against a wall/box
+var _room_contact_episodes: int = 0             # INSTRUMENT: rising edges of the above
+var _room_contact_prev: bool = false
+var _room_cells: Dictionary = {}                # INSTRUMENT: visited 0.25 m floor cells (coverage)
 var _dbg_contact_swing: float = 0.0   # TRUE swing fraction from the foot-contact sensor
 var _dbg_fk_cmd_err: float = 0.0      # mean |commanded-FK − achieved-FK| foot height (m)
 var _dbg_fk_valid_err: float = 0.0    # mean |measured-FK − achieved-pose| = FK wiring check
@@ -3167,6 +3212,13 @@ func _ready() -> void:
 		"float32[1]: fraction of the frame that is beacon-coloured (looming/LGMD analogue)", true)
 	brain.register_source("GroundClearance", "reality.proprio.ground_clearance",
 		"float32[1]: downward belly ToF/ultrasonic — normalized [0,1] distance from the belly to the ground beneath (0 = belly ON a surface / high-centered; higher = held up). Egocentric replacement for absolute chassis world-Y.", true)
+	if ultrasonic_model:
+		# The FORWARD ultrasonic, on the robot's own topic and in its exact format.  Never
+		# the belly channel (port doc §7.7): forward is obstacle avoidance, down is clearance.
+		brain.register_source("Range", "sense.range",
+			"float32[2]: FORWARD ultrasonic [distance_m, valid] — the robot's HC-SR04-class module on the front face, level, 20 Hz, max 1.5 m. valid=0 means no echo (beyond range OR a glancing surface), and distance then reads max range, never 0. Egocentric. Instrument-only until S1's separation study admits a consumer.", true)
+		print("PicrawlerBody: ULTRASONIC model ON — sense.range [m, valid], %.0f Hz, max %.2f m, lobe +/-7.5 deg, glancing limit %.0f deg, mount %.0f mm above the chassis bottom, no pitch" % [
+			ULTRASONIC_HZ, ULTRASONIC_MAX_RANGE_M, ULTRASONIC_GLANCE_DEG, ULTRASONIC_MOUNT_ABOVE_BOTTOM * 1000.0])
 	brain.register_source("Upright", "reality.proprio.upright",
 		"float32[1]: chassis up-vector alignment with gravity (1 = upright, 0 = on its side, -1 = inverted) from the IMU. Gates keyframe baking on posture validity (don't learn from a flipped body).", true)
 	# 2026-06-01 Stage 3.A — per-servo torque proprio. Normalized to [-1, 1]
@@ -3518,7 +3570,8 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_JOINTS",
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
-			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP"]:
+			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_ROOM_SIZE"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3553,6 +3606,8 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_POWER_LOG":         _power_log_path = v; power_model = true
 			"OGMA_PICRAWLER_HONEST_TORQUE_CAP": honest_torque_cap = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_HONEST_HOLD_CAP":   honest_hold_cap   = maxf(0.0, v.to_float())
+			"OGMA_PICRAWLER_ULTRASONIC":        ultrasonic_model  = (v != "0" and v != "")
+			"OGMA_PICRAWLER_ROOM_SIZE":         room_size         = clampf(v.to_float(), 1.0, 18.0)
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -3781,7 +3836,7 @@ func _resolve_env() -> void:
 # World — minimal flat floor
 # ---------------------------------------------------------------------------
 # World geometry lives under a WorldRoot container so the gym can be swapped
-# live (KEY_1 = arena / KEY_2 = corridor) — freeing WorldRoot and rebuilding
+# live (KEY_1 = arena / KEY_2 = corridor / KEY_5 = room) — freeing WorldRoot and rebuilding
 # drops the SAME robot + brain (an experienced agent) into a new scenario
 # WITHOUT a scene reload (the brain stays in memory, fully continuous).
 var _world_root: Node3D = null
@@ -3826,6 +3881,9 @@ func _rebuild_world_contents() -> void:
 	_gym_mode_active = mode
 	if mode == "corridor":
 		_build_corridor()
+		return
+	if mode == "room":
+		_build_room()
 		return
 
 	# Concentric reference rings on the floor.  Visual-only (no collision)
@@ -4086,6 +4144,71 @@ func _build_terrain() -> void:
 # use _make_wedge_mat() (mu=3.0, as the arena's containment ramps) so a grazing
 # body follows the slope instead of tumbling.
 # ---------------------------------------------------------------------------
+# THE ROOM — gym "room" (S1 of the MicroDuck port plan, 2026-10-10).  A room_size x
+# room_size flat floor inside four VERTICAL walls, with three boxes.  Flat on purpose:
+# terrain is not a confound here; the question this gym asks is whether the body sees
+# a wall before it hits it and learns to leave it.  The arena and the corridor have no
+# vertical surface at all (45 deg ramps, a 30 deg self-centring trench), which is why
+# the forward ultrasonic never had a scenario.  Fixed layout, no seed, so paired-seed
+# A/Bs see the same room; the (d) test moves the boxes mid-run.  Spawn is the origin,
+# facing +Z, so the first thing the beam sees is the far wall at half the room.
+func _build_room() -> void:
+	_pyramid_xz_positions.clear()
+	_pyramid_xz_radii.clear()
+	_pyramid_engagement_counts.clear()
+	_pyramid_meshes.clear()
+	_pyramid_default_mats.clear()
+	_room_bodies.clear()
+	_room_cells.clear()
+	_room_contact_ticks = 0
+	_room_contact_episodes = 0
+	_room_contact_prev = false
+	_build_floor_rings()
+	var half: float = room_size * 0.5
+	var wall_h: float = 0.30          # the ultrasonic sits ~0.09 m up; the walls are well above it
+	var wall_t: float = 0.10
+	var wall_mat := StandardMaterial3D.new()
+	wall_mat.albedo_color = Color(0.55, 0.50, 0.42, 1.0)
+	wall_mat.roughness = 0.9
+	for spec in [
+		[Vector3(0.0, wall_h * 0.5,  half + wall_t * 0.5), Vector3(room_size + 2.0 * wall_t, wall_h, wall_t)],
+		[Vector3(0.0, wall_h * 0.5, -half - wall_t * 0.5), Vector3(room_size + 2.0 * wall_t, wall_h, wall_t)],
+		[Vector3( half + wall_t * 0.5, wall_h * 0.5, 0.0), Vector3(wall_t, wall_h, room_size)],
+		[Vector3(-half - wall_t * 0.5, wall_h * 0.5, 0.0), Vector3(wall_t, wall_h, room_size)],
+	]:
+		_room_add_box(spec[0], spec[1], wall_mat)
+	# Three boxes at body scale (the chassis is ~0.1 m across, the standing body ~0.25 m).
+	var box_mat := StandardMaterial3D.new()
+	box_mat.albedo_color = Color(0.70, 0.35, 0.25, 1.0)
+	box_mat.roughness = 0.9
+	for spec in [
+		[Vector3( 0.8, 0.15,  0.9), Vector3(0.30, 0.30, 0.30)],
+		[Vector3(-1.0, 0.15, -0.6), Vector3(0.30, 0.30, 0.30)],
+		[Vector3(-0.6, 0.10,  0.9), Vector3(0.20, 0.20, 0.50)],
+	]:
+		_room_add_box(spec[0], spec[1], box_mat)
+	print("PicrawlerBody: [gym] ROOM %.1f x %.1f m, walls %.2f m high, 3 boxes; spawn at the origin facing +Z" % [room_size, room_size, wall_h])
+
+func _room_add_box(center: Vector3, size: Vector3, mat: StandardMaterial3D) -> void:
+	var body := StaticBody3D.new()
+	body.collision_layer = _LAYER_WORLD
+	body.collision_mask  = _world_collision_mask()
+	body.physics_material_override = _make_wedge_mat()
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = size
+	cs.shape = bs
+	body.add_child(cs)
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mi.mesh = bm
+	mi.set_surface_override_material(0, mat)
+	body.add_child(mi)
+	body.position = center
+	_world_root.add_child(body)
+	_room_bodies.append(body)
+
 func _build_corridor() -> void:
 	var chan_half:    float = 0.75    # half-width of the flat channel floor -> 1.5 m walkable
 	var corridor_len: float = 9.5     # +Z extent of the curriculum (fits the 20x20 floor)
@@ -5949,6 +6072,9 @@ func _input(event: InputEvent) -> void:
 	elif key == KEY_2:
 		# Live gym swap — drop the experienced robot (brain intact) into the CORRIDOR trench.
 		_switch_gym("corridor")
+	elif key == KEY_5:
+		# Live gym swap — drop the experienced robot (brain intact) into the walled ROOM.
+		_switch_gym("room")
 	elif key == KEY_3:
 		# Controlled belly-on-ramp test — drop the experienced robot onto the corridor hump.
 		_teleport_to_ramp()
@@ -7303,6 +7429,17 @@ func _step_one() -> void:
 	# different standing height emits a plausible wrong number into it.
 	clearance_arr.append(_stridemath.ground_clearance(_dbg_gc_raw, GROUND_CLEARANCE_STAND))
 	brain.publish_proprio(clearance_arr, "ground_clearance")
+	# (2b) the FORWARD ultrasonic (S1): cast at the driver's cadence, publish the held
+	# reading every tick on the robot's topic.  Nothing happens with the model off.
+	if ultrasonic_model:
+		_ultrasonic_step()
+		var us_arr := PackedFloat64Array()
+		us_arr.append(_us_range)
+		us_arr.append(_us_valid)
+		brain.publish_token(us_arr, "sense.range", "range")
+		_update_us_hud()
+	if _gym_mode_active == "room":
+		_room_instruments_step()
 	# Beacon magnitude.  Published every tick from the cached capture (the capture itself is
 	# sub-rated for CPU), matching how ground_clearance and the vision frame are handled.
 	# ⚠ Gated on the camera actually running.  Publishing 0.0 with no camera would be an
@@ -10328,6 +10465,104 @@ func _select_random_pyramid_target() -> void:
 	print("PicrawlerBody: walk_over_there target → pyramid #%d at xz=(%.2f, %.2f)" % [
 		walk_target_idx, walk_target_pos.x, walk_target_pos.y])
 
+# The forward ultrasonic's ping (see the state block for what is and is not modelled).
+func _ultrasonic_step() -> void:
+	# 20 Hz off the 50 Hz tick: cast when the ping slot advances (3, 2, 3, 2, ... ticks).
+	var slot: int = int(floor(float(tick_counter) * ULTRASONIC_HZ * TAU))
+	if slot == _us_last_slot:
+		return
+	_us_last_slot = slot
+	var space_state: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space_state == null or _chassis == null:
+		return
+	_us_pings += 1
+	var xf: Transform3D = _chassis.global_transform
+	# The transducer pair's midpoint: on the front (+Z) face, 11 mm above the belly plane.
+	var origin: Vector3 = xf * Vector3(0.0, _chassis_bottom_local + ULTRASONIC_MOUNT_ABOVE_BOTTOM, CHASSIS_Z * 0.5)
+	var fwd: Vector3 = xf.basis.z
+	var up: Vector3 = xf.basis.y
+	var right: Vector3 = xf.basis.x
+	var cos_glance: float = cos(deg_to_rad(ULTRASONIC_GLANCE_DEG))
+	var best: float = INF
+	for el in _US_EL_DEG:
+		var e: float = deg_to_rad(float(el))
+		for az in _US_AZ_DEG:
+			var a: float = deg_to_rad(float(az))
+			var dir: Vector3 = (fwd * (cos(e) * cos(a)) + right * (cos(e) * sin(a)) + up * sin(e)).normalized()
+			var q := PhysicsRayQueryParameters3D.create(origin, origin + dir * (ULTRASONIC_MAX_RANGE_M + 0.05), _LAYER_WORLD)
+			var hit := space_state.intersect_ray(q)
+			if hit.is_empty():
+				continue
+			var d: float = origin.distance_to(hit.position)
+			if d > ULTRASONIC_MAX_RANGE_M:
+				continue
+			# Incidence: the surface normal faces the ray, so -dir . n = cos(incidence).
+			if -dir.dot(hit.normal) < cos_glance:
+				continue   # reflects away; no echo from this ray
+			best = minf(best, d)
+	if best < INF:
+		_us_range = maxf(best, ULTRASONIC_MIN_RANGE_M)
+		_us_valid = 1.0
+	else:
+		_us_range = ULTRASONIC_MAX_RANGE_M
+		_us_valid = 0.0
+	# INSTRUMENT: the nearest surface along the body axis at any incidence — what a sensor
+	# with no glancing limit would read.  The gap between this and _us_range is the confound,
+	# measured.  God's-eye only in that it ignores physics the real part cannot; never published.
+	var qt := PhysicsRayQueryParameters3D.create(origin, origin + fwd * 5.0, _LAYER_WORLD)
+	var ht := space_state.intersect_ray(qt)
+	_us_true = origin.distance_to(ht.position) if not ht.is_empty() else -1.0
+
+func _update_us_hud() -> void:
+	if _us_hud == null:
+		var hud := get_tree().get_root().find_child("HUD", true, false)
+		if hud == null:
+			return
+		_us_hud = Label.new()
+		_us_hud.name = "RangeLine"
+		_us_hud.add_theme_font_size_override("font_size", 13)
+		_us_hud.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+		_us_hud.position = Vector2(12, -46)
+		hud.add_child(_us_hud)
+	var n: int = 12
+	var filled: int = clampi(int(round((1.0 - _us_range / ULTRASONIC_MAX_RANGE_M) * float(n))), 0, n)
+	var bar: String = "█".repeat(filled) + "░".repeat(n - filled)
+	var axis: String = ("%5.3f" % _us_true) if _us_true >= 0.0 else "  -  "
+	_us_hud.text = "range [%s] %5.3f m %s   axis %s   pings %d" % [
+		bar, _us_range, "valid  " if _us_valid > 0.5 else "no echo", axis, _us_pings]
+	_us_hud.add_theme_color_override("font_color",
+		Color(0.95, 0.85, 0.45, 1.0) if _us_valid > 0.5 else Color(0.6, 0.6, 0.6, 1.0))
+
+# INSTRUMENTS for the room (god's-eye, never published): contact with a wall or box,
+# and floor coverage.  contact_monitor on the chassis reports contacts and changes no
+# physics; it is switched on here, in the room only, so every other gym is untouched.
+func _room_instruments_step() -> void:
+	if _chassis == null:
+		return
+	if not _chassis.contact_monitor:
+		_chassis.contact_monitor = true
+		_chassis.max_contacts_reported = 8
+	var touching: bool = false
+	for b in _chassis.get_colliding_bodies():
+		if _room_bodies.has(b):
+			touching = true
+			break
+	if not touching:
+		for i in range(4):
+			for b in _lowers[i].get_colliding_bodies():
+				if _room_bodies.has(b):
+					touching = true
+					break
+			if touching:
+				break
+	if touching:
+		_room_contact_ticks += 1
+		if not _room_contact_prev:
+			_room_contact_episodes += 1
+	_room_contact_prev = touching
+	var p: Vector3 = _chassis.global_transform.origin
+	_room_cells[Vector2i(int(floor(p.x / 0.25)), int(floor(p.z / 0.25)))] = true
+
 func _compute_ground_clearance() -> float:
 	# Markov-compliant downward rangefinder (a belly-mounted ToF / ultrasonic).
 	# Casts along the chassis's OWN down axis (body-relative, like a real sensor on
@@ -11825,6 +12060,17 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# Belly-centre truth proxy, published ONLY while the boom model is on.  -1 = not
 	# modelled, which is distinguishable from a real reading of 0.
 	line["gc_belly"] = snappedf(_dbg_gc_belly, 0.0001)
+	# Forward ultrasonic (S1) and the room's instruments — present only when modelled /
+	# in the room, so every other run's JSONL is unchanged.
+	if ultrasonic_model:
+		line["us_r"]     = snappedf(_us_range, 0.0001)
+		line["us_v"]     = _us_valid
+		line["us_true"]  = snappedf(_us_true, 0.0001)
+		line["us_pings"] = _us_pings
+	if _gym_mode_active == "room":
+		line["wall_contact_ticks"]    = _room_contact_ticks
+		line["wall_contact_episodes"] = _room_contact_episodes
+		line["room_cov"]              = _room_cells.size()
 	line["gc_norm"] = snappedf(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0), 0.001)
 	line["cy_norm"] = snappedf(clamp(chassis_y / target_height, 0.0, 1.0), 0.001)
 	# TRUE swing fraction from the physics foot-contact sensor — the ground truth against

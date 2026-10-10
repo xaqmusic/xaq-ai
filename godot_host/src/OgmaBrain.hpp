@@ -50,6 +50,12 @@ public:
     // for golden replay where seed must come from the config alone.
     void set_master_seed(int64_t seed);
     void publish_proprio(PackedFloat64Array const& values, String const& sensor);
+    // The same ProprioToken on an ARBITRARY topic.  publish_proprio hardwires the
+    // "reality.proprio." prefix; the robot's hosts publish some senses elsewhere
+    // (pi_host: "sense.range", "sense.camera"), and a sim channel meant to be
+    // byte-for-byte the robot's must land on the robot's topic name so one config
+    // runs on both.  Unused by every existing path.
+    void publish_token(PackedFloat64Array const& values, String const& topic, String const& sensor);
     void publish_event(String const& name, double intensity);
     // Publish a raw video frame on reality.video.<modality>.  pixels is row-major
     // H × W × C uint8 (channels = 1 grayscale or 3 RGB).  Wraps RawImageFrame.

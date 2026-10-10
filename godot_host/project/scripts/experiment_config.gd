@@ -525,7 +525,7 @@ func resolve_picrawler_gym_mode(default_v: String) -> String:
 	if launched and picrawler_gym_mode != "":
 		return picrawler_gym_mode
 	var env_v := OS.get_environment("OGMA_PICRAWLER_GYM").to_lower()
-	if env_v in ["arena", "donut", "corridor"]:
+	if env_v in ["arena", "donut", "corridor", "room"]:   # "room": walled flat room, S1 of the MicroDuck port plan
 		return env_v
 	return default_v
 

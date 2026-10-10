@@ -6926,3 +6926,62 @@ slowest-loop rule before calling either safe). The current model puts ~2× (4.59
 much time near the HAT's current ceiling, which is where the rail dips and the resets come from.
 **Operator's call:** try it on smooth floor / carpet. 4.59 is the smaller step; watch the dash's rail
 line and the reset count against P-e·h0's 0.10–0.15 per minute on carpet.
+
+---
+
+### 2026-10-10 — S1 OF THE MICRODUCK PORT, SIM HALF: THE FORWARD ULTRASONIC MODEL AND THE ROOM; P-e·h0 WALKS INTO THE WALL AND STAYS THERE (n=6)
+
+*Plan: [`../plans-and-designs/picrawler_microduck_port_plan.md`](../plans-and-designs/picrawler_microduck_port_plan.md)
+§4 S1. Lever: `OGMA_PICRAWLER_ULTRASONIC=1` (a sensor model, instrument-only) and gym `room`
+(`OGMA_PICRAWLER_GYM=room`, hotkey `[5]`, `OGMA_PICRAWLER_ROOM_SIZE` default 3.0). Gain-0 guard:
+both off, the three deployed configs are byte-identical on body JSON at seed 1 × 6000 ticks
+(the same gate that covered the master merge and the eyes). Harness:
+`scripts_tools/roomavg.py`. Verdict: `BASELINE` — the scenario S3 will be measured against.*
+
+**What was built.** The robot's forward HC-SR04-class module, in the sim, on the robot's own
+topic and format: `sense.range` = `[distance_m, valid]`, 20 Hz off the 50 Hz tick, max 1.5 m,
+commissioned floor 0.023 m; a no-echo ping reads 1.5 with `valid` 0, never 0. The transducer
+pair's midpoint is 11 mm above the belly plane on the front face, level (operator: no downward
+pitch in the mount). The ping is a 5 × 3 fan of rays inside the ~15° lobe, nearest echo wins,
+and an echo returns only inside a 30° glancing limit (BOM §7: past ~30° off-normal the real
+echo reflects away). A new `OgmaBrain.publish_token` lets the sim publish on an arbitrary
+topic; `publish_proprio` hardwires the `reality.proprio.` prefix, and a channel meant to run
+the robot's `picrawler_senses.json` unchanged must land on the robot's name. The room: a
+3 × 3 m flat floor inside four vertical 0.3 m walls with three boxes, fixed layout, spawn at
+the origin facing +Z. God's-eye instruments, never published: `us_true` (the axis range at
+any incidence), `wall_contact_ticks/episodes` (chassis or a lower leg against a wall or box),
+`room_cov` (0.25 m cells visited). HUD: a `range [bar] m valid/no echo · axis · pings` line.
+
+**The baseline, P-e·h0 in the room, n=6 × 6000 ticks (seed 1–6):**
+
+| metric | mean ± sd | per seed |
+|---|---|---|
+| first contact (tick) | 1210 ± 223 | 1200 1080 1560 900 1320 1200 |
+| wall_frac (ticks against a wall / box) | 0.531 ± 0.096 | 0.59 0.53 0.35 0.60 0.53 0.58 |
+| contact episodes | 126 ± 21 | 111 136 96 122 151 142 |
+| coverage (0.25 m cells) | 12.7 ± 1.8 | 12 12 16 12 13 11 |
+| net_disp / path / straight | 1.55 / 3.66 / 0.42 | — |
+| falls | 0 | — |
+| us_valid (rows with an echo) | 0.94 ± 0.08 | 0.99 0.93 0.78 1.00 0.97 0.99 |
+| us_err, \|us_r − us_true\| on valid rows | 0.035 ± 0.029 m | 0.010 … 0.092 |
+| confound rows (axis sees a surface, no echo) | 5.2 ± 8.1 | 1 6 21 0 3 0 |
+
+**What it says.** Every seed does the same thing: the heading hold (the robot's loud
+capability, ledger §1) drives it straight into the +Z wall at 1.5 m, first contact at tick
+~1200, and then **holds it there for the rest of the run** — half of all ticks in contact,
+~125 contact episodes as the gait bounces off and re-presses, coverage a dozen cells. Nothing
+in the stack sees the wall before contact or leaves it after. This is the re-use context the
+`stuck→explore` lever was refuted into ("terrain, corridor corners, obstacle contact",
+ledger §1) — it exists now. The sensor saw the wall the whole way in: range tracks the axis
+truth to 3.5 cm (the lobe's nearest return is shorter than the axis, as it should be), and
+reads ~0.09 m when the body is pressed on the wall (the front legs reach ahead of the
+chassis). Seed 3 drifted and turned along the wall: its echo fraction fell to 0.78 and it
+logged 21 confound rows — the glancing rule firing as designed, a wall at an angle reading as
+open floor. That confound is what S1's separation study must show the vocabulary can carry
+(with `valid` in the vector), before any consumer is wired.
+
+**Not modelled, each a later switch:** absorption (carpet), ping noise, servo-whine coupling
+into the 40 kHz receiver (BOM §7 "unmeasured"). **Still open in S1:** the camera luma at the
+robot's 32×32, `odom`/`vel_ego` as a shared body helper, the robot publishing range and camera
+during a brain run, the separation study, and the three actuator measurements (turn table,
+stall signature, reverse).

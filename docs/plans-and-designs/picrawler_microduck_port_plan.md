@@ -1,6 +1,6 @@
 # Porting the MicroDuck's autonomous layer to the PiCrawler
 
-**Status: reviewed by the operator 2026-10-10; S0 done (master merged, PR #39). S1 next.**
+**Status: reviewed by the operator 2026-10-10; S0 done (master merged, PR #39). S1 in progress: the ultrasonic model and the room gym are built and the n=6 baseline is in the ledger (2026-10-10, "S1 OF THE MICRODUCK PORT, SIM HALF"); the robot half, the camera, odometry, the separation study and the actuator measurements are open.**
 
 **What this decides.** How the exploration and wall-avoidance machinery built for the
 MicroDuck (branch `master`, `docs/plans-and-designs/microduck/`) becomes a level above the
@@ -159,15 +159,17 @@ The pre-commit identifier scan runs over 158k added lines; expect it to be slow.
 ### S1. The senses, as instruments
 
 **Sim.**
-- An ultrasonic model in `picrawler_body.gd`: a cone of rays (7 across ±7.5°) from the
-  measured mount, min-range return, 20 Hz, max 1.5 m, `valid 0` when the nearest return's
-  incidence is past the glancing limit. Published as `sense.range` in the robot's exact
+- ✅ **Built 2026-10-10.** An ultrasonic model in `picrawler_body.gd`
+  (`OGMA_PICRAWLER_ULTRASONIC=1`): a 5 × 3 fan of rays inside the ~15° lobe from the measured
+  mount (11 mm above the belly plane, level), nearest echo wins, 20 Hz, max 1.5 m, and an
+  echo only inside a 30° glancing limit, so `valid 0` otherwise. Published as `sense.range` in the robot's exact
   format. The glancing-angle confound is deliberate: a no-echo reads the same as open
   floor, and the brain must learn that from the `valid` flag (memory: confounds ride in
   the channel).
-- **A walled gym, "the room"**: a 3 × 3 m floor with vertical walls and two or three
-  boxes, flat ground (so terrain is not a confound), spawned at the centre. Keyed `[3]`
-  beside arena and corridor. God's-eye wall-contact and coverage counters for the harness.
+- ✅ **Built 2026-10-10.** The room (`OGMA_PICRAWLER_GYM=room`, hotkey `[5]`): a 3 × 3 m
+  floor inside vertical 0.3 m walls with three boxes, flat, spawn at the centre facing +Z.
+  God's-eye wall-contact and coverage counters, and `scripts_tools/roomavg.py` as the harness.
+  Baseline in the ledger: P-e·h0 reaches the far wall at tick ~1200 and stays on it.
 - The camera: luma 32×32 on `sense.camera`, matching the robot. The sim's RGB raycast
   already exists; the reduction to the robot's format is a parity check, not new optics.
 - `reality.proprio.odom` `[x, y, unwrapped yaw]` and `vel_ego` ← `stride_v`, as a body
