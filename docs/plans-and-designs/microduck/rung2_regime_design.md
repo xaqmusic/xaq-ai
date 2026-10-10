@@ -7997,8 +7997,8 @@ ties (traps +0.5 [−0.1, +1.2]).
 **`NULL` on what it was built for — the traps and the returns — and the diagnosis is the size of the target, not the cost.**
 70–77 % of traps happen at a place no earlier trap was within 0.4 m of (E4 48 of 62, the placebo 67 of 86); the median cost on
 the approach in the 5 s before a trap is 0.00. A memory of stuck places can only prevent the returns, about a quarter of the
-traps, and where it was live the halved need still won the race: seed 3, 173–321 s, seven sits along 0.8 m of the −x wall,
-the target 1.8–2.1 m away across the wall, the cost 0.45–0.58 — the need halved and seek still steered. (The sits along one
+traps, and where it was live the halved need still won the race: seed 3, 173–321 s, seven sits along ~0.7 m of the −x wall,
+the target 1.8–2.1 m away, the cost 0.45–0.58 — the need halved and seek still steered. (The sits along one
 wall more than 0.4 m apart are also an undercount in `places.py`'s "back"; a wall-run is one trap repeated, not seven.)
 The side effects are the arbiter's hand-over: play walks more, so fewer arrival stops (fewer map nodes baked at stops) and
 fewer skills that touch; and less boring time against the placebo — a signal, not a finding, since it is −3.0 against E4.
