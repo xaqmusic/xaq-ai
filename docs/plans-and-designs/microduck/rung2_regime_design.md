@@ -7790,3 +7790,23 @@ engagement." The stack: ★ T1 + the slow train (S0) + `--stop-saccade 2.0` (lau
 seem to be clashing with walking since they are fired when the robot is in motion. The delay before a kick or peck is fine since
 it makes those skills obvious to the eye. The delay before the look was the problem to solve." Next: P2, the two combined with
 the settle kept before a skill only.
+
+**P2, ★ L1 + the walker holds the stop + a skill waits for stillness (host `--stop-walker-hold --stop-skill-settle`: the look
+starts on the stop's first tick; a kick or peck — deferred from the walk or asked for during the stop — fires only once the body
+passes the settle's stillness test, at most its 2 s timeout; `log/ten/p2a`, n = 24, against ★ L1 `sc1`; and the same without
+the skill settle, `p2b`, to isolate it).**
+
+| n = 24 | ★ L1 | + walker hold (`p2b`) | P2: + the skill waits (`p2a`) |
+|---|---|---|---|
+| stops a run · mean · settle before the look | 37.8 · 5.6 s · 45 s | 49.7 · 3.8 s · 0 | 43.6 · 4.3 s · 0 |
+| falls · backward at a stop's start | 2.71 · 0.42 | 3.12 · 0.54 | **2.21 · 0.00** |
+| skills a run | 9.2 | 19.5 (the cascade) | 9.5 |
+| things moved by kicks, pecks, pushes · answers observed | 87 / 257 · 148 | — | 86 / 266 · 187 |
+| the train chased | 36.5 s | 39.0 | **49.2** (CI +0.9, +24.5) |
+| the skill-window contact flag | 28.6 % | 21.8 | 14.9 (CI −21.8, −5.6) |
+| boring · interesting · walls · first minute | 26.9 · 46.7 · 10.6 · 0.75 | ties | ties (0.58, CI touches 0) |
+
+**`WORKING` on the pause, and the skill settle is what removes the cascade.** The settle before a skill gives the walk its
+chance to move on; the kicks fire from a stiller trunk (0.010 against 0.026 m/s) at the same distance and bearing from the thing
+(edge 0.12 m, 32–34°), and move as many things. The contact flag during the skill window halves while the things moved tie —
+the stander's stance rested against things more; the outcome is what the eye should judge. Preset P2 for the eye.
