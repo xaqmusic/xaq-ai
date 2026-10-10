@@ -7972,3 +7972,39 @@ places loses value the way play's nodes do (sweeps 33–35 refused targets outri
 graded cost is the untried form); (b) the escape — choosing among the cloud's free sectors the one whose places have not
 stalled. M2's re-use stands: a longer habituation is worth retrying only once something makes stuck places unattractive to
 the consumer that walks into them.
+
+**S1 — the approach's cost (the operator chose it, 2026-10-10: "go with (a), the graded cost on the seek targets").** Built:
+`PlayLoop.stall_pose_topic` / `stall_field_topic` (each stuck place's error-weighted position in the odometry frame, published
+as [x, y, excess] for the places above the walk's mean) and `BearingSeekLoop.stall_cost` / `stall_radius` (a held static
+target's need × (1 − stall_cost × the worst excess within 0.3 m of the straight approach, tapered), never below the floor —
+graded, the target is never refused). Play's own use of the memory (M1's weight) is off in this arm: one lever. Byte-identical
+off (E4 seed 5, P2 seed 3, 120 s); unit tests for both modules. `log/ten/ps1`, n = 24, every seed echoes the place stall.
+
+**The consumer fired:** seek's share of the steering 68.5 → 62.3 %, play's 24.3 → 30.3 %; the cost above 0.3 on 11 % of
+held-target ticks, and above 0.3 in the 10 s before 41 of 75 traps.
+
+| n = 24 | traps | back | cells | corner % | boring % | skills | skills touching % | map nodes | baked at stops | train s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ★ E4 `se4` | 2.6 | 0.6 | 113 | 3.0 | 27.2 | 12.9 | 15.1 | 37.0 | 19.9 | 43.8 |
+| placebo `pplc` | 3.6 | 0.8 | 108 | 5.0 | 28.7 | 13.4 | 19.1 | 37.4 | 22.1 | 31.4 |
+| **S1 `ps1`** | **3.1** | **1.0** | **113** | **2.4** | **24.2** | **12.0** | **12.7** | **33.3** | **17.0** | **47.1** |
+
+Against the placebo (paired): boring **−4.5 [−8.8, −0.3]**, corner −2.6 [−4.7, −0.5], skills touching −6.5 [−11.8, −1.1],
+map nodes −4.1 [−8.2, −0.0], baked at stops −5.2 [−7.9, −2.4], the train chased +15.7 [+3.8, +27.5] (E4 itself is +12.4 over
+the placebo there); traps −0.5, back +0.2, cells +5.4, walls, falls, escapes, outcomes tie. Against ★ E4 every places measure
+ties (traps +0.5 [−0.1, +1.2]).
+
+**`NULL` on what it was built for — the traps and the returns — and the diagnosis is the size of the target, not the cost.**
+70–77 % of traps happen at a place no earlier trap was within 0.4 m of (E4 48 of 62, the placebo 67 of 86); the median cost on
+the approach in the 5 s before a trap is 0.00. A memory of stuck places can only prevent the returns, about a quarter of the
+traps, and where it was live the halved need still won the race: seed 3, 173–321 s, seven sits along 0.8 m of the −x wall,
+the target 1.8–2.1 m away across the wall, the cost 0.45–0.58 — the need halved and seek still steered. (The sits along one
+wall more than 0.4 m apart are also an undercount in `places.py`'s "back"; a wall-run is one trap repeated, not seven.)
+The side effects are the arbiter's hand-over: play walks more, so fewer arrival stops (fewer map nodes baked at stops) and
+fewer skills that touch; and less boring time against the placebo — a signal, not a finding, since it is −3.0 against E4.
+
+**Re-use.** (1) Most traps are first-time: what prevents them is perception on the approach (the walking cloud or the ToF
+seeing what blocks the straight line), not a memory of where the walk failed. (2) For the returns, the cost must make play
+WIN the race at a stuck place, not halve the need — e.g. the excess subtracted from seek's trust rather than its need, or the
+stuck places as obstacles in play's own route (M1's weight on, with S1). (3) The "back" measure needs a wall-run form (a trap
+within 0.4 m of the previous trap's escape path).
