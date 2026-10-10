@@ -4860,15 +4860,19 @@ func _build_body() -> void:
 		_chassis.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 		_chassis.center_of_mass = _chassis_com
 
-	# Visual "eyes" on the +Z chassis face (front).  Two black half-embedded
-	# spheres (visible hemisphere from outside).  Visual-only — no
-	# collision, no physics.  Marks the body's front so the operator can
-	# read heading at a glance, in advance of the compass EPM and
-	# biomimetic-front work.
-	var eye_radius: float    = 0.010
-	var eye_x_offset: float  = 0.020                  # ±X from chassis centerline
-	var eye_y_offset: float  = 0.006                  # slightly above center
-	var eye_z: float         = CHASSIS_Z * 0.5        # at +Z face, half-protruding
+	# Visual "eyes" on the +Z chassis face (front): the two transducers of the
+	# robot's forward ultrasonic module, as black half-embedded spheres (visible
+	# hemisphere from outside).  Visual-only — no collision, no physics.  Marks
+	# the body's front so the operator can read heading at a glance, and sits
+	# where the real sensor sits so a forward range ray cast from here is cast
+	# from the right place.  Operator's measurement, 2026-10-10: transducer
+	# centres 11 mm above the bottom of the chassis, 25 mm apart; a 16 mm can.
+	# Placed off the belly plane (_chassis_bottom_local), not the box centre, so
+	# the cad and measured bodies both put them 11 mm up from their own bottom.
+	var eye_radius: float    = 0.008                                 # 16 mm transducer can
+	var eye_x_offset: float  = 0.0125                                # ±X: 25 mm centre to centre
+	var eye_y_offset: float  = _chassis_bottom_local + 0.011         # 11 mm above the chassis bottom
+	var eye_z: float         = CHASSIS_Z * 0.5                       # at +Z face, half-protruding
 	var eye_mat := StandardMaterial3D.new()
 	eye_mat.albedo_color = Color(0.05, 0.05, 0.05, 1.0)
 	for side in [-1.0, 1.0]:

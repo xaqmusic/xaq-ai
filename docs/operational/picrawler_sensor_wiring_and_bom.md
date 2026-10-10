@@ -1823,6 +1823,10 @@ reduces — and only after the authority check.
    both in the path ([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §2).
 6. **Ultrasonic mounting height and pitch** — the role is settled (forward, obstacle avoidance),
    but height and downward pitch set what it can see of the floor ahead. Record both.
+   ✅ **Height resolved 2026-10-10 (operator):** the two transducer centres are **11 mm above
+   the bottom of the chassis** and **25 mm apart**, on the front face (16 mm cans). Recorded in
+   `pi_host/calib/sensors.json` (`ultrasonic`), and the sim's "eyes" now sit there
+   (`picrawler_body.gd`). ⚠ **Pitch still unmeasured**; the beam is treated as level until it is.
 7. ~~**Whether the ultrasonic module's echo is already level-shifted**~~ — ⚠ **partially resolved
    2026-08-30**: the module drives GPIO22 (D3) directly and thousands of pings have been read
    without incident, so the HAT handles it. The high level was never metered with a scope;

@@ -1,6 +1,6 @@
 # Porting the MicroDuck's autonomous layer to the PiCrawler
 
-**Status: DRAFT for the operator's review (2026-10-10). Nothing here is built.**
+**Status: reviewed by the operator 2026-10-10; S0 done (master merged, PR #39). S1 next.**
 
 **What this decides.** How the exploration and wall-avoidance machinery built for the
 MicroDuck (branch `master`, `docs/plans-and-designs/microduck/`) becomes a level above the
@@ -334,13 +334,17 @@ real), has its re-use context here but is out of this plan's scope.
 
 ---
 
-## 8. Open questions for the operator
+## 8. Open questions, and the operator's answers (2026-10-10)
 
-1. The room's size and furniture for the sim gym (3 × 3 m, two boxes is the proposal).
-2. Whether to measure the ultrasonic mount now, or model it at a nominal height until the
-   robot is back on the floor.
-3. Turning in place at a stop as the quadruped's "look" (the body sweeping the single
-   beam): it is the duck's stop-and-look made of skid steer on four planted legs, which is
-   the yaw disturbance and the current peak the ledger names. Proposed: not in the first
-   pass; the body's own yaw wander is the sweep.
-4. Whether S0's merge is done now (it is the only step with a cost that grows with delay).
+1. **The room.** A 3 × 3 m floor with boxes. Agreed.
+2. **The ultrasonic mount.** Measured: the two transducer centres sit 11 mm above the bottom
+   of the chassis and 25 mm apart, on the front face. Recorded in `pi_host/calib/sensors.json`
+   and the sim's "eyes" now sit at those positions (`picrawler_body.gd`), so the S1 range model
+   is cast from the right place. Pitch is still unmeasured; the beam is treated as level.
+3. **Stop and look.** The stop-and-look rhythm is agreed, and the saccade method is open for
+   experiment when S4 reaches it. One ruling: rotating the body with the hip1 joints while in
+   the standing pose may work as the quadruped's saccade, but it is to be a **learned skill**,
+   not a scripted sweep. In this plan's terms: a prior to fulfil (bring the stalest sector of
+   the proximity memory into the beam), the hip1 motion emerging from it, A/B'd against the
+   body's own yaw wander as the sweep.
+4. **The merge.** Done: S0 landed as PR #39; master and picrawler-dev are one tree.
