@@ -7694,3 +7694,35 @@ stop_falls, then the eye):**
 3. **The pause at the transitions.** First measure where the time goes (the settle, the hand-back to the standing brain, the
    hand-off back to the walker, the first steps); then the stop held by the walking policy at zero command (`--stop-brain
    walker`, the record's control arm) against the standing brain.
+
+**Step 0, the slow train (★ T1 with `--train 0.12 8 0`, `log/ten/sl0`, n = 24, against ★ T1 at 0.2 m/s, `tc11`).** The chase
+closes on the train 43 → 62 % of its time; the train chased 36.0 → 38.7 s a run, followed 176 → 163 s (both inside the noise);
+skills touching 23.7 → 37.0 % (CI [+3.2, +23.4]); boring, interesting, falls, the first minute tie; walls 10.8 → 18.7 a minute
+with one seed far out (CI [−4, +20]). The slow train is the baseline from here (`sl0`). Note: the chase's start threshold
+(`chase_min_v` 0.1 m/s) sits just under the train's 0.12 — chases still start as often.
+
+**Step 1, the head on the mover (`mj_host/tools/head_on_mover.py`: on the walk, the train moving within 2 m, the head-yaw joint
+against the train's true bearing; "on it" = inside the cone's ±22.5°).**
+
+| `sl0`, n = 24 | seconds | the head on the train | the head yaw's share of the bearing |
+|---|---|---|---|
+| chasing (or coasting) | 1 191 | 66 % (86 % within 22°, 14 % beyond 69°) | 0.83 |
+| not chasing | 4 575 | 14 % | 0.05 |
+
+**While chasing, the head already follows the train**: the seek loop steers on the chase target (0.03 rad from the true bearing),
+and the head brain's gaze sense wants that bearing. The train beyond ~70° off the nose is out of the head's reach (its yaw is
+clamped at ±1.2 and the body turns slower than the train goes round). **Not chasing**, the train is beside or behind 62 % of
+the time; with it in front and within 2 m (1 131 s, ~47 s a run), the duck is walking to a static target 76 % of that time with
+its head on the target (the gaze sense: where the walk is going) and the train outside the 45° cone (64 %). Of that in-front
+time, 56 % is within 5 s of a chase ending. A ToF cone is not an eye: what the operator sees "in view" is beside the duck's
+narrow view unless the head turns to it, and the duck cannot know to turn to what its cone never caught.
+
+**G1, the gaze wants the mover the brain holds (host `--gaze-mover-memory`: on the walk, when no chase is on, the head brain's
+gaze sense wants `BearingSeekLoop::chase_gaze_ego` — the coasted target or the lost mover's extrapolated 5 s memory — before
+the static target; `log/ten/hg1`, n = 24, against `sl0`).** The head on the train while not chasing 14 → 14 %; every
+ten-minute measure ties (boring −1.3, falls −0.4, the train chased −1.5 s, stops at things +5, all inside the noise). **`NULL`,
+and nearly `DEAD_CODE`: the memory was live only 4.7 s a run against 38 s a run of walking within 5 s of a chase's end.** The
+brain keeps a memory only for a chase LOST while the mover was still moving (`lose()`); most chases end otherwise, and after
+them the train is mostly beside or behind (60 %), beyond where the head can turn. Re-use: a memory for every ending (a stopped
+chase whose mover moves on), or a glance at a mover's last place while walking to a static target (the look-around is off
+while the seek steers) — both would trade the view ahead the walk steers by (§17.102's `REGRESSION`).
