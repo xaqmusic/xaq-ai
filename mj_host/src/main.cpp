@@ -1312,6 +1312,7 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
+bool g_stop_skill_settle = false;   // --stop-skill-settle (§17.114 P2): under the walker hold, a kick or peck waits for stillness (the settle's test, at most its timeout); the look does not
 bool g_stop_walker_hold = false;   // --stop-walker-hold (§17.114 P1): the walking policy holds the stop's stance from its first tick (no settle, no standing brain)
 double g_saccade_speed = 0.0, g_fix_min_s = 0.2, g_fix_max_s = 0.8;   // --stop-saccade SPEED [FIX_MIN [FIX_MAX]] (§17.114 L1)
 bool g_gaze_mover_memory = false; int g_gmm_now = 0;   // --gaze-mover-memory (§17.114 G1): the gaze sense wants the mover the brain holds (incl. a lost one in memory) on the walk
@@ -2011,6 +2012,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     double spin_heading = 0.0, spin_prev_yaw = 0.0; bool spin_have_yaw = false; int spin_walk_run = 0, spins = 0, spin_rolls = 0, spin_last_roll = -100000;
     std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
+    bool wh_ready = true; int wh_settle_left = 0;   // §17.114 P2
     int fix_ticks = -1, fix_n = 0; double fix_peak = 0.0, fix_len_sum = 0.0; std::deque<int> fix_vox;   // §17.114 L1: the fixation (-1 = in a saccade)
     if (sweep_on) std::fprintf(stderr, "  gaze SWEEP at stops: never holds; %.2f rad/s (a quarter while the view is novel) toward the least-looked-at of %d x %d gaze cells, yaw +-%.2f rad, pitch %+.3f..%+.3f\n",
                                g_stop.gaze_sweep, sweep_ny, sweep_np, g_stop.gaze_sweep_yaw, sweep_p_lo, sweep_p_hi);
@@ -2327,7 +2329,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (g_stop.map_on_stop) brain.set_map_learning(true);
                         if (!stander || g_stop_walker_hold) {
                             stop_phase = StopPhase::Walker; stop_event = "stop:walker";
-                            if (g_stop_walker_hold && !skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); }
+                            wh_ready = !g_stop_skill_settle; wh_settle_left = stop_settle_ticks;   // §17.114 P2: a skill waits for stillness
+                            if (g_stop_walker_hold && wh_ready && !skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); }
                         } else if (g_stop.att_gate <= 0.0 || att < g_stop.att_gate) {
                             stop_phase = StopPhase::Brain; ++stop_handbacks; stop_event = "stop:handback";
                             if (!skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); }
@@ -2356,7 +2359,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (dash_left > 0) { stop_left = 0; dash_left = 0; ++dash_released; ++stops_chase_ended; stop_event = "dash:go"; }   // D1: released
                     }
                 }
-                if (g_stop_walker_hold && stop_phase == StopPhase::Walker && !skill_active && unwind_left == 0 && !req_consumed) {
+                if (g_stop_walker_hold && stop_phase == StopPhase::Walker && !wh_ready && (still || --wh_settle_left <= 0)) wh_ready = true;
+                if (g_stop_walker_hold && stop_phase == StopPhase::Walker && wh_ready && !skill_active && unwind_left == 0 && !req_consumed) {
                     // §17.114 P1: with the walker holding there is no hand-back to defer to -- a request (or one deferred from
                     // the walk) starts at once, as it does from the stand
                     if (!skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); req_consumed = true; }
@@ -3651,6 +3655,8 @@ int main(int argc, char** argv) {
             DuckBody::bam.dump = next("--bam-dump");
         } else if (a == "--stop-walker-hold") {
             g_stop_walker_hold = true;
+        } else if (a == "--stop-skill-settle") {
+            g_stop_skill_settle = true;
         } else if (a == "--stop-saccade") {
             g_saccade_speed = std::stod(next("--stop-saccade"));
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_fix_min_s = std::stod(next("--stop-saccade"));
