@@ -6985,3 +6985,52 @@ into the 40 kHz receiver (BOM §7 "unmeasured"). **Still open in S1:** the camer
 robot's 32×32, `odom`/`vel_ego` as a shared body helper, the robot publishing range and camera
 during a brain run, the separation study, and the three actuator measurements (turn table,
 stall signature, reverse).
+
+---
+
+### 2026-10-10 — S1 SIM HALF COMPLETE: THE ROBOT'S SENSES ASSEMBLED IN THE ROOM, INSTRUMENT-ONLY, FOR THE OPERATOR'S EYE
+
+*Plan §4 S1. Preset: `…__nohomeo__room_senses.json`, in the launcher dropdown. Verdict:
+`BASELINE` (an assembly; nothing tuned, no consumer). Gain-0: every switch off, the three
+deployed configs are byte-identical on body JSON (seed 1 × 6000 ticks).*
+
+**What was built, beside the ultrasonic model and the room (entry above):**
+
+- **The camera at the robot's format** (`OGMA_PICRAWLER_CAMERA_ROBOT=1`): the sim's raycast
+  camera rendered as pi_host's plane — the 4:3 frame centre-cropped square, so a 41.4° field
+  both ways, 32 × 32 luma (Rec. 601 weights), on `sense.camera`, captured every 3 ticks and
+  the cached frame published every tick. `picrawler_senses.json`'s `epm_vision` runs on it
+  unchanged. The mount is the sim's loom eye (chassis + 0.08 m); the robot's camera position
+  is not measured yet.
+- **Dead-reckoned odometry** (`OGMA_PICRAWLER_ODOM=1`): `ogma::body::DeadReckon`, a shared
+  header the robot host will run unchanged (six unit tests pin the frame), integrating
+  `stride_v` under `ego_heading`. `reality.proprio.odom` = [x, y, unwrapped yaw] in the body
+  frame at the last reset; `reality.proprio.place_in` = [x/L, y/L, cos ψ, sin ψ], the duck's
+  place-map input. Egocentric. Measured against the truth in the odom frame (instrument,
+  never published): before the wall, forward reads 0.88 of the truth (the stride sensor's
+  known 75–90 %), yaw matches, and the lateral channel has the right sign but reads ~0.4
+  (the stride sensor's own note: "lateral channel UNVALIDATED"). Pressed on the wall the legs
+  keep stepping and the integrator keeps walking — 14 m of "stride" for 1.4 m of ground over
+  the run, odom_err 0.5 m at the end. That is the slip the stride fusion already names, and
+  the odom carries it as dead reckoning must.
+- **Honest `vel_ego`** (`OGMA_PICRAWLER_HONEST_VEL_EGO=1`): `[stride_v.x, stride_v.y]` in
+  place of the world-velocity soft oracle — the ledger's one-topic swap that makes PlayLoop
+  / PlaceNav legal.
+- **`OgmaBrain.publish_image`**: a RawImageFrame on an arbitrary topic (as `publish_token`
+  for ProprioTokens), so sim channels land on the robot's topic names.
+- **Three instrument-only EPMs** in the preset, none read by anything: `epm_range` (rbf over
+  `sense.range`, the senses config's), `epm_vision` (jl retinal 32 over `sense.camera`),
+  `epm_place` (rbf over `place_in`, ±1.1, 128 nodes, every 5 ticks, the duck's map
+  parameters). The JSONL carries their node / baked / TLE so a headless run can show each
+  channel being coarse-grained.
+
+**The run (seed 1, 6000 ticks):** the body behaves as the room baseline (into the +Z wall at
+tick ~1200, held there). The range vocabulary grows to 22 nodes on the approach and settles at
+16 / 13 baked once the wall holds it; the camera's at 10 / 10 (mean luma 62 → 54 as the wall
+fills the frame); the place map at 4 / 4 for a 1.3 m walk. Every channel moves, every
+vocabulary bakes, nothing consumes.
+
+**What S1 still owes:** the robot half (`ogma_host --range --camera` during a brain run,
+`ego_heading` / `odom` published from `BrainInputBuilder` via the same header), the camera's
+mount position, the separation study on the recorded senses, and the three actuator
+measurements (turn table, stall signature, reverse). Then S2, the speed socket.

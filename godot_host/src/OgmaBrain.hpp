@@ -56,6 +56,9 @@ public:
     // byte-for-byte the robot's must land on the robot's topic name so one config
     // runs on both.  Unused by every existing path.
     void publish_token(PackedFloat64Array const& values, String const& topic, String const& sensor);
+    // publish_video on an ARBITRARY topic (the robot publishes its camera on "sense.camera",
+    // not host.video.*).  Same RawImageFrame, same size check.
+    void publish_image(PackedByteArray const& pixels, int height, int width, int channels, String const& topic);
     void publish_event(String const& name, double intensity);
     // Publish a raw video frame on reality.video.<modality>.  pixels is row-major
     // H × W × C uint8 (channels = 1 grayscale or 3 RGB).  Wraps RawImageFrame.

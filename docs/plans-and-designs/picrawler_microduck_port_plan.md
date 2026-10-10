@@ -1,6 +1,6 @@
 # Porting the MicroDuck's autonomous layer to the PiCrawler
 
-**Status: reviewed by the operator 2026-10-10; S0 done (master merged, PR #39). S1 in progress: the ultrasonic model and the room gym are built and the n=6 baseline is in the ledger (2026-10-10, "S1 OF THE MICRODUCK PORT, SIM HALF"); the robot half, the camera, odometry, the separation study and the actuator measurements are open.**
+**Status: reviewed by the operator 2026-10-10; S0 done (master merged, PR #39). S1's SIM HALF IS COMPLETE (ledger 2026-10-10, two entries): the ultrasonic model, the room, the camera at the robot's format, dead-reckoned odometry, honest vel_ego, and the preset `…__nohomeo__room_senses.json` that assembles them instrument-only in the launcher. Open in S1: the robot half, the camera mount, the separation study, the actuator measurements.**
 
 **What this decides.** How the exploration and wall-avoidance machinery built for the
 MicroDuck (branch `master`, `docs/plans-and-designs/microduck/`) becomes a level above the
@@ -170,11 +170,12 @@ The pre-commit identifier scan runs over 158k added lines; expect it to be slow.
   floor inside vertical 0.3 m walls with three boxes, flat, spawn at the centre facing +Z.
   God's-eye wall-contact and coverage counters, and `scripts_tools/roomavg.py` as the harness.
   Baseline in the ledger: P-e·h0 reaches the far wall at tick ~1200 and stays on it.
-- The camera: luma 32×32 on `sense.camera`, matching the robot. The sim's RGB raycast
-  already exists; the reduction to the robot's format is a parity check, not new optics.
-- `reality.proprio.odom` `[x, y, unwrapped yaw]` and `vel_ego` ← `stride_v`, as a body
-  helper in `cpp_core/include/ogma/body/` with a parity test, so the robot runs the same
-  arithmetic.
+- ✅ **Built 2026-10-10.** The camera at the robot's format (`OGMA_PICRAWLER_CAMERA_ROBOT=1`):
+  32 × 32 luma on `sense.camera`, the 4:3 frame's centre-cropped square (41.4° both ways).
+- ✅ **Built 2026-10-10.** `reality.proprio.odom` `[x, y, unwrapped yaw]` and `place_in`
+  `[x/L, y/L, cos, sin]` from `ogma::body::DeadReckon` (`OGMA_PICRAWLER_ODOM=1`, six unit
+  tests), and `vel_ego` ← `stride_v` (`OGMA_PICRAWLER_HONEST_VEL_EGO=1`). The robot host
+  adopts the same header in the robot half.
 
 **Robot.**
 - `ogma_host` runs `--range --camera` alongside `--brain-inputs` during a dash run, publish

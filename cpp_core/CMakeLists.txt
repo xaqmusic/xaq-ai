@@ -316,6 +316,10 @@ target_link_libraries(test_neurochem_state PRIVATE ogma_core GTest::gtest_main p
 add_executable(pair_neurochem_epm tests/ogma/pair_neurochem_epm.cpp)
 target_link_libraries(pair_neurochem_epm PRIVATE ogma_core GTest::gtest_main pthread)
 
+# S1 of the MicroDuck port — the shared dead-reckoning helper (sim + robot host)
+add_executable(test_dead_reckon tests/body/test_dead_reckon.cpp)
+target_link_libraries(test_dead_reckon PRIVATE ogma_core GTest::gtest_main pthread)
+
 # v4 Phase 1.2 — EPM unit tests
 add_executable(test_epm_module tests/ogma/test_epm_module.cpp)
 target_link_libraries(test_epm_module PRIVATE ogma_core GTest::gtest_main pthread)
@@ -575,6 +579,7 @@ gtest_discover_tests(test_epm)
 gtest_discover_tests(test_mitosis)
 gtest_discover_tests(test_ogma_headers)
 gtest_discover_tests(test_rng_parity)
+gtest_discover_tests(test_dead_reckon)
 gtest_discover_tests(test_inprocess_bus)
 gtest_discover_tests(test_neurochem_state)
 gtest_discover_tests(pair_neurochem_epm)

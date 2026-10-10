@@ -1628,6 +1628,36 @@ var _room_contact_ticks: int = 0                # INSTRUMENT: ticks with the cha
 var _room_contact_episodes: int = 0             # INSTRUMENT: rising edges of the above
 var _room_contact_prev: bool = false
 var _room_cells: Dictionary = {}                # INSTRUMENT: visited 0.25 m floor cells (coverage)
+# ---- THE ROBOT'S CAMERA FORMAT (S1): 32x32 luma on sense.camera ----------------------
+# pi_host centre-crops the OV5647's 4:3 frame to a square and area-averages it to 32x32
+# luma (CameraCapture.hpp): the brain's plane is 32x32x1 and its field of view is the
+# sensor's VERTICAL 41.4 deg both ways.  camera_robot renders the sim's raycast camera in
+# exactly that shape and publishes it on the robot's topic, so picrawler_senses.json's
+# epm_vision runs unchanged on both.  It forces vision_res to 32x32; the RGB
+# host.video.color path (publish_vision) is otherwise untouched.  The mount is the sim's
+# "loom eye" (chassis + 0.08 m up); the robot's camera position is not yet measured.
+@export var camera_robot: bool = false          # OGMA_PICRAWLER_CAMERA_ROBOT=1
+const CAMERA_ROBOT_RES: int = 32
+var _cam_luma: PackedByteArray = PackedByteArray()
+var _cam_mean: float = 0.0                      # INSTRUMENT: mean luma of the last frame
+# ---- DEAD-RECKONED ODOMETRY (S1): odom [x, y, yaw] and place_in [x/L, y/L, cos, sin] --
+# ogma::body::DeadReckon (shared with the robot host) integrates stride_v under
+# ego_heading.  The odom frame is the body frame at the last reset: x_o = the body's
+# forward then, y_o = its +X then.  Egocentric; it drifts, and the drift is measured
+# against the truth as an INSTRUMENT (odom_err), never fed back.  place_in is the duck's
+# place-map input: x, y over a scale and the heading as cos/sin.
+@export var publish_odom: bool = false          # OGMA_PICRAWLER_ODOM=1
+@export var odom_scale_m: float = 2.0           # OGMA_PICRAWLER_ODOM_SCALE: place_in's x/y normaliser (room half + margin)
+var _odom = null                                # DeadReckonNode
+var _odom_need_anchor: bool = true
+var _odom_yaw0: float = 0.0
+var _odom_origin_world: Vector3 = Vector3.ZERO
+var _odom_fwd_world: Vector3 = Vector3(0, 0, 1)
+var _odom_right_world: Vector3 = Vector3(1, 0, 0)
+var _odom_err_m: float = 0.0                    # INSTRUMENT: |odom - truth| in the odom frame
+# ---- HONEST vel_ego (S1): stride_v in place of the world-velocity soft oracle ----------
+# The ledger named vel_ego as the one topic to swap to make PlayLoop / PlaceNav legal.
+@export var honest_vel_ego: bool = false        # OGMA_PICRAWLER_HONEST_VEL_EGO=1
 var _dbg_contact_swing: float = 0.0   # TRUE swing fraction from the foot-contact sensor
 var _dbg_fk_cmd_err: float = 0.0      # mean |commanded-FK − achieved-FK| foot height (m)
 var _dbg_fk_valid_err: float = 0.0    # mean |measured-FK − achieved-pose| = FK wiring check
@@ -3219,6 +3249,20 @@ func _ready() -> void:
 			"float32[2]: FORWARD ultrasonic [distance_m, valid] — the robot's HC-SR04-class module on the front face, level, 20 Hz, max 1.5 m. valid=0 means no echo (beyond range OR a glancing surface), and distance then reads max range, never 0. Egocentric. Instrument-only until S1's separation study admits a consumer.", true)
 		print("PicrawlerBody: ULTRASONIC model ON — sense.range [m, valid], %.0f Hz, max %.2f m, lobe +/-7.5 deg, glancing limit %.0f deg, mount %.0f mm above the chassis bottom, no pitch" % [
 			ULTRASONIC_HZ, ULTRASONIC_MAX_RANGE_M, ULTRASONIC_GLANCE_DEG, ULTRASONIC_MOUNT_ABOVE_BOTTOM * 1000.0])
+	if camera_robot:
+		vision_res_w = CAMERA_ROBOT_RES
+		vision_res_h = CAMERA_ROBOT_RES
+		brain.register_source("CameraRobot", "sense.camera",
+			"uint8[32×32×1]: the robot's camera plane — luma, the 4:3 frame centre-cropped square (FOV 41.4° both ways), the retinal JL encoder's spec. Egocentric. Instrument-only until admitted.", true)
+		print("PicrawlerBody: CAMERA (robot format) ON — sense.camera 32x32x1 luma, FOV %.1f deg square, capture every %d ticks" % [rad_to_deg(VISION_FOV_V_RAD), VISION_CAPTURE_EVERY])
+	if publish_odom:
+		brain.register_source("Odom", "reality.proprio.odom",
+			"float32[3]: dead-reckoned pose [x m, y m, unwrapped yaw rad] in the body frame at the last reset (x = forward then, y = body +X then), from stride_v under ego_heading (ogma::body::DeadReckon, shared with the robot). Egocentric; drifts.", true)
+		brain.register_source("PlaceIn", "reality.proprio.place_in",
+			"float32[4]: the place map's input — [x/L, y/L, cos yaw, sin yaw] from odom, L = odom_scale_m. Egocentric.", true)
+		print("PicrawlerBody: ODOM ON — reality.proprio.odom [x, y, yaw] + place_in [x/%.1f, y/%.1f, cos, sin] from stride_v and ego_heading" % [odom_scale_m, odom_scale_m])
+	if honest_vel_ego:
+		print("PicrawlerBody: HONEST vel_ego ON — [stride_v.x, stride_v.y] replaces the world-velocity soft oracle")
 	brain.register_source("Upright", "reality.proprio.upright",
 		"float32[1]: chassis up-vector alignment with gravity (1 = upright, 0 = on its side, -1 = inverted) from the IMU. Gates keyframe baking on posture validity (don't learn from a flipped body).", true)
 	# 2026-06-01 Stage 3.A — per-servo torque proprio. Normalized to [-1, 1]
@@ -3571,7 +3615,9 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
-			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_ROOM_SIZE"]:
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_ROOM_SIZE",
+			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
+			  "OGMA_PICRAWLER_HONEST_VEL_EGO"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3608,6 +3654,10 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_HONEST_HOLD_CAP":   honest_hold_cap   = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_ULTRASONIC":        ultrasonic_model  = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ROOM_SIZE":         room_size         = clampf(v.to_float(), 1.0, 18.0)
+			"OGMA_PICRAWLER_CAMERA_ROBOT":      camera_robot      = (v != "0" and v != "")
+			"OGMA_PICRAWLER_ODOM":              publish_odom      = (v != "0" and v != "")
+			"OGMA_PICRAWLER_ODOM_SCALE":        odom_scale_m      = maxf(0.1, v.to_float())
+			"OGMA_PICRAWLER_HONEST_VEL_EGO":    honest_vel_ego    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -6804,9 +6854,14 @@ func _step_one() -> void:
 	# efference-matched stuck check (achieved vs learned capable speed), never for the
 	# gradient, so the oracle does not touch the inference — but it is named, not hidden.
 	var ve := PackedFloat64Array()
-	ve.append(Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z)
-		.dot(Vector2(cos(yaw), -sin(yaw))))
-	ve.append(fwd_v)
+	if honest_vel_ego:
+		# The legal form: the body's own stride estimate (previous tick's), same layout.
+		ve.append(_stridev_est.x)
+		ve.append(_stridev_est.y)
+	else:
+		ve.append(Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z)
+			.dot(Vector2(cos(yaw), -sin(yaw))))
+		ve.append(fwd_v)
 	brain.publish_proprio(ve, "vel_ego")
 
 	# Signed lateral (sideways-slip) velocity on its OWN topic — kept off the imu
@@ -7013,11 +7068,13 @@ func _step_one() -> void:
 	# Vision → brain: capture the shaded RGB at a subrate, publish the cached frame
 	# every tick (sub-rate publishes drop out of the voter trust map) so epm_color
 	# encodes a fresh token each tick.
-	if publish_vision:
+	if publish_vision or camera_robot:
 		_vision_capture_counter += 1
 		if _vision_capture_counter >= VISION_CAPTURE_EVERY:
 			_vision_capture_counter = 0
 			_capture_vision()
+			if camera_robot:
+				_reduce_camera_robot()
 			# V2 readout: epm_color latent → vision bearing (cached, applied here).
 			if vision_steer and _vsteer_loaded and brain.has_method("get_module_metrics"):
 				var lat = brain.get_module_metrics().get("epm_color", {}).get("last_latent", [])
@@ -7033,8 +7090,11 @@ func _step_one() -> void:
 		# ⚠ publish_video's signature is (pixels, HEIGHT, WIDTH, channels, modality) —
 		# height FIRST.  Square frames hid that for the whole life of this call; a 4:3
 		# frame does not.  A size mismatch push_errors and silently publishes NOTHING.
-		if _last_vision_pixels.size() == vision_res_w * vision_res_h * 3:
+		if publish_vision and _last_vision_pixels.size() == vision_res_w * vision_res_h * 3:
 			brain.publish_video(_last_vision_pixels, vision_res_h, vision_res_w, 3, "color")
+		# The robot's plane, every tick from the cached capture (as the RGB frame is).
+		if camera_robot and _cam_luma.size() == CAMERA_ROBOT_RES * CAMERA_ROBOT_RES:
+			brain.publish_image(_cam_luma, CAMERA_ROBOT_RES, CAMERA_ROBOT_RES, 1, "sense.camera")
 		if vision_steer:
 			# Publish the VISION-derived bearing every tick (MotorEPM nav steers on it).
 			var vcp := PackedFloat64Array()
@@ -7387,6 +7447,8 @@ func _step_one() -> void:
 		sv_out.append(_stridev_est.x)
 		sv_out.append(_stridev_est.y)
 		brain.publish_proprio(sv_out, "stride_v")
+		if publish_odom:
+			_odom_step_and_publish()
 		var slip_out := PackedFloat64Array()
 		slip_out.append(_stridev_slip)
 		brain.publish_proprio(slip_out, "slip")
@@ -10465,6 +10527,55 @@ func _select_random_pyramid_target() -> void:
 	print("PicrawlerBody: walk_over_there target → pyramid #%d at xz=(%.2f, %.2f)" % [
 		walk_target_idx, walk_target_pos.x, walk_target_pos.y])
 
+# The robot's camera plane from the sim's RGB capture: luma (Rec. 601 weights, integer),
+# 32x32x1, cached until the next capture.  Called on capture ticks only.
+func _reduce_camera_robot() -> void:
+	var n: int = CAMERA_ROBOT_RES * CAMERA_ROBOT_RES
+	if _last_vision_pixels.size() != n * 3:
+		return
+	if _cam_luma.size() != n:
+		_cam_luma.resize(n)
+	var acc: int = 0
+	for i in range(n):
+		var yv: int = (299 * int(_last_vision_pixels[3 * i]) + 587 * int(_last_vision_pixels[3 * i + 1])
+					   + 114 * int(_last_vision_pixels[3 * i + 2])) / 1000
+		_cam_luma[i] = yv
+		acc += yv
+	_cam_mean = float(acc) / float(n)
+
+# Dead-reckoned odometry: one integrator step per tick on the stride estimate, then the
+# two tokens.  The frame is anchored at the first step after a reset (the body frame
+# then), and ego_heading is taken relative to its value at the anchor so a reset that
+# does not re-zero the heading still starts the odom frame at yaw 0.
+func _odom_step_and_publish() -> void:
+	if _chassis == null:
+		return
+	if _odom == null:
+		_odom = ClassDB.instantiate("DeadReckonNode")
+	if _odom_need_anchor:
+		_odom.reset()
+		var xf: Transform3D = _chassis.global_transform
+		_odom_origin_world = xf.origin
+		_odom_fwd_world    = Vector3(xf.basis.z.x, 0.0, xf.basis.z.z).normalized()
+		_odom_right_world  = Vector3(xf.basis.x.x, 0.0, xf.basis.x.z).normalized()
+		_odom_yaw0 = _ego_heading
+		_odom_need_anchor = false
+	_odom.step(_stridev_est.x, _stridev_est.y, _ego_heading - _odom_yaw0, TAU)
+	var od := PackedFloat64Array()
+	od.append(_odom.x())
+	od.append(_odom.y())
+	od.append(_odom.yaw())
+	brain.publish_proprio(od, "odom")
+	var pin := PackedFloat64Array()
+	pin.append(clampf(_odom.x() / odom_scale_m, -1.1, 1.1))
+	pin.append(clampf(_odom.y() / odom_scale_m, -1.1, 1.1))
+	pin.append(cos(_odom.yaw()))
+	pin.append(sin(_odom.yaw()))
+	brain.publish_proprio(pin, "place_in")
+	# INSTRUMENT: the truth in the odom frame (god's-eye, never published).
+	var d: Vector3 = _chassis.global_transform.origin - _odom_origin_world
+	_odom_err_m = Vector2(_odom.x() - d.dot(_odom_fwd_world), _odom.y() - d.dot(_odom_right_world)).length()
+
 # The forward ultrasonic's ping (see the state block for what is and is not modelled).
 func _ultrasonic_step() -> void:
 	# 20 Hz off the 50 Hz tick: cast when the ping slot advances (3, 2, 3, 2, ... ticks).
@@ -10910,7 +11021,9 @@ func _capture_vision() -> void:
 		up      = chassis_xf.basis.y
 	# Separate H/V half-angles — the sensor is 4:3, not square.  Using one FOV for both
 	# axes (the old behaviour) silently stretches the image and misreports every bearing.
-	var tan_half_h: float = tan(VISION_FOV_H_RAD * 0.5)
+	# camera_robot: the robot's plane is the 4:3 frame centre-cropped SQUARE, so its
+	# horizontal field of view is the sensor's vertical one.
+	var tan_half_h: float = tan((VISION_FOV_V_RAD if camera_robot else VISION_FOV_H_RAD) * 0.5)
 	var tan_half_v: float = tan(VISION_FOV_V_RAD * 0.5)
 	# ⚠ NO target_collider here any more — see the colour test below.
 	var q := PhysicsRayQueryParameters3D.new()
@@ -11152,6 +11265,7 @@ func _safe_reset_xz_near(target: Vector2) -> Vector2:
 	return safe
 
 func _do_hard_reset() -> void:
+	_odom_need_anchor = true   # the odom frame is the body frame at the last reset
 	# Gate 0 (L-1a) — announce the teleport/respawn on the bus so brain modules
 	# (MotorEPM) can reset-mask their metrics.  A hard reset is otherwise invisible
 	# to the brain (no events.* fires), which fakes rhythm continuity across the
@@ -12071,6 +12185,22 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["wall_contact_ticks"]    = _room_contact_ticks
 		line["wall_contact_episodes"] = _room_contact_episodes
 		line["room_cov"]              = _room_cells.size()
+	if camera_robot:
+		line["cam_mean"] = snappedf(_cam_mean, 0.1)
+	if publish_odom and _odom != null:
+		line["odom_x"]    = snappedf(_odom.x(), 0.001)
+		line["odom_y"]    = snappedf(_odom.y(), 0.001)
+		line["odom_yaw"]  = snappedf(_odom.yaw(), 0.001)
+		line["odom_dist"] = snappedf(_odom.dist(), 0.001)
+		line["odom_err"]  = snappedf(_odom_err_m, 0.001)
+	# The instrument-only EPMs over the new senses (the room preset): node counts and TLE,
+	# so a headless run can show each channel is being coarse-grained.  Absent when absent.
+	for mid in ["epm_range", "epm_vision", "epm_place"]:
+		if metrics.has(mid):
+			var mm: Dictionary = metrics[mid]
+			line[mid + "_n"]     = int(mm.get("node_count", -1))
+			line[mid + "_baked"] = int(mm.get("baked_count", -1))
+			line[mid + "_tle"]   = snappedf(float(mm.get("tle", -1.0)), 0.0001)
 	line["gc_norm"] = snappedf(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0), 0.001)
 	line["cy_norm"] = snappedf(clamp(chassis_y / target_height, 0.0, 1.0), 0.001)
 	# TRUE swing fraction from the physics foot-contact sensor — the ground truth against

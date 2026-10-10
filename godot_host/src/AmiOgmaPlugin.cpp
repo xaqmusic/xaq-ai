@@ -15,6 +15,7 @@
 #include "ImuAttitude.hpp"
 #include "LegKinematics.hpp"
 #include "StrideOdometry.hpp"
+#include "DeadReckon.hpp"
 
 using namespace godot;
 
@@ -29,6 +30,7 @@ static void initialize_ami_ogma_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<StrideVNode>();
     ClassDB::register_class<DistressNode>();
     ClassDB::register_class<StrideMath>();
+    ClassDB::register_class<DeadReckonNode>();
 }
 
 static void uninitialize_ami_ogma_module(ModuleInitializationLevel p_level) {

@@ -99,6 +99,7 @@ void OgmaBrain::_bind_methods() {
     ClassDB::bind_method(D_METHOD("tick",             "delta"),                 &OgmaBrain::tick);
     ClassDB::bind_method(D_METHOD("publish_proprio",  "values", "sensor"),      &OgmaBrain::publish_proprio);
     ClassDB::bind_method(D_METHOD("publish_token",    "values", "topic", "sensor"), &OgmaBrain::publish_token);
+    ClassDB::bind_method(D_METHOD("publish_image",    "pixels", "height", "width", "channels", "topic"), &OgmaBrain::publish_image);
     ClassDB::bind_method(D_METHOD("publish_event",    "name",   "intensity"),   &OgmaBrain::publish_event);
     ClassDB::bind_method(D_METHOD("publish_video",    "pixels", "height", "width", "channels", "modality"),
                                                                                  &OgmaBrain::publish_video);
@@ -488,6 +489,25 @@ void OgmaBrain::publish_token(PackedFloat64Array const& values, String const& to
     p->values.resize(values.size());
     for (int i = 0; i < values.size(); ++i) p->values[i] = float(values[i]);
     instance_->bus()->publish(std::string(topic.utf8().get_data()), p);
+}
+
+void OgmaBrain::publish_image(PackedByteArray const& pixels, int height, int width, int channels, String const& topic) {
+    if (!initialized_) return;
+    int64_t expected = int64_t(height) * width * channels;
+    if (pixels.size() != expected) {
+        UtilityFunctions::push_error("OgmaBrain::publish_image: pixel count ", pixels.size(),
+                                     " != H*W*C ", expected, " (", height, "x", width, "x", channels, ")");
+        return;
+    }
+    auto f = std::make_shared<ogma::RawImageFrame>();
+    f->tick_id     = tick_id_;
+    f->producer_id = "host";
+    f->height      = height;
+    f->width       = width;
+    f->channels    = channels;
+    f->pixels.resize(size_t(expected));
+    std::memcpy(f->pixels.data(), pixels.ptr(), size_t(expected));
+    instance_->bus()->publish(std::string(topic.utf8().get_data()), f);
 }
 
 void OgmaBrain::publish_event(String const& name, double intensity) {

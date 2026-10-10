@@ -80,6 +80,7 @@ add_library(ami_ogma_host SHARED
     src/ImuAttitude.cpp   # binding for cpp_core/ogma/body/ImuAttitude (port step a)
     src/LegKinematics.cpp # binding for cpp_core/ogma/body/LegKinematics (port step a)
     src/StrideOdometry.cpp # binding for cpp_core/ogma/body/StrideOdometry (port step b)
+    src/DeadReckon.cpp    # binding for cpp_core/ogma/body/DeadReckon (MicroDuck port S1)
 )
 
 # No "lib" prefix — we reference it as "ami_ogma_host.so" in the .gdextension.
