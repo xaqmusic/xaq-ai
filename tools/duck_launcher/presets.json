@@ -48,6 +48,30 @@
   }
  },
  {
+  "name": "E4 · S2 + AFTER THE SIT, LOOK AND WALK OUT TO THE OPEN SIDE (§17.114, awaiting the eye)",
+  "hint": "§17.114 E1-E4 (2026-10-10): after the sit the duck looks (a stop: the cloud), then escapes toward the freest sector of what it saw (a turn-about when nothing ahead is free); during the escape the heading reflex owns the yaw, the walk does not back, no new stop or sit interrupts it, and it walks forward while facing the free side (the chase's floor). n = 24 vs S2: 0.6 m from the sit's place in 18 s (was 25), 0.72 m within 20 s (was 0.51), backing after a sit 30 -> 12 %, sits 3.3 -> 2.4 a run (stuck less), walls 13.5 -> 10.4 a minute; the rest ties. WATCH seed 16 from 250 s: sits at a wall at 253 s and 291 s, out in 17 s and 14 s.",
+  "state": {
+   "config": "a1v2_s1_sit.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 16,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 0 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.12 8 0 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest --stop-by-look --impeded-not-chasing --chase-yaw-range 1.5 --stop-saccade 2.0 --stop-walker-hold --stop-skill-settle --sit-on-stall 0.2 --sit-settle --sit-then-escape --escape-authority --escape-commit --escape-vx 0.3",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
   "name": "★ L1 · THE LIVELY LOOK (promoted 2026-10-10): ★ T1 + the slow train + the look as saccades and fixations",
   "hint": "PROMOTED on the operator's eye (2026-10-10): 'the L1 saccade looks better with no noticeable dropoff in object engagement'. §17.114 L1 (2026-10-09): the stop's sweep jumps to the next least-seen gaze cell at 2 rad/s and holds while that view still grows the cloud (0.2-0.8 s, mean ~0.4 s) -- instead of the constant 0.6 rad/s glide. n = 24 vs S0: the head still 26 % of stop ticks (was 11 %), the yaw span 0.85 -> 1.13 rad, voxels a cloud 2343 -> 2606, walls located 55 -> 60 %, objects found tie (28 %), obstacles read as small 11.1 -> 12.3 %; stop length unchanged (head speed does not set it, §17.32); the ten-minute set ties. WATCH: does the look read as an animal's (glance, hold, glance) rather than a scan? Caveat: the sim ToF has no registration smear unless --tof-real.",
   "state": {

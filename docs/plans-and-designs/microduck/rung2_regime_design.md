@@ -7859,3 +7859,31 @@ Against ★ P2 every ten-minute measure ties (boring −0.7, interesting +2.8, w
 [−16.0, +4.0], outcomes observed +4.6); skills +3.8 a run is the sits themselves. **`WORKING` as flavour: a sit a few times a
 run, three in four at a real bump, without costing the walk.** Not a navigation fix — the corner the duck backs into is still
 §17.17's deadlock. Preset S2 (seed 20: sits at 128 s and 150 s at contacts) for the eye.
+
+**The way out after the sit (the operator, 2026-10-10: "the sit is firing as expected but the robot remains in the corner,
+which is boring. After the sit, the play loop or another mechanism should be attempting to get the robot back into open
+areas so it can notice objects to interact with. Without the sit the robot normally babbles its way out of corners, but if
+we can navigate more assertively out of those situations it is a win for dynamic behaviour").** Instrument
+`mj_host/tools/after_sit.py`: per sit, how far the trunk gets from the sit's place within 10 / 20 / 40 s and the time to 0.6 m.
+On S2 (`st2`): 0.6 m in 25 s (p50), 30 % of the walk 5–15 s after spent backing; an escape follows 9 of 80 sits.
+
+| n = 24, against S2 | 0.6 m away, p50 (p75) | within 20 s | backing after | an escape's 6 s | sits a run | walls / min |
+|---|---|---|---|---|---|---|
+| S2 (`st2`) | 25 s (37) | 0.51 m | 30 % | — | 3.3 | 13.5 |
+| E1 the sit ends in a look stop and the stuck escape (`se1`) | 41 (115) | 0.33 | 42 % | 0.19 m | 3.7 | 12.7 |
+| E2 + the reflex owns the escape's yaw, no backing (`se2`) | 29 (56) | 0.38 | 16 % | 0.18 | 4.1 | 13.9 |
+| E3 + no stop or sit interrupts an escape (`se3`) | 24 (43) | 0.49 | 16 % | 0.27 | 3.4 | 13.5 |
+| **E4 + the escape walks out while facing the free side (`se4`)** | **18 (38)** | **0.72** | **12 %** | **0.57** | **2.4** | **10.4** |
+
+Each step was a diagnosis of the one before. **E1** (`--sit-then-escape`: the sit ends in a look stop whose cloud gives the
+stuck escape's freest sector, with a turn-about when nothing ahead is free within ~1.2 m; 6 turn-abouts in 24 runs) made it
+worse: the escape held the heading reference, but near a wall the walker brain's avoidance owned the body — 37 % of the
+escape backing at full reverse, and the heading reflex's yaw share mixed down to ~0.4 by proximity (T1's re-use context).
+**E2** (`--escape-authority`: during an escape the reflex owns the yaw at up to 1.5 rad/s and the walk may not back) removed
+the backing (8 %) and the escape still went 0.18 m: new stops and sits began inside it and its 6 s ran out standing. **E3**
+(`--escape-commit`: no stop or sit starts while an escape holds) let it run, 0.27 m. **E4** (`--escape-vx 0.3`: forward at
+least 0.3 × cos(heading error), the form of the chase's `--chase-vx` floor) walks it out: 0.57 m in 6 s, and the duck is
+stuck less, so it sits less. Against S2 every ten-minute measure ties (boring −2.1, walls −3.1 with CI [−8.0, +1.9], falls
++0.12, the first minute, skills, outcomes). **`WORKING` on the way out: the sit is followed by a look and a walk into the
+open, 7 s sooner at the median.** Preset E4 (seed 16 from 250 s) for the eye. Re-use: the escapes of the stuck stop and the
+impeded look share the authority, the commitment and the floor (they are on for every escape under these flags).
