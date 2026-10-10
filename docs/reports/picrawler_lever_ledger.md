@@ -6806,3 +6806,41 @@ picrawler-dash power and slow lines, the modelled pack and 3.3 V rail, and a joi
 mean |Δangle|/s over 12 joints). picrawler-dash gained the same line speed (from benchd's 50 Hz
 `out` pulses, over exact 100 ms spans) and the rail estimate. **Launch through the launcher**, so
 P-e·h0's body_env applies; a direct scene launch gets the default body.
+
+### ★★ 2026-10-10 — SIM vs ROBOT, SAME NUMBERS: the legs move at the same speed; current matches on the mean and is too calm in the sim; the robot steps more
+
+**Runs:** the robot, P-e·h0 from picrawler-dash (autonomous, lag 0.2, carpet), 384 s brain-driven on
+the floor, 1 HAT reset. The sim: the same config on its faithful body (body_env applied), arena 0.3,
+3 seeds × 12000 per arm, with the capped servo (0.25 / 0.6 N m, what the operator watched) and the
+legacy servo. `brainrun/sim_robot_compare.py` measures both sides the same way (robot: the pulse on
+the line; sim: the joint itself; 100 ms spans).
+
+| | robot | sim, capped | sim, legacy servo |
+|---|---|---|---|
+| joint line speed, mean (rad/s) | 1.12 | 1.31 | 1.25 |
+| … p90 | 2.75 | 3.12 | 3.08 |
+| … hip1 / hip2 / knee | 1.25 / **0.47** / 1.63 | 1.26 / 0.87 / 1.80 | 1.36 / 0.68 / 1.72 |
+| current mean (A) | 1.55 | 1.58 | 1.59 |
+| 10 ms peaks p90 / p99 (A) | 2.81 / 3.26 | 2.22 / 2.79 | 2.30 / 2.93 |
+| above 3 A per minute | 67 | 8 | 15 |
+| rail dips < 3.0 V per minute | 2.35 | 0 | 0 |
+| contact duty | 0.67 | 0.89 | 0.85 |
+| swings ≥ 4 ticks per minute | 231 | 129 | 156 |
+
+- **Speed: the robot is no longer faster than the sim.** With the servo lag on, its legs move ~10–15 %
+  SLOWER than the sim's on average (hip1 and knee within 10 %). The robot number is the pulse on the
+  line, so its real joints can only be slower still. The earlier "faster than the sim" was the
+  pre-lag robot (2026-10-03).
+- **hip2 is the exception: the robot moves it about half as much** (0.47 vs 0.68–0.87). This is the
+  brain's command, not the servo, so it is the brain behaving differently on the real body, and hip2
+  is the joint that carries the stance.
+- **Current: the mean holds on a run the model never saw** (1.55 robot vs 1.58–1.59 sim; K was
+  fitted on 2026-10-05's carpet run). The shape does not: the robot's peaks are higher and it crosses
+  3 A 4–8× as often. The sim never reaches the regulator limit, so its rail never dips.
+- **Stepping: the robot lifts its feet far more** (duty 0.67 vs 0.85–0.89, swings 231 vs 129–156 per
+  minute). FSR thresholds and creep make the robot side noisier, but the gap is large.
+
+**Reading:** the sim matches the robot on how fast the legs move and on average power. It differs in
+what the legs do: the robot steps more and works hip2 less. Its current spikes are bigger, which may
+be the same fact (more lift-offs mean more moments with fewer feet carrying the load). The current
+model's missing variance probably sits in the stepping gap, not in the servo model.
