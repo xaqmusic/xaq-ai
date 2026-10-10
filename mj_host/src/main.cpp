@@ -1312,7 +1312,7 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
-bool g_sit_progress = false, g_sit_settle = false;   // --sit-settle (§17.114 S2): stillness before the sit, and habituation
+bool g_sit_progress = false, g_sit_settle = false, g_sit_escape = false;   // --sit-then-escape (§17.114 E1): the sit ends in a look stop and the stuck escape (a turn-about when nothing ahead is free)   // --sit-settle (§17.114 S2): stillness before the sit, and habituation
    // --sit-on-stall F [HOLD_S]: the progress form (S1b)
 double g_sit_k = 0.0, g_sit_hold_s = 3.0, g_sit_rise_s = 1.0; double g_sit_need_s = 1.0;   // --sit-on-surprise K [HOLD_S] (§17.114 S1)
 bool g_stop_skill_settle = false;   // --stop-skill-settle (§17.114 P2): under the walker hold, a kick or peck waits for stillness (the settle's test, at most its timeout); the look does not
@@ -2018,6 +2018,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
     bool wh_ready = true; int wh_settle_left = 0;   // §17.114 P2
     int sit_pre_left = 0; double sit_hab = 1.0;   // §17.114 S2
+    bool sit_escape_due = false, stop_is_sit = false; int sit_turnabouts = 0;   // §17.114 E1
     double sit_rho_f = 0.75, sit_rho_b = 0.5; int sit_dir = 0, sit_dir_ticks = 0, sit_rise_extra = 0;   // §17.114 S1 progress form
     double sit_applied_vx = 0.0, sit_applied_yaw = 0.0, sit_ema = -1.0, sit_tle = -1.0; int sit_over = 0, sit_walk_ticks = 0, sits = 0;   // §17.114 S1
     int fix_ticks = -1, fix_n = 0; double fix_peak = 0.0, fix_len_sum = 0.0; std::deque<int> fix_vox;   // §17.114 L1: the fixation (-1 = in a saccade)
@@ -2209,6 +2210,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 skill_from_step = true; if (skill_start(nxt)) stop_event = "skill:reach"; skill_from_step = false;
             }
             if (skill_active && skill_left == 0) {
+                if (g_sit_escape && skill_name == "sit") sit_escape_due = true;   // §17.114 E1: the sit ends in a look, then the way out
                 skill_active = false;
                 if (down_skill_running) { down_skill_running = false; down_rise_watch = int(2.0 * kBrainHz); }
                 if (skill_then_stop) { skill_then_stop = false; skill_arrive_done = true; }
@@ -2344,7 +2346,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (g_stop.by_look && stop_is_byl && stop_phase != StopPhase::None && stop_left > 0 && brain.look_gain() <= 0.5) {
                 stop_left = 0; ++stops_byl_lost;                     // the look lost the body: the stop ends
             }
-            if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now || lost_now || byl_now)
+            const bool sitlook_now = sit_escape_due && stop_phase == StopPhase::None && !skill_active;   // §17.114 E1
+            if (sitlook_now) sit_escape_due = false;
+            if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now || lost_now || byl_now || sitlook_now)
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
                 ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : (lost_now ? "stop:lost" : "stop:start")); stop_started_tick = t;
@@ -2354,6 +2358,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 if (stop_is_byl) { ++stops_byl; stop_event = "stop:bylook"; }
                 if (arrive_now) ++stops_arrive;
                 if (stuck_now && !arrive_now) ++stops_stuck;
+                if (sitlook_now && !arrive_now && !stuck_now) { stop_is_stuck = true; stop_is_lost = false; stop_is_byl = false; stop_is_sit = true; stop_event = "stop:sitlook"; }
                 if (stop_is_lost) ++stops_lost;
                 brain.set_learning(false);                 // its command is not applied during the stop
                 if (stander) stander->on_reset();          // a fresh pairing after the walk
@@ -2652,11 +2657,20 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (view.size() == 8) {
                             int best = -1; double bv = -1.0;
                             for (int k = 0; k < 8; ++k) { const double v = view[size_t(k)] - 0.01 * std::fabs(k - 3.5); if (v > bv) { bv = v; best = k; } }
-                            const double bearing = (g_fix_escape_sign ? -1.0 : 1.0) * (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;   // + = right, as the loops' bearings (the sector's azimuth is + = left: --fix-escape-sign)
-                            brain.set_ref_hold(bearing, int(g_stuck_escape_s * kBrainHz)); ++escapes; stop_event = "stop:escape";
+                            double bearing = (g_fix_escape_sign ? -1.0 : 1.0) * (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;   // + = right, as the loops' bearings (the sector's azimuth is + = left: --fix-escape-sign)
+                            if (stop_is_sit && bv < 0.3) {
+                                // §17.114 E1: nothing ahead is free within ~1.2 m (a corner, a wall faced): the way out is behind --
+                                // turn about toward the freer side of the view (sectors 0-3 on the right)
+                                double right = 0.0, left = 0.0;
+                                for (int k = 0; k < 4; ++k) { right += view[size_t(k)]; left += view[size_t(7 - k)]; }
+                                bearing = (right >= left ? 1.0 : -1.0) * 2.6 * (g_fix_escape_sign ? 1.0 : -1.0);
+                                ++sit_turnabouts; stop_event = "stop:turnabout";
+                            } else stop_event = "stop:escape";
+                            brain.set_ref_hold(bearing, int(g_stuck_escape_s * kBrainHz)); ++escapes;
                         }
                         stop_is_stuck = false;
                     }
+                    stop_is_sit = false;
                     if (imp_stop) {
                         // the impeded look's verdict: tall structure at the target and no small thing there = a wall
                         const bool wall = brain.cloud_target_tall() > 0 && brain.cloud_target_small() == 0;
@@ -3406,6 +3420,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (sweep_on)
             std::fprintf(stderr, "  sweep: %d moves; the gaze grid covered %.0f %% of its cells per stop (%d stops); 'saccades' below count HOLD-long windows\n",
                          sweep_moves, 100.0 * sweep_cover_sum / std::max(1, sweep_cover_n), sweep_cover_n);
+        if (g_sit_k > 0.0) if (g_sit_escape) std::fprintf(stderr, "  sit then escape: %d turn-abouts\n", sit_turnabouts);
         if (g_sit_k > 0.0) std::fprintf(stderr, g_sit_progress ? "  sit on stall: %d sits (progress under %.2f of its own prediction for %.1f s; %.1f s seated)\n" : "  sit on surprise: %d sits (the traversal TLE above %.1f x its running mean for %.1f s; %.1f s seated)\n", sits, g_sit_k, g_sit_need_s, g_sit_hold_s);
         if (sweep_on && g_saccade_speed > 0.0)
             std::fprintf(stderr, "  saccade and fixate: %d fixations, mean %.2f s (saccades at %.2f rad/s)\n", fix_n, fix_len_sum / std::max(1, fix_n), g_saccade_speed);
@@ -3727,6 +3742,8 @@ int main(int argc, char** argv) {
             DuckBody::bam.dump = next("--bam-dump");
         } else if (a == "--stop-walker-hold") {
             g_stop_walker_hold = true;
+        } else if (a == "--sit-then-escape") {
+            g_sit_escape = true;
         } else if (a == "--sit-settle") {
             g_sit_settle = true;
         } else if (a == "--sit-on-stall") {
