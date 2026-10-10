@@ -8166,3 +8166,28 @@ holds no structure around the target yet — and the walls rose on three seeds (
 under 3 s): **the turn-in-reverse rubbing a wall it backs into**, a detour defect the stand-down's changed trajectories met on
 more seeds. **`PARTIAL`**. Next: the reverse leg — a detour turns in place (no backing) when the last one ended in wall
 contact, or backs only for its first half second; then SD and the kick fix stacked on it. Preset SD (seed 3 from 160 s).
+
+**RL — the reverse leg** (the operator: "go ahead with the reverse-leg fix, then stack them"). `--detour-back-s S`: the detour's
+turn backs only for its first S seconds, then turns in place (0 = off; byte-identical: E4, P2, D1c seed 16). Seed 22 under SD,
+600 s: walls 84.4 → 7.3 a minute, wall ticks 4 736 → 485, sits 3 → 3. Then two sweeps, n = 24 each: **RL** = D1c + SD + RL
+(`log/ten/prl`) and **the stack ST1** = RL + the kick fix (`log/ten/pstk`; every seed echoes all five flags).
+
+| vs placebo `pplc` (paired Δ, * beyond the dice) | D1c | + SD | + RL | **+ kick = ST1** |
+|---|---|---|---|---|
+| traps (a run; placebo 3.6) | 1.9 | 1.9 | 2.2 | **2.4 (−1.21 [−2.29, −0.12])** |
+| first-time, seek-led (2.0) | 1.1 | 1.0 | 1.4 | **1.2 (−0.83 [−1.40, −0.27])** |
+| open floor % (39.4) | 51.7 | 51.1 | 52.9 | **47.7 (+8.3 [+0.4, +16.1])** |
+| boring % (28.7) | −4.4* | −5.2* | −5.0* | **−4.2*** |
+| interesting % (48.9) | −9.8* | −5.0* | −5.0 | −5.9 |
+| walls / min (12.3) | 7.5* | 15.0 | 10.1 | 12.3 |
+| skills (13.4) | −2.4* | −2.8* | −2.2* | **−3.0*** |
+| skills touching % (19.1) | 16.6 | 16.6 | 12.7* | **18.9** |
+| falls (2.8) | 1.75 | 2.04 | 1.83 | 2.08 |
+| the train chased, s (31.4) | +11.8* | +18.2* | +15.3* | +6.1 |
+
+ST1's kicks swing 0.44–0.47 rad (84 kicks). **RL `WORKING` on its defect** (SD's wall outliers gone: walls 15.0 → 10.1).
+**ST1: `WORKING` on the navigation and on the kick** — fewer traps, more open floor, less boring time, the kicks connecting
+as often as the placebo's — **with a cost of ~3 skills a run** (the detour family costs 2.2–2.8 in every arm; the kick's head
+wait adds a little), interesting time −5.9 inside the dice, and the walls back to a tie (D1c alone was the only arm to cut
+them beyond the dice). Preset ST1 (seed 22 from 120 s: detours at 127, 187, 255–263 s, a kick at 220 s, no sits; ★ E4 sits
+four times on this seed). The operator's eye decides between ST1, D1c and K1 alone.
