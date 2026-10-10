@@ -7816,3 +7816,46 @@ The stack: ★ L1 + `--stop-walker-hold --stop-skill-settle` (preset ★ P2, fir
 the end of what we can accomplish in sim, so I would like to try adding the sit skill for a bit of flavour. There are still
 cases where the robot backs into walls or chairs or otherwise collides with an object unexpectedly. It would be fun if, when the
 robot has a big TLE spike from not traversing when expected, it sits down for a few seconds, then stands back up and continues."
+
+### 17.115 The sit on a stall: flavour from the walk's own surprise (2026-10-10)
+
+**The skill.** Pollen's `alpha_sitstand.onnx` (`pollen-robotics/microduck` `76d4ea6`, pinned in `fetch_scaffolds.sh`): one
+network for sit and stand, the posture flag in the twist's vx slot (1 = sit, 0 = stand), the 61-value observation of every other
+skill, run as their daemon runs it (action scale 1.0, a rise at flag 0 before the walker takes over). Here: flag 1 for 3 s,
+then flag 0 until both knees are within 0.15 rad of the stand (at most 2.5 s). The trunk goes 0.12 → 0.06 m and back.
+
+**The observation first (CLAUDE.md §1 step 2).** Contact odometry carries the signal: walking forward it senses 0.30 (command
+units; 0.12 m/s, the truth's 0.121), and with the body blocked 0.003 at the same command. The twist brain's own forward-model
+surprise (`mtle`) does not separate the two (p50 0.35 blocked against 0.30 walking; its tail is the gait). Contacts with walls
+and furniture are frequent and brief (120 a run, 40 ms each); merged across sub-second gaps they are ~14 bumps a run, ~4 of
+them sustained wrangles of 2 s or more, mostly backing and walking forward against the same wall.
+
+**S1, the EPM form (config `a1v2_s1_sit`: a traversal EPM over [the applied forward command, the applied |yaw|, the sensed
+forward speed], each averaged over 1 s; `--sit-on-surprise K`: its TLE held above K × its running mean).** Unconditioned, a
+walk's restart (full command, no motion for half a second, 40 times a run) is the blocked state, and the EPM learns it as
+ordinary; averaged over 1 s, a sharp turn's low forward progress is still a common node. Scanned offline against the true
+contacts, about one trigger in ten is at a contact, at every window and K. **`NULL` as a collision signal at this power:**
+"commanded and not moving" is common in this walk, and the TLE's transition term is noisy around ordinary states.
+
+**S1b, the progress form (`--sit-on-stall F`).** Predictive coding with the simplest predictor: the walk's own delivery ratio
+(sensed over commanded, one per direction, learned online over ~60 s) is the prediction; once the command has held its
+direction for 1 s (a start-up is slow by nature), progress under F of the prediction for 1 s is the stall. Offline, ~30 %
+of triggers at a contact at F 0.2 before the start-up gate; with it, in the sweep (`log/ten/st1`, n = 24): **5.6 sits a run,
+82 % at a wall, a chair or an object**; but one seed pinned in a corner sat 24 times, and 17 of 135 sits were followed by a
+fall within 7 s, 12 of them while sitting down or rising, mostly backward — the sit began with the body still moving.
+
+**S2 = S1b + `--sit-settle`:** the walker holds still before the sit (the settle's stillness test, at most 2 s), the rule
+★ P2 gave the kicks; and the sit **habituates** — each sit halves the stall needed for the next, recovering over ~60 s (the
+chase pull's habituation, §17.6x). `log/ten/st2`, n = 24, against ★ P2 `p2a`:
+
+| n = 24 | S1b | S2 |
+|---|---|---|
+| sits a run (max) · at a contact | 5.6 (24) · 82 % | 3.3 (9) · 74 % |
+| falls within 7 s of a sit | 17 / 135 | 4 / 80 |
+| seated, p50 | 2.4 s | 2.5 s |
+| falls a run (★ P2 2.21) | 2.79 (CI −0.15, +1.32) | 2.46 (CI −0.41, +0.91) |
+
+Against ★ P2 every ten-minute measure ties (boring −0.7, interesting +2.8, walls +0.9, the train chased −6.0 with CI
+[−16.0, +4.0], outcomes observed +4.6); skills +3.8 a run is the sits themselves. **`WORKING` as flavour: a sit a few times a
+run, three in four at a real bump, without costing the walk.** Not a navigation fix — the corner the duck backs into is still
+§17.17's deadlock. Preset S2 (seed 20: sits at 128 s and 150 s at contacts) for the eye.
