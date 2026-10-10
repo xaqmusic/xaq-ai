@@ -8230,3 +8230,15 @@ the target in any of the three sectors and is erased there too, for the walker's
 share (the share was G1's missing slice). Byte-identical off (E4, P2, ST1 seed 16). Seed 3 smoke (ST1 vs + RG, 300 s): time
 within 0.6 m of a target 0.5 → 0.9 min, skills 2 → 6; the reversal rates on one seed's short approaches are noise. Sweep
 `log/ten/prg` (ST1 + RG).
+
+**RG measured (`log/ten/prg`, ST1 + `--seek-gate-range 0.15`, n = 24, echoed on every seed).** The approach's forward/back
+reversals (while seek steers within 1 m): ★ E4 62.4, ST1 51.4, **RG 44.0 a minute**; paired per run **−7.6 [−14.9, −0.3]
+against ST1, −17.6 [−25.6, −9.6] against ★ E4**; the walk backs 15.9 % of the approach (ST1 17.6, ★ E4 18.9). Against the
+placebo: skills −1.6 [n.s.] (ST1 −3.0*), stops at things −3.3 (−6.4), outcomes observed −2.2 (−4.6), skills touching 19.5 %
+(18.9), the block touched in the first minute 0.79 (0.58), cells **+12.2*** (+1.0), first-time seek-led traps **−0.83*** (as
+ST1), traps −1.0, walls +1.0, falls −0.75, boring −2.6, interesting **−6.1*** (−5.9). The kicks: 100 (ST1 84), swing 0.43–0.47 rad.
+**`WORKING` on the dither** (beyond the dice against ST1), and it gives back about half of the detour family's cost in skills,
+stops at things and observed outcomes; the interesting-time cost stands. Preset ST2 (seed 20 from 60 s: 15 skills against
+ST1's 7 on this seed, kicks at 95, 126 and 239 s). The dither is not gone — 44 reversals a minute is still one every ~1.4 s
+close in — and its remaining sources are the next question (the forward command's single-tick reversals in the trace are the
+walker brain's own action, under the seek gate's proximity slots).

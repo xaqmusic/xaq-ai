@@ -24,6 +24,30 @@
   }
  },
  {
+  "name": "ST2 · ST1 + THE GATE KNOWS THE TARGET BY ITS RANGE (§17.117, awaiting the eye)",
+  "hint": "§17.117 RG (2026-10-10, the operator: 'the robot walks forward and back repeatedly when approaching objects'): the approach's dither (~60 forward/back reversals a minute on every arm since before today, 95 within 0.3 m of the target) came from the seek gate choosing its sector by the bearing alone - at a sector boundary the target's own return fell on the ungated side and the avoidance pushed off it. RG erases a return within 0.15 m of the target's range in any sector. n = 24: reversals -7.6/min vs ST1 [-14.9, -0.3] (-17.6 vs ★ E4); vs the placebo skills -1.6 (ST1 -3.0), stops at things -3.3 (ST1 -6.4), outcomes -2.2 (ST1 -4.6), cells +12, kicks swing 0.43-0.47 rad (100 kicks), first-time seek-led traps -0.8; interesting -6.1 still. WATCH seed 20 from 60 s: kicks at 95, 126 and 239 s, pecks and pushes between (15 skills on this seed, ST1 7).",
+  "state": {
+   "config": "a1v2_s1_sit.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 20,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 0 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.12 8 0 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest --stop-by-look --impeded-not-chasing --chase-yaw-range 1.5 --stop-saccade 2.0 --stop-walker-hold --stop-skill-settle --sit-on-stall 0.2 --sit-settle --sit-then-escape --escape-authority --escape-commit --escape-vx 0.3 --seek-gate-near 0.15 --detour 0.15 --detour-commit --detour-reopen 0.5 --detour-stand-down --detour-back-s 0.5 --kick-head-home --seek-gate-range 0.15",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
   "name": "ST1 · ★ E4 + THE DETOUR STACK + THE KICK RESTORED (§17.117, awaiting the eye)",
   "hint": "§17.117 (2026-10-10): G1 (the seek gate leaves an obstacle nearer than the target visible) + D1c (back while turning to the freer side until ahead is clear, walk out, turn again the same way if the way closes, commit to one way around) + SD (stand down at things with structure around them) + RL (back only the turn's first 0.5 s, then turn in place) + K1 (a kick waits for the head at home). n = 24 vs the placebo: traps 3.6 -> 2.4 a run, first-time seek-led traps -0.8, open floor 39 -> 48 %, boring -4.2, kicks swing 0.44-0.47 rad, skills touching 18.9 % (as the placebo); walls tie; COST: skills -3.0 a run, interesting -5.9 (inside the noise). WATCH seed 22 from 120 s: detours at 127, 187, 255-263 s, a kick at 220 s, no sits (★ E4 sits four times on this seed).",
   "state": {
