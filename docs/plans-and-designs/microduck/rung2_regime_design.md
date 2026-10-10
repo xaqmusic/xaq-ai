@@ -7758,3 +7758,29 @@ Preset L1 (on S0, the slow-train ★ T1).
 (p50 1.6, p90 the 2.0 s timeout), 49 s a run, and the look has not started; the stand that follows is p50 1.2 s. The restart
 after a stop is quick (0.5 s to 5 cm of travel). **The pause is the settle: the wait the standing brain needs before it can take
 over, longer than the typical look itself.**
+
+**P1, the walker holds the stop (host `--stop-walker-hold`: from the stop's first tick the walking policy at zero command holds
+the stance — no settle, no standing brain; a skill request, or one deferred from the walk, starts at once; the look and the
+cloud run as before).** As first built (`log/ten/wh1`) the unwind and the look after a skill followed only a skill from the
+standing brain's phase, so the outcome loop lost its look (outcomes observed 64 → 43 %) — a weakened slice (§3.2 rule 6),
+fixed in P1b. One finding from that slice stands: **skills fired from the walker's stance moved their thing far more often**
+(82 of 243 → 128 of 235; kicks 29 → 50 of 89).
+
+**P1b (`log/ten/wh2`, n = 24, against `sl0`):**
+
+| n = 24 | `sl0` | P1b |
+|---|---|---|
+| stops a run · mean length · settle a run | 39.5 · 5.3 s · 49 s | 52.1 · 3.7 s · 0 s |
+| standing a run | 211 s | 191 s |
+| falls · backward at a stop's start | 3.04 · 0.96 | 3.17 · 0.62 |
+| skills a run · touching · outcomes observed | 8.6 · 37 % · 64 % | 21.4 (CI +9.7, +15.9) · 26 % (CI −20, −2) · 72 % |
+| the train chased · contacts | 38.7 s · 3.7 | 28.6 s (CI −24.6, +4.4) · 2.5 |
+| boring · interesting · walls | 31 · 46 % · 18.7 | 31 · 45 % · 14.1 |
+
+**`PARTIAL`: the pause is gone, and a new loop appears.** In `sl0` every skill follows an arrival stop (239 of 243); in P1b,
+272 of 571 fire at the look stop after a skill's unwind, half within 6 s of the last skill. The quick look observes the answer
+(the outcome loop's `pending` clears), the seek loop re-arrives at the same thing 0.3 m away, the outcome loop arms again and
+asks: skill → unwind → look → skill. The standing brain's 1.6 s settle had been the delay that let the walk move on. Re-use
+(the next lever, not a timer): the outcome loop arms only where acting still has something to teach — a thing just acted on
+whose answer was just observed carries little expected information; its own outcome statistics are the measure. Preset P1b for
+the eye: whether the stop now reads as continuous, and whether repeated batting at a thing is lively or a stutter.
