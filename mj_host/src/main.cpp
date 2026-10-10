@@ -1312,6 +1312,7 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
+bool g_escape_authority = false;   // --escape-authority (§17.114 E2)
 bool g_sit_progress = false, g_sit_settle = false, g_sit_escape = false;   // --sit-then-escape (§17.114 E1): the sit ends in a look stop and the stuck escape (a turn-about when nothing ahead is free)   // --sit-settle (§17.114 S2): stillness before the sit, and habituation
    // --sit-on-stall F [HOLD_S]: the progress form (S1b)
 double g_sit_k = 0.0, g_sit_hold_s = 3.0, g_sit_rise_s = 1.0; double g_sit_need_s = 1.0;   // --sit-on-surprise K [HOLD_S] (§17.114 S1)
@@ -2153,7 +2154,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         }
         if (g_chase_yaw_range > 0.0)   // §17.113 T1: the reflex may turn as hard as the policy can while a mover is chased
             brain.set_reflex_range_override(chase_on && (brain.chase_active() || brain.chase_coasting()) ? g_chase_yaw_range : 0.0);
-        if (g_sit_k > 0.0) brain.set_traverse_cmd(sit_applied_vx, sit_applied_yaw);   // §17.114 S1: last tick's applied forward command
+        if (g_sit_k > 0.0) brain.set_traverse_cmd(sit_applied_vx, sit_applied_yaw);
+        if (g_escape_authority) brain.set_escape_authority(true);   // §17.114 S1: last tick's applied forward command
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
         if (cloud_on) {
@@ -3742,6 +3744,8 @@ int main(int argc, char** argv) {
             DuckBody::bam.dump = next("--bam-dump");
         } else if (a == "--stop-walker-hold") {
             g_stop_walker_hold = true;
+        } else if (a == "--escape-authority") {
+            g_escape_authority = true;
         } else if (a == "--sit-then-escape") {
             g_sit_escape = true;
         } else if (a == "--sit-settle") {

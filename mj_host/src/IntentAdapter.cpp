@@ -395,7 +395,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         }
         // the yaw rate that closes the error in tau seconds, minus damping on the sensed rate, in rad/s
         const double want = -err / hr_tau_ - hr_damp_ * vel_body[2];
-        const double rr = reflex_range_override_ > 0.0 ? reflex_range_override_ : yaw_range_;   // §17.113 T1
+        const bool esc = escape_authority_ && last_steer_ == 4;   // §17.114 E2
+        const double rr = esc ? std::max(1.5, yaw_range_) : (reflex_range_override_ > 0.0 ? reflex_range_override_ : yaw_range_);   // §17.113 T1
         const double reflex = std::clamp(want, -rr, rr);
         // the share: 1 with nothing within the gate's reach, 0 at a wall (the brain's avoidance keeps the yaw)
         // the seek gate covers the reflex too (2026-09-29, sweep 19: the reflex closed on its target at 1-1.5 m and was
@@ -405,7 +406,9 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         double near = std::max({double(tof_r[0]), double(tof_r[1]), double(tof_r[2])});
         if (contact_release_) near = std::max(near, double(tof[3]));   // contact: the reflex lets go
         hr_share_ = std::clamp(1.0 - near / std::max(1e-6, hr_gate_), 0.0, 1.0);
+        if (esc) hr_share_ = 1.0;
         last_twist_[2] = hr_share_ * reflex + (1.0 - hr_share_) * last_twist_[2];
+        if (esc && last_twist_[0] < 0.0) last_twist_[0] = 0.0;   // §17.114 E2: the way out is walked, not backed
     }
     ++tick_id_;
     if (has_override_) return override_;

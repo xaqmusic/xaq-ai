@@ -323,6 +323,7 @@ public:
     std::vector<double> look_now() const;
     double look_gain() const;
     void set_reflex_range_override(double r) { reflex_range_override_ = r; }   // §17.113 T1
+    void set_escape_authority(bool on) { escape_authority_ = on; }   // §17.114 E2
     std::vector<double> look_commit_now() const;
     std::vector<double> thing_belief_now() const;
     std::vector<double> mover_pos_now() const;
@@ -404,6 +405,7 @@ private:
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
     double yaw_range_ = kTwistRangeVyaw;
+    bool escape_authority_ = false;   // §17.114 E2: while an escape holds the reference, the reflex owns the yaw (no proximity mix, range 1.5) and the walk does not back
     double reflex_range_override_ = 0.0;   // §17.113 T1: the heading reflex's clamp while a mover is chased (0 = yaw_range_)
     bool head_sense_ = false; std::array<double, 3> head_g_{-1.0, 0.0, 0.0};
     bool range_sense_ = false;
