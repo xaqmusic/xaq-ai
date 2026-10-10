@@ -493,6 +493,10 @@ std::string IntentAdapter::place_form_desc() const {
 }
 
 nlohmann::json IntentAdapter::brain_state() const { return instance_->snapshot_state(); }
+nlohmann::json IntentAdapter::seek_state() const {
+    auto* m = instance_->module("seek");
+    return m ? m->diag_lite() : nlohmann::json();
+}
 nlohmann::json IntentAdapter::play_state() const {
     auto* m = instance_->module("play");
     return m ? m->diag_lite() : nlohmann::json();

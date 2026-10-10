@@ -3164,6 +3164,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
             // the seek loop, if the graph has one (things phase T2): its need and the range left to its target
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
+            if (g_place_stall) { const auto sd = brain.seek_state(); if (sd.contains("approach_cost")) std::printf(",\"sac\":%.3f", sd["approach_cost"].get<double>()); }   // §17.116 S1
             if (g_log_com) { const auto cm = body.com_over_feet(); std::printf(",\"com\":[%.4f,%.4f,%.4f]", cm[0], cm[1], cm[2]); }
             if (train_on) std::printf(",\"train\":[%.4f,%.4f,%.4f,%.3f,%.3f,%d]", train_x, train_y, train_yaw, train_vx, train_vy, train_moving ? 1 : 0);
             // THE CHASE (stage 1): [chasing, sightings held, target x, y (odometry frame), its velocity, a mover seen this tick,

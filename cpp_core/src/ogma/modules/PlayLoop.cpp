@@ -62,6 +62,7 @@ std::vector<TopicSpec> PlayLoop::input_topics() const {
         TopicSpec{eat_topic_,     std::type_index(typeid(EnvEvent)),     SubscriptionKind::Direct, false},
     };
     if (!stall_topic_.empty()) v.push_back(TopicSpec{stall_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    if (!stall_pose_topic_.empty()) v.push_back(TopicSpec{stall_pose_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     return v;
 }
 
@@ -69,6 +70,8 @@ std::vector<TopicSpec> PlayLoop::output_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{output_topic_, std::type_index(typeid(ProprioToken))} };
     if (!play_value_topic_.empty())
         v.push_back(TopicSpec{play_value_topic_, std::type_index(typeid(ProprioToken))});
+    if (!stall_field_topic_.empty())
+        v.push_back(TopicSpec{stall_field_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
 
@@ -102,6 +105,8 @@ ParamSchema PlayLoop::params_schema() const {
         {"stall_topic",   ParamMutability::ConstructionOnly, "THE STUCK PLACE (duck §17.116 M1): ProprioToken [progress error in [0,1], valid] -- 1 - the walk's progress over the progress it predicts from its own command.  While valid, it is learned onto the current node (EMA at stall_alpha) and never decays.  Empty = off (default, byte-identical).", ParamValue{std::string("")}},
         {"stall_weight",  ParamMutability::HotMutable, "The stuck place's weight in the value iteration: V[n] *= (1 - stall_weight * excess[n]), excess = (stall[n] - mean stall) / (1 - mean stall) above the mean over the places walked, so the climb routes around places where the walk stalls more than it usually does.  0 = off (default, byte-identical).", ParamValue{0.0}},
         {"stall_alpha",   ParamMutability::HotMutable, "EMA rate of a node's progress error, per valid tick at it.", ParamValue{0.02}},
+        {"stall_pose_topic",  ParamMutability::ConstructionOnly, "§17.116 S1: the pose [x, y, yaw] in the frame a consumer holds its targets in (the duck: reality.proprio.odom); each stuck place's position is the error-weighted mean pose over its stall samples.  Empty = off.", ParamValue{std::string("")}},
+        {"stall_field_topic", ParamMutability::ConstructionOnly, "§17.116 S1: publish the stuck places as ProprioToken [x, y, excess]*, excess = (stall - mean) / (1 - mean) for each place above the mean that has a position.  Empty = no publish (default).", ParamValue{std::string("")}},
     };
 }
 
@@ -135,6 +140,8 @@ ParamMap PlayLoop::current_params() const {
     m["stall_topic"]   = ParamValue{stall_topic_};
     m["stall_weight"]  = ParamValue{double(stall_weight_)};
     m["stall_alpha"]   = ParamValue{double(stall_alpha_)};
+    m["stall_pose_topic"]  = ParamValue{stall_pose_topic_};
+    m["stall_field_topic"] = ParamValue{stall_field_topic_};
     return m;
 }
 
@@ -193,6 +200,8 @@ void PlayLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "stall_topic",   [&](auto const& v){ stall_topic_  = get_string(v,"stall_topic"); });
     apply_param(params, "stall_weight",  [&](auto const& v){ stall_weight_ = float(get_double(v,"stall_weight")); });
     apply_param(params, "stall_alpha",   [&](auto const& v){ stall_alpha_  = float(get_double(v,"stall_alpha")); });
+    apply_param(params, "stall_pose_topic",  [&](auto const& v){ stall_pose_topic_  = get_string(v,"stall_pose_topic"); });
+    apply_param(params, "stall_field_topic", [&](auto const& v){ stall_field_topic_ = get_string(v,"stall_field_topic"); });
 
     if (!eat_topic_.empty())
         sub_ids_.push_back(bus_->subscribe(eat_topic_, SubscriptionKind::Direct,
@@ -210,11 +219,7 @@ void PlayLoop::run_value_iteration() {
     // gradient toward the least-recent / highest-TLE frontier and play SWEEPS instead of orbiting.
     // §17.116 M1: a place's stall counts by its EXCESS over the walk's typical progress error (the mean over the places it
     // has walked), scaled to what is left above that mean -- the walk's own scale, not a constant tuned to it (CLAUDE.md §5.5)
-    float stall_mean = 0.0f;
-    if (stall_weight_ > 0.0f && !stall_.empty()) {
-        for (auto const& [n, v] : stall_) stall_mean += v;
-        stall_mean /= float(stall_.size());
-    }
+    const float stall_mean = stall_mean_;
     for (int s = 0; s < vi_sweeps_; ++s) {
         for (auto& [n, vn] : value_) {
             float best = 0.0f;
@@ -332,7 +337,14 @@ void PlayLoop::tick(uint64_t tick_id) {
                 const float e = std::clamp(float(st->values[0]), 0.0f, 1.0f);
                 auto [it, ins] = stall_.try_emplace(cur_node_, 0.0f);
                 it->second += stall_alpha_ * (e - it->second);
+                if (!stall_pose_topic_.empty() && e > 0.0f)
+                    if (auto ps = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(stall_pose_topic_)))
+                        if (ps->values.size() >= 2) {
+                            StallPos& sp = stall_pos_[cur_node_];
+                            sp.sx += double(e) * ps->values[0]; sp.sy += double(e) * ps->values[1]; sp.w += double(e);
+                        }
             }
+    update_stall_mean();
 
     // HK HABITUATION ("recent = boring"): decay all (slow), rise current (fast).
     for (auto& [n, hh] : hab_) hh *= (1.0f - hab_decay_);
@@ -516,11 +528,34 @@ void PlayLoop::tick(uint64_t tick_id) {
         vout->values[0]   = last_play_value_;
         bus_->publish(play_value_topic_, vout);
     }
+    if (!stall_field_topic_.empty()) {   // §17.116 S1: the stuck places, where they stalled and by how much over the walk's mean
+        std::vector<float> f;
+        for (auto const& [n, v] : stall_) {
+            if (v <= stall_mean_) continue;
+            auto pit = stall_pos_.find(n);
+            if (pit == stall_pos_.end() || pit->second.w <= 0.0) continue;
+            f.push_back(float(pit->second.sx / pit->second.w));
+            f.push_back(float(pit->second.sy / pit->second.w));
+            f.push_back((v - stall_mean_) / std::max(1e-3f, 1.0f - stall_mean_));
+        }
+        auto fo = std::make_shared<ProprioToken>();
+        fo->tick_id = tick_id; fo->producer_id = id_.empty() ? std::string("play_loop") : id_; fo->sensor = "stall_field";
+        fo->values.resize(int(f.size()));
+        for (size_t i = 0; i < f.size(); ++i) fo->values[int(i)] = f[i];
+        bus_->publish(stall_field_topic_, fo);
+    }
 }
 
 float PlayLoop::value(int n) const {
     auto it = value_.find(n); return it == value_.end() ? 0.0f : it->second;
 }
+void PlayLoop::update_stall_mean() {
+    stall_mean_ = 0.0f;
+    if (stall_.empty()) return;
+    for (auto const& [n, v] : stall_) stall_mean_ += v;
+    stall_mean_ /= float(stall_.size());
+}
+
 float PlayLoop::stall(int n) const {
     auto it = stall_.find(n); return it == stall_.end() ? 0.0f : it->second;
 }

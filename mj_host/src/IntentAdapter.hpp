@@ -375,6 +375,7 @@ public:
     double thing_range() const { return thing_rng_; }
     // the play loop's bearing this tick and its state (climbing / wandering / next node), for the record
     std::array<float, 2> play_bearing() const { return play_bearing_; }
+    nlohmann::json seek_state() const;   // §17.116 S1: the seek loop's diag (its approach cost)
     nlohmann::json play_state() const;
     uint64_t ticks() const { return tick_id_; }
 

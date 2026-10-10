@@ -169,6 +169,15 @@ private:
     float stall_weight_       = 0.0f;
     float stall_alpha_        = 0.02f;
     std::unordered_map<int, float> stall_;
+    // §17.116 S1 (the stuck place for the seek loop): where each place stalled, in the host odometry's frame
+    // (stall_pose_topic, ProprioToken [x, y, yaw] -- the frame the seek loop holds its targets in), the error-weighted
+    // mean of the pose over the stall samples; and the stuck places published on stall_field_topic as [x, y, excess]
+    // triples, excess = (stall - mean) / (1 - mean) for the places above the mean.  Empty topics = off.
+    std::string stall_pose_topic_ = "", stall_field_topic_ = "";
+    struct StallPos { double sx = 0.0, sy = 0.0, w = 0.0; };
+    std::unordered_map<int, StallPos> stall_pos_;
+    float stall_mean_ = 0.0f;
+    void update_stall_mean();
 
     // state — the shared place-graph overlay (novelty + habituation, NO food)
     std::unordered_map<int, std::unordered_map<int, Edge>> edges_;

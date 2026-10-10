@@ -211,6 +211,15 @@ public:
     int static_yielded() const { return static_yielded_; }
     int static_yield_drops() const { return static_yield_drops_; }
     int progress_forgets() const { return progress_forgets_; }
+    // §17.116 S1, THE APPROACH'S COST (the operator, 2026-10-10: avoid the places the walk has been stuck in): the stuck
+    // places on stall_field_topic (PlayLoop: [x, y, excess]*, the walk's progress error over its mean, where it stalled)
+    // discount a held static target's need by the worst one near its straight approach -- the expected progress error on
+    // the way: need *= 1 - stall_cost * max_p(excess_p * (1 - d_p / stall_radius)+), d_p the place's distance from the
+    // segment body -> target.  Graded and never below the floor: the target is not refused (sweeps 33-35 refused it and
+    // lost a quarter of the walk's targets); the arbiter's precision race hands the walk to play by degrees.  0 = off.
+    std::string stall_field_topic_ = "";
+    double stall_cost_ = 0.0, stall_radius_ = 0.3, approach_cost_ = 0.0;
+    double approach_cost() const { return approach_cost_; }
     // the host's contact stall (§17.84, lever 1b): the target the body is pushing toward through a surface is dropped
     void forget_target() { if (have_target_ && !chasing_ && !coasting_) { have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++contact_forgets_; } }
     int contact_forgets() const { return contact_forgets_; }

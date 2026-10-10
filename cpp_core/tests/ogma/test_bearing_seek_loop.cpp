@@ -730,3 +730,39 @@ TEST(BearingSeekLoop, AnAmbushPlaceIsHeldNotReached) {
     EXPECT_FALSE(r.m.have_target()) << "the stalk let go";
     auto tt = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("tt")); ASSERT_TRUE(tt); ASSERT_EQ(tt->values.size(), 6);
 }
+
+// §17.116 S1, THE APPROACH'S COST: a stuck place (excess 0.8) on the straight approach to a held target discounts its need by
+// 1 - stall_cost x 0.8 x taper; one beside the approach beyond stall_radius costs nothing; the need never drops below the floor.
+TEST(BearingSeekLoop, AStuckPlaceOnTheApproachDiscountsTheNeed) {
+    ogma::ParamMap p; p["proximity_range"] = 2.5; p["stall_field_topic"] = std::string("reality.cognitive.stall_field");
+    p["stall_cost"] = 1.0; p["stall_radius"] = 0.3;
+    Rig r(p);
+    const auto field = [&](double x, double y, float ex) {
+        auto f = std::make_shared<ogma::ProprioToken>();
+        f->values = Eigen::VectorXf(3); f->values << float(x), float(y), ex;
+        r.bus.publish("reality.cognitive.stall_field", f);
+    };
+    field(0.5, 0.0, 0.8);                        // half way to the target, on the line
+    r.step(0, 0, 0, 0.0f, 1.0f, 0.6f);           // a thing 1 m ahead
+    ASSERT_TRUE(r.m.have_target());
+    EXPECT_NEAR(r.m.approach_cost(), 0.8, 1e-6);
+    EXPECT_NEAR(r.m.value(), 0.2f, 1e-5) << "need 1 x (1 - 0.8)";
+    field(0.5, 0.5, 0.8);                        // 0.5 m beside the approach: beyond the radius
+    r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_EQ(r.m.approach_cost(), 0.0);
+    EXPECT_GT(r.m.value(), 0.99f);
+    field(0.5, 0.0, 1.0);                        // a place stuck to the full: the floor, not a refusal
+    r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_TRUE(r.m.have_target());
+    EXPECT_NEAR(r.m.value(), 0.05f, 1e-6);
+}
+
+TEST(BearingSeekLoop, TheApproachCostIsOffByDefault) {
+    ogma::ParamMap p; p["proximity_range"] = 2.5;
+    Rig r(p);
+    auto f = std::make_shared<ogma::ProprioToken>();
+    f->values = Eigen::VectorXf(3); f->values << 0.5f, 0.0f, 1.0f;
+    r.bus.publish("reality.cognitive.stall_field", f);
+    r.step(0, 0, 0, 0.0f, 1.0f, 0.6f);
+    EXPECT_EQ(r.m.value(), 1.0f);
+}

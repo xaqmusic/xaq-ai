@@ -374,3 +374,29 @@ TEST(PlayLoop, StuckPlaceOffByDefault) {
     EXPECT_FLOAT_EQ(off.play.value(1), zero.play.value(1));
     EXPECT_FLOAT_EQ(off.play.value(2), zero.play.value(2));
 }
+
+// §17.116 S1: the stuck places published where they stalled (the error-weighted pose) with their excess over the mean.
+TEST(PlayLoop, PublishesTheStuckPlacesWhereTheyStalled) {
+    Fixture f({{"stall_topic", ogma::ParamValue{std::string("reality.proprio.progress")}},
+               {"stall_pose_topic", ogma::ParamValue{std::string("reality.proprio.odom")}},
+               {"stall_field_topic", ogma::ParamValue{std::string("reality.cognitive.stall_field")}}});
+    const auto step = [&](uint64_t t, int node, float err, double x, double y) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.cognitive.place", place(node, 0.0f));
+        f.bus.publish("reality.proprio.heading", p1(0.0f));
+        auto pose = std::make_shared<ogma::ProprioToken>(); pose->values.resize(3); pose->values << float(x), float(y), 0.0f;
+        f.bus.publish("reality.proprio.odom", pose);
+        f.bus.publish("reality.proprio.progress", p2(err, 1.0f));
+        f.play.tick(t);
+        f.bus.end_tick();
+    };
+    uint64_t t = 0;
+    for (int i = 0; i < 300; ++i) step(t++, 1, 1.0f, 1.0, 2.0);    // node 1 stalls at (1, 2)
+    for (int i = 0; i < 300; ++i) step(t++, 2, 0.0f, -1.0, 0.0);   // node 2 walks
+    auto fo = std::dynamic_pointer_cast<const ogma::ProprioToken>(f.bus.last_value("reality.cognitive.stall_field"));
+    ASSERT_NE(fo, nullptr);
+    ASSERT_EQ(fo->values.size(), 3) << "one stuck place: node 2 is under the mean";
+    EXPECT_NEAR(fo->values[0], 1.0, 1e-5);
+    EXPECT_NEAR(fo->values[1], 2.0, 1e-5);
+    EXPECT_NEAR(fo->values[2], 1.0, 1e-2) << "stall ~1, mean ~0.5: excess (1 - 0.5) / (1 - 0.5)";
+}

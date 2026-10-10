@@ -38,6 +38,7 @@ std::vector<TopicSpec> BearingSeekLoop::input_topics() const {
                               TopicSpec{pose_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
     if (!renew_topic_.empty()) v.push_back(TopicSpec{renew_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!release_topic_.empty()) v.push_back(TopicSpec{release_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    if (!stall_field_topic_.empty()) v.push_back(TopicSpec{stall_field_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!ambush_topic_.empty()) v.push_back(TopicSpec{ambush_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!pull_topic_.empty()) v.push_back(TopicSpec{pull_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!situation_topic_.empty()) v.push_back(TopicSpec{situation_topic_, std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false});
@@ -171,6 +172,9 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "THE PROGRESS FORGET: for every this many metres the body walks with a static target held, the range left must have shrunk by progress_m, or the target is forgotten -- a dead-reckoned position the world refutes (a wall between, an orbit).  0 = off.",
             ParamValue{0.0}},
         {"progress_m", ParamMutability::HotMutable, "The range the walk must gain per progress_walk_m of walking (metres).", ParamValue{0.05}},
+        {"stall_field_topic", ParamMutability::ConstructionOnly, "§17.116 S1, THE APPROACH'S COST: the stuck places, ProprioToken [x, y, excess]* in the pose frame (PlayLoop stall_field_topic).  Empty = off.", ParamValue{std::string("")}},
+        {"stall_cost", ParamMutability::HotMutable, "A held static target's need is multiplied by 1 - stall_cost * (the worst stuck place's excess near its straight approach, tapered to 0 at stall_radius from the segment), never below the floor.  0 = off (default, byte-identical).", ParamValue{0.0}},
+        {"stall_radius", ParamMutability::HotMutable, "How far from the straight approach a stuck place still costs it (metres; the body's footprint and the place's spread).", ParamValue{0.3}},
         {"static_yield_tall", ParamMutability::HotMutable,
             "A held STATIC target with at least this many tall voxels within a body length (the cloud's target_tall count) is dropped, and the place is not-a-thing for forget_ticks: a sighting within chase_gate_m of it is not taken.  0 = off.",
             ParamValue{int64_t{0}}},
@@ -218,6 +222,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["chase_memory_holds"] = ParamValue{chase_memory_holds_};
     m["static_yield_tall"] = ParamValue{int64_t(static_yield_tall_)};
     m["progress_walk_m"] = progress_walk_m_; m["progress_m"] = progress_m_;
+    m["stall_field_topic"] = ParamValue{stall_field_topic_}; m["stall_cost"] = stall_cost_; m["stall_radius"] = stall_radius_;
     m["yield_topic"] = ParamValue{yield_topic_}; m["chase_yield_tall"] = ParamValue{int64_t(chase_yield_tall_)}; m["chase_yield_look"] = ParamValue{chase_yield_look_}; m["chase_pull_decay"] = ParamValue{chase_pull_decay_};
     m["chase_pull_recover_ticks"] = ParamValue{chase_pull_recover_ticks_};
     return m;
@@ -274,6 +279,9 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "static_yield_tall", [&](auto const& v){ static_yield_tall_ = std::max(0, int(get_double(v,"static_yield_tall"))); });
     apply_param(params, "progress_walk_m", [&](auto const& v){ progress_walk_m_ = get_double(v,"progress_walk_m"); });
     apply_param(params, "progress_m", [&](auto const& v){ progress_m_ = get_double(v,"progress_m"); });
+    apply_param(params, "stall_field_topic", [&](auto const& v){ stall_field_topic_ = get_string(v,"stall_field_topic"); });
+    apply_param(params, "stall_cost", [&](auto const& v){ stall_cost_ = get_double(v,"stall_cost"); });
+    apply_param(params, "stall_radius", [&](auto const& v){ stall_radius_ = get_double(v,"stall_radius"); });
     apply_param(params, "chase_memory_holds", [&](auto const& v){ chase_memory_holds_ = get_double(v,"chase_memory_holds") > 0.5; });
     apply_param(params, "chase_memory_ticks", [&](auto const& v){ chase_memory_ticks_ = std::max(0, int(get_double(v,"chase_memory_ticks"))); });
     apply_param(params, "chase_pull_decay", [&](auto const& v){ chase_pull_decay_ = std::clamp(get_double(v,"chase_pull_decay"), 0.0, 1.0); });
@@ -305,6 +313,8 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "static_yield_tall") static_yield_tall_ = std::max(0, int(get_double(value, k)));
     else if (k == "progress_walk_m") progress_walk_m_ = get_double(value, k);
     else if (k == "progress_m") progress_m_ = get_double(value, k);
+    else if (k == "stall_cost") stall_cost_ = get_double(value, k);
+    else if (k == "stall_radius") stall_radius_ = get_double(value, k);
     else if (k == "chase_memory_holds") chase_memory_holds_ = get_double(value, k) > 0.5;
     else if (k == "chase_memory_ticks") chase_memory_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_pull_decay") chase_pull_decay_ = std::clamp(get_double(value, k), 0.0, 1.0);
@@ -513,6 +523,20 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
                 have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f;
             }
     value_ = have_target_ ? conf_ : 0.0f;
+    approach_cost_ = 0.0;
+    if (stall_cost_ > 0.0 && !stall_field_topic_.empty() && have_target_ && !chasing_ && !coasting_ && have_pose_ && stall_radius_ > 0.0)
+        if (auto sf = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(stall_field_topic_))) {
+            // §17.116 S1: the worst stuck place near the straight approach, body -> target
+            const double ax = px_, ay = py_, dx = tx_ - ax, dy = ty_ - ay, L2 = dx * dx + dy * dy;
+            for (int i = 0; i + 2 < int(sf->values.size()); i += 3) {
+                const double qx = sf->values[i], qy = sf->values[i + 1], ex = sf->values[i + 2];
+                const double u = L2 > 1e-9 ? std::clamp(((qx - ax) * dx + (qy - ay) * dy) / L2, 0.0, 1.0) : 0.0;
+                const double d = std::hypot(qx - (ax + u * dx), qy - (ay + u * dy));
+                approach_cost_ = std::max(approach_cost_, ex * std::max(0.0, 1.0 - d / stall_radius_));
+            }
+            if (approach_cost_ > 0.0)
+                value_ = std::max(floor_, float(double(value_) * std::max(0.0, 1.0 - stall_cost_ * approach_cost_)));
+        }
 
     auto out = std::make_shared<ProprioToken>();
     out->tick_id = tick_id; out->producer_id = id_.empty() ? std::string("seek") : id_; out->sensor = "seek_bearing";
@@ -800,8 +824,10 @@ void BearingSeekLoop::restore_state(nlohmann::json const& s) {
     conf_ = s.value("conf", 0.0f); arrivals_ = s.value("arrivals", 0); forgets_ = s.value("forgets", 0); renewals_ = s.value("renewals", 0);
 }
 nlohmann::json BearingSeekLoop::diag_lite() const {
-    return nlohmann::json{{"seen", seen_}, {"target", have_target_}, {"value", value_}, {"range", range_left_},
+    nlohmann::json j{{"seen", seen_}, {"target", have_target_}, {"value", value_}, {"range", range_left_},
                           {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}, {"refixes", refixes_}, {"static_promoted", static_promoted_}, {"released", released_}, {"ambush_taken", ambush_taken_}, {"ambush_released", ambush_released_}};
+    if (stall_cost_ > 0.0) j["approach_cost"] = approach_cost_;   // §17.116 S1
+    return j;
 }
 nlohmann::json BearingSeekLoop::diag_snapshot() const {
     nlohmann::json j = diag_lite();
