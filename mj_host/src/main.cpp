@@ -1312,6 +1312,8 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
+bool g_stop_walker_hold = false;   // --stop-walker-hold (§17.114 P1): the walking policy holds the stop's stance from its first tick (no settle, no standing brain)
+double g_saccade_speed = 0.0, g_fix_min_s = 0.2, g_fix_max_s = 0.8;   // --stop-saccade SPEED [FIX_MIN [FIX_MAX]] (§17.114 L1)
 bool g_gaze_mover_memory = false; int g_gmm_now = 0;   // --gaze-mover-memory (§17.114 G1): the gaze sense wants the mover the brain holds (incl. a lost one in memory) on the walk
 double g_chase_yaw_range = 0.0;   // --chase-yaw-range R (§17.113 T1): the heading reflex's yaw clamp while a mover is chased (0 = the walker's range)
 double g_neck_burst_s = 0.0, g_neck_burst_gap_s = 4.0;   // --neck-burst SECS [GAP] (§17.113 N1): in a chase, walking, the mover ahead, the slide at its forward limit for SECS, at most every GAP s
@@ -2009,6 +2011,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     double spin_heading = 0.0, spin_prev_yaw = 0.0; bool spin_have_yaw = false; int spin_walk_run = 0, spins = 0, spin_rolls = 0, spin_last_roll = -100000;
     std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
+    int fix_ticks = -1, fix_n = 0; double fix_peak = 0.0, fix_len_sum = 0.0; std::deque<int> fix_vox;   // §17.114 L1: the fixation (-1 = in a saccade)
     if (sweep_on) std::fprintf(stderr, "  gaze SWEEP at stops: never holds; %.2f rad/s (a quarter while the view is novel) toward the least-looked-at of %d x %d gaze cells, yaw +-%.2f rad, pitch %+.3f..%+.3f\n",
                                g_stop.gaze_sweep, sweep_ny, sweep_np, g_stop.gaze_sweep_yaw, sweep_p_lo, sweep_p_hi);
     if (sweep_on && g_stop.gaze_sweep_slow != 0.25)
@@ -2298,14 +2301,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 if (stop_phase == StopPhase::Settle) {
                     --stop_settle_left;
                     if (stander) (void)stander->act(body); // observes, frozen: its attitude error is then fresh
-                    if (still || stop_settle_left == 0) {
+                    if (still || stop_settle_left == 0 || g_stop_walker_hold) {   // §17.114 P1: the walker holds from the first tick
                         double att = 0.0;
                         if (stander) for (double v : stander->attitude_error()) att = std::max(att, v);
                         if (scan_on) { scanning = true; scan_idx = 0; scan_left = scan_hold_ticks; }
                         if (look_on) { looking = true; look_idx = 0; look_held = 0; look_novel_seen = false; look_round_novel = false; scan_target = 0.0; }
                         if (gaze_on) { looking = true; look_held = 0; look_novel_seen = false; gaze_quiet_run = 0; gaze_yaw = 0.0; gaze_pitch = g_stop.gaze_down; scan_target = 0.0; }
                         if (sweep_on) {
-                            std::fill(sweep_count.begin(), sweep_count.end(), 0); sweep_have_target = false;
+                            std::fill(sweep_count.begin(), sweep_count.end(), 0); sweep_have_target = false; fix_ticks = -1;
                             if (g_stop.gaze_at_thing && stop_is_arrive) {
                                 const double centre = std::clamp(std::atan2(0.2, std::max(0.05, brain.seek_range()) + 0.15), 0.2, 0.55);
                                 sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp((g_fix_sweep_sign ? -1.0 : 1.0) * brain.seek_ego(), -0.5, 0.5);
@@ -2322,8 +2325,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         }
                         ticks_in_stop = 0; rolled_this_stop = false;
                         if (g_stop.map_on_stop) brain.set_map_learning(true);
-                        if (!stander) {
+                        if (!stander || g_stop_walker_hold) {
                             stop_phase = StopPhase::Walker; stop_event = "stop:walker";
+                            if (g_stop_walker_hold && !skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); }
                         } else if (g_stop.att_gate <= 0.0 || att < g_stop.att_gate) {
                             stop_phase = StopPhase::Brain; ++stop_handbacks; stop_event = "stop:handback";
                             if (!skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); }
@@ -2352,6 +2356,15 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (dash_left > 0) { stop_left = 0; dash_left = 0; ++dash_released; ++stops_chase_ended; stop_event = "dash:go"; }   // D1: released
                     }
                 }
+                if (g_stop_walker_hold && stop_phase == StopPhase::Walker && !skill_active && unwind_left == 0 && !req_consumed) {
+                    // §17.114 P1: with the walker holding there is no hand-back to defer to -- a request (or one deferred from
+                    // the walk) starts at once, as it does from the stand
+                    if (!skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); req_consumed = true; }
+                    else {
+                        const int req = brain.skill_request();
+                        if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && skill_start(kSkills[req].name)) { stop_event = "skill:stand"; ++skills_requested; req_consumed = true; }
+                    }
+                }
                 if (!req_consumed && ((stop_phase != StopPhase::None && stop_phase != StopPhase::Brain) || (stop_phase == StopPhase::Brain && (skill_active || unwind_left > 0)))) {
                     // a request that lands while the stop settles, or during a skill's own window or its unwind, is not lost:
                     // it fires at the next hand-back like a deferred arrival request (R78 dropped 9 of 21 requests here)
@@ -2371,7 +2384,22 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     const int cy_i = std::clamp(int(std::floor((hc[2] - sweep_yc + g_stop.gaze_sweep_yaw) / sweep_wy)), 0, sweep_ny - 1);
                     const int cp_i = sweep_np == 1 ? 0 : std::clamp(int(std::floor((cp - sweep_p_lo) / sweep_wp)), 0, sweep_np - 1);
                     if (ticks_in_stop > 0) ++sweep_count[size_t(cp_i * sweep_ny + cy_i)];
-                    const bool arrived = std::fabs(hc[2] - sweep_ty) < 1e-3 && (g_stop.gaze_pitch_sd <= 0.0 || std::fabs(hc[1] - sweep_tp) < 1e-3);
+                    const bool arrived0 = std::fabs(hc[2] - sweep_ty) < 1e-3 && (g_stop.gaze_pitch_sd <= 0.0 || std::fabs(hc[1] - sweep_tp) < 1e-3);
+                    bool arrived = arrived0;
+                    if (g_saccade_speed > 0.0 && sweep_have_target && arrived0) {
+                        // §17.114 L1, SACCADE AND FIXATE: on arrival the gaze holds while this view still adds to the cloud --
+                        // the fixation ends when the view's growth (new voxels over the last 0.2 s) falls below half its own
+                        // peak, between FIX_MIN and FIX_MAX -- then the next cell is taken at the saccade's speed
+                        if (fix_ticks < 0) { fix_ticks = 0; fix_peak = 0.0; fix_vox.clear(); }
+                        ++fix_ticks;
+                        fix_vox.push_back(brain.cloud_open() ? brain.cloud_voxels() : 0);
+                        if (fix_vox.size() > 11) fix_vox.pop_front();
+                        const double grow = fix_vox.size() > 10 ? double(fix_vox.back() - fix_vox.front()) : 0.0;
+                        fix_peak = std::max(fix_peak, grow);
+                        const bool spent = fix_vox.size() > 10 && grow < 0.5 * fix_peak;
+                        arrived = fix_ticks >= int(g_fix_max_s * kBrainHz) || (fix_ticks >= int(g_fix_min_s * kBrainHz) && spent);
+                        if (arrived) { fix_len_sum += fix_ticks / kBrainHz; ++fix_n; fix_ticks = -1; }
+                    }
                     if (!sweep_have_target || arrived) {        // the next target: at random among the least-looked-at cells
                         const int least = *std::min_element(sweep_count.begin(), sweep_count.end());
                         std::vector<int> ties;
@@ -2398,7 +2426,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     }
                     if (look_held > 10 && view_novel) look_novel_seen = true;
                     const bool slow = look_novel_seen && view_novel && look_held < gaze_max_ticks;   // the dwell, as speed
-                    head->set_override_slew(slow ? g_stop.gaze_sweep_slow * g_stop.gaze_sweep : g_stop.gaze_sweep);
+                    head->set_override_slew(g_saccade_speed > 0.0 ? g_saccade_speed : (slow ? g_stop.gaze_sweep_slow * g_stop.gaze_sweep : g_stop.gaze_sweep));
                     if (look_held >= gaze_hold_ticks && !slow) {
                         if (look_novel_seen) { ++novel_holds; gaze_quiet_run = 0; } else ++gaze_quiet_run;
                         ++saccades; look_held = 0; look_novel_seen = false;
@@ -3303,6 +3331,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (sweep_on)
             std::fprintf(stderr, "  sweep: %d moves; the gaze grid covered %.0f %% of its cells per stop (%d stops); 'saccades' below count HOLD-long windows\n",
                          sweep_moves, 100.0 * sweep_cover_sum / std::max(1, sweep_cover_n), sweep_cover_n);
+        if (sweep_on && g_saccade_speed > 0.0)
+            std::fprintf(stderr, "  saccade and fixate: %d fixations, mean %.2f s (saccades at %.2f rad/s)\n", fix_n, fix_len_sum / std::max(1, fix_n), g_saccade_speed);
         if (look_on || gaze_on)
             std::fprintf(stderr, "  look: %d saccades, %d holds extended by novelty, %d of %d stops ended by a quiet round; mean stop %.1f s; the head looked for %.1f s\n",
                          saccades, novel_holds, stops_bored, stop_len_n, stop_len_n ? stop_len_sum / stop_len_n : 0.0, look_ticks / kBrainHz);
@@ -3619,6 +3649,12 @@ int main(int argc, char** argv) {
             DuckBody::train_contacts = true;
         } else if (a == "--bam-dump") {
             DuckBody::bam.dump = next("--bam-dump");
+        } else if (a == "--stop-walker-hold") {
+            g_stop_walker_hold = true;
+        } else if (a == "--stop-saccade") {
+            g_saccade_speed = std::stod(next("--stop-saccade"));
+            if (i + 1 < argc && argv[i + 1][0] != '-') g_fix_min_s = std::stod(next("--stop-saccade"));
+            if (i + 1 < argc && argv[i + 1][0] != '-') g_fix_max_s = std::stod(next("--stop-saccade"));
         } else if (a == "--gaze-mover-memory") {
             g_gaze_mover_memory = true;
         } else if (a == "--chase-yaw-range") {
