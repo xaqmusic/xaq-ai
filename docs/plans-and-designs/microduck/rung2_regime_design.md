@@ -8029,3 +8029,34 @@ and the walker keeps seeing it (and the reference's free-space check, where on, 
 written: the walker's own proximity prior does the avoiding, as it does everywhere else. M = 0.15 m (a thing's own half-extent
 plus the sector's range spread). Predicted: seek-led first-time traps at chairs, walls and furniture ↓; arrivals, skills and
 the train's chase tie (the target's own return stays erased). Against ★ E4 and the placebo, n = 24.
+
+**G1 measured (`log/ten/pg1`, n = 24, `--seek-gate-near 0.15` echoed on every seed; 838 ticks of a nearer return left visible
+against 2 039 gated in seed 16's first 300 s).**
+
+| n = 24 | traps | first | first, seek-led | back | cells | open % | skills |
+|---|---|---|---|---|---|---|---|
+| ★ E4 `se4` | 2.6 | 2.0 | 1.4 | 0.6 | 113 | 42.3 | 10.5 |
+| placebo `pplc` | 3.6 | 2.8 | 2.0 | 0.8 | 108 | 39.4 | 10.3 |
+| G1 `pg1` | 4.2 | 3.1 | 2.2 | 1.0 | 111 | 43.4 | 9.0 |
+
+Against the placebo (paired): traps +0.6 [−1.0, +2.1], first-time seek-led +0.1 [−0.7, +1.0], skills −1.3 [−3.3, +0.7]; the
+rest ties. Seek-led first-time traps by what is within 0.25 m (placebo → G1): chair 11 → 12, wall 10 → 13, the train 14 → 3,
+table and shelf 2 → 9, open floor 7 → 10 — the chairs and walls it was built for did not move. **`NULL` at the sweep.**
+
+**What the walker does with what it now sees** — every encounter (a return nearer than the target by 0.15 m in its sector
+while seek steers; in the placebo the gate hid it, in G1 it is kept), the 3 s after:
+
+| | encounters | forward command | displacement | heading change | a trap within 5 s |
+|---|---|---|---|---|---|
+| placebo, hidden | 696 | 0.19 | 0.24 m | 0.45 rad | 6.8 % |
+| G1, visible | 801 | 0.15 | 0.20 m | 0.37 rad | 4.0 % |
+
+Per encounter a trap follows less often (a signal: 47 → 32 traps after encounters), but the walker's answer to an obstacle it
+can see is to **brake, not to turn** — it turns less than when it was blind to it, because the heading reflex still holds the
+yaw on the target's bearing. The body creeps toward what it sees, and over a run the local gain is inside the dice.
+
+**Re-use.** The perception is there and the walker now has it; what is missing is a reference that goes AROUND. Releasing the
+reference (`--ref-free`) is refuted twice (§17.44, §17.79: the released yaw goes to the twist brain's avoidance, which is what
+fails at surfaces). The untried form is a **detour**: with G1's condition (a return nearer than the target in its sector), the
+reference set to the freest direction of the walking cloud's view on the target's side, held until the target's sector reads
+free again — the escape's choice of direction, made on the walk before the stall instead of after it.
