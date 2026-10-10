@@ -1312,6 +1312,7 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
+bool g_gaze_mover_memory = false; int g_gmm_now = 0;   // --gaze-mover-memory (§17.114 G1): the gaze sense wants the mover the brain holds (incl. a lost one in memory) on the walk
 double g_chase_yaw_range = 0.0;   // --chase-yaw-range R (§17.113 T1): the heading reflex's yaw clamp while a mover is chased (0 = the walker's range)
 double g_neck_burst_s = 0.0, g_neck_burst_gap_s = 4.0;   // --neck-burst SECS [GAP] (§17.113 N1): in a chase, walking, the mover ahead, the slide at its forward limit for SECS, at most every GAP s
 bool g_dash = false; double g_dash_lean = 0.0, g_dash_release = 0.0;   // --dash [SIN [DEG]]: DEG the lean (deg) a dash is released at (0 = the stop's hand-off lean)   // --dash [SIN]: the lean target's sine (0 = 1.5 x the hand-off lean)   // --dash (§17.113 D1): a chase confirmed at a stand leans the standing brain toward the mover; the lean hand-off releases a run   // --stop-head-hold (§17.113 H2): at the stand the head's pitch, roll and neck held where the walk left them   // --impeded-not-chasing (§17.113 M2): the impeded look does not judge a chase -- a mover not closing is the chase's business
@@ -2681,6 +2682,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 // the gaze error: where the walk is going (the seek target's body bearing while seek steers the reference;
                 // straight ahead otherwise), minus where the head points (its yaw joint from home), + = left
                 double want = gm_src > 0 ? gm_want : (brain.last_steer() == 3 ? -brain.seek_ego() : 0.0);
+                g_gmm_now = 0;
+                if (g_gaze_mover_memory && gm_src == 0 && stop_phase == StopPhase::None) {
+                    // §17.114 G1: on the walk the gaze wants the mover the brain holds -- chased, coasted after, or lost
+                    // within its memory (extrapolated) -- before the static target the walk is going to
+                    const double ge = brain.chase_gaze_ego();                    // + = right; the head yaw is + left
+                    if (std::isfinite(ge)) { want = std::clamp(-ge, -1.2, 1.2); g_gmm_now = 1; }
+                }
                 if (g_look_around > 0.0) {
                     // the sectors the cone covers now are fresh; the stalest within reach is the target when nothing else is
                     const double view = odom.yaw() + head_q[2];
@@ -3195,6 +3203,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                             hc[0], hc[1], hc[2], hc[3], hg[0], hg[1], hg[2], hw[0], hw[1], hw[2]);
                 if (g_translate > 0.0) std::printf(",\"fore\":%.4f", g_fore_now);
                 if (g_neck_burst_s > 0.0) std::printf(",\"nb\":%d", neck_burst_left > 0 ? 1 : 0);
+                if (g_gaze_mover_memory) std::printf(",\"gmm\":%d", g_gmm_now);
             }
             std::printf("}\n");
         }
@@ -3610,6 +3619,8 @@ int main(int argc, char** argv) {
             DuckBody::train_contacts = true;
         } else if (a == "--bam-dump") {
             DuckBody::bam.dump = next("--bam-dump");
+        } else if (a == "--gaze-mover-memory") {
+            g_gaze_mover_memory = true;
         } else if (a == "--chase-yaw-range") {
             g_chase_yaw_range = std::stod(next("--chase-yaw-range"));
         } else if (a == "--neck-burst") {
