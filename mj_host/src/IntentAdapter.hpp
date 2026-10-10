@@ -188,6 +188,14 @@ public:
     // before G1 (no detour).  D1c turned away from these: in its detours at things by structure the return lay a median
     // 0.26 m in front of the thing.  R <= 0 = off, byte-identical.
     void set_detour_stand_down(double r) { stand_down_r_ = r; }
+    // §17.117 RG (--seek-gate-range M): the seek gate knows the target by its RANGE, not only by its bearing's sector: a
+    // return within M of the target's range is the target in any of the three sectors, and is erased there too -- for the
+    // walker's sense slots and for the heading reflex's share alike.  Within 0.6 m of a target the gated sector switches 66
+    // times a minute as the bearing crosses a sector boundary, the thing's own return lands in an ungated sector on 11-13 % of
+    // the ticks, and the yaw (69/min) and the forward command (76/min) reverse at the same rate: the forward-and-back of an
+    // approach.  0 = off, byte-identical.
+    void set_seek_gate_range(double m) { seek_gate_range_m_ = m; }
+    int  seek_gate_ranged() const { return seek_gate_ranged_; }
     int  stand_downs() const { return stand_downs_; }
     int  seek_gate_kept() const { return seek_gate_kept_; }   // ticks a nearer return was left visible
     // §17.117 D1, THE DETOUR (the operator, 2026-10-10: "the most effective escapes seem to be achieved by turn-in-reverse
@@ -471,6 +479,7 @@ private:
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
     double seek_gate_near_m_ = 0.0; int seek_gate_kept_ = 0;   // §17.117 G1
     double stand_down_r_ = 0.0; int stand_downs_ = 0;           // §17.117 SD
+    double seek_gate_range_m_ = 0.0; int seek_gate_ranged_ = 0;  // §17.117 RG
     bool seek_nearer_now_ = false;                              // G1's condition this tick
     double detour_back_vx_ = 0.0; int detour_arm_ticks_ = 25, detour_max_ticks_ = 150, detour_out_ticks_ = 75;   // §17.117 D1
     int detour_back_ticks_ = 0;   // §17.117 RL

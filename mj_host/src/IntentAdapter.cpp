@@ -171,6 +171,9 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (nearer) ++seek_gate_kept_;
         else if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
         if (seek_gate_contact_m_ > 0.0 && seek_range_ > 0.0 && seek_range_ <= seek_gate_contact_m_ && tof_s[3] > 0.0f) { tof_s[3] = 0.0f; ++seek_gated_contact_; }
+        if (seek_gate_range_m_ > 0.0 && seek_range_ > 0.0)   // §17.117 RG: the target's own return, in whichever sector it fell
+            for (int k = 0; k < 3; ++k)
+                if (k != slot && tof_s[size_t(k)] > 0.0f && std::fabs((1.0 - double(tof_s[size_t(k)])) - seek_range_) < seek_gate_range_m_) { tof_s[size_t(k)] = 0.0f; ++seek_gate_ranged_; }
     }
     {
         std::vector<float> sense = {float(g[0]), float(g[1]), unit(0.3 * w[1]), unit(0.3 * w[0]), unit(0.3 * w[2]),
@@ -414,7 +417,12 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         // the seek gate covers the reflex too (2026-09-29, sweep 19: the reflex closed on its target at 1-1.5 m and was
         // released within a metre of it -- the thing walked to is a ToF hit -- handing yaw to the avoidance that orbits it)
         std::array<float, 4> tof_r = tof;
-        if (seek_gate_ && last_steer_ == 3) { const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1); tof_r[size_t(slot)] = 0.0f; }
+        if (seek_gate_ && last_steer_ == 3) {
+            const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1); tof_r[size_t(slot)] = 0.0f;
+            if (seek_gate_range_m_ > 0.0 && seek_present_ && seek_range_ > 0.0)   // §17.117 RG: and the target's return wherever it fell
+                for (int k = 0; k < 3; ++k)
+                    if (k != slot && tof_r[size_t(k)] > 0.0f && std::fabs((1.0 - double(tof_r[size_t(k)])) - seek_range_) < seek_gate_range_m_) tof_r[size_t(k)] = 0.0f;
+        }
         double near = std::max({double(tof_r[0]), double(tof_r[1]), double(tof_r[2])});
         if (contact_release_) near = std::max(near, double(tof[3]));   // contact: the reflex lets go
         hr_share_ = std::clamp(1.0 - near / std::max(1e-6, hr_gate_), 0.0, 1.0);
