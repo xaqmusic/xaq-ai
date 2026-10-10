@@ -173,6 +173,7 @@ set(OGMA_FP_PARITY_FLAGS -ffp-contract=off)
 
 add_library(ogma_core
     src/ogma/Rng.cpp
+    src/ogma/ThreadCpuTime.cpp
     src/ogma/InProcessBus.cpp
     src/ogma/Module.cpp
     src/ogma/ModuleRegistry.cpp
