@@ -8099,3 +8099,13 @@ loop aims it back at the target and the same obstacle, and it detours again. **D
 of the last one's end turns the same way and walks out twice as long (1.5 → 3 → 6 s): one way around, held longer while the
 obstacle persists. Byte-identical off (E4; D1 seed 16 300 s). Smoke, seed 16: the nook between the −x wall and chair 0
 (258–271 s, the target 1.7 m away; ★ E4 sits here at 253 s) worked out of by 278 s in five detours. Sweep `log/ten/pd1b`.
+
+**D1b measured (`log/ten/pd1b`, n = 24; 16.6 detours a run, 13.2 clear, 9.6 repeats).** Against the placebo: first-time
+seek-led **−0.71 [−1.37, −0.04]**, cells **+10.4 [+2.5, +18.3]** — the first two beyond the dice in this push — but traps
++0.5, back +0.6, interesting **−5.8 [−9.7, −1.9]**, outcomes observed **−7.7 [−15.1, −0.3]**, walls +3.5 [−2.0, +9.1],
+fewer stops (baked at stops −4.9). The traps moved: by the loop steering the 5 s before (a run), placebo seek 2.58 / held
+heading 0.29, D1 2.08 / 0.75, **D1b 1.58 / 1.92** — the long walk outs (to 6 s, the reflex owning the yaw, forward at the
+floor, no backing) walk the body into the next wall. **`PARTIAL` with a cost** (interesting time, observed outcomes).
+**D1c** (`--detour-reopen 0.5`): the walk out ends when the ahead sector closes (a return within 0.5 m) and the turn starts
+again the same way — the heading found is held only while it stays open. Byte-identical off (E4; D1b seed 16). Smoke, seed 16:
+22 detours, 11 ended clear, 18 walk outs reopened, 1 sit. Sweep `log/ten/pd1c`.
