@@ -178,6 +178,11 @@ public:
     // --seek-gate-contact R (§17.85): while seek holds the reference with its target within R metres, the ToF's too-close
     // share reads 0 to the walker's sense -- the thing walked onto fills the near field at the arrival.  0 = off.
     void set_seek_gate_contact(double r) { seek_gate_contact_m_ = r; }
+    // §17.117 G1 (--seek-gate-near M): the gate erases only what could be the target -- the sector reads free only when its
+    // nearest return is no nearer than the target's range less M; a return clearly nearer than the target is something on
+    // the approach, and the walker keeps seeing it (and the free-space gate keeps releasing the reference into it).  0 = off.
+    void set_seek_gate_near(double m) { seek_gate_near_m_ = m; }
+    int  seek_gate_kept() const { return seek_gate_kept_; }   // ticks a nearer return was left visible
     // THE HEADING REFLEX (2026-09-17, `--heading-reflex TAU DAMP GATE`).  The twist brain's yaw column
     // does not hold a heading (design doc §17.17: with a quiet reference the error sits at two radians and
     // the command saturates at the gait frequency), so every loop's bearing -- play's, seek's -- goes into a
@@ -420,6 +425,7 @@ private:
     bool map_bake_honest_ = false;
     double translate_frac_ = 0.0, fore_target_ = 0.0, head_fore_ = 0.0; bool fore_sense_ = false;
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
+    double seek_gate_near_m_ = 0.0; int seek_gate_kept_ = 0;   // §17.117 G1
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double ref_hold_ = 0.0; int ref_hold_left_ = 0;

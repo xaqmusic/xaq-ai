@@ -160,7 +160,11 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         // the seek loop won the reference last tick: the slot of its target's sector reads free
         // (slots 12/13/14 = columns 0-2 / 3-4 / 5-7 = left / ahead / right; the sector by the bearing)
         const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1);
-        if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
+        // §17.117 G1: the slot's proximity is 1 - range / 1 m; a return nearer than the target by M is not the target
+        const bool nearer = seek_gate_near_m_ > 0.0 && tof_s[size_t(slot)] > 0.0f && seek_range_ > 0.0
+                            && 1.0 - double(tof_s[size_t(slot)]) < seek_range_ - seek_gate_near_m_;
+        if (nearer) ++seek_gate_kept_;
+        else if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
         if (seek_gate_contact_m_ > 0.0 && seek_range_ > 0.0 && seek_range_ <= seek_gate_contact_m_ && tof_s[3] > 0.0f) { tof_s[3] = 0.0f; ++seek_gated_contact_; }
     }
     {
@@ -310,7 +314,9 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                 const double ego = std::atan2(cx, cy);                              // + = right
                 const int slot = ego < -0.3 ? 0 : (ego > 0.3 ? 2 : 1);              // left / ahead / right
                 // the seek gate covers this check too (2026-09-29): the thing walked to is a hit in its own sector
-                const bool own = seek_gate_ && steer_code == 3 && seek_present_;
+                bool own = seek_gate_ && steer_code == 3 && seek_present_;
+                // §17.117 G1: a return nearer than the target by M is not the thing walked to
+                if (own && seek_gate_near_m_ > 0.0 && seek_range_ > 0.0 && 1.0 - double(tof[size_t(slot)]) < seek_range_ - seek_gate_near_m_) own = false;
                 if (!own && std::fabs(ego) < 1.2 && double(tof[size_t(slot)]) > ref_free_) blocked = true;
                 if (contact_release_ && double(tof[3]) > ref_free_) blocked = true;
             }

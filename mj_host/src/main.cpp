@@ -1424,6 +1424,7 @@ bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the refer
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
 double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
+double g_seek_gate_near = 0.0;      // --seek-gate-near M (§17.117 G1): the gate erases only returns no nearer than the target less M
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
 bool g_head_gaze_sense = false; double g_head_stop_slew = 0.0;   // --head-stop-slew RATE: at a stop the yaw slews home until the look takes it; on release it slews back   // --head-gaze-sense: the gaze error in the head brain's 12th sense slot
@@ -1723,6 +1724,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_fore_sense) { brain.set_fore_sense(true); std::fprintf(stderr, "  intent fore sense: where the head sits fore-aft leads the walker's sense (one more load slot)\n"); }
     if (g_intent_head_sense) { brain.set_head_sense(true); std::fprintf(stderr, "  intent head sense: the head's roll and pitch (head-frame gravity y, z) lead the walker's sense (load_slots 18)\n"); }
     if (g_intent_head > 0.0) { brain.set_intent_head(g_intent_head, g_intent_head_tau); std::fprintf(stderr, "  intent head: on the walk the intent's four head actions are the walker's head command, %.2f of the trained ranges, low-passed at %.2f s; the head brain owns the head at stops\n", g_intent_head, g_intent_head_tau); }
+    if (g_seek_gate_near > 0.0) { brain.set_seek_gate_near(g_seek_gate_near); std::fprintf(stderr, "  seek gate, near: a return nearer than the target by %.2f m stays visible to the walker (§17.117 G1)\n", g_seek_gate_near); }
     if (g_seek_gate_contact > 0.0) { brain.set_seek_gate_contact(g_seek_gate_contact); std::fprintf(stderr, "  seek gate, contact: the too-close share reads 0 to the walker while seek's target is within %.2f m\n", g_seek_gate_contact); }
     if (g_contact_forget) std::fprintf(stderr, "  contact forget: a stall fired by contact drops the seek loop's target (the position the surface refutes)\n");
     if (g_contact_release) { brain.set_contact_release(true); std::fprintf(stderr, "  contact release: the heading reflex and the free-space gate take the ToF's too-close share as proximity\n"); }
@@ -3164,6 +3166,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
             // the seek loop, if the graph has one (things phase T2): its need and the range left to its target
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
+            if (g_seek_gate_near > 0.0) std::printf(",\"sgk\":%d", brain.seek_gate_kept());   // §17.117 G1
             if (g_place_stall) { const auto sd = brain.seek_state(); if (sd.contains("approach_cost")) std::printf(",\"sac\":%.3f", sd["approach_cost"].get<double>()); }   // §17.116 S1
             if (g_log_com) { const auto cm = body.com_over_feet(); std::printf(",\"com\":[%.4f,%.4f,%.4f]", cm[0], cm[1], cm[2]); }
             if (train_on) std::printf(",\"train\":[%.4f,%.4f,%.4f,%.3f,%.3f,%d]", train_x, train_y, train_yaw, train_vx, train_vy, train_moving ? 1 : 0);
@@ -3805,6 +3808,8 @@ int main(int argc, char** argv) {
             g_stop.on_arrive = true;
         } else if (a == "--stop-gaze-at-thing") {
             g_stop.gaze_at_thing = true;
+        } else if (a == "--seek-gate-near") {
+            g_seek_gate_near = std::stod(next("--seek-gate-near"));
         } else if (a == "--seek-gate-contact") {
             g_seek_gate_contact = std::stod(next("--seek-gate-contact"));
         } else if (a == "--head-home") {
