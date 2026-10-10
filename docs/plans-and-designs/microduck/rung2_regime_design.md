@@ -8078,3 +8078,24 @@ walking cloud's 8-sector view was the first candidate for the direction; it is l
 anchor, up to a metre back and turned, so it cannot steer a turn on the walk.) Smoke, seed 16, 300 s, BACK_VX 0.15: 11
 detours, 10 ended clear, 1 sit (★ E4: 2 sits by 300 s on this seed); some dithering at one spot (260–272 s, a detour every
 ~2.5 s). Sweep `log/ten/pd1`, n = 24, against ★ E4, the placebo and G1.
+
+**D1 measured (`log/ten/pd1`, n = 24, BACK_VX 0.15; echoed on every seed): 22.6 detours a run, 17.5 ended by the clear reading.**
+
+| n = 24 | traps | first | first, seek-led | back | open % | skills | boring % | escape: 10 s disp |
+|---|---|---|---|---|---|---|---|---|
+| ★ E4 `se4` | 2.6 | 2.0 | 1.4 | 0.6 | 42.3 | 10.5 | 27.2 | 0.59 m |
+| placebo `pplc` | 3.6 | 2.8 | 2.0 | 0.8 | 39.4 | 10.3 | 28.7 | 0.57 m |
+| G1 `pg1` | 4.2 | 3.1 | 2.2 | 1.0 | 43.4 | 9.0 | — | — |
+| D1 `pd1` | 3.4 | 2.5 | 1.6 | 0.9 | 45.7 | 9.5 | 25.3 | 0.69 m |
+
+Against the placebo (paired): first-time seek-led −0.46 [−1.12, +0.20], first −0.29, traps −0.21, open +6.3 [−2.1, +14.7],
+boring −3.5 [−7.0, +0.0], escapes −1.0 [−2.4, +0.3], an escape's 10 s +0.12 m [−0.01, +0.26]; map baked at stops −5.4
+[−8.3, −2.4] (fewer stops); walls +0.0, falls −0.7, skills −0.8, skills touching −5.1 [−11.1, +0.8], outcomes, the train tie.
+Against G1: first-time seek-led −0.58 [−1.47, +0.31]. **Per detour** (536): a trap within 5 s 3.2 % (an encounter: placebo
+6.8 %, G1 4.0 %), the next detour a median 5.0 s later and within 4 s on 34 %, the median turn 0.25 rad, the target's range
+closed by 0.04 m in 5 s. **`PARTIAL`:** the direction is right everywhere it is measured and nothing regresses, but the effect
+is inside a sweep's dice; the defect is plain in the per-detour numbers — the duck turns ~15–20°, walks out 1.5 s, the seek
+loop aims it back at the target and the same obstacle, and it detours again. **D1b** (`--detour-commit`): a detour within 10 s
+of the last one's end turns the same way and walks out twice as long (1.5 → 3 → 6 s): one way around, held longer while the
+obstacle persists. Byte-identical off (E4; D1 seed 16 300 s). Smoke, seed 16: the nook between the −x wall and chair 0
+(258–271 s, the target 1.7 m away; ★ E4 sits here at 253 s) worked out of by 278 s in five detours. Sweep `log/ten/pd1b`.
