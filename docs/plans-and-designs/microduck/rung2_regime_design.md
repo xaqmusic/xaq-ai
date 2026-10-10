@@ -8242,3 +8242,33 @@ stops at things and observed outcomes; the interesting-time cost stands. Preset 
 ST1's 7 on this seed, kicks at 95, 126 and 239 s). The dither is not gone — 44 reversals a minute is still one every ~1.4 s
 close in — and its remaining sources are the next question (the forward command's single-tick reversals in the trace are the
 walker brain's own action, under the seek gate's proximity slots).
+
+**GH / GM — the gate's sector choice (the operator, 2026-10-10: "did you try hysteresis on the gate?").** Not until then. Two
+guarded options (`IntentAdapter::gate_slot_for`; byte-identical at the defaults: E4, P2, ST2 seed 16): **GH** `--seek-gate-hyst
+RAD` holds the erased sector until the target's bearing is past the boundary by RAD; **GM** `--seek-gate-mid RAD` moves the
+boundary — found while building GH: the gate maps the bearing to "ahead" within ±0.3 rad (±17°), but the sensor's ahead sector
+is ±5.6° (columns 3–4 of 8 across 45°; `--tof-body` bins the same widths), so a target 6–17° off the nose has always been
+gated "ahead" while its return lay in a side sector. Three arms, n = 24 each: A = ST1 + GH 0.1 (`pgha`), B = ST2 + GH 0.1
+(`pghb`), C = ST1 + GM 0.098 (`pgm`).
+
+Approach reversals a minute (seek steering within 1 m), fwd/back · yaw: ST1 51.6 · 78.6, ST2 (RG) 44.0 · 66.5, A 47.3 ·
+62.3, B 43.3 · 59.7, C 50.1 · 72.4. Paired: **A − ST1 yaw −16.3 [−25.6, −7.1]**, fwd/back −4.3 [−13.6, +5.0]; B − ST2 yaw −6.8
+[−16.6, +3.0], fwd/back −0.7; C − ST1 −6.2 / −1.6 (inside the dice).
+
+| vs placebo | ST1 | ST2 | A | **B** | C |
+|---|---|---|---|---|---|
+| interesting % | −5.9 | −6.1* | −4.0 | **−2.6** | −9.8* |
+| outcomes observed % | −4.6 | −2.2 | −6.3 | **+0.8** | −5.6 |
+| stops at things % | −6.4 | −3.3 | −8.2 | **−1.3** | −10.1 |
+| skills touching % (19.1) | 18.9 | 19.5 | 16.7 | **22.5** | 16.5 |
+| skills | −3.0* | −1.6 | −2.8* | −2.8* | −3.2* |
+| walls / min | −0.0 | +1.0 | −0.8 | −2.1 | +1.9 |
+| escapes | −0.5 | −0.9 | −1.6* | −1.7* | −0.7 |
+| falls | −0.7 | −0.8 | −0.9 | −1.1 | −0.5 |
+
+Traps and first-time seek-led traps tie across A, B, C and their bases. **GH `WORKING` on the yaw dither by itself (A), and B
+= ST2 + GH is the arm with the engagement cost nearly gone** (interesting, observed outcomes, stops at things at the
+placebo's level; inside the dice against ST2, a signal); the skill count stays ~2.8 a run under the placebo. **GM `NULL`, a
+REGRESSION on interesting time**: matching the sensor's narrow ahead sector makes the bearing cross a boundary more often — the
+mismatch was hiding a narrower sector's switching, and RG (range) is the better answer to it. Preset ST3 = B (seed 7 from
+200 s: kicks at 216 and 247 s, 19 skills, one sit).
