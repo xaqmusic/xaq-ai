@@ -1424,6 +1424,7 @@ bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the refer
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
 double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
+double g_detour_vx = 0.0, g_detour_max_s = 3.0, g_detour_out_s = 1.5;   // --detour BACK_VX [MAX_S [OUT_S]] (§17.117 D1)
 double g_seek_gate_near = 0.0;      // --seek-gate-near M (§17.117 G1): the gate erases only returns no nearer than the target less M
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
@@ -1724,6 +1725,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_fore_sense) { brain.set_fore_sense(true); std::fprintf(stderr, "  intent fore sense: where the head sits fore-aft leads the walker's sense (one more load slot)\n"); }
     if (g_intent_head_sense) { brain.set_head_sense(true); std::fprintf(stderr, "  intent head sense: the head's roll and pitch (head-frame gravity y, z) lead the walker's sense (load_slots 18)\n"); }
     if (g_intent_head > 0.0) { brain.set_intent_head(g_intent_head, g_intent_head_tau); std::fprintf(stderr, "  intent head: on the walk the intent's four head actions are the walker's head command, %.2f of the trained ranges, low-passed at %.2f s; the head brain owns the head at stops\n", g_intent_head, g_intent_head_tau); }
+    if (g_detour_vx > 0.0) {
+        if (g_seek_gate_near <= 0.0) { std::fprintf(stderr, "--detour needs --seek-gate-near (its trigger is G1's condition)\n"); return 2; }
+        brain.set_detour(g_detour_vx, 25, int(g_detour_max_s * kBrainHz), int(g_detour_out_s * kBrainHz));
+        std::fprintf(stderr, "  detour: a return nearer than the target for 0.5 s -> back at %.2f m/s turning to the freer side until ahead is clear (max %.1f s), then %.1f s on that heading (§17.117 D1)\n", g_detour_vx, g_detour_max_s, g_detour_out_s);
+    }
     if (g_seek_gate_near > 0.0) { brain.set_seek_gate_near(g_seek_gate_near); std::fprintf(stderr, "  seek gate, near: a return nearer than the target by %.2f m stays visible to the walker (§17.117 G1)\n", g_seek_gate_near); }
     if (g_seek_gate_contact > 0.0) { brain.set_seek_gate_contact(g_seek_gate_contact); std::fprintf(stderr, "  seek gate, contact: the too-close share reads 0 to the walker while seek's target is within %.2f m\n", g_seek_gate_contact); }
     if (g_contact_forget) std::fprintf(stderr, "  contact forget: a stall fired by contact drops the seek loop's target (the position the surface refutes)\n");
@@ -2168,6 +2174,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_place_stall) brain.set_place_progress(place_err, place_valid);   // §17.116 M1: last tick's progress error
         if (g_escape_authority) brain.set_escape_authority(true, g_escape_vx);   // §17.114 S1: last tick's applied forward command
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
+        if (g_detour_vx > 0.0 && brain.detour_started() && !*stop_event) stop_event = "detour";   // §17.117 D1
         // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
         if (cloud_on) {
             const bool now_open = brain.cloud_open();
@@ -3167,6 +3174,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // the seek loop, if the graph has one (things phase T2): its need and the range left to its target
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
             if (g_seek_gate_near > 0.0) std::printf(",\"sgk\":%d", brain.seek_gate_kept());   // §17.117 G1
+            if (g_detour_vx > 0.0) std::printf(",\"dt\":[%d,%d]", brain.detours(), brain.detour_clear());   // §17.117 D1
             if (g_place_stall) { const auto sd = brain.seek_state(); if (sd.contains("approach_cost")) std::printf(",\"sac\":%.3f", sd["approach_cost"].get<double>()); }   // §17.116 S1
             if (g_log_com) { const auto cm = body.com_over_feet(); std::printf(",\"com\":[%.4f,%.4f,%.4f]", cm[0], cm[1], cm[2]); }
             if (train_on) std::printf(",\"train\":[%.4f,%.4f,%.4f,%.3f,%.3f,%d]", train_x, train_y, train_yaw, train_vx, train_vy, train_moving ? 1 : 0);
@@ -3442,6 +3450,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             std::fprintf(stderr, "  sweep: %d moves; the gaze grid covered %.0f %% of its cells per stop (%d stops); 'saccades' below count HOLD-long windows\n",
                          sweep_moves, 100.0 * sweep_cover_sum / std::max(1, sweep_cover_n), sweep_cover_n);
         if (g_sit_k > 0.0) if (g_sit_escape) std::fprintf(stderr, "  sit then escape: %d turn-abouts\n", sit_turnabouts);
+        if (g_detour_vx > 0.0) std::fprintf(stderr, "  detour: %d detours, %d ended by the ahead sector reading clear\n", brain.detours(), brain.detour_clear());
         if (g_sit_k > 0.0) std::fprintf(stderr, g_sit_progress ? "  sit on stall: %d sits (progress under %.2f of its own prediction for %.1f s; %.1f s seated)\n" : "  sit on surprise: %d sits (the traversal TLE above %.1f x its running mean for %.1f s; %.1f s seated)\n", sits, g_sit_k, g_sit_need_s, g_sit_hold_s);
         if (sweep_on && g_saccade_speed > 0.0)
             std::fprintf(stderr, "  saccade and fixate: %d fixations, mean %.2f s (saccades at %.2f rad/s)\n", fix_n, fix_len_sum / std::max(1, fix_n), g_saccade_speed);
@@ -3808,6 +3817,10 @@ int main(int argc, char** argv) {
             g_stop.on_arrive = true;
         } else if (a == "--stop-gaze-at-thing") {
             g_stop.gaze_at_thing = true;
+        } else if (a == "--detour") {
+            g_detour_vx = std::stod(next("--detour"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_detour_max_s = std::stod(next("--detour"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_detour_out_s = std::stod(next("--detour"));
         } else if (a == "--seek-gate-near") {
             g_seek_gate_near = std::stod(next("--seek-gate-near"));
         } else if (a == "--seek-gate-contact") {

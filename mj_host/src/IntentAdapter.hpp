@@ -183,6 +183,19 @@ public:
     // the approach, and the walker keeps seeing it (and the free-space gate keeps releasing the reference into it).  0 = off.
     void set_seek_gate_near(double m) { seek_gate_near_m_ = m; }
     int  seek_gate_kept() const { return seek_gate_kept_; }   // ticks a nearer return was left visible
+    // §17.117 D1, THE DETOUR (the operator, 2026-10-10: "the most effective escapes seem to be achieved by turn-in-reverse
+    // manoeuvres ... so the robot can turn in place to find an escape vector").  A SCAFFOLD, the escape's kind: with G1 on,
+    // when the seek loop's target sector has held a return nearer than the target for ARM ticks, the walk backs at BACK_VX
+    // while turning at the full yaw range toward the freer side sector (the target's side on a tie) -- the turn sweeps the
+    // sensor -- until the ahead sector and the sector the obstacle swings into read clear (nothing within 1 m) after at least
+    // 0.2 s, or MAX ticks; then the reference
+    // is held on the heading found for OUT ticks (the escape's hold: with --escape-authority the walk goes forward on it).
+    // escaping() covers the turn, so no stop or sit interrupts it under --escape-commit.  BACK_VX 0 = off, byte-identical.
+    void set_detour(double back_vx, int arm_ticks, int max_ticks, int out_ticks) {
+        detour_back_vx_ = back_vx; detour_arm_ticks_ = arm_ticks; detour_max_ticks_ = max_ticks; detour_out_ticks_ = out_ticks; }
+    int  detours() const { return detours_; }
+    int  detour_clear() const { return detour_clear_; }        // turns ended by the ahead sector reading clear
+    bool detour_started() const { return detour_started_; }    // this tick
     // THE HEADING REFLEX (2026-09-17, `--heading-reflex TAU DAMP GATE`).  The twist brain's yaw column
     // does not hold a heading (design doc §17.17: with a quiet reference the error sits at two radians and
     // the command saturates at the gait frequency), so every loop's bearing -- play's, seek's -- goes into a
@@ -332,7 +345,7 @@ public:
     double look_gain() const;
     void set_reflex_range_override(double r) { reflex_range_override_ = r; }   // §17.113 T1
     void set_escape_authority(bool on, double vx = 0.0) { escape_authority_ = on; escape_vx_ = vx; }   // §17.114 E2 (E4: the forward floor while facing)
-    bool escaping() const { return ref_hold_left_ > 0; }               // §17.114 E3: an escape holds the reference
+    bool escaping() const { return ref_hold_left_ > 0 || detour_left_ > 0; }   // §17.114 E3: an escape holds the reference (§17.117 D1: or turns)
     std::vector<double> look_commit_now() const;
     std::vector<double> thing_belief_now() const;
     std::vector<double> mover_pos_now() const;
@@ -426,6 +439,9 @@ private:
     double translate_frac_ = 0.0, fore_target_ = 0.0, head_fore_ = 0.0; bool fore_sense_ = false;
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
     double seek_gate_near_m_ = 0.0; int seek_gate_kept_ = 0;   // §17.117 G1
+    bool seek_nearer_now_ = false;                              // G1's condition this tick
+    double detour_back_vx_ = 0.0; int detour_arm_ticks_ = 25, detour_max_ticks_ = 150, detour_out_ticks_ = 75;   // §17.117 D1
+    int detour_arm_ = 0, detour_left_ = 0, detour_age_ = 0, detours_ = 0, detour_clear_ = 0; double detour_dir_ = 0.0; bool detour_started_ = false;
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double ref_hold_ = 0.0; int ref_hold_left_ = 0;

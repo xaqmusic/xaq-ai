@@ -163,6 +163,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         // §17.117 G1: the slot's proximity is 1 - range / 1 m; a return nearer than the target by M is not the target
         const bool nearer = seek_gate_near_m_ > 0.0 && tof_s[size_t(slot)] > 0.0f && seek_range_ > 0.0
                             && 1.0 - double(tof_s[size_t(slot)]) < seek_range_ - seek_gate_near_m_;
+        seek_nearer_now_ = nearer;
         if (nearer) ++seek_gate_kept_;
         else if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
         if (seek_gate_contact_m_ > 0.0 && seek_range_ > 0.0 && seek_range_ <= seek_gate_contact_m_ && tof_s[3] > 0.0f) { tof_s[3] = 0.0f; ++seek_gated_contact_; }
@@ -417,6 +418,31 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         last_twist_[2] = hr_share_ * reflex + (1.0 - hr_share_) * last_twist_[2];
         if (esc && last_twist_[0] < 0.0) last_twist_[0] = 0.0;   // §17.114 E2: the way out is walked, not backed
         if (esc && escape_vx_ > 0.0) last_twist_[0] = std::max(last_twist_[0], escape_vx_ * std::max(0.0, std::cos(err)));   // §17.114 E4: walked out, as the chase's floor
+    }
+    if (detour_back_vx_ > 0.0) {   // §17.117 D1, the detour (see the header)
+        detour_started_ = false;
+        if (detour_left_ == 0 && ref_hold_left_ == 0) {
+            detour_arm_ = (last_steer_ == 3 && seek_nearer_now_) ? detour_arm_ + 1 : 0;
+            if (detour_arm_ >= detour_arm_ticks_) {
+                detour_arm_ = 0; detour_left_ = detour_max_ticks_; detour_age_ = 0; ++detours_; detour_started_ = true;
+                // + yaw = left; slot 0 = left, 2 = right: toward the lower proximity, the target's side on a tie
+                detour_dir_ = tof[0] < tof[2] ? 1.0 : tof[2] < tof[0] ? -1.0 : (seek_ego_ > 0.0 ? -1.0 : 1.0);
+            }
+        }
+        if (detour_left_ > 0) {
+            --detour_left_; ++detour_age_;
+            // clear: ahead, and the side the obstacle swings into as the body turns away from it (a turn of ~20 deg or more)
+            const bool clear = detour_age_ >= 10 && double(tof[1]) <= 0.0 && double(tof[detour_dir_ > 0.0 ? 2 : 0]) <= 0.0;
+            if (clear || detour_left_ == 0) {
+                if (clear) ++detour_clear_;
+                detour_left_ = 0;
+                set_ref_hold(0.0, detour_out_ticks_);   // the heading found, held: the walk out
+            } else {
+                last_twist_[0] = -detour_back_vx_;
+                last_twist_[2] = detour_dir_ * yaw_range_;
+                last_steer_ = 4;
+            }
+        }
     }
     ++tick_id_;
     if (has_override_) return override_;
