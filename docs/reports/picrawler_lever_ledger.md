@@ -6844,3 +6844,37 @@ the line; sim: the joint itself; 100 ms spans).
 what the legs do: the robot steps more and works hip2 less. Its current spikes are bigger, which may
 be the same fact (more lift-offs mean more moments with fewer feet carrying the load). The current
 model's missing variance probably sits in the stepping gap, not in the servo model.
+
+### ★ 2026-10-10 — P-e·h0 AT 4.59 AND 6.0 rad/s (sim): the gait steps 3× and 6× as often and the belly rises; heading and current pay (`PARTIAL`, signal n=6)
+
+**Lever:** servo speed only (`OGMA_PICRAWLER_MAX_SERVO_SPEED`), same brain and gains. New configs
+`…__nohomeo__spd459` (4.585 rad/s = 50 µs/tick on the robot) and `…__nohomeo__spd600` (6.0 = 65 µs/tick),
+now in the pruned launcher/dash menu beside P-e·h0. On the robot, `dash_run` sets benchd's brain slew
+from the config's declared speed for the run and restores it after. Arena 0.3, n=6 × 12000, seeds
+1–6, faithful body (receipts: `max_servo_speed` 3.668 / 4.585 / 6.000 on every seed).
+
+| | 3.668 (P-e·h0) | 4.585 | 6.0 |
+|---|---|---|---|
+| steps | 26.3 ± 14.0 | 75.3 ± 10.9 | 159.7 ± 14.9 |
+| contact duty | 0.83 | 0.79 | 0.74 |
+| belly (mm) | 29.9 | 33.6 | 37.9 |
+| net_disp | 9.40 ± 0.91 | 9.97 ± 0.40 | 10.67 ± 0.92 |
+| path_len | 12.6 | 14.8 | 19.3 |
+| straight | 0.74 | 0.67 | 0.56 |
+| scrub | 0.075 | 0.093 | 0.115 |
+| tilt_sd | 0.082 | 0.080 | 0.100 |
+| falls | 0 | 0.17 (1 / 6) | 0.17 (1 / 6) |
+| modelled current, mean (A) | 1.62 | 1.66 | 1.82 |
+| modelled 10 ms peaks above 3 A per min | 15 | 33 | 91 |
+
+(Current: the S1 electrical model, 2 seeds per arm. It under-reads the robot's peaks ~4× at
+3.668 — robot 67 / min — so read the column as a ratio: ~2× and ~6× the time near the ceiling.)
+
+**Verdict: `PARTIAL` (signal, n=6).** Faster servos give the gait what 3.668 lost (2026-10-01): it
+steps 3× and 6× as often, lifts the belly 4 and 8 mm, and moves its contact duty toward the robot's
+(0.67 measured on carpet, 2026-10-10). It costs heading (straight 0.74 → 0.56: more path for the same
+displacement), scrub, and one fall in six at each faster speed (12000-tick horizon only; see the
+slowest-loop rule before calling either safe). The current model puts ~2× (4.59) and ~6× (6.0) as
+much time near the HAT's current ceiling, which is where the rail dips and the resets come from.
+**Operator's call:** try it on smooth floor / carpet. 4.59 is the smaller step; watch the dash's rail
+line and the reset count against P-e·h0's 0.10–0.15 per minute on carpet.
