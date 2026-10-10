@@ -31,6 +31,7 @@
 #include "ogma/body/LegKinematics.hpp"
 #include "ogma/body/StrideOdometry.hpp"
 #include "ogma/body/Distress.hpp"
+#include "ogma/body/DeadReckon.hpp"
 #include <algorithm>
 
 namespace ogma::hw::brain {
@@ -294,6 +295,12 @@ struct BrainTopics {
     float distress = 0.0f;
     float upright  = 1.0f;
     bool  fsr_stale = false;                // fsr_ok was false: foot values are the last good ones
+    // S1 of the MicroDuck port (opt-in at the host: --odom / --vel-ego).  Same layouts as
+    // the sim publishes them (picrawler_body.gd: ego_heading, odom, place_in, vel_ego).
+    float                ego_heading = 0.0f;  // the gyro's yaw, integrated, UNWRAPPED (rad)
+    std::array<float, 3> odom{};              // [x m, y m, yaw rad] in the body frame at the last odom reset
+    std::array<float, 4> place_in{};          // [x/L, y/L, cos yaw, sin yaw], the place map's input
+    std::array<float, 2> vel_ego{};           // [stride_v.x, stride_v.y]: the honest form
 };
 
 class BrainInputBuilder {
@@ -319,6 +326,7 @@ public:
 
         // 1. Ego heading: dead-reckoned yaw about the body's up axis (sim: _ego_heading).
         ego_heading_ = wrap_pi(ego_heading_ + double(gyro.y) * in.dt);
+        yaw_unwrapped_ += double(gyro.y) * in.dt;     // the sim's _ego_heading never wraps; nor does this
 
         // 2. Joints: commanded pulse -> hinge angle -> servo forward model -> sim normalisation.
         const std::array<double, 12> cmd = hinge_angles_from_us(in.us, map_, us_per_rad_);
@@ -372,8 +380,23 @@ public:
         t.stride_v = {sv_.est().x, sv_.est().y};
         sv_prev_x_ = sv_.est().x;
         sv_prev_y_ = sv_.est().y;
+
+        // 8. Odometry (ogma::body::DeadReckon, the sim's integrator): stride_v under the
+        //    unwrapped heading, anchored at the last odom reset.  And vel_ego's honest form.
+        odom_.step(double(sv_.est().x), double(sv_.est().y), yaw_unwrapped_ - yaw_anchor_, in.dt);
+        t.ego_heading = float(yaw_unwrapped_);
+        t.odom = {float(odom_.x()), float(odom_.y()), float(odom_.yaw())};
+        auto cl11 = [](double v) { return float(v < -1.1 ? -1.1 : (v > 1.1 ? 1.1 : v)); };
+        t.place_in = {cl11(odom_.x() / odom_scale_), cl11(odom_.y() / odom_scale_),
+                      float(std::cos(odom_.yaw())), float(std::sin(odom_.yaw()))};
+        t.vel_ego = {sv_.est().x, sv_.est().y};
         return t;
     }
+
+    // place_in's x/y normaliser (the room's half-size plus a margin; the sim's odom_scale_m).
+    void set_odom_scale(double s) { odom_scale_ = s > 0.1 ? s : 0.1; }
+    // Re-anchor the odom frame at the current pose (the sim does this on a hard reset).
+    void reset_odom() { odom_.reset(); yaw_anchor_ = yaw_unwrapped_; }
 
     double ego_heading() const { return ego_heading_; }
 
@@ -392,6 +415,8 @@ private:
     ogma::body::StrideV             sv_;
     ogma::body::DistressAccumulator dist_;
     double ego_heading_ = 0.0, sv_prev_x_ = 0.0, sv_prev_y_ = 0.0;
+    double yaw_unwrapped_ = 0.0, yaw_anchor_ = 0.0, odom_scale_ = 2.0;
+    ogma::body::DeadReckon odom_;
     std::array<int, 4> last_fsr_{};
     std::array<ogma::body::Vec3f, 4> prev_toe_{};
     std::array<bool, 4> prev_loaded_{};

@@ -86,6 +86,11 @@ class ConfigEntry:
     phase: str = ""
     speed_rad_s: Optional[float] = None    # body_env OGMA_PICRAWLER_MAX_SERVO_SPEED
     slew_us: Optional[int] = None          # the same speed as benchd's brain slew (us per tick)
+    # S1 of the MicroDuck port: the senses the config switches on in the sim, as ogma_host
+    # flags, so one config publishes the same channels on both.  body_env
+    # OGMA_PICRAWLER_ULTRASONIC -> --range, _CAMERA_ROBOT -> --camera, _ODOM -> --odom
+    # (--odom-scale from _ODOM_SCALE), _HONEST_VEL_EGO -> --vel-ego.
+    host_flags: tuple = ()
 
 
 def allowlist(launcher_gd: Path = LAUNCHER_GD) -> list[str]:
@@ -117,10 +122,20 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
             spd = float(be["OGMA_PICRAWLER_MAX_SERVO_SPEED"])
         except (KeyError, ValueError):
             spd = None
+        flags: list[str] = []
+        if str(be.get("OGMA_PICRAWLER_ULTRASONIC", "")) == "1":
+            flags.append("--range")
+        if str(be.get("OGMA_PICRAWLER_CAMERA_ROBOT", "")) == "1":
+            flags.append("--camera")
+        if str(be.get("OGMA_PICRAWLER_ODOM", "")) == "1":
+            flags += ["--odom", "--odom-scale", str(be.get("OGMA_PICRAWLER_ODOM_SCALE", "2.0"))]
+        if str(be.get("OGMA_PICRAWLER_HONEST_VEL_EGO", "")) == "1":
+            flags.append("--vel-ego")
         out.append(ConfigEntry(file=f, path=p, name=str(md.get("name", f)),
                                faithful=str(be.get("OGMA_PICRAWLER_HONEST_JOINTS", "")) == "1",
                                phase=str(md.get("phase_tag", "")), speed_rad_s=spd,
-                               slew_us=int(round(spd * US_PER_RAD / TICK_HZ)) if spd else None))
+                               slew_us=int(round(spd * US_PER_RAD / TICK_HZ)) if spd else None,
+                               host_flags=tuple(flags)))
     # Robot-faithful first; otherwise the launcher's own order.
     return sorted(out, key=lambda c: not c.faithful)
 
@@ -233,7 +248,7 @@ class RobotIo:
     def host_exists(self) -> bool:
         return OGMA_HOST.exists()
 
-    def spawn_host(self, cfg: Path, log_path: Path):
+    def spawn_host(self, cfg: Path, log_path: Path, extra: tuple = ()):
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         lf = open(log_path, "w")
         # Own session: Ctrl-C in the dashboard must not reach the brain mid-run; the end
@@ -241,7 +256,7 @@ class RobotIo:
         return subprocess.Popen(
             [str(OGMA_HOST), "--config", str(cfg), "--imu", "--brain-inputs",
              "--actuate", f"tcp://127.0.0.1:{CMD_PORT}", "--listen", "0.0.0.0", "--rt",
-             "--dump-inputs", "50"],
+             "--dump-inputs", "50", *extra],
             cwd=str(REPO), stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
             start_new_session=True)
 
@@ -540,7 +555,9 @@ class RunController:
         self._ev(f"benchd in {self.run_mode}, STOPPED, HAT recovery → '{self.pose}'; starting the brain (paused until resume)")
         stamp = time.strftime("%Y%m%d_%H%M%S")
         self.st.log_path = LOG_DIR / f"dashrun_{stamp}_{Path(self.cfg.file).stem[-40:]}.log"
-        self._host = self.io.spawn_host(self.cfg.path, self.st.log_path)
+        if self.cfg.host_flags:
+            self._ev("senses from body_env: " + " ".join(self.cfg.host_flags))
+        self._host = self.io.spawn_host(self.cfg.path, self.st.log_path, self.cfg.host_flags)
 
         def ready() -> bool:
             if self._host.poll() is not None:

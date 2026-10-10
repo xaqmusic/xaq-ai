@@ -106,6 +106,13 @@ struct Args {
     // socket.  Needs --brain-inputs (the state feed carries STOP, and the joints input is
     // what the command path inverts).  Empty = off: nothing is sent.
     std::string actuate;
+    // S1 of the MicroDuck port.  --odom publishes ego_heading / odom / place_in (dead-reckoned
+    // from stride_v and the gyro, ogma::body::DeadReckon, the sim's integrator); --vel-ego
+    // publishes vel_ego in its honest stride_v form.  Both need --brain-inputs.  The dash passes
+    // them from the config's body_env (OGMA_PICRAWLER_ODOM / _HONEST_VEL_EGO), as the sim reads them.
+    bool   odom       = false;
+    bool   vel_ego    = false;
+    double odom_scale = 2.0;
 };
 
 void usage() {
@@ -116,6 +123,8 @@ void usage() {
         "                  [--body-calib pi_host/calib/body_measured_fsr.json] [--servo-map pi_host/calib/servo_map.json]]\n"
         "  --brain-inputs needs --imu and benchd started with --state-pub 5592; --dump-inputs N prints them\n"
         "  --actuate tcp://127.0.0.1:5594 publishes the brain's actions to benchd (--cmd-port 5594); needs --brain-inputs\n"
+        "  --odom [--odom-scale 2.0] publishes ego_heading / odom / place_in (dead-reckoned); --vel-ego publishes vel_ego\n"
+        "    from stride_v; both need --brain-inputs and are what the sim's OGMA_PICRAWLER_ODOM / _HONEST_VEL_EGO publish\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
         "  topics: sense.audio (RawAudioFrame) sense.camera (RawImageFrame) sense.range (ProprioToken)\n"
         "  inspector: control = $OGMA_INSPECTOR_PORT (default 7400), diag = port+1\n"
@@ -157,6 +166,9 @@ int main(int argc, char** argv) {
         else if (v == "--servo-map" && i + 1 < argc)  a.servo_map = argv[++i];
         else if (v == "--dump-inputs" && i + 1 < argc) a.dump_inputs = std::atol(argv[++i]);
         else if (v == "--actuate" && i + 1 < argc)     a.actuate = argv[++i];
+        else if (v == "--odom")                        a.odom = true;
+        else if (v == "--vel-ego")                     a.vel_ego = true;
+        else if (v == "--odom-scale" && i + 1 < argc)  a.odom_scale = std::atof(argv[++i]);
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
@@ -168,6 +180,10 @@ int main(int argc, char** argv) {
     if (!a.actuate.empty() && !a.brain_inputs) {
         std::fprintf(stderr, "ogma_host: --actuate needs --brain-inputs (STOP rides the state feed, and a brain "
                              "with no body inputs must not drive the body)\n");
+        return 2;
+    }
+    if ((a.odom || a.vel_ego) && !a.brain_inputs) {
+        std::fprintf(stderr, "ogma_host: --odom / --vel-ego need --brain-inputs (they are built from stride_v and the gyro)\n");
         return 2;
     }
     if (a.brain_inputs && !a.imu) {
@@ -451,6 +467,10 @@ int main(int argc, char** argv) {
             builder_map = map;   // kept for the commanded-servo check each tick
             builder = std::make_unique<ogma::hw::brain::BrainInputBuilder>(
                 std::move(body), std::move(map), fsr, calib.servo_us_per_rad);
+            builder->set_odom_scale(a.odom_scale);
+            if (a.odom || a.vel_ego)
+                std::printf("ogma_host: S1 senses — odom %s (place_in scale %.1f m), vel_ego %s\n",
+                            a.odom ? "ON" : "off", a.odom_scale, a.vel_ego ? "ON (stride_v)" : "off");
             if (!zmq_ctx) zmq_ctx = zmq_ctx_new();
             state_sub = zmq_socket(zmq_ctx, ZMQ_SUB);
             int conflate = 1, linger = 0;
@@ -864,6 +884,12 @@ int main(int argc, char** argv) {
                     pub("joint_torque", t.joint_torque.data(), t.joint_torque.size());
                     pub("feet_y_gravity_cmd_imu", t.feet_y_gravity_cmd_imu.data(), t.feet_y_gravity_cmd_imu.size());
                     pub("distress", &t.distress, 1);
+                    if (a.odom) {
+                        pub("ego_heading", &t.ego_heading, 1);
+                        pub("odom", t.odom.data(), t.odom.size());
+                        pub("place_in", t.place_in.data(), t.place_in.size());
+                    }
+                    if (a.vel_ego) pub("vel_ego", t.vel_ego.data(), t.vel_ego.size());
                     ++bi_published;
                     inputs_this_tick = true;
                     // INSTRUMENT: the values themselves, not just the count, so a shadow run
@@ -878,6 +904,7 @@ int main(int argc, char** argv) {
                             {"foot_load", v(t.foot_load.data(), 4)},
                             {"feet_y", v(t.feet_y_gravity_cmd_imu.data(), 4)},
                             {"distress", t.distress}, {"upright", t.upright}, {"servo_i", bi_servo_i},
+                            {"odom", v(t.odom.data(), 3)}, {"vel_ego", v(t.vel_ego.data(), 2)},
                             {"fsr_raw", bi_in.fsr}, {"us", bi_in.us}};
                         std::printf("%s\n", d.dump().c_str());
                     }

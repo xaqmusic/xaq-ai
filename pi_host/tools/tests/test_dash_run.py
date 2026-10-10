@@ -150,7 +150,7 @@ class FakeRobot:
     def host_exists(self):
         return True
 
-    def spawn_host(self, cfg, log_path):
+    def spawn_host(self, cfg, log_path, extra=()):
         self.log("spawn")
         log_path = self.tmp / log_path.name
         self.spawned_log = log_path
