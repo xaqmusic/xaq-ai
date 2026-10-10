@@ -387,12 +387,13 @@ def draw_chase(scn, frame, mujoco, np):
 
 
 # ---- the operator's keys ------------------------------------------------------------
-# State the key callback flips; read by the watch loop each frame. Defaults: the beams
-# off (they hide the head), the camera window on, its HUD text on.
+# State the key callback flips; read by the watch loop each frame. Defaults: the beams and the clouds
+# off (the beams hide the head; the clouds, the operator 2026-10-10: off at launch, P shows them), the camera window on,
+# its HUD text on.
 #
 # The HUD lives in the camera window, not the MuJoCo window: label geoms placed in the
 # free camera's frame lagged the mouse between syncs and flashed on every zoom (2026-09-10).
-UI = {"tof": False, "help": True, "cam": True, "fade": True, "cloud": True, "solo": None, "age": True, "chase": True}
+UI = {"tof": False, "help": True, "cam": True, "fade": True, "cloud": False, "solo": None, "age": True, "chase": True}
 HOTKEYS = ("V  ToF beams     C  this window     H  this text     W  fade what hides the duck\n"
            "P  clouds        N  next remembered place alone / all     A  age fading     M  chase markers\n"
            "space  pause     drag  orbit     scroll  zoom     right-drag  pan")
