@@ -176,6 +176,11 @@ the MicroDuck Brain" describes it.
 
 ## The resource push (2026-10-04) — resume here for the ARM measurements
 
+**2026-10-08: the Pi 5 is measured and the Radxa Zero 3W projected (design doc §17.112, `mj_host/tools/arm_bench/`).** On the
+A76 the three brains cost 2.9 % of a core (intent 523 µs a tick); on the A55 at 1.8 GHz, 11–26 % of one core, with the cloud map's clustering
+ticks reaching 15–61 ms on 0.8–2.9 % of ticks; ~5 MB of heap. Next: the same command against a real Radxa Zero 3W, then the
+clustering's spikes. The note below is the plan as it stood on 2026-10-04.
+
 Design doc §17.110–17.111. The question: would Pollen read the brain as too heavy for the Radxa Zero 3W (RK3566, 4× A55)?
 Measured on the desktop: intent 199 µs a tick (1.0 % of a core), head 8 µs, stop 31 µs; the brains-only process 24 MB
 resident. The cloud map is the one heavy module (tall index landed, exact; weighted cast-once −21 %, behaviour tie, awaiting the
