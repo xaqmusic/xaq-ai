@@ -7665,3 +7665,32 @@ walker's own yaw still holds the command under the clamp). The train chased 33.5
 leans longer; interactions with things lean worse.** Not promoted; preset "T1" for the eye. Re-use: the reflex's share released
 from the obstacle mix while the target is the mover (the mix, not the clamp, is what holds the command at ~1.0); the policy itself
 turns 0.9–1.1 rad/s at 1.5.
+
+**★ T1 PROMOTED on the operator's eye (2026-10-09): "T1 looks good and is a slight improvement."** The stack: ★ M2 + the ambush
+(A1, `a1v2_m2_ambush`) + `--chase-yaw-range 1.5` (launcher preset ★ T1, first row).
+
+### 17.114 The plan after ★ T1: a catchable mover, the head on it, a livelier look, no pause (2026-10-09)
+
+**The operator (2026-10-09):** slow the train as suggested; "the head did not follow the moving train even as it was in view —
+if we keep the head tracking the train while walking we may have some gains"; then, in order of priority for keeping the robot
+interesting: "the head movement during the standing look is very mechanical and scripted looking and seems like it takes longer
+than necessary (we have some data on voxel fidelity vs head speed)"; and "the pause between transitions — if our standing brain is
+the root of the pause, experiment with using the existing RL behaviour to hold the stance; we can revisit our standing brain
+later."
+
+**Order, one lever at a time, each against the current ★ (n = 24, the chase readouts, the ten-minute set, the first minute,
+stop_falls, then the eye):**
+0. **The world: the train at 0.12 m/s** (`--train 0.12 8 0`), below the duck's real top speed (~0.155 m/s); ★ T1 re-measured
+   there as the baseline.
+1. **The head on the mover while walking.** First measure what the head does in a chase (the head's direction against the
+   train's true bearing, the chase target's bearing, the gaze sense the head brain receives). The record: a host yaw offset
+   toward the chase was `NULL` at three gains (§17.65, §17.68) — "the gaze as an intent the head brain fulfils, not a host
+   offset"; since ★ GAZE the head brain senses the seek target's bearing while seek steers (chases included), so the question is
+   why that does not hold the head on the train.
+2. **The standing look.** The sweep (`--stop-gaze-sweep 0.6 0.7`: never holds, 0.6 rad/s toward the least-looked-at of 14 × 3
+   gaze cells, a quarter of that while the view is novel) reads as scripted; and the stop lasts as long as the cloud's growth.
+   First the record's numbers on the cloud's registration error against head speed (the ToF studies, `tre`), then a sweep at the
+   speed the cloud can bear, and an end when the view is covered, not when growth falls.
+3. **The pause at the transitions.** First measure where the time goes (the settle, the hand-back to the standing brain, the
+   hand-off back to the walker, the first steps); then the stop held by the walking policy at zero command (`--stop-brain
+   walker`, the record's control arm) against the standing brain.
