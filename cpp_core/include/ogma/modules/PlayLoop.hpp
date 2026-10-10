@@ -94,6 +94,7 @@ public:
     float frontier_bearing() const { return frontier_bearing_; } // outward heading (away from the visited centroid), if defined
     bool  have_frontier()   const { return have_frontier_; }     // is the frontier bearing defined this tick
     float eat_credit()      const { return eat_credit_; }  // EMA of "episodes led to a real eat"
+    float stall(int n)      const;                   // §17.116 M1: the place's learned progress error (0 if never walked there)
     int   stale_explore()   const { return stale_explore_; }   // ticks since the map last grew
     bool  forced_wander()   const { return forced_wander_; }   // stall-wander overriding the climb
     bool  route_exists()    const { return last_route_exists_; }   // the other climb term (climb = route_exists && !forced_wander)
@@ -158,6 +159,16 @@ private:
     uint64_t explore_seed_      = 11;
     float pi_cell_size_   = 0.0f;     // >0 = place node IS the odometry grid cell; 0 = use place_topic
     float eat_credit_alpha_ = 0.01f;  // EMA rate for the eat-credit success signal
+    // THE STUCK PLACE (the duck, design doc §17.116 M1, 2026-10-10): the walk's progress error -- ProprioToken
+    // [1 - progress / predicted progress in [0,1], valid] on stall_topic -- attached to the place it is at, a per-node EMA
+    // that never decays (the node is permanent, so is what it taught).  The value iteration multiplies each node's value
+    // by (1 - stall_weight * excess), the excess of its stall over the mean over the places walked, scaled to what is left
+    // above that mean: a place where the walk stalls more than usual is a hole in the novelty field and the climb routes
+    // around it.  Empty topic or weight 0 = off, byte-identical.
+    std::string stall_topic_  = "";
+    float stall_weight_       = 0.0f;
+    float stall_alpha_        = 0.02f;
+    std::unordered_map<int, float> stall_;
 
     // state — the shared place-graph overlay (novelty + habituation, NO food)
     std::unordered_map<int, std::unordered_map<int, Edge>> edges_;

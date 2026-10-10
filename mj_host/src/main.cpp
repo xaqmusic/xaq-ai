@@ -1315,6 +1315,7 @@ bool g_stop_head_hold = false;
 double g_escape_vx = 0.0;   // --escape-vx V (§17.114 E4): with --escape-authority, the escape walks forward at least V x cos(heading error)
 bool g_escape_authority = false, g_escape_commit = false;   // --escape-commit (§17.114 E3): no stop or sit starts while an escape holds the reference
    // --escape-authority (§17.114 E2)
+bool g_place_stall = false;   // --place-stall (§17.116 M1): publish the walk's progress error on reality.proprio.progress (needs --sit-on-stall)
 bool g_sit_progress = false, g_sit_settle = false, g_sit_escape = false;   // --sit-then-escape (§17.114 E1): the sit ends in a look stop and the stuck escape (a turn-about when nothing ahead is free)   // --sit-settle (§17.114 S2): stillness before the sit, and habituation
    // --sit-on-stall F [HOLD_S]: the progress form (S1b)
 double g_sit_k = 0.0, g_sit_hold_s = 3.0, g_sit_rise_s = 1.0; double g_sit_need_s = 1.0;   // --sit-on-surprise K [HOLD_S] (§17.114 S1)
@@ -1697,6 +1698,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_head_gaze_sense) std::fprintf(stderr, "  head gaze sense: the head brain's 12th sense slot carries the gaze error (the seek target's bearing while seek steers, else straight ahead, minus the head's yaw)\n");
     if (g_fix_escape_sign) std::fprintf(stderr, "  fix: the escapes head for the freest sector, not its mirror image\n");
     if (g_fix_sweep_sign) std::fprintf(stderr, "  fix: a stop's sweep is centred on its target's side, not the mirror image\n");
+    if (g_place_stall) {
+        if (!g_sit_progress) { std::fprintf(stderr, "--place-stall needs --sit-on-stall (the progress prediction it publishes)\n"); return 2; }
+        std::fprintf(stderr, "  place stall: the walk's progress error on reality.proprio.progress (§17.116 M1)\n");
+    }
     if (g_map_bake_honest) { brain.set_map_bake_honest(true); std::fprintf(stderr, "  fix: the place map's walk freeze keeps its bake check (bake_gate)\n"); }
     if (g_look_around > 0.0) std::fprintf(stderr, "  look around: on the walk, with nothing else holding the gaze, the head's target is the bearing least recently seen within %.2f rad, if older than %.1f s\n", g_look_around, g_look_stale_s);
     if (g_freeze_walker) { brain.freeze_walker(); std::fprintf(stderr, "  walker frozen: its MotorEPM learning is off for the whole run\n"); }
@@ -2022,6 +2027,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     bool wh_ready = true; int wh_settle_left = 0;   // §17.114 P2
     int sit_pre_left = 0; double sit_hab = 1.0;   // §17.114 S2
     bool sit_escape_due = false, stop_is_sit = false; int sit_turnabouts = 0;   // §17.114 E1
+    double place_err = 0.0; bool place_valid = false;   // §17.116 M1 (--place-stall): the walk's progress error, for the play loop
     double sit_rho_f = 0.75, sit_rho_b = 0.5; int sit_dir = 0, sit_dir_ticks = 0, sit_rise_extra = 0;   // §17.114 S1 progress form
     double sit_applied_vx = 0.0, sit_applied_yaw = 0.0, sit_ema = -1.0, sit_tle = -1.0; int sit_over = 0, sit_walk_ticks = 0, sits = 0;   // §17.114 S1
     int fix_ticks = -1, fix_n = 0; double fix_peak = 0.0, fix_len_sum = 0.0; std::deque<int> fix_vox;   // §17.114 L1: the fixation (-1 = in a saccade)
@@ -2157,6 +2163,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_chase_yaw_range > 0.0)   // §17.113 T1: the reflex may turn as hard as the policy can while a mover is chased
             brain.set_reflex_range_override(chase_on && (brain.chase_active() || brain.chase_coasting()) ? g_chase_yaw_range : 0.0);
         if (g_sit_k > 0.0) brain.set_traverse_cmd(sit_applied_vx, sit_applied_yaw);
+        if (g_place_stall) brain.set_place_progress(place_err, place_valid);   // §17.116 M1: last tick's progress error
         if (g_escape_authority) brain.set_escape_authority(true, g_escape_vx);   // §17.114 S1: last tick's applied forward command
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
@@ -2237,6 +2244,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 // sensed forward speed]) against its own running mean; held above K x the mean for SIT_NEED, the duck sits
                 // (Pollen's sit<->stand: HOLD seconds seated, then the rise) and walks on
                 sit_tle = brain.traverse_tle();
+                place_valid = false;
                 const bool walking = stop_phase == StopPhase::None && !skill_active && driver == Driver::Brain;   // the back-offs included: they back into things
                 if (walking && sit_tle >= 0.0 && g_sit_progress) {
                     // the PROGRESS form: the walk's own prediction of its progress -- the sensed forward speed it usually gets
@@ -2250,7 +2258,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     if (sg != 0) {
                         double& rho = sg > 0 ? sit_rho_f : sit_rho_b;
                         const double q = std::clamp(sn / c, -0.5, 1.5);
-                        if (sit_dir_ticks >= 50) { frac = q / std::max(0.05, rho); rho += (q - rho) / 3000.0; }
+                        if (sit_dir_ticks >= 50) {
+                            frac = q / std::max(0.05, rho); rho += (q - rho) / 3000.0;
+                            place_valid = true; place_err = std::clamp(1.0 - frac, 0.0, 1.0);
+                        }
                     }
                     ++sit_walk_ticks;
                     sit_ema = frac;
@@ -3210,7 +3221,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // the play loop, for the record: its bearing every tick, its state every 10 (2026-09-19, the orbit)
             { const auto pb = brain.play_bearing(); std::printf(",\"pb\":[%.3f,%.3f]", pb[0], pb[1]);
               if (t % 10 == 0) { const auto ps = brain.play_state();
-                  if (!ps.is_null()) std::printf(",\"pl\":[%d,%d,%d,%.2f]", ps.value("climbing", false) ? 1 : 0, ps.value("wandering", false) ? 1 : 0, ps.value("next_node", -1), ps.value("explore_dir", 0.0)); } }
+                  if (!ps.is_null()) std::printf(",\"pl\":[%d,%d,%d,%.2f]", ps.value("climbing", false) ? 1 : 0, ps.value("wandering", false) ? 1 : 0, ps.value("next_node", -1), ps.value("explore_dir", 0.0));
+                  if (!ps.is_null() && ps.contains("stall")) { const auto& st = ps["stall"]; std::printf(",\"pst\":[%.3f,%.3f,%d,%d]", st[0].get<double>(), st[1].get<double>(), st[2].get<int>(), st[3].get<int>()); } } }
             { const auto oc = brain.outcome_now();   // the outcome loop: [node, predicted, observed, surprise, samples]
               if (!oc.empty()) std::printf(",\"outc\":[%d,%.3f,%.3f,%.2f,%d,%d]", int(oc[0]), oc[1], oc[2], oc[3], int(oc[4]), oc.size() > 5 ? int(oc[5]) : 0); }
             { const auto lk = brain.look_now();      // the look loop (§17.112): [need, prediction, in a stop, realized, predicted]
@@ -3757,6 +3769,8 @@ int main(int argc, char** argv) {
             g_sit_escape = true;
         } else if (a == "--sit-settle") {
             g_sit_settle = true;
+        } else if (a == "--place-stall") {
+            g_place_stall = true;
         } else if (a == "--sit-on-stall") {
             g_sit_progress = true; g_sit_k = std::stod(next("--sit-on-stall"));
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_sit_hold_s = std::stod(next("--sit-on-stall"));

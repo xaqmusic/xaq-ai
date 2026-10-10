@@ -141,6 +141,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     last_sensed_ = {unit(vel_body[0] / kTwistRangeVx), unit(vel_body[1] / kTwistRangeVy),
                     unit(vel_body[2] / yaw_range_)};
     publish("intent", {last_sensed_[0], last_sensed_[1], last_sensed_[2]});
+    if (progress_on_) publish("progress", {float(progress_err_), progress_valid_ ? 1.0f : 0.0f});   // §17.116 M1
     if (traverse_on_) {
         // §17.114 S1, conditioned (CLAUDE.md §0 rule 2): both averaged over ~1 s, so a walk's restart -- full command, no motion
         // for its first half second, 40 times a run -- stays near the usual command-to-motion line while both ramp, and only

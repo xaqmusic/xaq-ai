@@ -55,12 +55,14 @@ float PlayLoop::Edge::heading() const {
 std::string_view PlayLoop::type_name() const { return "PlayLoop"; }
 
 std::vector<TopicSpec> PlayLoop::input_topics() const {
-    return {
+    std::vector<TopicSpec> v{
         TopicSpec{place_topic_,   std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false},
         TopicSpec{heading_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
         TopicSpec{vel_topic_,     std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
         TopicSpec{eat_topic_,     std::type_index(typeid(EnvEvent)),     SubscriptionKind::Direct, false},
     };
+    if (!stall_topic_.empty()) v.push_back(TopicSpec{stall_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    return v;
 }
 
 std::vector<TopicSpec> PlayLoop::output_topics() const {
@@ -97,6 +99,9 @@ ParamSchema PlayLoop::params_schema() const {
         {"commit_hold",          ParamMutability::HotMutable, "SUB-GOAL COMMITMENT AT THE TIMESCALE OF ARRIVAL (duck R37, 2026-09-11).  Off (default, byte-identical): the committed next node is dropped whenever the current node changes to one it is not adjacent to -- and on the duck's map the current node changes 130-155 times a minute (nodes 8-13 cm apart with 23-47 cm of pose spread each), so the sub-goal is re-chosen several times a second, the bearing to a fresh target inside the body's 18 cm turning radius saturates the yaw command (|vyaw| 0.95, 50 sign flips a minute), and the body orbits (286 deg turned per metre travelled, straightness 0.14-0.24).  On: the committed node is held until REACHED (it becomes the current node) or until it is no longer uphill from wherever the body is (value(target) <= value(current)); adjacency is not required; and the bearing is taken from the loop's own live odometry to the target's position, not from the flickering current node's centroid.  A plan held until its prediction fails -- no timescale is set: arrival and the value field end it.", ParamValue{false}},
         {"pi_cell_size",  ParamMutability::HotMutable, "Path-integration place-code: >0 = place node IS the odometry grid cell (metres); 0 = use place_topic (panorama).", ParamValue{0.0}},
         {"eat_credit_alpha", ParamMutability::HotMutable, "EMA rate for the eat-credit success signal (telemetry).", ParamValue{0.01}},
+        {"stall_topic",   ParamMutability::ConstructionOnly, "THE STUCK PLACE (duck §17.116 M1): ProprioToken [progress error in [0,1], valid] -- 1 - the walk's progress over the progress it predicts from its own command.  While valid, it is learned onto the current node (EMA at stall_alpha) and never decays.  Empty = off (default, byte-identical).", ParamValue{std::string("")}},
+        {"stall_weight",  ParamMutability::HotMutable, "The stuck place's weight in the value iteration: V[n] *= (1 - stall_weight * excess[n]), excess = (stall[n] - mean stall) / (1 - mean stall) above the mean over the places walked, so the climb routes around places where the walk stalls more than it usually does.  0 = off (default, byte-identical).", ParamValue{0.0}},
+        {"stall_alpha",   ParamMutability::HotMutable, "EMA rate of a node's progress error, per valid tick at it.", ParamValue{0.02}},
     };
 }
 
@@ -127,6 +132,9 @@ ParamMap PlayLoop::current_params() const {
     m["lookahead_hops"]       = ParamValue{int64_t(lookahead_hops_)};
     m["pi_cell_size"]  = ParamValue{double(pi_cell_size_)};
     m["eat_credit_alpha"] = ParamValue{double(eat_credit_alpha_)};
+    m["stall_topic"]   = ParamValue{stall_topic_};
+    m["stall_weight"]  = ParamValue{double(stall_weight_)};
+    m["stall_alpha"]   = ParamValue{double(stall_alpha_)};
     return m;
 }
 
@@ -150,6 +158,8 @@ void PlayLoop::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "lookahead_hops")  lookahead_hops_  = int(get_int(value, k));
     else if (k == "pi_cell_size")  pi_cell_size_  = float(get_double(value, k));
     else if (k == "eat_credit_alpha") eat_credit_alpha_ = float(get_double(value, k));
+    else if (k == "stall_weight") stall_weight_ = float(get_double(value, k));
+    else if (k == "stall_alpha")  stall_alpha_  = float(get_double(value, k));
 }
 
 void PlayLoop::on_setup(Bus* bus, ParamMap const& params) {
@@ -180,6 +190,9 @@ void PlayLoop::on_setup(Bus* bus, ParamMap const& params) {
     explore_rng_.seed(explore_seed_);
     apply_param(params, "pi_cell_size",  [&](auto const& v){ pi_cell_size_  = float(get_double(v,"pi_cell_size")); });
     apply_param(params, "eat_credit_alpha", [&](auto const& v){ eat_credit_alpha_ = float(get_double(v,"eat_credit_alpha")); });
+    apply_param(params, "stall_topic",   [&](auto const& v){ stall_topic_  = get_string(v,"stall_topic"); });
+    apply_param(params, "stall_weight",  [&](auto const& v){ stall_weight_ = float(get_double(v,"stall_weight")); });
+    apply_param(params, "stall_alpha",   [&](auto const& v){ stall_alpha_  = float(get_double(v,"stall_alpha")); });
 
     if (!eat_topic_.empty())
         sub_ids_.push_back(bus_->subscribe(eat_topic_, SubscriptionKind::Direct,
@@ -195,6 +208,13 @@ void PlayLoop::run_value_iteration() {
     // Gauss-Seidel sweeps on NOVELTY (not food): V[n] = novelty[n]·(1−hab[n]) + γ·max_m V[n→m].
     // Habituation suppresses the LOCAL novelty term only (recent = boring) so propagation routes the
     // gradient toward the least-recent / highest-TLE frontier and play SWEEPS instead of orbiting.
+    // §17.116 M1: a place's stall counts by its EXCESS over the walk's typical progress error (the mean over the places it
+    // has walked), scaled to what is left above that mean -- the walk's own scale, not a constant tuned to it (CLAUDE.md §5.5)
+    float stall_mean = 0.0f;
+    if (stall_weight_ > 0.0f && !stall_.empty()) {
+        for (auto const& [n, v] : stall_) stall_mean += v;
+        stall_mean /= float(stall_.size());
+    }
     for (int s = 0; s < vi_sweeps_; ++s) {
         for (auto& [n, vn] : value_) {
             float best = 0.0f;
@@ -206,6 +226,11 @@ void PlayLoop::run_value_iteration() {
             auto hit = hab_.find(n);
             float h = (hit != hab_.end()) ? hit->second : 0.0f;
             vn = nov * (1.0f - h) + gamma_ * best;
+            if (stall_weight_ > 0.0f) {   // §17.116 M1: a place where the walk stalls is a hole in the field
+                auto sit = stall_.find(n);
+                if (sit != stall_.end() && sit->second > stall_mean)
+                    vn *= std::max(0.0f, 1.0f - stall_weight_ * (sit->second - stall_mean) / std::max(1e-3f, 1.0f - stall_mean));
+            }
         }
     }
 }
@@ -300,6 +325,14 @@ void PlayLoop::tick(uint64_t tick_id) {
         if (!ins) it->second += tle_ema_alpha_ * (place_tle - it->second);
     }
     float local_tle = (cur_node_ >= 0 && node_tle_.count(cur_node_)) ? node_tle_.at(cur_node_) : 0.0f;
+    // §17.116 M1, THE STUCK PLACE: the walk's progress error learned onto the place it is at; never decays
+    if (!stall_topic_.empty() && cur_node_ >= 0)
+        if (auto st = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(stall_topic_)))
+            if (st->values.size() >= 2 && st->values[1] > 0.5f) {
+                const float e = std::clamp(float(st->values[0]), 0.0f, 1.0f);
+                auto [it, ins] = stall_.try_emplace(cur_node_, 0.0f);
+                it->second += stall_alpha_ * (e - it->second);
+            }
 
     // HK HABITUATION ("recent = boring"): decay all (slow), rise current (fast).
     for (auto& [n, hh] : hab_) hh *= (1.0f - hab_decay_);
@@ -488,6 +521,9 @@ void PlayLoop::tick(uint64_t tick_id) {
 float PlayLoop::value(int n) const {
     auto it = value_.find(n); return it == value_.end() ? 0.0f : it->second;
 }
+float PlayLoop::stall(int n) const {
+    auto it = stall_.find(n); return it == stall_.end() ? 0.0f : it->second;
+}
 float PlayLoop::novelty(int n) const {
     auto it = node_tle_.find(n); return it == node_tle_.end() ? 0.0f : it->second;
 }
@@ -512,6 +548,11 @@ float PlayLoop::max_hab() const {
 nlohmann::json PlayLoop::diag_lite() const {
     nlohmann::json j = {{"n_nodes", n_nodes()}, {"climbing", climbing_}, {"next_node", next_node_}};
     if (lookahead_) j["reach"] = reach_now();
+    if (!stall_topic_.empty()) {   // §17.116 M1: the current place's stall, the worst place's, and how many places are stuck
+        float mx = 0.0f; int stuck = 0;
+        for (auto const& [n, v] : stall_) { mx = std::max(mx, v); stuck += v > 0.3f; }
+        j["stall"] = {stall(cur_node_), mx, stuck, int(stall_.size())};
+    }
     return j;
 }
 

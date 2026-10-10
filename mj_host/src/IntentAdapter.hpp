@@ -308,6 +308,9 @@ public:
     // §17.114 S1: the traversal observation [the applied forward command, the sensed forward speed] (command units) on
     // reality.proprio.traverse_in, published only once the host sets it; and the traversal EPM's TLE (-1 = none)
     void   set_traverse_cmd(double vx, double vyaw = 0.0) { traverse_on_ = true; traverse_cmd_ = vx; traverse_yaw_ = vyaw; }
+    // §17.116 M1 (--place-stall): the walk's progress error [1 - progress / predicted progress, valid] on
+    // reality.proprio.progress, for the play loop's stuck place.  Never called = never published (byte-identical).
+    void   set_place_progress(double err, bool valid) { progress_on_ = true; progress_err_ = err; progress_valid_ = valid; }
     double traverse_tle() const;
     std::array<double, 4> traverse_token() const;   // [winner, novel, input cmd, input sensed]
     // The CloudMap module, if the graph declares one.  The host reads these for the JSONL and for
@@ -383,6 +386,7 @@ private:
     mutable uint64_t mover_pos_seen_ = ~uint64_t{0};   // §17.113 A0
     std::array<double, 3> last_twist_{};
     std::array<float, 3> last_sensed_{};
+    bool progress_on_ = false, progress_valid_ = false; double progress_err_ = 0.0;   // §17.116 M1
     bool traverse_on_ = false; double traverse_cmd_ = 0.0, traverse_yaw_ = 0.0, trv_cmd_ = 0.0, trv_yaw_ = 0.0, trv_sen_ = 0.0;   // §17.114 S1
     std::map<std::string, double> frozen_rates_;
     bool frozen_ = false;
