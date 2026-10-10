@@ -324,6 +324,7 @@ public:
     double look_gain() const;
     void set_reflex_range_override(double r) { reflex_range_override_ = r; }   // §17.113 T1
     void set_escape_authority(bool on) { escape_authority_ = on; }   // §17.114 E2
+    bool escaping() const { return ref_hold_left_ > 0; }               // §17.114 E3: an escape holds the reference
     std::vector<double> look_commit_now() const;
     std::vector<double> thing_belief_now() const;
     std::vector<double> mover_pos_now() const;

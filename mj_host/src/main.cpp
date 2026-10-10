@@ -1312,7 +1312,8 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
-bool g_escape_authority = false;   // --escape-authority (§17.114 E2)
+bool g_escape_authority = false, g_escape_commit = false;   // --escape-commit (§17.114 E3): no stop or sit starts while an escape holds the reference
+   // --escape-authority (§17.114 E2)
 bool g_sit_progress = false, g_sit_settle = false, g_sit_escape = false;   // --sit-then-escape (§17.114 E1): the sit ends in a look stop and the stuck escape (a turn-about when nothing ahead is free)   // --sit-settle (§17.114 S2): stillness before the sit, and habituation
    // --sit-on-stall F [HOLD_S]: the progress form (S1b)
 double g_sit_k = 0.0, g_sit_hold_s = 3.0, g_sit_rise_s = 1.0; double g_sit_need_s = 1.0;   // --sit-on-surprise K [HOLD_S] (§17.114 S1)
@@ -2254,7 +2255,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     sit_ema = frac;
                     sit_over = (sit_walk_ticks > 1500 && sit_dir_ticks >= 50 && frac < g_sit_k) ? sit_over + 1 : 0;
                     sit_hab = std::min(1.0, sit_hab + 1.0 / 3000.0);   // S2: habituation recovers over ~60 s
-                    if (sit_pre_left == 0 && sit_over >= int(g_sit_need_s * kBrainHz) && (!g_sit_settle || frac < g_sit_k * sit_hab)) {
+                    if (sit_pre_left == 0 && !(g_escape_commit && brain.escaping()) && sit_over >= int(g_sit_need_s * kBrainHz) && (!g_sit_settle || frac < g_sit_k * sit_hab)) {
                         sit_over = 0; unwind_left = 0; imp_back_left = 0;   // the sit answers the surprise: a pending back-off and its stop are dropped
                         if (g_sit_settle) { sit_pre_left = 2 * int(kBrainHz); stop_event = "sit:settle"; }
                         else if (skill_start("sit")) {
@@ -2348,9 +2349,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (g_stop.by_look && stop_is_byl && stop_phase != StopPhase::None && stop_left > 0 && brain.look_gain() <= 0.5) {
                 stop_left = 0; ++stops_byl_lost;                     // the look lost the body: the stop ends
             }
+            const bool esc_commit = g_escape_commit && brain.escaping();   // §17.114 E3: the escape is walked out before anything else stops the body
             const bool sitlook_now = sit_escape_due && stop_phase == StopPhase::None && !skill_active;   // §17.114 E1
             if (sitlook_now) sit_escape_due = false;
-            if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now || lost_now || byl_now || sitlook_now)
+            if (stop_phase == StopPhase::None && !esc_commit && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now || lost_now || byl_now || sitlook_now)
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
                 ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : (lost_now ? "stop:lost" : "stop:start")); stop_started_tick = t;
@@ -3744,6 +3746,8 @@ int main(int argc, char** argv) {
             DuckBody::bam.dump = next("--bam-dump");
         } else if (a == "--stop-walker-hold") {
             g_stop_walker_hold = true;
+        } else if (a == "--escape-commit") {
+            g_escape_commit = true;
         } else if (a == "--escape-authority") {
             g_escape_authority = true;
         } else if (a == "--sit-then-escape") {
