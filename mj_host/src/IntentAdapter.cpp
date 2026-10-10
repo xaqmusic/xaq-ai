@@ -456,7 +456,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                 detour_last_end_ = int(tick_id_) + (detour_commit_ ? detour_out_now_ : detour_out_ticks_);
                 if (detour_reopen_ > 0.0) detour_walking_ = true;
             } else {
-                last_twist_[0] = -detour_back_vx_;
+                last_twist_[0] = (detour_back_ticks_ > 0 && detour_age_ > detour_back_ticks_) ? 0.0 : -detour_back_vx_;   // RL: then in place
                 last_twist_[2] = detour_dir_ * yaw_range_;
                 last_steer_ = 4;
             }

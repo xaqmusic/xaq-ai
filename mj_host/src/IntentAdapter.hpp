@@ -209,6 +209,10 @@ public:
     // only while it stays open (D1b's long walk outs walked into the next wall: traps led by the held heading 0.3 -> 1.9 a
     // run).  0 = off, byte-identical to D1b.
     void set_detour_reopen(double p) { detour_reopen_ = p; }
+    // §17.117 RL (--detour-back-s S): the turn backs only for its first S seconds, then turns in place -- the reverse leg
+    // backs into what the sensor cannot see behind (SD's wall outliers: seed 22, 4 164 of 4 736 wall ticks under the detour's
+    // held heading, bursts under 3 s).  0 = off (backs for the whole turn), byte-identical.
+    void set_detour_back_ticks(int n) { detour_back_ticks_ = n; }
     int  detour_reopens() const { return detour_reopens_; }
     int  detour_repeats() const { return detour_repeats_; }
     int  detours() const { return detours_; }
@@ -461,6 +465,7 @@ private:
     double stand_down_r_ = 0.0; int stand_downs_ = 0;           // §17.117 SD
     bool seek_nearer_now_ = false;                              // G1's condition this tick
     double detour_back_vx_ = 0.0; int detour_arm_ticks_ = 25, detour_max_ticks_ = 150, detour_out_ticks_ = 75;   // §17.117 D1
+    int detour_back_ticks_ = 0;   // §17.117 RL
     double detour_reopen_ = 0.0; int detour_reopens_ = 0; bool detour_walking_ = false;   // §17.117 D1c
     bool detour_commit_ = false; int detour_out_now_ = 0, detour_last_end_ = -1000000, detour_repeats_ = 0;   // §17.117 D1b
     int detour_arm_ = 0, detour_left_ = 0, detour_age_ = 0, detours_ = 0, detour_clear_ = 0; double detour_dir_ = 0.0; bool detour_started_ = false;

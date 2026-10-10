@@ -1425,7 +1425,7 @@ bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the refer
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
 double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
-double g_detour_vx = 0.0, g_detour_max_s = 3.0, g_detour_out_s = 1.5; bool g_detour_stand_down = false;   // --detour-stand-down (§17.117 SD)
+double g_detour_vx = 0.0, g_detour_max_s = 3.0, g_detour_out_s = 1.5; bool g_detour_stand_down = false; double g_detour_back_s = 0.0;   // --detour-back-s S (§17.117 RL)   // --detour-stand-down (§17.117 SD)
 bool g_detour_commit = false; double g_detour_reopen = 0.0;   // --detour-reopen P (§17.117 D1c)   // --detour-commit (§17.117 D1b)   // --detour BACK_VX [MAX_S [OUT_S]] (§17.117 D1)
 double g_seek_gate_near = 0.0;      // --seek-gate-near M (§17.117 G1): the gate erases only returns no nearer than the target less M
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
@@ -1731,6 +1731,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_seek_gate_near <= 0.0) { std::fprintf(stderr, "--detour needs --seek-gate-near (its trigger is G1's condition)\n"); return 2; }
         brain.set_detour(g_detour_vx, 25, int(g_detour_max_s * kBrainHz), int(g_detour_out_s * kBrainHz));
         if (g_detour_reopen > 0.0) { brain.set_detour_reopen(g_detour_reopen); std::fprintf(stderr, "  detour reopen: the walk out ends when the ahead sector reads above %.2f, and the turn starts again (§17.117 D1c)\n", g_detour_reopen); }
+        if (g_detour_back_s > 0.0) { brain.set_detour_back_ticks(std::max(1, int(g_detour_back_s * kBrainHz))); std::fprintf(stderr, "  detour back: the turn backs for its first %.2f s, then turns in place (§17.117 RL)\n", g_detour_back_s); }
         if (g_detour_stand_down) {
             const double r = brain.cloud_iso_radius();   // the same reach the static yield counts structure in
             brain.set_detour_stand_down(r);
@@ -3854,6 +3855,8 @@ int main(int argc, char** argv) {
             g_stop.gaze_at_thing = true;
         } else if (a == "--detour-reopen") {
             g_detour_reopen = std::stod(next("--detour-reopen"));
+        } else if (a == "--detour-back-s") {
+            g_detour_back_s = std::stod(next("--detour-back-s"));
         } else if (a == "--detour-stand-down") {
             g_detour_stand_down = true;
         } else if (a == "--detour-commit") {
