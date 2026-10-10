@@ -2202,7 +2202,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 if (skill_then_stop) { skill_then_stop = false; skill_arrive_done = true; }
                 // the unwind and the look follow a skill from standing -- and, with --skill-now, one fired from the walk
                 // (R82: without it the arrival stop never came, and 2 of 39 answers were seen)
-                if (g_skill_unwind_s > 0.0 && (stop_phase == StopPhase::Brain || (g_skill_now && stop_phase == StopPhase::None && skill_name != "approach"))) { stop_left = 0; unwind_left = int(g_skill_unwind_s * kBrainHz); unwind_then_stop = true; ++unwinds; }
+                if (g_skill_unwind_s > 0.0 && (stop_phase == StopPhase::Brain || (g_stop_walker_hold && stop_phase == StopPhase::Walker) || (g_skill_now && stop_phase == StopPhase::None && skill_name != "approach"))) { stop_left = 0; unwind_left = int(g_skill_unwind_s * kBrainHz); unwind_then_stop = true; ++unwinds; }
             }
             if (!skill_active && stop_phase == StopPhase::None && t >= stop_from) {
                 const int req = brain.skill_request();      // a module's request through the bus, by name (id)

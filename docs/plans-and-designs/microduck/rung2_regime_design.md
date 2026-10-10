@@ -7726,3 +7726,35 @@ brain keeps a memory only for a chase LOST while the mover was still moving (`lo
 them the train is mostly beside or behind (60 %), beyond where the head can turn. Re-use: a memory for every ending (a stopped
 chase whose mover moves on), or a glance at a mover's last place while walking to a static target (the look-around is off
 while the seek steers) — both would trade the view ahead the walk steers by (§17.102's `REGRESSION`).
+
+**Step 2, the standing look. The record first:** cloud quality holds to 0.6 rad/s and frays above it (walls and furniture read
+as small), and head speed does not set the stop's length — the growth rule does (§17.32); the registration error under the
+real ToF timing follows the head's angular speed, ~2 cm below 0.3 rad/s to 5–9 cm at 1–2 rad/s (§17.86's `tre` table). The
+sweep (`--stop-gaze-sweep 0.6 0.7`) glides at a constant 0.58 rad/s (p25–p90 0.50–0.61) and the head is still on 6–11 % of
+stand ticks: a scan, which is what reads as mechanical.
+
+**L1, saccade and fixate (host `--stop-saccade 2.0`: the sweep's next least-looked-at cell is reached at 2 rad/s, and the gaze
+holds there while that view still grows the cloud — the fixation ends when the voxels added over the last 0.2 s fall below
+half the fixation's own peak, between 0.2 and 0.8 s; the stop's end rule untouched; `log/ten/sc1`, n = 24, against `sl0`).**
+Fixations average ~0.4 s.
+
+| n = 24 | `sl0` (the glide) | L1 (saccade and fixate) |
+|---|---|---|
+| head still, % of stop ticks · yaw span p50 | 11 % · 0.85 rad | 26 % · 1.13 rad |
+| head speed while moving p50 / p90 | 0.60 / 0.89 rad/s | 0.98 / 2.02 |
+| voxels a cloud · walls located | 2 343 · 55 % | 2 606 · 60 % |
+| objects within 2 m found · rule precision | 28 % · 0.22 | 28 % · 0.22 |
+| obstacles read as small | 11.1 % | 12.3 % |
+| stop length mean (settle · stand) | 5.3 s (1.2 · 3.4) | 5.6 s (1.2 · 3.6) |
+
+The ten-minute set ties (boring −2.6, falls −0.3, skills touching −8.4 with CI [−17.8, +1.0], outcomes observed +2.8). **`PARTIAL`:
+the look covers more (span +33 %, a fuller cloud, more of the walls) at the same length and the same object finding; it is a
+form for the eye, not a time saving — as §17.32 found, the stop's length is the growth rule's.** Caveat: this stack runs the
+ToF without its real timing; at 2 rad/s the saccades' casts would smear 5–9 cm on hardware (a fixation's casts would not).
+Preset L1 (on S0, the slow-train ★ T1).
+
+**Step 3, the pause. Where a stop's time goes (`mj_host/tools/stop_phases.py`, `sl0`):** 39.5 stops a run, 5.3 s each. The
+**settle** — the walker at zero command, waiting for stillness before the standing brain may take the legs — is 1.2 s a stop
+(p50 1.6, p90 the 2.0 s timeout), 49 s a run, and the look has not started; the stand that follows is p50 1.2 s. The restart
+after a stop is quick (0.5 s to 5 cm of travel). **The pause is the settle: the wait the standing brain needs before it can take
+over, longer than the typical look itself.**
