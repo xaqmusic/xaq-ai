@@ -8060,3 +8060,21 @@ reference (`--ref-free`) is refuted twice (§17.44, §17.79: the released yaw go
 fails at surfaces). The untried form is a **detour**: with G1's condition (a return nearer than the target in its sector), the
 reference set to the freest direction of the walking cloud's view on the target's side, held until the target's sector reads
 free again — the escape's choice of direction, made on the walk before the stall instead of after it.
+
+**G1, a missing slice found while building D1:** the heading reflex's share (`IntentAdapter`, the reflex block) zeroes the seek
+target's sector with no range check, so under G1 the walker's sense slots see the nearer return but the reflex keeps its full
+share of the yaw toward the target — part of why G1's walk turned less. Re-use for G1 alone: the same range check in the share.
+
+**D1 — the detour (the operator, 2026-10-10: "the most effective escapes seem to be achieved by turn-in-reverse manoeuvres.
+Therefore the braking lever makes good sense, so the robot can turn in place to find an escape vector").** `--detour BACK_VX
+[MAX_S [OUT_S]]`, with G1 (its trigger is G1's condition); 0 = off, byte-identical (E4 seed 5, P2 seed 3). A SCAFFOLD of the
+escape's kind, named as such: when the seek target's sector has held a return nearer than the target for 0.5 s, the walk backs
+at BACK_VX while turning at the full yaw range toward the freer side sector (the target's side on a tie). The turn sweeps the
+sensor, so the escape vector is FOUND by the turn rather than chosen from a map: it ends when the ahead sector and the sector
+the obstacle swings into both read clear (nothing within 1 m, a turn of ~20° or more) after at least 0.2 s, or at MAX_S; then
+the heading found is held for OUT_S (the escape's hold — under `--escape-authority` the reflex owns the yaw and the walk goes
+forward on it at the floor). `escaping()` covers the turn, so under `--escape-commit` no stop or sit interrupts it. (The
+walking cloud's 8-sector view was the first candidate for the direction; it is laid out in the frame of the cloud's last
+anchor, up to a metre back and turned, so it cannot steer a turn on the walk.) Smoke, seed 16, 300 s, BACK_VX 0.15: 11
+detours, 10 ended clear, 1 sit (★ E4: 2 sits by 300 s on this seed); some dithering at one spot (260–272 s, a detour every
+~2.5 s). Sweep `log/ten/pd1`, n = 24, against ★ E4, the placebo and G1.
