@@ -213,6 +213,14 @@ public:
     // backs into what the sensor cannot see behind (SD's wall outliers: seed 22, 4 164 of 4 736 wall ticks under the detour's
     // held heading, bursts under 3 s).  0 = off (backs for the whole turn), byte-identical.
     void set_detour_back_ticks(int n) { detour_back_ticks_ = n; }
+    // §17.117 DF (--detour-forget N, the operator, 2026-10-10: "the detour is causing the robot to walk forward and back
+    // repeatedly when approaching objects ... damp that resonance or uncertainty"): the N-th detour of a chain (each within
+    // 10 s of the last one's walk out, the reopened ones included) refutes the held target -- its approach keeps meeting
+    // something nearer than it, 71 % of ST1's detours repeat, and half are aimed at a remembered position with no thing at it
+    // -- so the seek loop forgets it (the progress forget's kind: forgotten, not refused; a real thing is seen again at the
+    // next look, where it is).  0 = off, byte-identical.
+    void set_detour_forget(int n) { detour_forget_n_ = n; }
+    int  detour_forgets() const { return detour_forgets_; }
     int  detour_reopens() const { return detour_reopens_; }
     int  detour_repeats() const { return detour_repeats_; }
     int  detours() const { return detours_; }
@@ -466,6 +474,7 @@ private:
     bool seek_nearer_now_ = false;                              // G1's condition this tick
     double detour_back_vx_ = 0.0; int detour_arm_ticks_ = 25, detour_max_ticks_ = 150, detour_out_ticks_ = 75;   // §17.117 D1
     int detour_back_ticks_ = 0;   // §17.117 RL
+    int detour_forget_n_ = 0, detour_chain_ = 0, detour_forgets_ = 0;   // §17.117 DF
     double detour_reopen_ = 0.0; int detour_reopens_ = 0; bool detour_walking_ = false;   // §17.117 D1c
     bool detour_commit_ = false; int detour_out_now_ = 0, detour_last_end_ = -1000000, detour_repeats_ = 0;   // §17.117 D1b
     int detour_arm_ = 0, detour_left_ = 0, detour_age_ = 0, detours_ = 0, detour_clear_ = 0; double detour_dir_ = 0.0; bool detour_started_ = false;

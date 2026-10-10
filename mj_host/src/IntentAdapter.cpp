@@ -429,6 +429,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (detour_reopen_ > 0.0 && detour_walking_ && ref_hold_left_ > 0 && double(tof[1]) > detour_reopen_) {
             // D1c: the way ahead closed on the walk out -- turn again, the same way, as a repeat
             ref_hold_left_ = 0; detour_walking_ = false; ++detour_reopens_;
+            if (detour_forget_n_ > 0 && ++detour_chain_ >= detour_forget_n_) { forget_seek_target(); ++detour_forgets_; detour_chain_ = 0; }   // DF
             detour_left_ = detour_max_ticks_; detour_age_ = 0; ++detours_; ++detour_repeats_; detour_started_ = true;
             detour_out_now_ = std::min(2 * detour_out_now_, 4 * detour_out_ticks_);
         }
@@ -438,6 +439,10 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                 detour_arm_ = 0; detour_left_ = detour_max_ticks_; detour_age_ = 0; ++detours_; detour_started_ = true;
                 // + yaw = left; slot 0 = left, 2 = right: toward the lower proximity, the target's side on a tie
                 const bool repeat = detour_commit_ && int(tick_id_) - detour_last_end_ <= 500;   // D1b: within 10 s
+                if (detour_forget_n_ > 0) {   // DF: a chain of detours refutes the held target
+                    detour_chain_ = (int(tick_id_) - detour_last_end_ <= 500) ? detour_chain_ + 1 : 1;
+                    if (detour_chain_ >= detour_forget_n_) { forget_seek_target(); ++detour_forgets_; detour_chain_ = 0; }
+                }
                 if (repeat) { ++detour_repeats_; detour_out_now_ = std::min(2 * detour_out_now_, 4 * detour_out_ticks_); }
                 else {
                     detour_out_now_ = detour_out_ticks_;
