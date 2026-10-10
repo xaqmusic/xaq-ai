@@ -8109,3 +8109,25 @@ floor, no backing) walk the body into the next wall. **`PARTIAL` with a cost** (
 **D1c** (`--detour-reopen 0.5`): the walk out ends when the ahead sector closes (a return within 0.5 m) and the turn starts
 again the same way — the heading found is held only while it stays open. Byte-identical off (E4; D1b seed 16). Smoke, seed 16:
 22 detours, 11 ended clear, 18 walk outs reopened, 1 sit. Sweep `log/ten/pd1c`.
+
+**D1c measured (`log/ten/pd1c`, n = 24; a run: 24.7 detours, 18.3 ended clear, 18.2 repeats, 12.5 walk outs reopened).**
+
+| n = 24, paired | traps | first | first, seek-led | open % | corner % | cells | walls / min | boring % | interesting % | skills |
+|---|---|---|---|---|---|---|---|---|---|---|
+| D1c − placebo | **−1.71 [−2.66, −0.76]** | **−1.29 [−1.93, −0.65]** | **−0.96 [−1.51, −0.41]** | **+12.3 [+5.5, +19.2]** | **−3.5 [−6.1, −1.0]** | **+9.1 [+2.2, +16.0]** | **−4.8 [−9.4, −0.2]** | **−4.4 [−7.0, −1.8]** | **−9.8 [−14.1, −5.5]** | **−2.4 [−4.5, −0.3]** |
+| D1c − ★ E4 | −0.71 [−1.69, +0.27] | −0.50 | −0.29 | **+9.4 [+2.8, +16.0]** | −1.5 | +4.1 | — | — | — | −1.2 |
+
+Means: traps 1.9 a run (★ E4 2.6, placebo 3.6), walls 7.5 a minute (10.4, 12.3), open floor 51.7 % (42.3, 39.4), corners
+1.5 % (3.0, 5.0); escapes −1.4 [−2.6, −0.3], an escape's 10 s in wall contact −2.8 points, falls −1.0 [−2.1, +0.1]; against
+D1b, traps −2.2 [−3.4, −1.1] and back −1.0 — the traps D1b moved to the held heading are gone (by the loop steering the 5 s
+before: seek 1.42, held heading 0.29, play 0.17 a run). **The cost:** interesting time −9.8, skills −2.4, stops at things −8.6
+[−19.0, +1.7], outcomes observed −5.4, map nodes −6.8 (fewer stops at new places). Boring and interesting both fall: the
+time goes to the middle — walking and detouring rather than engaging — and the likeliest reason is the things that stand at
+the foot of a chair or a wall, whose approach now reads as an obstacle nearer than the target and is turned away from.
+
+**`WORKING` on the navigation — loud, seed-robust on every places measure against the placebo, walls and escapes down with
+it — with a `REGRESSION` on engagement.** The operator's eye decides. Preset D1c (seed 3 from 160 s: detours at 171–203 s
+along the −x wall where ★ E4 sits four times at 173–238 s; seed 16 from 240 s). Re-use for the cost: G1's margin is the
+lever — a thing at the foot of a structure is a return AT the target's range with structure behind it, which the cloud's
+target-tall count (`target_tall_topic`, the static yield's signal) already reports; the detour could stand down when the
+target's own cluster is the nearest return (the arrival's range), or M could grow with the target's measured extent.

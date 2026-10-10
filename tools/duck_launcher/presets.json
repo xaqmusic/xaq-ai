@@ -24,6 +24,30 @@
   }
  },
  {
+  "name": "D1c · ★ E4 + THE TURN-IN-REVERSE DETOUR (§17.117, awaiting the eye)",
+  "hint": "§17.117 D1c (2026-10-10, the operator: 'the most effective escapes seem to be achieved by turn-in-reverse manoeuvres'): walking to a target with something nearer than the target in its way for 0.5 s (G1: the seek gate no longer hides it), the duck backs while turning toward the freer side until ahead reads clear, walks out on that heading, and turns again the same way if the way closes; repeated detours commit to one way around. n = 24 vs the placebo: traps 3.6 -> 1.9 a run, first-time traps 2.8 -> 1.5, walls 12.3 -> 7.5 a minute, open floor 39 -> 52 %, corners 5.0 -> 1.5 %, boring -4.4; COST: interesting -9.8 points, skills -2.4 a run (things at the foot of a chair or wall are turned away from). WATCH seed 3 from 160 s: detours at 171-203 s along the -x wall where ★ E4 sits four times (173-238 s); seed 16 from 240 s (★ E4 sits at 253 and 291 s).",
+  "state": {
+   "config": "a1v2_s1_sit.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 3,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 0 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.12 8 0 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6 --look-around 0.9 2.0 --fix-escape-sign --fix-sweep-sign --map-bake-honest --stop-by-look --impeded-not-chasing --chase-yaw-range 1.5 --stop-saccade 2.0 --stop-walker-hold --stop-skill-settle --sit-on-stall 0.2 --sit-settle --sit-then-escape --escape-authority --escape-commit --escape-vx 0.3 --seek-gate-near 0.15 --detour 0.15 --detour-commit --detour-reopen 0.5",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
   "name": "★ P2 · NO PAUSE (promoted 2026-10-10): ★ L1 + the walker holds the stop, a skill waits for stillness",
   "hint": "PROMOTED on the operator's eye (2026-10-10): 'accuracy of pecks and kicks seems similar while the look has improved'. §17.114 P2 (2026-10-10): at a stop the walking policy holds the stance from the first tick and the look starts at once (no settle before the look); a kick or peck waits for stillness (the settle's test, at most 2 s) before it fires. n = 24 vs ★ L1: settle before the look 45 s -> 0 a run, stops 5.6 -> 4.3 s; backward falls at a stop's start 0.42 -> 0, falls 2.7 -> 2.2; the train chased 36.5 -> 49.2 s (beyond the noise); skills 9.2 -> 9.5 (no cascade), things moved 87 -> 86, answers observed 148 -> 187; the skill-window contact flag 29 -> 15 %. WATCH: the stop flowing straight into the look; a skill visibly preceded by a still moment; whether kicks still connect.",
   "state": {
