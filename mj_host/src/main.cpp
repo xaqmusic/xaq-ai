@@ -1320,6 +1320,7 @@ bool g_sit_progress = false, g_sit_settle = false, g_sit_escape = false;   // --
    // --sit-on-stall F [HOLD_S]: the progress form (S1b)
 double g_sit_k = 0.0, g_sit_hold_s = 3.0, g_sit_rise_s = 1.0; double g_sit_need_s = 1.0;   // --sit-on-surprise K [HOLD_S] (§17.114 S1)
 bool g_stop_skill_settle = false;   // --stop-skill-settle (§17.114 P2): under the walker hold, a kick or peck waits for stillness (the settle's test, at most its timeout); the look does not
+bool g_kick_head_home = false, g_kick_homing_now = false;   // --kick-head-home (2026-10-10): a kick at a walker-held stop waits for the head at its home pose
 bool g_stop_walker_hold = false;   // --stop-walker-hold (§17.114 P1): the walking policy holds the stop's stance from its first tick (no settle, no standing brain)
 double g_saccade_speed = 0.0, g_fix_min_s = 0.2, g_fix_max_s = 0.8;   // --stop-saccade SPEED [FIX_MIN [FIX_MAX]] (§17.114 L1)
 bool g_gaze_mover_memory = false; int g_gmm_now = 0;   // --gaze-mover-memory (§17.114 G1): the gaze sense wants the mover the brain holds (incl. a lost one in memory) on the walk
@@ -2035,6 +2036,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
     bool wh_ready = true; int wh_settle_left = 0;   // §17.114 P2
+    int kick_home_wait = 0, kick_home_waits = 0, kick_home_timeouts = 0;   // --kick-head-home
     int sit_pre_left = 0; double sit_hab = 1.0;   // §17.114 S2
     bool sit_escape_due = false, stop_is_sit = false; int sit_turnabouts = 0;   // §17.114 E1
     double place_err = 0.0; bool place_valid = false;   // §17.116 M1 (--place-stall): the walk's progress error, for the play loop
@@ -2455,7 +2457,28 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     }
                 }
                 if (g_stop_walker_hold && stop_phase == StopPhase::Walker && !wh_ready && (still || --wh_settle_left <= 0)) wh_ready = true;
-                if (g_stop_walker_hold && stop_phase == StopPhase::Walker && wh_ready && !skill_active && unwind_left == 0 && !req_consumed) {
+                g_kick_homing_now = false;
+                if (g_kick_head_home && g_stop_walker_hold && stop_phase == StopPhase::Walker && wh_ready && !skill_active && unwind_left == 0 && !req_consumed) {
+                    // --kick-head-home (2026-10-10, the operator: "the kick ... is not firing"): Pollen's kick networks were trained
+                    // from the stand, head home; since ★ P2 a kick starts after the stillness wait with the head pitched down at the
+                    // thing (+0.91 rad against +0.33 at the stander's stop), and the network holds the leg still (swing 0.12-0.16 rad
+                    // against 0.47-0.49).  The kick waits with the head driven home until neck and head pitch are within 0.15 rad of
+                    // it (at most 1 s), then fires from the posture it knows.
+                    std::string want = skill_pending;
+                    if (want.empty()) {
+                        const int req = brain.skill_request();
+                        if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && std::string(kSkills[req].name).rfind("kick", 0) == 0) {
+                            want = kSkills[req].name; skill_pending = want; ++skills_requested; req_consumed = true; stop_event = "skill:request";
+                        }
+                    }
+                    if (want.rfind("kick", 0) == 0) {
+                        const auto jq = body.joint_positions();
+                        const bool home = std::fabs(jq[5] - kHomePose[5]) < 0.15 && std::fabs(jq[6] - kHomePose[6]) < 0.15;
+                        if (!home && kick_home_wait < int(kBrainHz)) { g_kick_homing_now = true; if (kick_home_wait++ == 0) ++kick_home_waits; }
+                        else { if (!home) ++kick_home_timeouts; kick_home_wait = 0; req_consumed = false; }
+                    }
+                }
+                if (g_stop_walker_hold && stop_phase == StopPhase::Walker && wh_ready && !skill_active && unwind_left == 0 && !req_consumed && !g_kick_homing_now) {
                     // §17.114 P1: with the walker holding there is no hand-back to defer to -- a request (or one deferred from
                     // the walk) starts at once, as it does from the stand
                     if (!skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); req_consumed = true; }
@@ -2913,6 +2936,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         // from wherever the intent's steering left them, and its level loop starts with a large error; on the walk's
         // return the intent's command jumps back.  Both targets slew from the head's CURRENT position at a servo's
         // rate -- 9.5 of the six-motor arm's 11.7 falls a run came within 3 s of a stop's start.
+        if (g_kick_homing_now && head_owns_joints) for (int i = 0; i < 4; ++i) head_targets[size_t(i)] = kHomePose[size_t(5 + i)];   // --kick-head-home (slewed below if --head-slew)
         if (g_head_rate > 0.0) {
             static std::array<double, 4> slew_joint{}, slew_cmd{}; static bool slew_init = false, prev_owns = false;
             const auto qj = body.joint_positions();
@@ -3452,6 +3476,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             std::fprintf(stderr, "  sweep: %d moves; the gaze grid covered %.0f %% of its cells per stop (%d stops); 'saccades' below count HOLD-long windows\n",
                          sweep_moves, 100.0 * sweep_cover_sum / std::max(1, sweep_cover_n), sweep_cover_n);
         if (g_sit_k > 0.0) if (g_sit_escape) std::fprintf(stderr, "  sit then escape: %d turn-abouts\n", sit_turnabouts);
+        if (g_kick_head_home) std::fprintf(stderr, "  kick head home: %d kicks waited for the head, %d fired at the 1 s timeout\n", kick_home_waits, kick_home_timeouts);
         if (g_detour_vx > 0.0) std::fprintf(stderr, "  detour: %d detours, %d ended by the ahead sector reading clear, %d repeats, %d reopened\n", brain.detours(), brain.detour_clear(), brain.detour_repeats(), brain.detour_reopens());
         if (g_sit_k > 0.0) std::fprintf(stderr, g_sit_progress ? "  sit on stall: %d sits (progress under %.2f of its own prediction for %.1f s; %.1f s seated)\n" : "  sit on surprise: %d sits (the traversal TLE above %.1f x its running mean for %.1f s; %.1f s seated)\n", sits, g_sit_k, g_sit_need_s, g_sit_hold_s);
         if (sweep_on && g_saccade_speed > 0.0)
@@ -3772,6 +3797,8 @@ int main(int argc, char** argv) {
             DuckBody::train_contacts = true;
         } else if (a == "--bam-dump") {
             DuckBody::bam.dump = next("--bam-dump");
+        } else if (a == "--kick-head-home") {
+            g_kick_head_home = true;
         } else if (a == "--stop-walker-hold") {
             g_stop_walker_hold = true;
         } else if (a == "--escape-vx") {
