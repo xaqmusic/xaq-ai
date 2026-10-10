@@ -195,6 +195,13 @@ public:
     // the ticks, and the yaw (69/min) and the forward command (76/min) reverse at the same rate: the forward-and-back of an
     // approach.  0 = off, byte-identical.
     void set_seek_gate_range(double m) { seek_gate_range_m_ = m; }
+    // §17.117 GH / GM: the seek gate's sector choice.  The gate maps the target's bearing to a sector at +-0.3 rad (17 deg),
+    // but the sensor's ahead sector is +-5.6 deg (columns 3-4 of 8 across 45 deg; --tof-body bins the same widths), so a target
+    // 6-17 deg off the nose is gated "ahead" while its return lies in a side sector.  GM (--seek-gate-mid RAD) sets the
+    // boundary (0.098 = the sensor's); GH (--seek-gate-hyst RAD) holds the sector chosen until the bearing is past the
+    // boundary by RAD (the operator, 2026-10-10: "did you try hysteresis on the gate?").  Defaults 0.3 / 0 = byte-identical.
+    void set_seek_gate_slots(double mid, double hyst) { gate_mid_ = mid; gate_hyst_ = hyst; }
+    int  gate_switches() const { return gate_switches_; }
     int  seek_gate_ranged() const { return seek_gate_ranged_; }
     int  stand_downs() const { return stand_downs_; }
     int  seek_gate_kept() const { return seek_gate_kept_; }   // ticks a nearer return was left visible
@@ -480,6 +487,8 @@ private:
     double seek_gate_near_m_ = 0.0; int seek_gate_kept_ = 0;   // §17.117 G1
     double stand_down_r_ = 0.0; int stand_downs_ = 0;           // §17.117 SD
     double seek_gate_range_m_ = 0.0; int seek_gate_ranged_ = 0;  // §17.117 RG
+    double gate_mid_ = 0.3, gate_hyst_ = 0.0; int gate_slot_ = -1, gate_switches_ = 0;   // §17.117 GM / GH
+    int gate_slot_for(double ego);
     bool seek_nearer_now_ = false;                              // G1's condition this tick
     double detour_back_vx_ = 0.0; int detour_arm_ticks_ = 25, detour_max_ticks_ = 150, detour_out_ticks_ = 75;   // §17.117 D1
     int detour_back_ticks_ = 0;   // §17.117 RL

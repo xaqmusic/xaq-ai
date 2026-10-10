@@ -156,10 +156,11 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     // The 12-slot sense the bridge appends as load slots: attitude, rates, accel, the
     // sensed velocity again, two spare.
     std::array<float, 4> tof_s = tof;
+    if (!(seek_gate_ && last_steer_ == 3 && seek_present_)) gate_slot_ = -1;   // GH: the held sector lapses with the seek's reference
     if (seek_gate_ && last_steer_ == 3 && seek_present_) {
         // the seek loop won the reference last tick: the slot of its target's sector reads free
         // (slots 12/13/14 = columns 0-2 / 3-4 / 5-7 = left / ahead / right; the sector by the bearing)
-        const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1);
+        const int slot = gate_slot_for(seek_ego_);   // §17.117 GM / GH (the defaults: +-0.3 rad, no hysteresis)
         // §17.117 G1: the slot's proximity is 1 - range / 1 m; a return nearer than the target by M is not the target
         bool nearer = seek_gate_near_m_ > 0.0 && tof_s[size_t(slot)] > 0.0f && seek_range_ > 0.0
                             && 1.0 - double(tof_s[size_t(slot)]) < seek_range_ - seek_gate_near_m_;
@@ -418,7 +419,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         // released within a metre of it -- the thing walked to is a ToF hit -- handing yaw to the avoidance that orbits it)
         std::array<float, 4> tof_r = tof;
         if (seek_gate_ && last_steer_ == 3) {
-            const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1); tof_r[size_t(slot)] = 0.0f;
+            const int slot = (gate_hyst_ > 0.0 && gate_slot_ >= 0) ? gate_slot_ : (seek_ego_ < -gate_mid_ ? 0 : (seek_ego_ > gate_mid_ ? 2 : 1));   // GH: this tick's held sector
+            tof_r[size_t(slot)] = 0.0f;
             if (seek_gate_range_m_ > 0.0 && seek_present_ && seek_range_ > 0.0)   // §17.117 RG: and the target's return wherever it fell
                 for (int k = 0; k < 3; ++k)
                     if (k != slot && tof_r[size_t(k)] > 0.0f && std::fabs((1.0 - double(tof_r[size_t(k)])) - seek_range_) < seek_gate_range_m_) tof_r[size_t(k)] = 0.0f;
@@ -520,6 +522,23 @@ void IntentAdapter::set_learning(bool on) {
             }
         }
     }
+}
+
+int IntentAdapter::gate_slot_for(double ego) {
+    const int raw = ego < -gate_mid_ ? 0 : (ego > gate_mid_ ? 2 : 1);
+    if (gate_hyst_ <= 0.0) return raw;
+    int s = gate_slot_ < 0 ? raw : gate_slot_;
+    if (raw != s) {
+        const double h = gate_hyst_;
+        const bool go = (s == 1 && raw == 0) ? ego < -gate_mid_ - h
+                      : (s == 1 && raw == 2) ? ego >  gate_mid_ + h
+                      : (s == 0 && raw == 1) ? ego > -gate_mid_ + h
+                      : (s == 2 && raw == 1) ? ego <  gate_mid_ - h
+                      : true;                                   // across the ahead sector in one tick
+        if (go) { s = raw; ++gate_switches_; }
+    }
+    gate_slot_ = s;
+    return s;
 }
 
 void IntentAdapter::set_map_learning(bool on) {
