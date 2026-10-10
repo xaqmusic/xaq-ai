@@ -15,6 +15,13 @@ namespace ogma {
 
 namespace {
 
+double checked_range(double v, double lo, double hi, std::string const& key) {
+    if (!(v >= lo && v <= hi))
+        throw std::invalid_argument("EPM param '" + key + "' = " + std::to_string(v) + " is outside [" +
+                                    std::to_string(lo) + ", " + std::to_string(hi) + "]");
+    return v;
+}
+
 template <typename T>
 T clamp01(T v) { return std::clamp(v, T{0}, T{1}); }
 
@@ -147,6 +154,14 @@ ParamSchema EPM::params_schema() const {
             ParamValue{0.0}},
         {"mitosis_drift_gain",      ParamMutability::HotMutable, "Fraction of the mean residual applied as the drift correction (1 = jump to the corrected mean).", ParamValue{1.0}},
         {"stale_prune_enabled",     ParamMutability::HotMutable, "GNG stale-prune",             ParamValue{true}},
+        {"learning_enabled",        ParamMutability::HotMutable,
+            "Inference-only switch.  false = the EPM keeps answering (winner, quant_error, TLE, novelty, tokens) "
+            "but learns nothing: the GNG step is a pure nearest-node query (no prototype moves, insertion, "
+            "pruning, deaths, baking or mitosis; its step counter does not advance), transition counts are not "
+            "updated, the commissioning window does not advance and the residual RMS scale is held.  For "
+            "evaluating a learned vocabulary on held-out input without the evaluation changing it.  The TLE "
+            "EMA, novelty threshold and winner histogram keep running: they measure, they do not learn.  "
+            "true (default) = byte-identical.", ParamValue{true}},
         {"health_death_spares_baked", ParamMutability::HotMutable,
          "Exempt BAKED nodes from the GNG health-death sweep (2026-09-01).  The health system "
          "silently removed baked-immunity: a long perturbation starves an earned node of "
@@ -157,6 +172,41 @@ ParamSchema EPM::params_schema() const {
          "permanent facts about the body — earned nodes should not be forgotten for a long "
          "absence.  false = legacy, byte-identical.", ParamValue{false}},
         {"stale_window_factor",     ParamMutability::HotMutable, "Stale prune window",          ParamValue{12000.0}},
+        // ---- Retention: the GNG's health model -------------------------------------------
+        // How long an unvisited node is remembered.  That is a property of the world's own
+        // timescale, not of the clusterer: a short-term motor vocabulary wants fast forgetting,
+        // a vocabulary of rare events or any long-term memory wants slow.  Health rises by
+        // health_boost per visit and decays every step by health_base_decay^(1/(1 + health *
+        // health_resilience_k)), so a young node is volatile and a well-used one resists; a node
+        // below health_death_threshold is culled (one per step at most, max_deaths_per_tick,
+        // death_cooldown_steps apart, never below health_death_min_nodes).  Defaults are the
+        // historical constants: byte-identical.
+        {"health_boost",            ParamMutability::HotMutable,
+            "Health gained per visit (activity-dependent potentiation).",
+            ParamValue{0.5}, ParamValue{0.0}, ParamValue{100.0}},
+        {"health_base_decay",       ParamMutability::HotMutable,
+            "Per-step health decay factor at health 0 (the youngest node's).  0.995 = half-life of "
+            "~138 steps; 1.0 = no decay (nothing is forgotten).  Older nodes decay more slowly "
+            "through health_resilience_k.",
+            ParamValue{0.995}, ParamValue{0.5}, ParamValue{1.0}},
+        {"health_resilience_k",     ParamMutability::HotMutable,
+            "How fast health turns into resistance to decay: the decay exponent is "
+            "1 / (1 + health * k).",
+            ParamValue{0.08}, ParamValue{0.0}, ParamValue{10.0}},
+        {"health_death_threshold",  ParamMutability::HotMutable,
+            "Health below which a node is culled.", ParamValue{0.01}, ParamValue{0.0}, ParamValue{100.0}},
+        {"health_death_min_nodes",  ParamMutability::HotMutable,
+            "No health deaths while the vocabulary is at or below this size.",
+            ParamValue{int64_t{16}}, ParamValue{int64_t{0}}, ParamValue{int64_t{1000000}}},
+        {"death_cooldown_steps",    ParamMutability::HotMutable,
+            "Minimum steps between two health deaths.",
+            ParamValue{int64_t{25}}, ParamValue{int64_t{0}}, ParamValue{int64_t{100000000}}},
+        {"max_deaths_per_tick",     ParamMutability::HotMutable,
+            "Health deaths allowed per step.", ParamValue{int64_t{1}}, ParamValue{int64_t{0}}, ParamValue{int64_t{1000}}},
+        {"near_baked_fraction",     ParamMutability::HotMutable,
+            "Fraction of baking_threshold above which a node is near-baked: half-speed health decay "
+            "and immune to isolation and stale pruning.",
+            ParamValue{0.6}, ParamValue{0.0}, ParamValue{1.0}},
         {"subtract_descending_prediction", ParamMutability::HotMutable, "Subtract prediction.<m>", ParamValue{true}},
         {"normalize_residual", ParamMutability::ConstructionOnly,
          "B v2 (2026-08-14): running-RMS normalize the post-subtraction residual before the GNG, "
@@ -306,8 +356,18 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "mitosis_drift_ratio",     [&](auto const& v){ gng_cfg.drift_ratio             = float(get_double(v, "mitosis_drift_ratio")); });
     apply_param(params, "mitosis_drift_gain",      [&](auto const& v){ gng_cfg.drift_gain              = float(get_double(v, "mitosis_drift_gain")); });
     apply_param(params, "stale_prune_enabled",     [&](auto const& v){ gng_cfg.stale_prune_enabled     = get_bool(v, "stale_prune_enabled"); });
+    apply_param(params, "learning_enabled",        [&](auto const& v){ learning_enabled_ = get_bool(v, "learning_enabled"); });
+    gng_cfg.learning_enabled = learning_enabled_;
     apply_param(params, "health_death_spares_baked", [&](auto const& v){ gng_cfg.health_death_spares_baked = get_bool(v, "health_death_spares_baked"); });
     apply_param(params, "stale_window_factor",     [&](auto const& v){ gng_cfg.stale_window_factor     = float(get_double(v, "stale_window_factor")); });
+    apply_param(params, "health_boost",            [&](auto const& v){ gng_cfg.health_boost            = float(checked_range(get_double(v, "health_boost"), 0.0, 100.0, "health_boost")); });
+    apply_param(params, "health_base_decay",       [&](auto const& v){ gng_cfg.health_base_decay       = float(checked_range(get_double(v, "health_base_decay"), 0.5, 1.0, "health_base_decay")); });
+    apply_param(params, "health_resilience_k",     [&](auto const& v){ gng_cfg.health_resilience_k     = float(checked_range(get_double(v, "health_resilience_k"), 0.0, 10.0, "health_resilience_k")); });
+    apply_param(params, "health_death_threshold",  [&](auto const& v){ gng_cfg.health_death_threshold  = float(checked_range(get_double(v, "health_death_threshold"), 0.0, 100.0, "health_death_threshold")); });
+    apply_param(params, "health_death_min_nodes",  [&](auto const& v){ gng_cfg.health_death_min_nodes  = int(checked_range(double(get_int(v, "health_death_min_nodes")), 0.0, 1e6, "health_death_min_nodes")); });
+    apply_param(params, "death_cooldown_steps",    [&](auto const& v){ gng_cfg.death_cooldown_steps    = int(checked_range(double(get_int(v, "death_cooldown_steps")), 0.0, 1e8, "death_cooldown_steps")); });
+    apply_param(params, "max_deaths_per_tick",     [&](auto const& v){ gng_cfg.max_deaths_per_tick     = int(checked_range(double(get_int(v, "max_deaths_per_tick")), 0.0, 1000.0, "max_deaths_per_tick")); });
+    apply_param(params, "near_baked_fraction",     [&](auto const& v){ gng_cfg.near_baked_fraction     = float(checked_range(get_double(v, "near_baked_fraction"), 0.0, 1.0, "near_baked_fraction")); });
     apply_param(params, "insertion_autotune",          [&](auto const& v){ gng_cfg.insertion_autotune          = get_bool(v, "insertion_autotune"); });
     apply_param(params, "insertion_autotune_quantile", [&](auto const& v){ gng_cfg.insertion_autotune_quantile = float(get_double(v, "insertion_autotune_quantile")); });
     insertion_autotune_ = gng_cfg.insertion_autotune;
@@ -456,8 +516,18 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "mitosis_drift_ratio")     gng_->set_drift_ratio(float(get_double(value, k)));
     else if (k == "mitosis_drift_gain")      gng_->set_drift_gain(float(get_double(value, k)));
     else if (k == "stale_prune_enabled")     gng_->set_stale_prune_enabled(get_bool(value, k));
+    else if (k == "learning_enabled")        { learning_enabled_ = get_bool(value, k); gng_->set_learning_enabled(learning_enabled_); }
     else if (k == "health_death_spares_baked") gng_->set_health_death_spares_baked(get_bool(value, k));
     else if (k == "stale_window_factor")     gng_->set_stale_window_factor(float(get_double(value, k)));
+    else if (k == "max_nodes")               gng_->set_max_nodes(int(get_int(value, k)));   // declared hot; was refused live
+    else if (k == "health_boost")            gng_->set_health_boost(float(checked_range(get_double(value, k), 0.0, 100.0, k)));
+    else if (k == "health_base_decay")       gng_->set_health_base_decay(float(checked_range(get_double(value, k), 0.5, 1.0, k)));
+    else if (k == "health_resilience_k")     gng_->set_health_resilience_k(float(checked_range(get_double(value, k), 0.0, 10.0, k)));
+    else if (k == "health_death_threshold")  gng_->set_health_death_threshold(float(checked_range(get_double(value, k), 0.0, 100.0, k)));
+    else if (k == "health_death_min_nodes")  gng_->set_health_death_min_nodes(int(checked_range(double(get_int(value, k)), 0.0, 1e6, k)));
+    else if (k == "death_cooldown_steps")    gng_->set_death_cooldown_steps(int(checked_range(double(get_int(value, k)), 0.0, 1e8, k)));
+    else if (k == "max_deaths_per_tick")     gng_->set_max_deaths_per_tick(int(checked_range(double(get_int(value, k)), 0.0, 1000.0, k)));
+    else if (k == "near_baked_fraction")     gng_->set_near_baked_fraction(float(checked_range(get_double(value, k), 0.0, 1.0, k)));
     else if (k == "kalman_q")                gng_->set_kalman_q(float(get_double(value, k)));
     else if (k == "kalman_gain_cap")         gng_->set_kalman_gain_cap(float(get_double(value, k)));
     else if (k == "modality_group" || k == "modality_name" || k == "encoder_kind"
@@ -806,7 +876,9 @@ void EPM::tick(uint64_t tick_id) {
 
     // Commissioning window: observe the RAW input, before conditioning, so the
     // measured range describes the sensor rather than the current mapping of it.
-    if (dim_autocal_ticks_ > 0 && !dim_autocal_done_ &&
+    // Frozen (learning_enabled = false): the window neither observes nor
+    // finalises, since finalising rescales the input space and resets the GNG.
+    if (learning_enabled_ && dim_autocal_ticks_ > 0 && !dim_autocal_done_ &&
         pending_proprio_ && pending_proprio_->values.size() > 0) {
         dim_autocal_observe(pending_proprio_->values.data(),
                             int(pending_proprio_->values.size()));
@@ -846,16 +918,21 @@ void EPM::tick(uint64_t tick_id) {
         // residual's own running RMS (§5: adapt, don't tune) so the GNG tiles
         // DIRECTION at unit scale.  Off = byte-identical (B v1 behavior).
         if (normalize_residual_) {
-            const float nrm = latent.norm();
-            residual_rms_ = residual_rms_ <= 0.0f
-                                ? std::max(nrm, 1e-6f)
-                                : 0.99f * residual_rms_ + 0.01f * nrm;
+            // Frozen: apply the scale as learned, do not adapt it to the input
+            // under evaluation (it is the GNG's coordinate system).
+            if (learning_enabled_) {
+                const float nrm = latent.norm();
+                residual_rms_ = residual_rms_ <= 0.0f
+                                    ? std::max(nrm, 1e-6f)
+                                    : 0.99f * residual_rms_ + 0.01f * nrm;
+            }
             if (residual_rms_ > 1e-6f) latent *= (1.0f / residual_rms_);
         }
     }
 
     apply_neuro_scaling();
 
+    if (!learning_enabled_) frozen_last_input_ = latent;
     auto [winner_id, quant_error] = gng_->step(latent);
 
     // GNG bootstrap: first ~2 ticks return placeholder (winner_id=0, qe=0).
@@ -891,7 +968,10 @@ void EPM::tick(uint64_t tick_id) {
     // Stage 3 (K2): score the move against the table as it stood BEFORE this step.
     const float logprob_surp = transition_logprob_
         ? transition_logprob_surprise(prev_winner_id_for_transitions_, winner_id) : -1.0f;
-    if (prev_winner_id_for_transitions_ >= 0 &&
+    // Frozen: the transition table is learned sequence structure and is held;
+    // the previous winner is still tracked so resuming counts from a real move.
+    if (learning_enabled_ &&
+        prev_winner_id_for_transitions_ >= 0 &&
         prev_winner_id_for_transitions_ != winner_id) {
         ++transition_counts_[prev_winner_id_for_transitions_][winner_id];
     }
@@ -902,7 +982,7 @@ void EPM::tick(uint64_t tick_id) {
 
     // Stage 4: the Mitosis Gatekeeper (with the innovation-mean drift test inside it).
     last_just_mitosis_ = false;
-    if (mitosis_gatekeeper_) last_just_mitosis_ = gng_->maybe_mitosis(winner_id, latent);
+    if (mitosis_gatekeeper_ && learning_enabled_) last_just_mitosis_ = gng_->maybe_mitosis(winner_id, latent);
     last_tle_         = tle;
     last_quant_error_ = quant_error;
 
@@ -945,12 +1025,26 @@ nlohmann::json EPM::diag_lite() const {
         j["drift_count"]   = gng_->drift_count();
         j["baked_now"]     = gng_->last_step_baked();   // a node earned its place THIS step
     }
+    j["learning_enabled"] = learning_enabled_;
     // Stage 0.4 instruments — normalised innovation and innovation whiteness.
     j["tle_norm"] = last_tle_ / std::max(ema_tle_, 1e-6f);
     {
         const float var = qe_sq_ema_   - qe_mean_ema_ * qe_mean_ema_;
         const float cov = qe_lag1_ema_ - qe_mean_ema_ * qe_mean_ema_;
         j["qe_lag1"] = var > 1e-12f ? std::clamp(cov / var, -1.0f, 1.0f) : 0.0f;
+    }
+    return j;
+}
+
+// The diag stream's full payload: the clone-ready snapshot plus the learning
+// switch, which is a param and so deliberately absent from snapshot_state().
+nlohmann::json EPM::diag_snapshot() const {
+    nlohmann::json j = snapshot_state();
+    j["learning_enabled"] = learning_enabled_;
+    // Frozen, the GNG's last_x stops at the last learned input; show the live one.
+    if (!learning_enabled_ && frozen_last_input_.size() > 0 && j["gng"].is_object()) {
+        j["gng"]["last_x"] = std::vector<float>(frozen_last_input_.data(),
+                                                frozen_last_input_.data() + frozen_last_input_.size());
     }
     return j;
 }
@@ -1029,6 +1123,10 @@ void EPM::restore_state(nlohmann::json const& s) {
     }
     if (gng_ && s.contains("gng") && !s["gng"].is_null()) {
         *gng_ = ami_ogma::v3::GNG::from_json(s["gng"]);
+        // from_json builds a fresh Config; the learning switch is this
+        // instance's param, not snapshot state, so re-apply it.  Without this a
+        // restore (or clone) of a frozen EPM would silently resume learning.
+        gng_->set_learning_enabled(learning_enabled_);
     }
     has_prev_prototype_ = s.value("has_prev_prototype", false);
     if (has_prev_prototype_ && s.contains("prev_winner_prototype") &&

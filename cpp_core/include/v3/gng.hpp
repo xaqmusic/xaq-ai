@@ -210,6 +210,21 @@ public:
         // isolated/stale pruning. Catches concepts that are clearly forming
         // but haven't crossed the binary bake gate yet.
         float near_baked_fraction      = 0.6f;
+
+        // ---------------------------------------------------------------------
+        // Learning switch (inference-only mode)
+        // ---------------------------------------------------------------------
+        // An operator evaluating a learned vocabulary on held-out input needs the
+        // evaluation not to change the vocabulary it is evaluating.  With
+        // learning_enabled = false, step() is a pure query: it reports the same
+        // {winner, distance} the learning path would report for this input, and
+        // mutates nothing that is learned — no prototype, error, edge, visit,
+        // health, history, insertion, prune, death, bake or post-bake update, no
+        // autotune sample, and the step counter does not advance (so stale and
+        // death windows do not elapse while frozen).  maybe_mitosis() and
+        // boost_visits() are no-ops.  Explicit operator calls (prune_unbaked,
+        // reset_topology) still act.  true (default) = byte-identical.
+        bool  learning_enabled         = true;
     };
 
     explicit GNG(const Config& cfg);
@@ -281,8 +296,26 @@ public:
     // Runtime-adjustable parameters (wired to UI sliders)
     // ---------------------------------------------------------------------------
 
+    /// Inference-only mode (see Config::learning_enabled).
+    void set_learning_enabled(bool enabled)    { cfg_.learning_enabled = enabled; }
+    bool learning_enabled() const              { return cfg_.learning_enabled; }
+
     void set_stale_prune_enabled(bool enabled) { cfg_.stale_prune_enabled = enabled; }
     void set_health_death_spares_baked(bool v) { cfg_.health_death_spares_baked = v; }
+
+    // Health model (Config "Biological health model").  These set how long an unvisited node
+    // is remembered, which is a property of the world's timescale, not of the clusterer: a
+    // short-term motor vocabulary wants fast forgetting, a vocabulary of rare events (or any
+    // long-term memory) wants slow.  Defaults are the historical constants.
+    void set_health_boost(float v)            { cfg_.health_boost = v; }
+    void set_health_base_decay(float v)       { cfg_.health_base_decay = v; }
+    void set_health_resilience_k(float v)     { cfg_.health_resilience_k = v; }
+    void set_health_death_threshold(float v)  { cfg_.health_death_threshold = v; }
+    void set_health_death_min_nodes(int v)    { cfg_.health_death_min_nodes = v; }
+    void set_death_cooldown_steps(int v)      { cfg_.death_cooldown_steps = v; }
+    void set_max_deaths_per_tick(int v)       { cfg_.max_deaths_per_tick = v; }
+    void set_near_baked_fraction(float v)     { cfg_.near_baked_fraction = v; }
+    void set_max_nodes(int v)                 { cfg_.max_nodes = v; }
     void set_stale_window_factor(float factor) { cfg_.stale_window_factor = factor; }
     void set_min_insertion_error(float e)      { cfg_.min_insertion_error = e; }
 
