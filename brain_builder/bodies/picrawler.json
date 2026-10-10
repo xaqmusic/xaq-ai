@@ -1,0 +1,400 @@
+{
+  "body": "picrawler",
+  "host": "godot",
+  "env_target": "picrawler",
+  "title": "PiCrawler (Godot)",
+  "launch_hint": "godot_host launcher → picrawler; the config must be in the launcher allowlist",
+  "description": "The four-legged PiCrawler in the Godot host (godot_host/project/scripts/picrawler_body.gd). Sources marked oracle are god's-eye and must not feed a deployed brain (see sensor_legitimacy doc).",
+  "sources": [
+    {
+      "name": "imu",
+      "topic": "reality.proprio.imu",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "sin(yaw), cos(yaw), forward speed, angular speed"
+    },
+    {
+      "name": "joints",
+      "topic": "reality.proprio.joints",
+      "payload": "ProprioToken",
+      "dims": 12,
+      "description": "4 hip1 + 4 hip2 + 4 knee, normalised"
+    },
+    {
+      "name": "joints_dyn",
+      "topic": "reality.proprio.joints_dyn",
+      "payload": "ProprioToken",
+      "dims": 24,
+      "description": "[q(12), Δq(12)] — the joints stream + its per-tick delta"
+    },
+    {
+      "name": "camera",
+      "topic": "host.video.color",
+      "payload": "RawImageFrame",
+      "dims": 0,
+      "description": "forward raycast RGB frame (OV5647 optics), when vision is on",
+      "optional": true
+    },
+    {
+      "name": "compass",
+      "topic": "reality.proprio.compass",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "sin(yaw), cos(yaw) — world-frame heading"
+    },
+    {
+      "name": "radial_compass",
+      "topic": "reality.proprio.radial_compass",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "body-frame outward direction (x, z)"
+    },
+    {
+      "name": "target_compass",
+      "topic": "reality.proprio.target_compass",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "body-frame direction to the active target — (0,0) when none"
+    },
+    {
+      "name": "target_loom",
+      "topic": "reality.proprio.target_loom",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "fraction of the forward raycast hitting the active target (looming)"
+    },
+    {
+      "name": "bucket_fl",
+      "topic": "reality.proprio.bucket_fl",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "foot-contact bucket for FL (1 stance / 0 swing)"
+    },
+    {
+      "name": "bucket_fr",
+      "topic": "reality.proprio.bucket_fr",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "foot-contact bucket for FR (1 stance / 0 swing)"
+    },
+    {
+      "name": "bucket_rl",
+      "topic": "reality.proprio.bucket_rl",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "foot-contact bucket for RL (1 stance / 0 swing)"
+    },
+    {
+      "name": "bucket_rr",
+      "topic": "reality.proprio.bucket_rr",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "foot-contact bucket for RR (1 stance / 0 swing)"
+    },
+    {
+      "name": "leg_id_fl",
+      "topic": "reality.proprio.leg_id_fl",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "constant leg id for FL"
+    },
+    {
+      "name": "leg_id_fr",
+      "topic": "reality.proprio.leg_id_fr",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "constant leg id for FR"
+    },
+    {
+      "name": "leg_id_rl",
+      "topic": "reality.proprio.leg_id_rl",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "constant leg id for RL"
+    },
+    {
+      "name": "leg_id_rr",
+      "topic": "reality.proprio.leg_id_rr",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "constant leg id for RR"
+    },
+    {
+      "name": "tgt_align_fl",
+      "topic": "reality.proprio.tgt_align_fl",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "target-alignment bucket 0..3 for FL"
+    },
+    {
+      "name": "tgt_align_fr",
+      "topic": "reality.proprio.tgt_align_fr",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "target-alignment bucket 0..3 for FR"
+    },
+    {
+      "name": "tgt_align_rl",
+      "topic": "reality.proprio.tgt_align_rl",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "target-alignment bucket 0..3 for RL"
+    },
+    {
+      "name": "tgt_align_rr",
+      "topic": "reality.proprio.tgt_align_rr",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "target-alignment bucket 0..3 for RR"
+    },
+    {
+      "name": "feet_y",
+      "topic": "reality.proprio.feet_y",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "per-leg foot height — ORACLE: absolute world Y"
+    },
+    {
+      "name": "imu6",
+      "topic": "reality.proprio.imu6",
+      "payload": "ProprioToken",
+      "dims": 6,
+      "description": "body-frame specific force [ax ay az] + gyro [gx gy gz]"
+    },
+    {
+      "name": "feet_y_gravity_cmd_acc",
+      "topic": "reality.proprio.feet_y_gravity_cmd_acc",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "commanded-FK foot height on an accelerometer-only gravity estimate"
+    },
+    {
+      "name": "feet_y_gravity_cmd_imu",
+      "topic": "reality.proprio.feet_y_gravity_cmd_imu",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "commanded-FK foot height on a gyro-fused gravity estimate"
+    },
+    {
+      "name": "feet_y_gravity_cmd",
+      "topic": "reality.proprio.feet_y_gravity_cmd",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "feet_y_gravity from commanded servo angles"
+    },
+    {
+      "name": "feet_y_gravity_fk",
+      "topic": "reality.proprio.feet_y_gravity_fk",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "feet_y_gravity via analytic FK from measured angles"
+    },
+    {
+      "name": "feet_y_gravity",
+      "topic": "reality.proprio.feet_y_gravity",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "per-leg foot height below the chassis along gravity (encoder FK · accelerometer up)"
+    },
+    {
+      "name": "feet_y_ground",
+      "topic": "reality.proprio.feet_y_ground",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "per-leg foot height above the ground = feet_y_body + belly ToF clearance"
+    },
+    {
+      "name": "feet_y_body",
+      "topic": "reality.proprio.feet_y_body",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "per-leg foot height relative to the chassis — the Markov-compliant twin of feet_y"
+    },
+    {
+      "name": "foot_contact",
+      "topic": "reality.proprio.foot_contact",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "per-leg true foot contact (1 touching / 0 airborne)"
+    },
+    {
+      "name": "ego_heading",
+      "topic": "reality.proprio.ego_heading",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "dead-reckoned heading integrated from the body-frame gyro"
+    },
+    {
+      "name": "vel_ego",
+      "topic": "reality.proprio.vel_ego",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "[v_right v_forward] body-frame velocity — SOFT ORACLE (world velocity projected)"
+    },
+    {
+      "name": "stride_v",
+      "topic": "reality.proprio.stride_v",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "[v_right v_forward] estimated from stance-leg FK, IMU-fused"
+    },
+    {
+      "name": "slip",
+      "topic": "reality.proprio.slip",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "re-afference mismatch: EMA of the FK-vs-IMU innovation"
+    },
+    {
+      "name": "beacon",
+      "topic": "reality.proprio.beacon",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "fraction of the frame that is beacon-coloured"
+    },
+    {
+      "name": "ground_clearance",
+      "topic": "reality.proprio.ground_clearance",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "belly ToF: normalised distance from the belly to the ground beneath"
+    },
+    {
+      "name": "upright",
+      "topic": "reality.proprio.upright",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "chassis up-vector alignment with gravity (1 upright, 0 on its side, -1 inverted)"
+    },
+    {
+      "name": "joint_torque",
+      "topic": "reality.proprio.joint_torque",
+      "payload": "ProprioToken",
+      "dims": 12,
+      "description": "per-servo PD command budget, normalised — not applied torque"
+    },
+    {
+      "name": "foot_load",
+      "topic": "reality.proprio.foot_load",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "per-leg foot normal force normalised by body weight — the CoG sensor"
+    },
+    {
+      "name": "joint_load",
+      "topic": "reality.proprio.joint_load",
+      "payload": "ProprioToken",
+      "dims": 12,
+      "description": "per-servo velocity-tracking deficit, normalised — the load proxy"
+    },
+    {
+      "name": "tilt",
+      "topic": "reality.proprio.tilt",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "sin(pitch), cos(pitch), sin(roll), cos(roll)",
+      "optional": true
+    }
+  ],
+  "sinks": [
+    {
+      "name": "fl_hip1",
+      "topic": "action.fl_hip1",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FL hip1 servo"
+    },
+    {
+      "name": "fl_hip2",
+      "topic": "action.fl_hip2",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FL hip2 servo"
+    },
+    {
+      "name": "fl_knee",
+      "topic": "action.fl_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FL knee servo"
+    },
+    {
+      "name": "fr_hip1",
+      "topic": "action.fr_hip1",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FR hip1 servo"
+    },
+    {
+      "name": "fr_hip2",
+      "topic": "action.fr_hip2",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FR hip2 servo"
+    },
+    {
+      "name": "fr_knee",
+      "topic": "action.fr_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FR knee servo"
+    },
+    {
+      "name": "rl_hip1",
+      "topic": "action.rl_hip1",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RL hip1 servo"
+    },
+    {
+      "name": "rl_hip2",
+      "topic": "action.rl_hip2",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RL hip2 servo"
+    },
+    {
+      "name": "rl_knee",
+      "topic": "action.rl_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RL knee servo"
+    },
+    {
+      "name": "rr_hip1",
+      "topic": "action.rr_hip1",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RR hip1 servo"
+    },
+    {
+      "name": "rr_hip2",
+      "topic": "action.rr_hip2",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RR hip2 servo"
+    },
+    {
+      "name": "rr_knee",
+      "topic": "action.rr_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RR knee servo"
+    }
+  ],
+  "reads": [],
+  "events": [
+    {
+      "name": "hit",
+      "topic": "events.hit",
+      "event_type": "hit",
+      "description": "graded reward — duty-cycled toward standing height"
+    },
+    {
+      "name": "miss",
+      "topic": "events.miss",
+      "event_type": "miss",
+      "description": "the complement of hit"
+    },
+    {
+      "name": "episode_end",
+      "topic": "events.episode_end",
+      "event_type": "episode_end",
+      "description": "episode boundary"
+    },
+    {
+      "name": "reset",
+      "topic": "events.reset",
+      "event_type": "reset",
+      "description": "body reset"
+    }
+  ]
+}

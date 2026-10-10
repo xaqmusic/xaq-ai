@@ -95,6 +95,10 @@ ParamSchema SequenceGNG::params_schema() const {
         {"prototype_per_winner_dim",    ParamMutability::ConstructionOnly, "Per-winner sub-encoding size", ParamValue{int64_t{32}}},
         {"motif_branching_threshold",   ParamMutability::HotMutable,       "Successor-entropy threshold for mitosis", ParamValue{0.4}},
         {"baking_threshold",            ParamMutability::HotMutable,       "GNG baking visit count", ParamValue{int64_t{50}}},
+        {"health_death_spares_baked",   ParamMutability::HotMutable,
+         "Exempt BAKED nodes from the GNG health-death sweep — see the EPM's param of the "
+         "same name for the mechanism and measurements (the operator's prune-then-relearn "
+         "cascade). false = legacy, byte-identical.", ParamValue{false}},
         {"min_insertion_error",         ParamMutability::HotMutable,       "GNG min_insertion_error", ParamValue{0.02}},
         {"epsilon_b",                   ParamMutability::HotMutable,       "GNG winner LR", ParamValue{0.05}},
         {"epsilon_n",                   ParamMutability::HotMutable,       "GNG neighbour LR", ParamValue{0.003}},
@@ -147,6 +151,7 @@ void SequenceGNG::on_setup(Bus* bus, ParamMap const& params) {
     ami_ogma::v3::GNG::Config gng_cfg;
     gng_cfg.dim                 = projection_dim_;
     apply_param(params, "baking_threshold",        [&](auto const& v){ gng_cfg.baking_threshold        = int(get_int(v, "baking_threshold")); });
+    apply_param(params, "health_death_spares_baked", [&](auto const& v){ gng_cfg.health_death_spares_baked = get_bool(v, "health_death_spares_baked"); });
     apply_param(params, "min_insertion_error",     [&](auto const& v){ gng_cfg.min_insertion_error     = float(get_double(v, "min_insertion_error")); });
     apply_param(params, "epsilon_b",               [&](auto const& v){ gng_cfg.epsilon_b               = float(get_double(v, "epsilon_b")); });
     apply_param(params, "epsilon_n",               [&](auto const& v){ gng_cfg.epsilon_n               = float(get_double(v, "epsilon_n")); });
@@ -185,6 +190,7 @@ void SequenceGNG::on_param_change(std::string_view key, ParamValue const& value)
     auto k = std::string(key);
     if      (k == "motif_branching_threshold") motif_branching_threshold_ = float(get_double(value, k));
     else if (k == "baking_threshold")          gng_->set_baking_threshold(int(get_int(value, k)));
+    else if (k == "health_death_spares_baked") gng_->set_health_death_spares_baked(get_bool(value, k));
     else if (k == "min_insertion_error")       gng_->set_min_insertion_error(float(get_double(value, k)));
     else if (k == "epsilon_b")                 gng_->set_epsilon_b(float(get_double(value, k)));
     else if (k == "epsilon_n")                 gng_->set_epsilon_n(float(get_double(value, k)));

@@ -97,6 +97,12 @@ using MessagePtr = std::shared_ptr<const Message>;
 struct RealityToken : Message {
     int     winner_id        = -1;     // stable GNG node ID
     float   quant_error      = 0.0f;   // distance from latent to winner prototype
+    float   expected_error   = 0.0f;   // the channel's running EXPECTED TLE (the EPM's ema_tle): its
+                                       // innovation spread, the Kalman-faithful quantity a fusion
+                                       // weights by (Kalman-lessons Stage 2).  Measured 2026-09-05: the
+                                       // winner node's own running residual was tried first and refuted —
+                                       // a noisy channel tiles its noise finely, so every node's own error
+                                       // is small and the per-node value cannot tell noisy from clean.
     float   transition_surp  = 0.0f;   // distance between consecutive winners
     float   tle              = 0.0f;   // dual TLE = α·QE + β·transition_surp
     float   novelty_threshold = 0.0f;  // adaptive threshold this tick
@@ -107,6 +113,7 @@ struct RealityToken : Message {
     int     node_count       = 0;
     int     baked_count       = 0;
     int     mitosis_count    = 0;
+    int     drift_count      = 0;      // Stage 4: prototype corrections by the innovation-mean test
     std::vector<int> pruned_ids;
     std::vector<int> history_trace;    // last N winner IDs for sequence learners
     // Phase 6.6.E: forward-pointing analogue of history_trace.  Empty unless

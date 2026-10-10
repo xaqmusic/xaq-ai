@@ -38,6 +38,46 @@ Vendored header:
 | godot-cpp | MIT | https://github.com/godotengine/godot-cpp, pinned to commit `7e18e40` (fetched at build time) |
 | Godot Engine API (`extension_api.json`, `gdextension_interface.h`) | MIT | dumped from Godot 4.6.x |
 
+## MuJoCo host (`mj_host/`)
+
+Fetched at build time, pinned by version and by SHA-256:
+
+| Component | Version | License | Source |
+|---|---|---|---|
+| MuJoCo (official prebuilt, Linux x86-64) | 3.12.0 | Apache-2.0 | https://github.com/google-deepmind/mujoco/releases |
+| ONNX Runtime (official prebuilt, Linux x64) | 1.29.0 | MIT | https://github.com/microsoft/onnxruntime/releases |
+
+Vendored, unmodified, under `mj_host/models/microduck/`:
+
+| Component | License | Source |
+|---|---|---|
+| Microduck MJCF model — 4 scene/robot XML files and 38 STL meshes | Apache-2.0 | https://github.com/pollen-robotics/microduck_rl at commit `d424a0c`, path `src/mjlab_microduck/robot/microduck/` |
+| `scaffolds/alpha_stand.onnx` — the trained standing policy, used as a prop | Apache-2.0 | https://github.com/pollen-robotics/microduck at commit `590b986`, path `policies/alpha_stand.onnx` |
+| `scaffolds/alpha_walking.onnx` — the trained walking policy, used as the intent boundary's walker | Apache-2.0 | https://github.com/pollen-robotics/microduck at commit `3954496`, path `policies/alpha_walking.onnx` |
+
+The robot, its model and its policies are Pollen Robotics'
+([`microduck`](https://github.com/pollen-robotics/microduck),
+[`microduck_rl`](https://github.com/pollen-robotics/microduck_rl)), both Apache-2.0. Of the nine
+shipped policies only `alpha_stand` is vendored, and it is a scaffold rather than part of the
+brain ([`scaffolds/README.md`](mj_host/models/microduck/scaffolds/README.md)). Neither
+repository is a submodule.
+Provenance and the re-vendoring rule are in
+[`mj_host/models/microduck/README.md`](mj_host/models/microduck/README.md).
+
+## Brain builder (`brain_builder/`)
+
+Fetched at build time via CMake `FetchContent` (`brain_builder/CMakeLists.txt`):
+
+| Component | Version | License | Source |
+|---|---|---|---|
+| Dear ImGui (docking branch) | v1.91.9b-docking | MIT | https://github.com/ocornut/imgui |
+| imgui-node-editor | develop @ b302971 | MIT | https://github.com/thedmd/imgui-node-editor |
+| GLFW | 3.4 | zlib | https://github.com/glfw/glfw |
+| GoogleTest (tests only) | 1.14.0 | BSD-3-Clause | https://github.com/google/googletest |
+
+System dependencies (linked, not vendored): OpenGL (Mesa), X11 (the GLFW X11 backend;
+the Wayland backend is an opt-in build flag).
+
 ## Python (`python/`)
 
 | Component | License | Notes |

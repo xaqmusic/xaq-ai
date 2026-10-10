@@ -350,7 +350,8 @@ not part of the gait substrate.
 ## 6. L3 — Descending predictor (closes the strange loop — §5)
 
 `DescendingPredictor`: `predicted_latent = W·consensus + b` per target; each EPM
-subtracts the prediction before its GNG step → its residual IS the prediction error;
+subtracts the prediction before its GNG step → its residual IS the prediction error
+(*the predictor's update pairs it with the context one tick late unless `residual_align` is on — default off, Kalman charter Stage 3*);
 SGD on the error. Top-down prediction meets bottom-up sensation; **action makes the
 prediction come true.** Note this is the *same primitive* that closes the gait keyframe
 loop (§2.3) — one mechanism, two placements (nested blankets, §2.1).

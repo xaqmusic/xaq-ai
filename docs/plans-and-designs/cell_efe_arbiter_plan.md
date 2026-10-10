@@ -1,5 +1,7 @@
 # Cell L2 — EFE Arbiter (policy selection over competent loops)
 
+> **SUPERSEDED IN PART (2026-09-06).** The §"EFE formulation" below describes the `value_race` path; every Cell configuration runs `scoring_mode: efe`, whose formulas, horizon (one step) and open questions are in [`loop_and_arbitration_recipe.md`](loop_and_arbitration_recipe.md) §3. The PLAY loop this plan's open items ask for was built (`cell_play_loop_plan.md`). Design rationale here still stands.
+
 *Design + build spec. Branch `cell-maze`. Task #34. Doctrine refs: §2 (policy selection into the future), §5 (MotorBus authority-gated learning), §6 (whiten by running scale, no tuning), §8 (default-off, verify the consumer fires).*
 
 ## Goal

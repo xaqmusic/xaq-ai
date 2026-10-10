@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "Cell \u2014 MAZE VISION-ONLY (ablation)",
-    "description": "Ablation arm: action layer follows percept.visual_bearing directly. Vision is line-of-sight only \u2014 food occluded behind the L-bend wall \u2192 [0,0] \u2192 the bug is blind until it rounds the bend. Expected weakest arm.",
+    "description": "AUDIT 2026-09-06: the mechanism described below NEVER OPERATED in this config -- proprio_state_dims 2 vs the compass modules' 3-value tokens fed the EPMs zero vectors, so trust was a constant 0.5/0.5 and BearingFusion blended at 50/50 (Kalman charter Stage 1; audit R4). Use the_cell_maze_fusion__dims3.json for a live fusion. Ablation arm: action layer follows percept.visual_bearing directly. Vision is line-of-sight only \u2014 food occluded behind the L-bend wall \u2192 [0,0] \u2192 the bug is blind until it rounds the bend. Expected weakest arm.",
     "env_target": "cell",
     "phase_tag": "6.12.maze.fusion.vision_only",
     "reflex_modular": true,

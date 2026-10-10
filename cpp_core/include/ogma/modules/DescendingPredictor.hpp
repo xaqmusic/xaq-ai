@@ -81,6 +81,13 @@ private:
         Eigen::VectorXf     b;              // (target_dim)
         Eigen::VectorXf     cached_prediction;
         bool                cached_valid    = false;
+        // Kalman-lessons Stage 3 (K6): the prediction one forward pass earlier, so a
+        // residual that measures prediction(t-2) can be paired with the context that
+        // produced it (residual_align); and the RLS inverse-covariance over [ctx; 1]
+        // (only allocated when update_method == "rls").
+        Eigen::VectorXf     cached_prediction_prev;
+        bool                cached_valid_prev = false;
+        Eigen::MatrixXd     P;              // double: RLS loses P's symmetry in float within ~1000 steps
         // Confidence tracking — rolling mean of |error| / |target|.
         float               err_ema         = 1.0f;
         float               norm_ema        = 1.0f;
@@ -94,6 +101,15 @@ private:
     std::string  update_method_     = "sgd";
     float        learning_rate_     = 0.01f;
     float        rls_forget_        = 0.99f;
+    // Kalman-lessons Stage 3 (K6).  residual_align: the residual published at t-1
+    // measures the prediction made at t-2 (the EPM subtracts prediction(t-1) at tick t),
+    // but the legacy update pairs it with the context cached at t-1 — one tick off.
+    // true = pair with the context two ticks back.  false (default) = legacy, byte-
+    // identical.  rls_p0: the initial diagonal of P for update_method "rls" (true
+    // recursive least squares; the earlier "rls" was SGD with a rescaled constant and
+    // no config used it).
+    bool         residual_align_    = false;
+    float        rls_p0_            = 100.0f;
     float        init_noise_scale_  = 0.01f;
     int64_t      freeze_after_ticks_= 0;
     int64_t      confidence_window_ = 100;
@@ -111,6 +127,8 @@ private:
     bool                                         consensus_seen_   = false;
     Eigen::VectorXf                              cached_consensus_;
     bool                                         cached_consensus_valid_ = false;
+    Eigen::VectorXf                              cached_consensus_prev_;         // K6: one forward pass earlier
+    bool                                         cached_consensus_prev_valid_ = false;
 
     uint64_t                                     ticks_run_        = 0;
     // sub_ids_ lives on Module base (Phase 6.6.A teardown fix).

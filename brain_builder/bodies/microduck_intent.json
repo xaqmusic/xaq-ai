@@ -1,0 +1,232 @@
+{
+  "body": "microduck",
+  "host": "mj_host",
+  "env_target": "microduck",
+  "title": "Microduck - intent level (mj_host --level2)",
+  "launch_hint": "./mj_host/run.sh launcher → a level-2 preset, or ogma_mjhost --level2 --graph <config>",
+  "description": "The duck above Pollen's walking policy (mj_host/src/IntentAdapter.cpp): the brain senses body velocity, the IMU, the ToF and its own odometry, and publishes a twist intent (+ the head's fore-aft slide) and skill requests. The host also reads the loops' outputs and the arbiter's gains to set the heading reference, and reads CloudMap / BearingSeekLoop / MotionField state directly (stops, gaze, logging) -- those reads are not topics and are not drawn.",
+  "sources": [
+    {
+      "name": "intent",
+      "topic": "reality.proprio.intent",
+      "payload": "ProprioToken",
+      "dims": 3,
+      "description": "the sensed body velocity in the walker's command units [vx vy vyaw], each unit-clamped"
+    },
+    {
+      "name": "imu",
+      "topic": "reality.proprio.imu",
+      "payload": "ProprioToken",
+      "dims": 6,
+      "description": "projected gravity [g_x g_y g_z] + gyro [w_x w_y w_z]"
+    },
+    {
+      "name": "sense",
+      "topic": "reality.proprio.sense",
+      "payload": "ProprioToken",
+      "dims": 16,
+      "description": "the walker's load slots: g_x, g_y, pitch/roll/yaw rate x0.3, accel x/y/z /20, sensed vx, vy, heading deviation from its 60 s average /pi, map TLE, ToF left/ahead/right/too-close (the seek gate frees the target's sector). Host flags PREPEND slots: --intent-fore-sense +1 (the head's fore-aft), --intent-range-sense +1 (seek range /2), --intent-mover-sense +2 (the chased mover's velocity), --intent-head-sense +2; the ★ configs carry 18"
+    },
+    {
+      "name": "place_in",
+      "topic": "reality.proprio.place_in",
+      "payload": "ProprioToken",
+      "dims": 13,
+      "description": "the map EPM's input: the dead-reckoned pose (4) + the depth form's columns (--place-form; 13 in the ★ configs)"
+    },
+    {
+      "name": "depth_in",
+      "topic": "reality.proprio.depth_in",
+      "payload": "ProprioToken",
+      "dims": 64,
+      "description": "the 8x8 depth frame with its own mean removed (--place-form stacked only)",
+      "optional": true
+    },
+    {
+      "name": "tof_points",
+      "topic": "reality.proprio.tof_points",
+      "payload": "ProprioToken",
+      "dims": 392,
+      "description": "one ToF cast, repeated between casts (12.5 Hz): [still, yaw, trunk_z, odom_x, odom_y, 64 x (x,y,z) levelled body frame, sensor origin (x,y,z), 64 x the empty zones' ray ends]; CloudMap and MotionField read it",
+      "optional": true
+    },
+    {
+      "name": "heading",
+      "topic": "reality.proprio.heading",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "the unwrapped dead-reckoned heading (rad)"
+    },
+    {
+      "name": "odom",
+      "topic": "reality.proprio.odom",
+      "payload": "ProprioToken",
+      "dims": 3,
+      "description": "the dead-reckoned pose [x, y, yaw] in the odometry frame (BearingSeekLoop, SkillOutcomeLoop)",
+      "optional": true
+    },
+    {
+      "name": "vel_ego",
+      "topic": "reality.proprio.vel_ego",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "the body velocity [lateral, forward] in command units"
+    },
+    {
+      "name": "tof",
+      "topic": "reality.proprio.tof",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "the ToF summary [left, ahead, right, too-close] for an avoidance loop"
+    }
+  ],
+  "sinks": [
+    {
+      "name": "vx",
+      "topic": "action.vx",
+      "payload": "ActionOut",
+      "description": "forward velocity command, unit-scaled to the walker's range"
+    },
+    {
+      "name": "vy",
+      "topic": "action.vy",
+      "payload": "ActionOut",
+      "description": "lateral velocity command"
+    },
+    {
+      "name": "vyaw",
+      "topic": "action.vyaw",
+      "payload": "ActionOut",
+      "description": "yaw-rate command (--twist-yaw-range)"
+    },
+    {
+      "name": "head_fore",
+      "topic": "action.head_fore",
+      "payload": "ActionOut",
+      "description": "the head's fore-aft slide (--intent-head-translate F), the walker's fourth motor",
+      "optional": true
+    },
+    {
+      "name": "neck_pitch",
+      "topic": "action.neck_pitch",
+      "payload": "ActionOut",
+      "description": "the head as walker motors (--intent-head F): neck pitch",
+      "optional": true
+    },
+    {
+      "name": "head_pitch",
+      "topic": "action.head_pitch",
+      "payload": "ActionOut",
+      "description": "head pitch (--intent-head)",
+      "optional": true
+    },
+    {
+      "name": "head_yaw",
+      "topic": "action.head_yaw",
+      "payload": "ActionOut",
+      "description": "head yaw (--intent-head)",
+      "optional": true
+    },
+    {
+      "name": "head_roll",
+      "topic": "action.head_roll",
+      "payload": "ActionOut",
+      "description": "head roll (--intent-head)",
+      "optional": true
+    }
+  ],
+  "reads": [
+    {
+      "name": "place",
+      "topic": "reality.proprio.place",
+      "payload": "RealityToken",
+      "description": "the map EPM's token: winner = place id, TLE = map surprise (slot 11 of sense)"
+    },
+    {
+      "name": "thing",
+      "topic": "reality.cognitive.thing",
+      "payload": "RealityToken",
+      "description": "the thing EPM's token, logged"
+    },
+    {
+      "name": "thing_kind",
+      "topic": "reality.cognitive.thing_kind",
+      "payload": "RealityToken",
+      "description": "the thing-kind EPM's token, logged"
+    },
+    {
+      "name": "play_bearing",
+      "topic": "percept.play_bearing",
+      "payload": "ProprioToken",
+      "description": "the play loop's bearing: the heading reference when play wins"
+    },
+    {
+      "name": "seek_bearing",
+      "topic": "percept.seek_bearing",
+      "payload": "ProprioToken",
+      "description": "the seek loop's bearing: the heading reference when seek (arbiter.gain.vision) wins"
+    },
+    {
+      "name": "avoid_bearing",
+      "topic": "percept.avoid_bearing",
+      "payload": "ProprioToken",
+      "description": "an avoidance loop's bearing: the reference when arbiter.gain.klino wins"
+    },
+    {
+      "name": "gain_play",
+      "topic": "arbiter.gain.play",
+      "payload": "ProprioToken",
+      "description": "the arbiter's gate on the play loop"
+    },
+    {
+      "name": "gain_vision",
+      "topic": "arbiter.gain.vision",
+      "payload": "ProprioToken",
+      "description": "the arbiter's gate on the seek loop"
+    },
+    {
+      "name": "gain_klino",
+      "topic": "arbiter.gain.klino",
+      "payload": "ProprioToken",
+      "description": "the arbiter's gate on an avoidance loop"
+    },
+    {
+      "name": "seek_value",
+      "topic": "reality.cognitive.seek_value",
+      "payload": "ProprioToken",
+      "description": "the seek loop's need: arrival detection (need -> 0 at range < 0.3 m)"
+    },
+    {
+      "name": "seek_range",
+      "topic": "reality.cognitive.seek_range",
+      "payload": "ProprioToken",
+      "description": "the seek target's range: the range sense and arrival"
+    },
+    {
+      "name": "skill",
+      "topic": "intent.skill",
+      "payload": "ProprioToken",
+      "description": "a skill request [id, 1] on one tick: the host runs Pollen's kick / peck"
+    },
+    {
+      "name": "outcome",
+      "topic": "reality.cognitive.outcome",
+      "payload": "ProprioToken",
+      "description": "the outcome loop's record (node, prediction, observation, surprise), logged"
+    },
+    {
+      "name": "outcome_need",
+      "topic": "reality.cognitive.outcome_need",
+      "payload": "ProprioToken",
+      "description": "the outcome loop's renewed target [need, x, y]: the host's thing bearing"
+    }
+  ],
+  "events": [
+    {
+      "name": "reset",
+      "topic": "events.reset",
+      "event_type": "reset",
+      "description": "fired when the recovery harness stands the body back up"
+    }
+  ]
+}

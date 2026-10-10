@@ -152,6 +152,8 @@ ever touches the world through this interface.
 
 ### 2.2 How expected free energy is actually scored — the arbiter's honest ledger
 
+> *As built, 2026-09-06:* the Cell's arbiter runs the `efe` scoring — hunger × reach in shared units, epistemic terms gated by need, one step, greedy. Whether that is the precision this section asks for or the proxy it forbids is [register O3](plans-and-designs/open_items_register.md); the formulas are in the [recipe](plans-and-designs/loop_and_arbitration_recipe.md) §3.
+
 The (b) bar demands action minimize the agent's OWN predicted expected free energy,
 **measured as such**. A hand-scaled comparison of two heuristic value scalars (a "value
 race" between a proximity level and a planner value) is NOT that — it is the mis-scaled
@@ -189,6 +191,8 @@ higher-level prior and must carry its own error.
   arbiter needs is [0,1] confidence, not a common physical scale.
 
 ### 2.3 Precision is a controlled variable — the principled arbitration
+
+> *As built, 2026-09-06:* precision-weighted fusion runs in the maze-fusion testbed (`LateralVoter` → `BearingFusion`; the activity term is the shipped form of the leg-kill lesson); the study brain races. See the [recipe](plans-and-designs/loop_and_arbitration_recipe.md) §4 and register O1/O3.
 
 Active inference is precision-weighting at its core: the balance between **sensory
 precision** (trust the senses) and **prior/model precision** (trust the model) decides
@@ -244,6 +248,8 @@ decoration).
 ---
 
 ## 3. The decomposition methodology — how to build a capability
+
+> *As built, 2026-09-06:* the race-vs-fuse question this section leaves open has a stated rule (fuse redundant estimates of one hidden state; race policies with different goals) and stays open on measurement — [register O1](plans-and-designs/open_items_register.md).
 
 **Split the capability into parts that each (i) have an easily-learnable structure,
 (ii) carry their own honest learning signal, and (iii) pass an independent gate. Prove

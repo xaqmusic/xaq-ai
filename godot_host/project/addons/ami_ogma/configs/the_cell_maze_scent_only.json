@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "Cell \u2014 MAZE SCENT-ONLY (ablation)",
-    "description": "Ablation arm: same fusion pipeline (VisualBearing + EPMs + voter all present for comparable trust telemetry) but the action layer follows percept.scent_compass directly. Scent routes around the L-bend but is diffuse/orbit-prone near the food peak.",
+    "description": "AUDIT 2026-09-06: the mechanism described below NEVER OPERATED in this config -- proprio_state_dims 2 vs the compass modules' 3-value tokens fed the EPMs zero vectors, so trust was a constant 0.5/0.5 and BearingFusion blended at 50/50 (Kalman charter Stage 1; audit R4). Use the_cell_maze_fusion__dims3.json for a live fusion. Ablation arm: same fusion pipeline (VisualBearing + EPMs + voter all present for comparable trust telemetry) but the action layer follows percept.scent_compass directly. Scent routes around the L-bend but is diffuse/orbit-prone near the food peak.",
     "env_target": "cell",
     "phase_tag": "6.12.maze.fusion.scent_only",
     "reflex_modular": true,

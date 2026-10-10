@@ -12,7 +12,7 @@
 
 - **dopamine / serotonin** — bounded [0, 1] state variables with per-tick decay and event-driven boosts. v3 calls these the "transmitter pair"; the names are biological referents, not literal models.
 - **reward_signal** — `dopamine - baseline`, the credit-assignment signal `ActionDecoder` and `MotorRepertoire` consume.
-- **scaling factors** — four dimensionless multiplicands (`epsilon_b_scale`, `min_insertion_error_scale`, `mitosis_threshold_scale`, `novelty_threshold_scale`) that shape EPM/GNG learning dynamics across the bath. v3's `NeurochemicalState.epsilon_b_scale()` and friends are the source.
+- **scaling factors** — four dimensionless multiplicands (`epsilon_b_scale`, `min_insertion_error_scale`, `mitosis_threshold_scale` [scales a gate that is default-off and was never called before 2026-09-05 — register O4], `novelty_threshold_scale`) that shape EPM/GNG learning dynamics across the bath. v3's `NeurochemicalState.epsilon_b_scale()` and friends are the source.
 
 It does **not** own valence or drive: those live in HomeostaticDrive (drive-error setpoints) and the per-instance `valence_map` reinterpreted under HomeostaticDrive (state-conditional drive-reduction estimate). Removing the valence-map ownership from NeurochemState relative to v3 is the single largest semantic change.
 

@@ -57,7 +57,7 @@ The recurrent-predictor variant called out in `v4_algorithmic_gaps.md` Open Ques
 
 1. The predictor publishes one `PredictionToken` per declared target every tick.
 2. `PredictionToken.predicted_latent.dim == target_EPM.projection_dim`.
-3. The supervisory update for tick t uses `RealityToken_target(t-1)` (Feedback) and `ConsensusToken(t-1)` (held in a one-tick buffer because the consumer of the prediction — the target EPM — needs the prediction in the *current* tick before it has produced its `RealityToken(t)`). The predictor's tick(t):
+3. *(Audit note 2026-09-06: with `residual_align` off, the default, the residual at t−1 measures the prediction made at t−2 and is paired with the context of t−1 — a one-tick misalignment under which true RLS diverges; Kalman charter Stage 3.)* The supervisory update for tick t uses `RealityToken_target(t-1)` (Feedback) and `ConsensusToken(t-1)` (held in a one-tick buffer because the consumer of the prediction — the target EPM — needs the prediction in the *current* tick before it has produced its `RealityToken(t)`). The predictor's tick(t):
    1. reads `consensus.<level>(t)` (Direct) for forward pass,
    2. reads `reality.<modality>(t-1)` (Feedback) for supervisory update vs. its previous prediction,
    3. publishes `prediction.<modality>(t)` for the target EPM to consume (Feedback) at tick t+1.
@@ -119,3 +119,13 @@ When the DescendingPredictor is wired into a Phase-3 integration of the maze ben
 
 - **Per-voter, not global.** Each LateralVoter that has a paired DescendingPredictor reads from its own `consensus.<level>` and projects to its own targets. There is no cross-level prediction sharing in Phase 1.
 - **Recurrent variant deferred.** A small per-voter recurrent predictor (GRU-shaped, but inside the voter, not a global workspace) is the documented next step in `v4_algorithmic_gaps.md`. Phase 1 ships AR(1); promotion happens via a contract amendment when the AR(1) form is shown to have a meaningful capacity gap on a real benchmark.
+
+## Kalman-lessons Stage 3 (K6) — two options, both default-off (2026-09-05)
+
+| Key | Type | Mutability | Default | Description |
+|---|---|---|---|---|
+| `residual_align` | bool | HotMutable | false | The residual the EPM publishes at t−1 measures the prediction made at t−2 (the EPM subtracts prediction(t−1) at tick t), but the legacy update pairs it with the context cached at t−1: one tick off. `true` pairs it with the context and prediction from t−2. Found by the bench (Stage 0); **proved by `rls`**, which diverges on the misaligned pairs (S3: residual² 8 × 10¹⁰) and converges on the aligned ones. SGD tolerates the misalignment, so `false` stays the default for byte-identity. |
+| `update_method` = `rls` | string | ConstructionOnly | `sgd` | Now true recursive least squares over `[context; 1]` with forgetting `rls_forget`: the Kalman filter for a static parameter vector. Double-precision covariance, re-symmetrised each step, trace capped at the prior. The earlier `rls` was SGD with a rescaled constant and no config used it. Needs `residual_align=true`. On the bench's fast-rotation target it beats SGD's residual by 26 % and sits within 1.65× of the Kalman floor where SGD cannot beat persistence; the rest of the gap is the two-lag context, not the estimator. |
+| `rls_p0` | double | ConstructionOnly | 100 | Initial diagonal of the RLS covariance (diffuse prior). |
+
+Charter with the measurements: [`../epm_kalman_lessons_plan.md`](../epm_kalman_lessons_plan.md).

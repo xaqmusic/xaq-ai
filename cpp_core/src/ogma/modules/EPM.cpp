@@ -51,7 +51,8 @@ EPM::EncoderKind parse_encoder_kind(std::string const& s) {
     if (s == "stft" || s == "audio") return EPM::EncoderKind::STFT;
     if (s == "rbf"     ) return EPM::EncoderKind::RBF;
     if (s == "identity") return EPM::EncoderKind::Identity;
-    throw std::invalid_argument("EPM: unknown encoder_kind '" + s + "' (expected jl/stft/rbf/identity)");
+    if (s == "jl_state") return EPM::EncoderKind::JLState;
+    throw std::invalid_argument("EPM: unknown encoder_kind '" + s + "' (expected jl/stft/rbf/identity/jl_state)");
 }
 
 } // namespace
@@ -72,6 +73,7 @@ std::vector<TopicSpec> EPM::input_topics() const {
             specs.push_back(TopicSpec{input_topic_, std::type_index(typeid(RawAudioFrame))});
             break;
         case EncoderKind::RBF:
+        case EncoderKind::JLState:
             specs.push_back(TopicSpec{input_topic_, std::type_index(typeid(ProprioToken))});
             break;
         case EncoderKind::Identity:
@@ -100,11 +102,12 @@ ParamSchema EPM::params_schema() const {
     return {
         {"modality_group", ParamMutability::ConstructionOnly, "video|audio|proprio|consensus", std::nullopt},
         {"modality_name",  ParamMutability::ConstructionOnly, "Trailing component of output topic", std::nullopt},
-        {"encoder_kind",   ParamMutability::ConstructionOnly, "jl|stft|rbf|identity", std::nullopt},
+        {"encoder_kind",   ParamMutability::ConstructionOnly, "jl|stft|rbf|identity|jl_state (jl_state: the frozen JL projection over a ProprioToken of proprio_state_dims values, L2-normalised before and after -- for a wide, homogeneous state such as a depth matrix, where the RBF grid's bandwidth in that many dimensions flattens every input to the same activation profile (measured on the duck's 64-zone ToF, 2026-09-11: the raw input spread doubled, the RBF latent spread fell to 0.6x); no per-dim ranges, no auto-derived projection_dim)", std::nullopt},
         {"input_topic",    ParamMutability::ConstructionOnly, "Bus topic to subscribe", std::nullopt},
         {"projection_dim", ParamMutability::ConstructionOnly, "GNG input dim.  When OMITTED and `proprio_state_dims` is provided (RBF encoder), derived as max(48, 8 * proprio_state_dims) so the GNG always has enough random-projection capacity for its input to spread into distinguishable clusters.  Empirical floor at pd=48 + per-dim allowance of 8x — phase 7.2-EPM Stage 2 showed pd=24 with 3-D input collapses cluster discrimination (chassis_y -50%, falls 10x), while pd=48 recovers.  Explicit values in config still honoured.", ParamValue{int64_t{128}}},
         {"baking_threshold",        ParamMutability::HotMutable, "GNG baking visit count",      ParamValue{int64_t{50}}},
         {"min_insertion_error",     ParamMutability::HotMutable, "GNG min_insertion_error",     ParamValue{0.02}},
+        {"bake_gate",               ParamMutability::HotMutable, "The consistency gate a node must pass to bake (squared-error EMA); 0 = min_insertion_error, as before. A host freezing insertion by raising min_insertion_error sets this to keep the bake check honest.", ParamValue{0.0}},
         {"lambda_new",              ParamMutability::HotMutable, "GNG lambda_new",              ParamValue{int64_t{25}}},
         {"max_age",                 ParamMutability::HotMutable, "GNG edge max_age",            ParamValue{int64_t{88}}},
         {"epsilon_b",               ParamMutability::HotMutable, "GNG winner LR",               ParamValue{0.05}},
@@ -115,6 +118,13 @@ ParamSchema EPM::params_schema() const {
         {"tle_alpha",               ParamMutability::HotMutable, "Weight of QE in dual TLE",    ParamValue{0.7}},
         {"tle_beta",                ParamMutability::HotMutable, "Weight of TS in dual TLE",    ParamValue{0.3}},
         {"tle_ema_alpha",           ParamMutability::HotMutable, "TLE EMA decay",               ParamValue{0.05}},
+        {"transition_surprise_kind", ParamMutability::HotMutable,
+            "Kalman-lessons Stage 3 (K2).  'displacement' (default) = ||proto_t - proto_{t-1}||, the C++ port's "
+            "stand-in, byte-identical.  'logprob' = the Python reference's surprise restored: -log P(cur|prev) "
+            "from the EPM's own transition counts (before this step is added), Laplace-smoothed, normalised by "
+            "log N to [0,1], conditioned on a move (a stay scores 0, a first arrival 1).  Feeds tle via tle_beta "
+            "and the token's transition_surp; the bench's S4 showed the displacement cannot separate an expected "
+            "transition from a teleport (ratio 1.03).", ParamValue{std::string("displacement")}},
         {"novelty_threshold_multiplier", ParamMutability::HotMutable, "EMA scale for novelty",  ParamValue{1.5}},
         {"novelty_floor",           ParamMutability::HotMutable, "Min novelty threshold",       ParamValue{0.01}},
         {"history_trace_size",      ParamMutability::HotMutable, "Rolling winner trace length", ParamValue{int64_t{5}}},
@@ -123,7 +133,29 @@ ParamSchema EPM::params_schema() const {
         {"mitosis_enabled",         ParamMutability::HotMutable, "GNG mitosis on/off",          ParamValue{true}},
         {"mitosis_error_threshold", ParamMutability::HotMutable, "Post-bake mean error trigger", ParamValue{0.30}},
         {"mitosis_check_interval",  ParamMutability::HotMutable, "Visits between mitosis checks", ParamValue{int64_t{50}}},
+        {"mitosis_gatekeeper",      ParamMutability::HotMutable,
+            "Kalman-lessons Stage 4.  ⚠ The v4 EPM never called GNG::maybe_mitosis: mitosis_enabled and its threshold "
+            "were plumbed and neuro-scaled but the gatekeeper was never invoked, so mitosis has been dead in every v4 "
+            "EPM (found 2026-09-05; bench S4 mitosis_count 0 on every tick).  true = call the gatekeeper each tick on "
+            "the winner (the v3 semantics: a baked node whose post-bake error stays above mitosis_error_threshold "
+            "splits).  false (default) = the dead path, byte-identical.", ParamValue{false}},
+        {"mitosis_drift_ratio",     ParamMutability::HotMutable,
+            "Kalman-lessons Stage 4: the innovation-mean test inside the gatekeeper (needs mitosis_gatekeeper).  At a "
+            "check, bias = |mean post-bake residual|, spread = RMS post-bake residual; bias/spread > ratio means the "
+            "world MOVED: the prototype is corrected by mitosis_drift_gain * mean residual and the node kept, instead "
+            "of splitting.  Noise alone gives ~1/sqrt(n) (0.14 at 50 visits).  0 (default) = off, byte-identical.",
+            ParamValue{0.0}},
+        {"mitosis_drift_gain",      ParamMutability::HotMutable, "Fraction of the mean residual applied as the drift correction (1 = jump to the corrected mean).", ParamValue{1.0}},
         {"stale_prune_enabled",     ParamMutability::HotMutable, "GNG stale-prune",             ParamValue{true}},
+        {"health_death_spares_baked", ParamMutability::HotMutable,
+         "Exempt BAKED nodes from the GNG health-death sweep (2026-09-01).  The health system "
+         "silently removed baked-immunity: a long perturbation starves an earned node of "
+         "visits and its health decays to death in minutes — the operator's observed "
+         "prune-then-relearn cascade on the picrawler, and measured on the microduck regime "
+         "EPM as 25/41 node ids dead in 50 min with the standing regime's identity churning "
+         "1→16→29 (orphaning every consumer keyed on winner_id).  For a REGIME vocabulary — "
+         "permanent facts about the body — earned nodes should not be forgotten for a long "
+         "absence.  false = legacy, byte-identical.", ParamValue{false}},
         {"stale_window_factor",     ParamMutability::HotMutable, "Stale prune window",          ParamValue{12000.0}},
         {"subtract_descending_prediction", ParamMutability::HotMutable, "Subtract prediction.<m>", ParamValue{true}},
         {"normalize_residual", ParamMutability::ConstructionOnly,
@@ -145,6 +177,24 @@ ParamSchema EPM::params_schema() const {
         {"insertion_autotune_quantile", ParamMutability::ConstructionOnly,
             "Percentile of the GNG's own recent squared-TLE distribution used as the insertion floor.  A RANK, not a scale: dimensionless and invariant to the signal's units, which is what makes this adaptive rather than another constant tuned to a signal's magnitude.  0.30 matches the v3 reference.",
             ParamValue{0.30}},
+        {"gain_kind",               ParamMutability::ConstructionOnly,
+            "PER-NODE KALMAN GAIN (Kalman-lessons Stage 1, docs/plans-and-designs/epm_kalman_lessons_plan.md).  "
+            "'linear' (default) = the legacy anneal eps_b*(1 - 0.9*visits/N), byte-identical.  'kalman' = each node "
+            "carries a scalar prior-variance ratio p in units of its own observation noise: per win p += kalman_q; "
+            "K = min(kalman_gain_cap, p/(p+1)); w += K*(x-w); p *= 1-K.  With kalman_p0 = 1 and kalman_q = 0 that is "
+            "exactly the Kalman filter for a constant (gain 1/(n+1)) and baked nodes stay frozen.  Measured on the "
+            "bench, the legacy anneal leaves 24% of a baked prototype on its birth point and 2x the MSE of the mean "
+            "of the same samples.  eps_b, its visit/health damping and its neuro scaling are unused in this mode.",
+            ParamValue{std::string("linear")}},
+        {"kalman_p0",               ParamMutability::ConstructionOnly,
+            "Initial p for every node born (1 = the seed counts as one sample).", ParamValue{1.0}},
+        {"kalman_q",                ParamMutability::HotMutable,
+            "Process-noise ratio added to p per win.  0 (default) = baked nodes frozen; > 0 = every node, baked "
+            "included, settles at the random-walk steady-state gain (q + sqrt(q^2 + 4q))/2 and tracks slow drift.",
+            ParamValue{0.0}},
+        {"kalman_gain_cap",         ParamMutability::HotMutable,
+            "Upper bound on K (1 = uncapped).  Lower it (e.g. to eps_b) if young nodes get dragged across cluster "
+            "boundaries by the high early gain.", ParamValue{1.0}},
         {"dim_autocal_ticks",       ParamMutability::ConstructionOnly,
             "COMMISSIONING WINDOW, in input frames.  When > 0, the EPM measures its own per-dim input ranges over the first N frames instead of being told them, then installs them and RESETS the GNG topology so the vocabulary is re-earned in the calibrated space.  This is the adaptive form of `dim_min`/`dim_max`: §0 rule 2 requires the input be conditioned before discretisation, and a hand-measured constant per sensor is the smell that names a missing mechanism.  Window length is legitimately application-set — it must cover the body's characteristic motion (several stride cycles for a gait, a full sweep for a sensor), because a range set by a startup transient is worse than the default.  Mutually exclusive with explicit dim_min/dim_max (throws).  RBF encoder only (throws for jl/stft, whose dims are homogeneous pixels/samples and must not be rescaled per-dim).  0 = off, byte-identical.",
             ParamValue{int64_t{0}}},
@@ -195,6 +245,12 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "tle_alpha",      [&](auto const& v){ tle_alpha_      = float(get_double(v, "tle_alpha")); });
     apply_param(params, "tle_beta",       [&](auto const& v){ tle_beta_       = float(get_double(v, "tle_beta")); });
     apply_param(params, "tle_ema_alpha",  [&](auto const& v){ tle_ema_alpha_  = float(get_double(v, "tle_ema_alpha")); });
+    apply_param(params, "transition_surprise_kind", [&](auto const& v){
+        auto s = get_string(v, "transition_surprise_kind");
+        if      (s == "displacement") transition_logprob_ = false;
+        else if (s == "logprob")      transition_logprob_ = true;
+        else throw std::invalid_argument("EPM: transition_surprise_kind must be 'displacement' or 'logprob' (got '" + s + "')");
+    });
     apply_param(params, "novelty_threshold_multiplier", [&](auto const& v){ novelty_threshold_multiplier_ = float(get_double(v, "novelty_threshold_multiplier")); });
     apply_param(params, "novelty_floor",  [&](auto const& v){ novelty_floor_  = float(get_double(v, "novelty_floor")); });
     apply_param(params, "history_trace_size", [&](auto const& v){ history_trace_size_ = int(get_int(v, "history_trace_size")); });
@@ -235,6 +291,7 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     gng_cfg.dim                 = projection_dim_;
     apply_param(params, "baking_threshold",        [&](auto const& v){ gng_cfg.baking_threshold        = int(get_int(v, "baking_threshold")); });
     apply_param(params, "min_insertion_error",     [&](auto const& v){ gng_cfg.min_insertion_error     = float(get_double(v, "min_insertion_error")); });
+    apply_param(params, "bake_gate",               [&](auto const& v){ gng_cfg.bake_gate               = float(get_double(v, "bake_gate")); });
     apply_param(params, "lambda_new",              [&](auto const& v){ gng_cfg.lambda_new              = int(get_int(v, "lambda_new")); });
     apply_param(params, "max_age",                 [&](auto const& v){ gng_cfg.max_age                 = int(get_int(v, "max_age")); });
     apply_param(params, "epsilon_b",               [&](auto const& v){ gng_cfg.epsilon_b               = float(get_double(v, "epsilon_b")); });
@@ -245,11 +302,24 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "mitosis_enabled",         [&](auto const& v){ gng_cfg.mitosis_enabled         = get_bool(v, "mitosis_enabled"); });
     apply_param(params, "mitosis_error_threshold", [&](auto const& v){ gng_cfg.mitosis_error_threshold = float(get_double(v, "mitosis_error_threshold")); });
     apply_param(params, "mitosis_check_interval",  [&](auto const& v){ gng_cfg.mitosis_check_interval  = int(get_int(v, "mitosis_check_interval")); });
+    apply_param(params, "mitosis_gatekeeper",      [&](auto const& v){ mitosis_gatekeeper_             = get_bool(v, "mitosis_gatekeeper"); });
+    apply_param(params, "mitosis_drift_ratio",     [&](auto const& v){ gng_cfg.drift_ratio             = float(get_double(v, "mitosis_drift_ratio")); });
+    apply_param(params, "mitosis_drift_gain",      [&](auto const& v){ gng_cfg.drift_gain              = float(get_double(v, "mitosis_drift_gain")); });
     apply_param(params, "stale_prune_enabled",     [&](auto const& v){ gng_cfg.stale_prune_enabled     = get_bool(v, "stale_prune_enabled"); });
+    apply_param(params, "health_death_spares_baked", [&](auto const& v){ gng_cfg.health_death_spares_baked = get_bool(v, "health_death_spares_baked"); });
     apply_param(params, "stale_window_factor",     [&](auto const& v){ gng_cfg.stale_window_factor     = float(get_double(v, "stale_window_factor")); });
     apply_param(params, "insertion_autotune",          [&](auto const& v){ gng_cfg.insertion_autotune          = get_bool(v, "insertion_autotune"); });
     apply_param(params, "insertion_autotune_quantile", [&](auto const& v){ gng_cfg.insertion_autotune_quantile = float(get_double(v, "insertion_autotune_quantile")); });
     insertion_autotune_ = gng_cfg.insertion_autotune;
+    apply_param(params, "gain_kind", [&](auto const& v){
+        auto s = get_string(v, "gain_kind");
+        if      (s == "linear") gng_cfg.gain_kind = ami_ogma::v3::GainKind::Linear;
+        else if (s == "kalman") gng_cfg.gain_kind = ami_ogma::v3::GainKind::Kalman;
+        else throw std::invalid_argument("EPM: gain_kind must be 'linear' or 'kalman' (got '" + s + "')");
+    });
+    apply_param(params, "kalman_p0",       [&](auto const& v){ gng_cfg.kalman_p0       = float(get_double(v, "kalman_p0")); });
+    apply_param(params, "kalman_q",        [&](auto const& v){ gng_cfg.kalman_q        = float(get_double(v, "kalman_q")); });
+    apply_param(params, "kalman_gain_cap", [&](auto const& v){ gng_cfg.kalman_gain_cap = float(get_double(v, "kalman_gain_cap")); });
 
     base_epsilon_b_               = gng_cfg.epsilon_b;
     base_min_insertion_error_     = gng_cfg.min_insertion_error;
@@ -311,6 +381,16 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
             }
             break;
         }
+        case EncoderKind::JLState: {
+            // The JL projection over a state vector: distance-preserving for any input width
+            // (FrozenJLEncoder::make_state_encoder), which is what the RBF grid is not past ~12 dims.
+            if (!proprio_state_dims_seen_flag)
+                throw std::invalid_argument("EPM: encoder_kind='jl_state' needs proprio_state_dims (the input vector's width)");
+            if (params.count("dim_min") || params.count("dim_max"))
+                throw std::invalid_argument("EPM: encoder_kind='jl_state' takes no dim_min/dim_max (homogeneous dims; condition the vector at the source)");
+            enc_jl_ = ami_ogma::v3::FrozenJLEncoder::make_state_encoder(modality_name_, projection_dim_, proprio_state_dims_seen);
+            break;
+        }
         case EncoderKind::Identity:
             // No encoder.  GNG receives input vectors directly.
             break;
@@ -349,6 +429,12 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     if (k == "tle_alpha")             tle_alpha_          = float(get_double(value, k));
     else if (k == "tle_beta")         tle_beta_           = float(get_double(value, k));
     else if (k == "tle_ema_alpha")    tle_ema_alpha_      = float(get_double(value, k));
+    else if (k == "transition_surprise_kind") {
+        auto s = get_string(value, k);
+        if      (s == "displacement") transition_logprob_ = false;
+        else if (s == "logprob")      transition_logprob_ = true;
+        else throw std::invalid_argument("EPM: transition_surprise_kind must be 'displacement' or 'logprob'");
+    }
     else if (k == "novelty_threshold_multiplier") novelty_threshold_multiplier_ = float(get_double(value, k));
     else if (k == "novelty_floor")    novelty_floor_      = float(get_double(value, k));
     else if (k == "history_trace_size") history_trace_size_ = int(get_int(value, k));
@@ -358,6 +444,7 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     // GNG hot-mutable params route into the underlying GNG.
     else if (k == "epsilon_b")        { base_epsilon_b_ = float(get_double(value, k)); gng_->set_epsilon_b(base_epsilon_b_ * epsilon_b_scale_); }
     else if (k == "epsilon_n")        gng_->set_epsilon_n(float(get_double(value, k)));
+    else if (k == "bake_gate") gng_->set_bake_gate(float(get_double(value, k)));
     else if (k == "min_insertion_error") { base_min_insertion_error_ = float(get_double(value, k)); gng_->set_min_insertion_error(base_min_insertion_error_ * min_insertion_error_scale_); }
     else if (k == "baking_threshold") gng_->set_baking_threshold(int(get_int(value, k)));
     else if (k == "max_age")          gng_->set_max_age(int(get_int(value, k)));
@@ -365,12 +452,19 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "mitosis_enabled")  gng_->set_mitosis_enabled(get_bool(value, k));
     else if (k == "mitosis_error_threshold") { base_mitosis_error_threshold_ = float(get_double(value, k)); gng_->set_mitosis_error_threshold(base_mitosis_error_threshold_ * mitosis_threshold_scale_); }
     else if (k == "mitosis_check_interval")  gng_->set_mitosis_check_interval(int(get_int(value, k)));
+    else if (k == "mitosis_gatekeeper")      mitosis_gatekeeper_ = get_bool(value, k);
+    else if (k == "mitosis_drift_ratio")     gng_->set_drift_ratio(float(get_double(value, k)));
+    else if (k == "mitosis_drift_gain")      gng_->set_drift_gain(float(get_double(value, k)));
     else if (k == "stale_prune_enabled")     gng_->set_stale_prune_enabled(get_bool(value, k));
+    else if (k == "health_death_spares_baked") gng_->set_health_death_spares_baked(get_bool(value, k));
     else if (k == "stale_window_factor")     gng_->set_stale_window_factor(float(get_double(value, k)));
+    else if (k == "kalman_q")                gng_->set_kalman_q(float(get_double(value, k)));
+    else if (k == "kalman_gain_cap")         gng_->set_kalman_gain_cap(float(get_double(value, k)));
     else if (k == "modality_group" || k == "modality_name" || k == "encoder_kind"
           || k == "input_topic"    || k == "projection_dim" || k == "master_seed"
           || k == "sample_rate"    || k == "f_min" || k == "f_max"
-          || k == "proprio_state_dims" || k == "dim_min" || k == "dim_max")
+          || k == "proprio_state_dims" || k == "dim_min" || k == "dim_max"
+          || k == "gain_kind"      || k == "kalman_p0")
         throw std::invalid_argument("EPM param '" + k + "' is ConstructionOnly");
     else
         throw std::invalid_argument("EPM: unknown param '" + k + "'");
@@ -386,6 +480,7 @@ void EPM::handle_input(std::string_view /*topic*/, MessagePtr payload) {
             pending_audio_   = std::dynamic_pointer_cast<const RawAudioFrame>(payload);
             break;
         case EncoderKind::RBF:
+        case EncoderKind::JLState:
             pending_proprio_ = std::dynamic_pointer_cast<const ProprioToken>(payload);
             break;
         case EncoderKind::Identity:
@@ -467,6 +562,8 @@ void EPM::dim_autocal_finalise() {
     ema_tle_               = 0.1f;      // the constructed default, not a learned value
     last_tle_              = 0.0f;
     last_quant_error_      = 0.0f;
+    qe_mean_ema_ = qe_sq_ema_ = qe_lag1_ema_ = prev_qe_ = 0.0f;
+    has_prev_qe_           = false;
     last_published_token_.reset();
 
     dim_autocal_done_ = true;
@@ -512,6 +609,11 @@ bool EPM::encode_pending_input(Eigen::VectorXf& out) {
             out = enc_rbf_->encode(pending_proprio_->values.data(), int(pending_proprio_->values.size()));
             return out.size() == projection_dim_;
         }
+        case EncoderKind::JLState: {
+            if (!pending_proprio_ || pending_proprio_->values.size() == 0) return false;
+            out = enc_jl_->encode_state(pending_proprio_->values.data(), int(pending_proprio_->values.size()));
+            return out.size() == projection_dim_;
+        }
         case EncoderKind::Identity: {
             if (pending_reality_ && pending_reality_->latent.size() == projection_dim_) {
                 out = pending_reality_->latent;
@@ -551,8 +653,25 @@ void EPM::apply_neuro_scaling() {
     gng_->set_mitosis_error_threshold(base_mitosis_error_threshold_ * mitosis_threshold_scale_);
 }
 
+float EPM::transition_logprob_surprise(int prev_id, int cur_id) const {
+    if (prev_id < 0) return 1.0f;                 // a first arrival: nothing predicted it
+    if (prev_id == cur_id) return 0.0f;           // a stay is not a move
+    const int N = std::max(2, gng_ ? gng_->node_count() : 2);
+    auto rit = transition_counts_.find(prev_id);
+    double total = 0.0, count = 0.0;
+    if (rit != transition_counts_.end()) {
+        for (auto const& [dst, c] : rit->second) total += double(c);
+        auto cit = rit->second.find(cur_id);
+        if (cit != rit->second.end()) count = double(cit->second);
+    }
+    if (total <= 0.0) return 1.0f;                // never left this place before
+    const double p = (count + 1.0) / (total + double(N));   // Laplace, as the reference
+    return float(std::min(1.0, std::max(0.0, -std::log(p) / std::log(double(N)))));
+}
+
 void EPM::compute_dual_tle(float quant_error, int winner_id,
-                           float& transition_surp_out, float& tle_out) {
+                           float& transition_surp_out, float& tle_out,
+                           float  logprob_surp) {
     transition_surp_out = 0.0f;
 
     auto winner_proto = gng_->get_prototype(winner_id);
@@ -565,6 +684,7 @@ void EPM::compute_dual_tle(float quant_error, int winner_id,
         has_prev_prototype_    = true;
     }
 
+    if (logprob_surp >= 0.0f) transition_surp_out = logprob_surp;   // Stage 3 (K2): the restored surprise
     tle_out = tle_alpha_ * quant_error + tle_beta_ * transition_surp_out;
     if (std::isnan(tle_out)) tle_out = 0.0f;
 
@@ -572,6 +692,18 @@ void EPM::compute_dual_tle(float quant_error, int winner_id,
     ema_tle_ = (1.0f - tle_ema_alpha_) * ema_tle_ + tle_ema_alpha_ * tle_out;
     novelty_threshold_now_ = std::max(novelty_floor_,
                                       ema_tle_ * novelty_threshold_multiplier_ * novelty_threshold_scale_);
+
+    // Stage 0.4 instruments (diag-only; see EPM.hpp).  Same EMA rate as the
+    // TLE so the three moments describe the same window.
+    {
+        const float a = tle_ema_alpha_;
+        if (has_prev_qe_)
+            qe_lag1_ema_ = (1.0f - a) * qe_lag1_ema_ + a * (quant_error * prev_qe_);
+        qe_mean_ema_ = (1.0f - a) * qe_mean_ema_ + a * quant_error;
+        qe_sq_ema_   = (1.0f - a) * qe_sq_ema_   + a * quant_error * quant_error;
+        prev_qe_     = quant_error;
+        has_prev_qe_ = true;
+    }
 }
 
 void EPM::publish_token(uint64_t tick_id,
@@ -585,13 +717,15 @@ void EPM::publish_token(uint64_t tick_id,
     tok->producer_id       = id_.empty() ? std::string("epm") : id_;
     tok->winner_id         = winner_id;
     tok->quant_error       = quant_error;
+    tok->expected_error    = ema_tle_;   // channel-level expected TLE (see Topics.hpp)
     tok->transition_surp   = transition_surp;
     tok->tle               = tle;
     tok->novelty_threshold = novelty_threshold_now_;
     tok->is_novel          = quant_error > novelty_threshold_now_;
     tok->just_baked        = gng_->last_step_baked();
     tok->just_pruned       = !gng_->last_pruned_ids().empty();
-    tok->just_mitosis      = false; // TODO: gng_ doesn't expose a per-step flag yet
+    tok->just_mitosis      = last_just_mitosis_;
+    tok->drift_count       = gng_->drift_count();
     tok->pruned_ids        = gng_->last_pruned_ids();
     tok->node_count        = gng_->node_count();
     tok->baked_count       = gng_->baked_count();
@@ -754,6 +888,9 @@ void EPM::tick(uint64_t tick_id) {
             }
         }
     }
+    // Stage 3 (K2): score the move against the table as it stood BEFORE this step.
+    const float logprob_surp = transition_logprob_
+        ? transition_logprob_surprise(prev_winner_id_for_transitions_, winner_id) : -1.0f;
     if (prev_winner_id_for_transitions_ >= 0 &&
         prev_winner_id_for_transitions_ != winner_id) {
         ++transition_counts_[prev_winner_id_for_transitions_][winner_id];
@@ -761,7 +898,11 @@ void EPM::tick(uint64_t tick_id) {
     prev_winner_id_for_transitions_ = winner_id;
 
     float transition_surp = 0.0f, tle = 0.0f;
-    compute_dual_tle(quant_error, winner_id, transition_surp, tle);
+    compute_dual_tle(quant_error, winner_id, transition_surp, tle, logprob_surp);
+
+    // Stage 4: the Mitosis Gatekeeper (with the innovation-mean drift test inside it).
+    last_just_mitosis_ = false;
+    if (mitosis_gatekeeper_) last_just_mitosis_ = gng_->maybe_mitosis(winner_id, latent);
     last_tle_         = tle;
     last_quant_error_ = quant_error;
 
@@ -801,7 +942,15 @@ nlohmann::json EPM::diag_lite() const {
         j["nodes"]         = gng_->node_count();
         j["baked"]         = gng_->baked_count();
         j["mitosis_count"] = gng_->mitosis_count();
+        j["drift_count"]   = gng_->drift_count();
         j["baked_now"]     = gng_->last_step_baked();   // a node earned its place THIS step
+    }
+    // Stage 0.4 instruments — normalised innovation and innovation whiteness.
+    j["tle_norm"] = last_tle_ / std::max(ema_tle_, 1e-6f);
+    {
+        const float var = qe_sq_ema_   - qe_mean_ema_ * qe_mean_ema_;
+        const float cov = qe_lag1_ema_ - qe_mean_ema_ * qe_mean_ema_;
+        j["qe_lag1"] = var > 1e-12f ? std::clamp(cov / var, -1.0f, 1.0f) : 0.0f;
     }
     return j;
 }

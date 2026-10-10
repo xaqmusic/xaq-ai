@@ -1,0 +1,282 @@
+// =============================================================================
+// BearingSeekLoop.hpp  --  seeking a thing seen only now and then (the duck's things phase, T2)
+// =============================================================================
+//
+// The duck sees a small thing only while it stands: the swept cloud (CloudMap) exists at a stop,
+// and its attended thing's bearing reads proximity 0 the moment the body walks.  A loop that
+// walked toward things would therefore be silent for the whole walk unless it REMEMBERED where
+// the thing was.  This loop does, in the body's own frame of reference: while the bearing is
+// live it fixes the thing's position by dead reckoning (its own odometry pose plus the bearing
+// and range), and while the bearing is silent it homes to that remembered position, re-aiming
+// as the body moves and turns, until it arrives (the remaining range under arrive_m) or forgets
+// (its confidence decays to the floor).  The Cell's VisualHomingNav kept an allocentric BEARING
+// through an occlusion; the duck has range, so the belief is a POSITION, and arrival is its own.
+//
+// What it publishes, in the loop unit's five fields (loop_and_arbitration_recipe.md):
+//   - the bearing to the thing, [cx = +right, cy = +forward, 0]: the IntentAdapter's heading-
+//     reference contract, the same as play's and avoidance's;
+//   - its NEED / value in [0,1]: the confidence in the held target (1 while seen, decaying while
+//     remembered, 0 when none) -- the arbiter's preference for this loop (hunger_topic);
+//   - its HONEST SIGNAL: the remaining range to the target, for LoopCompetence (sign -1: seeking
+//     works while the range falls under its own drive).
+// Nothing here is a trajectory; the twist prior turns the body toward the reference as it always
+// has.  Module absent = byte-identical.
+#pragma once
+
+#include <deque>
+#include <limits>
+#include <map>
+#include <string>
+#include <nlohmann/json.hpp>
+#include "ogma/Module.hpp"
+#include "ogma/Topics.hpp"
+
+namespace ogma {
+
+class BearingSeekLoop : public Module {
+public:
+    BearingSeekLoop();
+    ~BearingSeekLoop() override;
+
+    std::string_view             type_name()      const override;
+    std::vector<TopicSpec>       input_topics()   const override;
+    std::vector<TopicSpec>       output_topics()  const override;
+    ParamSchema                  params_schema()  const override;
+    ParamMap                     current_params() const override;
+
+    void on_setup(Bus* bus, ParamMap const& params) override;
+    void tick(uint64_t tick_id) override;
+    void on_param_change(std::string_view key, ParamValue const& value) override;
+
+    nlohmann::json snapshot_state() const override;
+    nlohmann::json diag_snapshot() const override;
+    nlohmann::json diag_lite() const override;
+    void           restore_state(nlohmann::json const& s) override;
+
+    bool   have_target() const { return have_target_; }
+    bool   seen()        const { return seen_; }
+    float  value()       const { return value_; }
+    double range_left()  const { return range_left_; }
+    int    arrivals()    const { return arrivals_; }
+    int    forgets()     const { return forgets_; }
+    float  last_cx()     const { return cx_; }
+    float  last_cy()     const { return cy_; }
+    double target_x()    const { return tx_; }
+    double target_y()    const { return ty_; }
+
+private:
+    std::string bearing_topic_ = "percept.thing_bearing";      // [vx=+right, vy=+forward, proximity]
+    std::string pose_topic_    = "reality.proprio.odom";       // [x, y, yaw] dead-reckoned, the body's own
+    std::string output_topic_  = "percept.seek_bearing";
+    std::string value_topic_   = "reality.cognitive.seek_value";
+    std::string range_topic_   = "reality.cognitive.seek_range";
+    double proximity_range_ = 2.5;    // the bearing's proximity is 1 - range / this (CloudMap max_range / things_range)
+    float  min_conf_        = 0.02f;  // proximity above this = the thing is in view
+    double arrive_m_        = 0.25;   // the remaining range at which the target counts as reached
+    double forget_ticks_    = 3000.0; // confidence decays by 1/forget_ticks per tick while the thing is unseen
+    float  floor_           = 0.05f;  // ...and the target is dropped below this
+    // the renewal (2026-09-22, the linger): a token [need, x, y] from the loop that learns what intents do at
+    // the thing (SkillOutcomeLoop need_topic).  After an arrival drops the target, a need above renew_min at a
+    // position between 1.5 x arrive_m and renew_range away re-arms it with confidence = need: the duck goes
+    // back to a thing it does not yet understand and leaves one it does.  Empty = off (byte-identical).
+    std::string renew_topic_;
+    // pull_topic (2026-10-02, S3): the outcome loop's [pull] -- the expected answer at the attended thing's cell.  A
+    // sighted thing's need (the confidence a sighting sets) is that pull instead of 1: a thing whose kind in its context
+    // has been tried and never moved is still seen, but no longer worth the walk.  Empty = 1 (byte-identical).
+    std::string pull_topic_;
+    // publish_chase_flag (the chase push, 2026-10-02): the output token carries a 4th value, 1 while chasing or coasting --
+    // so CloudMap's mover_not_target_m gates only a STATIC held target.  false = three values (byte-identical).
+    bool publish_chase_flag_ = false;
+public:
+    // THE LEARNED LEAD (2026-10-03, the chase push; the operator: "chasing is a planning loop and exists at the intent level,
+    // strategic").  Where the chase aims is an OPTION learned from its own outcomes, as the outcome loop learns what a kick
+    // does: lead_options (seconds ahead along the mover's velocity, e.g. [0, 0.5, 1, 2]); the SITUATION -- the chase's view of
+    // the mover, published on situation_out_topic as [range / 2.5, |bearing| / pi, the bearing's drift outward (0.5 = none),
+    // the range rate (0.5 = none)] for an EPM whose winner comes back on situation_topic; every lead_eval_ticks of chasing the
+    // loop records how far the range to the mover's estimated position closed (m/s) for (situation, option), then chooses
+    // again: the least-tried option while any has fewer than lead_min_samples outcomes, else the best mean.  Empty options =
+    // the fixed chase_lead_s (byte-identical).  restore_lead_only: a restored snapshot brings the lead table and nothing else
+    // (a practice session's held target must not follow the brain into another room).
+    struct LeadStat { int n = 0; double mean = 0.0, m2 = 0.0; };
+    int lead_option() const { return lead_opt_; }
+    int lead_node() const { return lead_node_; }
+    const std::map<int, LeadStat>& lead_stats() const { return lead_stats_; }
+private:
+    std::vector<double> lead_options_;
+    std::string situation_out_topic_, situation_topic_;
+    int lead_eval_ticks_ = 50, lead_min_samples_ = 2;
+    bool restore_lead_only_ = false;
+    std::map<int, LeadStat> lead_stats_;
+    int lead_opt_ = -1, lead_node_ = 0, lead_last_opt_ = -1;
+    uint64_t lead_start_tick_ = 0; double lead_start_range_ = 0.0; bool lead_eval_on_ = false;
+    double prev_mover_bearing_ = 0.0, prev_mover_range_ = 0.0; bool have_prev_mover_ = false;
+    int lead_records_ = 0;
+    void lead_tick(uint64_t tick_id);
+    int  lead_choose(int node) const;
+    float  renew_min_       = 0.25f;
+    double renew_range_     = 2.0;
+    // the walk re-fix (2026-09-23, §17.47): a bearing flagged as seen from a WALKING cloud (the token's 4th
+    // value) only refines a target already held, when its fix lies within walk_refix_m of it; it never sets
+    // one.  The approach is then by sight and the arrival is where the thing IS.  0 = walking bearings ignored.
+    double walk_refix_m_    = 0.0;
+    // walk_take_range (2026-09-29, the operator: "the robot seems to be ignoring the smaller objects when they are close
+    // by"): a bearing seen from a WALKING cloud may START a target when its fix lies within this range, no target is held
+    // and no lost mover is in mind.  R70/R74 refused walking sightings because they drifted to wall bases and legs -- the
+    // anchor-relative bearing (§17.54), since fixed.  0 = a walking sighting never starts a target (R74's rule).
+    double walk_take_range_ = 0.0;
+    int    walk_takes_ = 0;
+    int    refixes_ = 0;
+public:
+    int refixes() const { return refixes_; }
+    int walk_takes() const { return walk_takes_; }
+    // THE CHASE (the chase phase, stage 1, 2026-09-27): the moving fix.  CloudMap's mover_topic names a cluster whose
+    // voxels are young against the cloud's own -- a thing that is not where "things do not move" predicted it
+    // (design doc §17.53).  The loop holds such a sighting as a CANDIDATE with a position in the odometry frame;
+    // a later sighting within chase_gate_m of where the candidate would now be (its position plus its velocity
+    // times the time since) confirms it and updates the velocity; after chase_confirm sightings spread over at
+    // least chase_confirm_ticks the candidate is CHASED: the target is its predicted position a chase_lead_s ahead,
+    // re-fixed by every confirming sighting, the need 1, and arrival does not drop it (a mover's error is never
+    // fulfilled by standing where it was).  With no confirming sighting for chase_forget_ticks the chase ends and
+    // the last predicted position stays as an ordinary remembered target: where it stopped is where to go and
+    // look.  A static thing newly in view is young for under a second and ages out before it confirms; a fragment
+    // sliding along a wall does not follow the prediction.  Empty mover_topic = off, byte-identical.
+    bool   chasing()        const { return chasing_; }
+    int    chase_n()        const { return cand_n_; }
+    int    chases()         const { return chases_; }
+    double chase_vx()       const { return cand_vx_; }
+    double chase_vy()       const { return cand_vy_; }
+    bool   mover_seen()     const { return mover_seen_; }
+    bool   have_cand()      const { return have_cand_; }
+    double cand_x()         const { return cand_x_; }
+    double cand_y()         const { return cand_y_; }
+private:
+    std::string mover_topic_;
+    double chase_gate_m_ = 0.35, chase_lead_s_ = 0.3, chase_v_max_ = 1.0;
+    // chase_min_v (2026-09-27 night, §17.55): a candidate is chased only if it has MOVED -- its velocity and its
+    // displacement since the first sighting both at least this (m/s, and m per second watched).  A young cluster that
+    // stays put is a static thing newly in view (R85 chased 447 of those in six runs); 0 = not required.
+    double chase_min_v_ = 0.0;
+    double cand_x0_ = 0.0, cand_y0_ = 0.0;
+    // chase_stop_v (2026-09-28, the operator's eye: the duck walked to where the train HAD passed and pecked at the
+    // place): a chase that ends with the thing still moving (its last velocity above this, m/s) is DROPPED -- the
+    // thing left the view, it is not at the predicted place; only a thing that had slowed below this is remembered
+    // where it stopped.  A position belongs to a thing while the thing is stationary.  0 = always remembered.
+    double chase_stop_v_ = 0.0;
+    int    chases_lost_ = 0, chases_stopped_ = 0;
+    // the loss, for a host that turns it into a LOOK (--stop-on-lost, 2026-09-29): true on the tick a chase is dropped
+    // with the thing still moving, with the bearing (body frame, + = right) and range of where it was last predicted
+    bool   lost_now_ = false; double lost_ego_ = 0.0, lost_range_ = 0.0;
+    // OBJECT PERMANENCE (2026-09-29, the operator: "some form of object permanence, especially for moving objects"):
+    // chase_permanence_ticks -- when the sightings stop with the thing still moving, the target keeps moving at its
+    // last velocity for up to this long, the need falling from 1 to 0 over it (COASTING), and a sighting near the
+    // prediction takes the chase up again; at the end the loss is reported (the look).  0 = the loss at once.
+    // THE PULL'S DECAY (habituation): chase_pull_decay -- every loss multiplies the chase's pull by this, and the pull
+    // recovers by 1/chase_pull_recover_ticks per tick; the need while chasing is the pull.  A thing that keeps getting
+    // away loses its hold, the way a known kind does.  1 = no decay.
+    int    chase_permanence_ticks_ = 0;
+    // PERMANENCE IN RECOGNITION (2026-09-29, after coasting regressed -- §17.61): chase_memory_ticks -- a lost mover is
+    // kept in mind (its last predicted position and velocity, extrapolated) for this long WITHOUT driving the walk;
+    // a single mover sighting within chase_gate_m of where it should now be re-acquires the chase at once, no
+    // confirmation wait.  Where it went is what the look (--stop-on-lost) turns the head toward.  0 = off.
+    int    chase_memory_ticks_ = 0;
+    // THE YIELD (2026-09-29): yield_topic carries the cloud's count of tall voxels around this loop's held target
+    // (CloudMap target_tall_topic); a chase or a coast whose target stands within a body length of tall structure --
+    // chase_yield_tall voxels or more -- yields: it is lost (the memory, the look) instead of run into the wall the
+    // thing turned away from.  Empty topic or 0 = off.
+    std::string yield_topic_; int chase_yield_tall_ = 0; int chases_yielded_ = 0;
+    // the yielded place, remembered as not-a-mover for chase_memory_ticks: a sighting within chase_gate_m of it is dropped
+    bool have_yield_ = false; double yield_x_ = 0.0, yield_y_ = 0.0; uint64_t yield_tick_ = 0; int yield_drops_ = 0;
+    bool chase_yield_look_ = false;   // the yield starts a look at the target's bearing (lost_now_), no memory
+    // the static yield: a held static target at the foot of tall structure is dropped; the place is not-a-thing for forget_ticks
+    int static_yield_tall_ = 0; int static_yielded_ = 0; int static_yield_drops_ = 0;
+    // the progress forget
+    double progress_walk_m_ = 0.0, progress_m_ = 0.05, walked_ = 0.0, best_range_ = 1e9; int progress_forgets_ = 0;
+    int contact_forgets_ = 0;
+    bool have_syield_ = false, syield_static_ = false; double syield_x_ = 0.0, syield_y_ = 0.0; uint64_t syield_tick_ = 0;
+    int target_src_ = 0;   // the held static target's source: 1 a sighting, 2 the renewal, 3 a mover that stopped
+    uint64_t target_set_tick_ = 0; double target_px_ = 0.0, target_py_ = 0.0;
+public:
+    int static_yielded() const { return static_yielded_; }
+    int static_yield_drops() const { return static_yield_drops_; }
+    int progress_forgets() const { return progress_forgets_; }
+    // the host's contact stall (§17.84, lever 1b): the target the body is pushing toward through a surface is dropped
+    void forget_target() { if (have_target_ && !chasing_ && !coasting_) { have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++contact_forgets_; } }
+    int contact_forgets() const { return contact_forgets_; }
+private:
+    void yield_to_structure(uint64_t tick_id);
+public:
+    int chases_yielded() const { return chases_yielded_; }
+    int yield_drops() const { return yield_drops_; }
+    bool yield_live() const { return have_yield_; }
+private:
+    // chase_memory_holds (2026-09-29, the operator: "we should definitely be prioritizing the moving objects" -- measured:
+    // in the five seconds after a chase ends a static target is held on 87 % of ticks, the block beside the track): while
+    // the memory of a lost mover lives, no NEW static target is taken; the mover keeps its priority until forgotten.
+    bool   chase_memory_holds_ = false;
+    bool   have_memory_ = false; double mem_x_ = 0.0, mem_y_ = 0.0, mem_vx_ = 0.0, mem_vy_ = 0.0, mem_dt_ = 0.0; uint64_t mem_tick_ = 0;
+    double chase_pull_decay_ = 1.0, chase_pull_recover_ticks_ = 3000.0, pull_ = 1.0;
+    bool   coasting_ = false; uint64_t coast_from_ = 0;
+    int    chases_reacquired_ = 0;
+    // why candidates do not become chases (2026-09-29): replaced (the next sighting missed the prediction by more than the
+    // gate), too fast (implied a speed over chase_v_max), still (chase_min_v failed at confirmation), timed out (forgotten
+    // unconfirmed).  A crossing became a candidate 9 times in 10 and a chase 1 in 4 (sweep 6); these say which gate.
+    int    cand_replaced_ = 0, cand_fast_ = 0, cand_still_ = 0, cand_timeout_ = 0;
+    // the last sighting's judgement, for the record: miss from the prediction (m), implied speed (m/s), and the decision
+    // (0 none this tick, 1 confirmed, 2 replaced: missed the gate, 3 replaced: too fast, 4 a new candidate, 5 chased, 6 still)
+    double last_miss_ = 0.0, last_speed_ = 0.0; int last_decision_ = 0;
+    double last_seq_ = -1.0;   // the mover token's recompute tick last taken as a sighting (a token without it: every one)
+    // the candidate's recent sightings (tick, x, y), kept for chase_v_window_s: the velocity is the displacement across
+    // this ring, long enough to average the centroid's jitter and short enough to see a thing that just stopped
+    std::deque<std::array<double, 3>> sight_;
+    double chase_v_window_s_ = 0.8;
+public:
+    double last_miss()  const { return last_miss_; }
+    double last_speed() const { return last_speed_; }
+    int    last_decision() const { return last_decision_; }
+private:
+public:
+    int cand_replaced() const { return cand_replaced_; }
+    int cand_fast()     const { return cand_fast_; }
+    int cand_still()    const { return cand_still_; }
+    int cand_timeout()  const { return cand_timeout_; }
+private:
+    void   lose(uint64_t tick_id, double c, double s);
+public:
+    bool   coasting()          const { return coasting_; }
+    int    chases_reacquired() const { return chases_reacquired_; }
+    double pull()              const { return pull_; }
+private:
+public:
+    int    chases_lost()    const { return chases_lost_; }
+    int    chases_stopped() const { return chases_stopped_; }
+    bool   chase_lost_now() const { return lost_now_; }
+    // THE GAZE (2026-09-29, the operator: "the robot should be able to turn its head while it's walking to try to reacquire
+    // the moving target"): the bearing (body frame, + = right) the head should turn to -- the chased or coasted target's,
+    // else the lost mover's extrapolated memory's; NaN when there is nothing moving to look for.
+    double chase_gaze_ego() const;
+    bool   memory_live() const { return have_memory_; }
+    double chase_lost_ego() const { return lost_ego_; }
+    double chase_lost_range() const { return lost_range_; }
+private:
+    int    chase_confirm_ = 2, chase_confirm_ticks_ = 25, chase_forget_ticks_ = 50;
+    bool   have_cand_ = false, chasing_ = false, mover_seen_ = false;
+    double cand_x_ = 0.0, cand_y_ = 0.0, cand_vx_ = 0.0, cand_vy_ = 0.0;
+    uint64_t cand_tick_ = 0, cand_first_ = 0;
+    int    cand_n_ = 0, chases_ = 0, chase_ticks_ = 0;
+    void   chase_tick(uint64_t tick_id, double c, double s);
+public:
+    int chase_ticks() const { return chase_ticks_; }
+private:
+
+    bool   seen_ = false, have_target_ = false;
+    double tx_ = 0.0, ty_ = 0.0;          // the remembered position, odometry frame
+    double px_ = 0.0, py_ = 0.0, pyaw_ = 0.0;
+    bool   have_pose_ = false;
+    float  conf_ = 0.0f, value_ = 0.0f, cx_ = 0.0f, cy_ = 0.0f;
+    double range_left_ = 0.0;
+    int    arrivals_ = 0, forgets_ = 0, renewals_ = 0;
+public:
+    int renewals() const { return renewals_; }
+};
+
+} // namespace ogma

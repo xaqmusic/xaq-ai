@@ -1,0 +1,372 @@
+// =============================================================================
+// SkillOutcomeLoop.cpp  --  see the header
+// =============================================================================
+#include "ogma/modules/SkillOutcomeLoop.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
+#include <typeindex>
+
+namespace ogma {
+
+namespace {
+template <typename Fn>
+void apply_param(ParamMap const& params, std::string const& key, Fn&& fn) {
+    auto it = params.find(key);
+    if (it != params.end()) fn(it->second);
+}
+double get_double(ParamValue const& v, std::string const& k) {
+    if (auto p = std::get_if<double>(&v))  return *p;
+    if (auto p = std::get_if<int64_t>(&v)) return double(*p);
+    throw std::invalid_argument("SkillOutcomeLoop: param '" + k + "' must be numeric");
+}
+std::string get_string(ParamValue const& v, std::string const& k) {
+    if (auto p = std::get_if<std::string>(&v)) return *p;
+    throw std::invalid_argument("SkillOutcomeLoop: param '" + k + "' must be a string");
+}
+}  // namespace
+
+SkillOutcomeLoop::SkillOutcomeLoop()  = default;
+SkillOutcomeLoop::~SkillOutcomeLoop() = default;
+
+std::string_view SkillOutcomeLoop::type_name() const { return "SkillOutcomeLoop"; }
+
+std::vector<TopicSpec> SkillOutcomeLoop::input_topics() const {
+    std::vector<TopicSpec> v{ TopicSpec{bearing_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
+             TopicSpec{thing_topic_,      std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false},
+             TopicSpec{seek_value_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
+             TopicSpec{seek_range_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
+             TopicSpec{pose_topic_,       std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
+    if (!context_topic_.empty()) v.push_back(TopicSpec{context_topic_, std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false});
+    return v;
+}
+std::vector<TopicSpec> SkillOutcomeLoop::output_topics() const {
+    std::vector<TopicSpec> v{ TopicSpec{skill_topic_,   std::type_index(typeid(ProprioToken))},
+                              TopicSpec{outcome_topic_, std::type_index(typeid(ProprioToken))} };
+    if (!need_topic_.empty()) v.push_back(TopicSpec{need_topic_, std::type_index(typeid(ProprioToken))});
+    if (!pull_topic_.empty()) v.push_back(TopicSpec{pull_topic_, std::type_index(typeid(ProprioToken))});
+    return v;
+}
+
+ParamSchema SkillOutcomeLoop::params_schema() const {
+    return {
+        {"bearing_topic",    ParamMutability::ConstructionOnly, "The attended thing's [vx=+right, vy=+forward, proximity] (CloudMap thing_bearing_topic).", ParamValue{std::string("percept.thing_bearing")}},
+        {"thing_topic",      ParamMutability::ConstructionOnly, "The thing EPM's RealityToken: its winner is the node the outcome is learned for.", ParamValue{std::string("reality.cognitive.thing")}},
+        {"seek_value_topic", ParamMutability::ConstructionOnly, "The seek loop's need; its fall to 0 with the range under arrive_range is the arrival.", ParamValue{std::string("reality.cognitive.seek_value")}},
+        {"seek_range_topic", ParamMutability::ConstructionOnly, "The seek loop's range left.", ParamValue{std::string("reality.cognitive.seek_range")}},
+        {"pose_topic",       ParamMutability::ConstructionOnly, "The body's dead-reckoned [x, y, yaw].", ParamValue{std::string("reality.proprio.odom")}},
+        {"skill_topic",      ParamMutability::ConstructionOnly, "The intent boundary: ProprioToken [skill id, request] with request 1 on the tick a skill is asked for.", ParamValue{std::string("intent.skill")}},
+        {"outcome_topic",    ParamMutability::ConstructionOnly, "The loop's honest signal: [node, predicted displacement, observed displacement, surprise, samples] on the tick an outcome is observed; zeros otherwise.", ParamValue{std::string("reality.cognitive.outcome")}},
+        {"need_topic",       ParamMutability::ConstructionOnly, "[need, x, y]: the share of intents whose answer for the last attended thing is still unknown (by min_samples and explore_gain), 0 while an outcome is in flight, and the thing's fixed position -- a seek loop's renew_topic (the linger). Empty = not published.", ParamValue{std::string("")}},
+        {"proximity_range",  ParamMutability::HotMutable, "The bearing's proximity scale (metres): range = (1 - proximity) x this.", ParamValue{2.5}},
+        {"arrive_range",     ParamMutability::HotMutable, "The seek range under which a need falling to 0 is an arrival (metres).", ParamValue{0.3}},
+        {"match_radius",     ParamMutability::HotMutable, "A bearing after the kick whose fixed position lies within this of the kicked thing's is the same thing, moved (metres).", ParamValue{0.6}},
+        {"min_samples",      ParamMutability::HotMutable, "A node with fewer recorded outcomes than this is always worth a kick.", ParamValue{int64_t{2}}},
+        {"observe_ticks",    ParamMutability::HotMutable, "How long after a kick to wait for the thing to be seen again before the outcome is unknown.", ParamValue{int64_t{1500}}},
+        {"min_conf_ticks",   ParamMutability::HotMutable, "A bearing must be live this many ticks in a row before its position is fixed.", ParamValue{int64_t{5}}},
+        {"explore_gain",     ParamMutability::HotMutable, "Kick a known node when its outcome spread exceeds this x the mean spread over nodes; 0 = only unknown nodes.", ParamValue{1.0}},
+        {"skill_left",       ParamMutability::ConstructionOnly, "The id of the left kick on the boundary.", ParamValue{int64_t{0}}},
+        {"skill_right",      ParamMutability::ConstructionOnly, "The id of the right kick.", ParamValue{int64_t{1}}},
+        {"peck_id",          ParamMutability::ConstructionOnly, "The id of the peck (Pollen's ground pick) on the boundary; -1 = the kick only.  With two intents the loop asks for the one whose answer for this thing it knows least (fewer outcomes, then the larger spread, then the one not tried last).", ParamValue{int64_t{-1}}},
+        {"reach_m",          ParamMutability::HotMutable, "Fire at what you see: an arrival only arms the loop; the request goes out when the thing's bearing is live within this range (metres) and ahead. 0 = request on the arrival tick.", ParamValue{0.0}},
+        {"reach_short_m",    ParamMutability::HotMutable, "With reach_m: a kick or a peck is asked for only when the sighting is within this range; beyond it only the push (if present).", ParamValue{0.35}},
+        {"reach_cos",        ParamMutability::HotMutable, "The bearing's forward component (cosine) a live sighting needs to count as ahead.", ParamValue{0.7}},
+        {"armed_ticks",      ParamMutability::HotMutable, "How long after an arrival the loop stays armed for a sighting within reach (a miss is counted when it lapses).", ParamValue{int64_t{1500}}},
+        {"context_topic",    ParamMutability::ConstructionOnly, "S3: a context EPM's RealityToken; its winner splits each kind's cells (key = kind x context_n + ctx). Empty = kind only.", ParamValue{std::string("")}},
+        {"context_n",        ParamMutability::ConstructionOnly, "S3: the context vocabulary's size (the context EPM's max_nodes).", ParamValue{int64_t{4}}},
+        {"pull_topic",       ParamMutability::ConstructionOnly, "S3: [pull], the expected answer at the attended thing's cell -- 1 while uncertain, else its answered share (Laplace); a context whose pooled outcomes are known lends its share to its unknown cells. The seek loop's need for a sighted thing. Empty = not published.", ParamValue{std::string("")}},
+        {"context_pool_min", ParamMutability::HotMutable, "S3b: the pooled outcomes a context needs before it lends its answered share to an uncertain cell (whatever the intent: does anything standing here move?); 0 = min_samples x the intents.", ParamValue{int64_t{0}}},
+        {"answer_m",         ParamMutability::HotMutable, "S3: a displacement above this is an ANSWER (two voxels of the cloud).", ParamValue{0.08}},
+        {"push_id",          ParamMutability::ConstructionOnly, "The id of the push (the walker into the thing for a window) on the boundary; -1 = absent.  A third intent in the same least-known rule.", ParamValue{int64_t{-1}}},
+    };
+}
+
+ParamMap SkillOutcomeLoop::current_params() const {
+    ParamMap m;
+    m["bearing_topic"] = ParamValue{bearing_topic_}; m["thing_topic"] = ParamValue{thing_topic_};
+    m["seek_value_topic"] = ParamValue{seek_value_topic_}; m["seek_range_topic"] = ParamValue{seek_range_topic_};
+    m["pose_topic"] = ParamValue{pose_topic_}; m["skill_topic"] = ParamValue{skill_topic_}; m["outcome_topic"] = ParamValue{outcome_topic_};
+    m["need_topic"] = ParamValue{need_topic_};
+    m["proximity_range"] = ParamValue{proximity_range_}; m["arrive_range"] = ParamValue{arrive_range_}; m["match_radius"] = ParamValue{match_radius_};
+    m["min_samples"] = ParamValue{int64_t{min_samples_}}; m["observe_ticks"] = ParamValue{int64_t{observe_ticks_}}; m["min_conf_ticks"] = ParamValue{int64_t{min_conf_ticks_}};
+    m["explore_gain"] = ParamValue{explore_gain_}; m["skill_left"] = ParamValue{int64_t{skill_left_}}; m["skill_right"] = ParamValue{int64_t{skill_right_}};
+    m["peck_id"] = ParamValue{int64_t{peck_id_}}; m["push_id"] = ParamValue{int64_t{push_id_}};
+    m["reach_m"] = ParamValue{reach_m_}; m["reach_cos"] = ParamValue{reach_cos_}; m["armed_ticks"] = ParamValue{int64_t{armed_ticks_}};
+    m["reach_short_m"] = ParamValue{reach_short_m_};
+    m["context_topic"] = ParamValue{context_topic_}; m["context_n"] = ParamValue{int64_t{context_n_}};
+    m["pull_topic"] = ParamValue{pull_topic_}; m["answer_m"] = ParamValue{answer_m_};
+    m["context_pool_min"] = ParamValue{int64_t{context_pool_min_}};
+    return m;
+}
+
+void SkillOutcomeLoop::on_setup(Bus* bus, ParamMap const& params) {
+    bus_ = bus;
+    if (!bus_) throw std::invalid_argument("SkillOutcomeLoop requires a non-null Bus");
+    apply_param(params, "bearing_topic",    [&](auto const& v){ bearing_topic_ = get_string(v,"bearing_topic"); });
+    apply_param(params, "thing_topic",      [&](auto const& v){ thing_topic_ = get_string(v,"thing_topic"); });
+    apply_param(params, "seek_value_topic", [&](auto const& v){ seek_value_topic_ = get_string(v,"seek_value_topic"); });
+    apply_param(params, "seek_range_topic", [&](auto const& v){ seek_range_topic_ = get_string(v,"seek_range_topic"); });
+    apply_param(params, "pose_topic",       [&](auto const& v){ pose_topic_ = get_string(v,"pose_topic"); });
+    apply_param(params, "skill_topic",      [&](auto const& v){ skill_topic_ = get_string(v,"skill_topic"); });
+    apply_param(params, "outcome_topic",    [&](auto const& v){ outcome_topic_ = get_string(v,"outcome_topic"); });
+    apply_param(params, "need_topic",       [&](auto const& v){ need_topic_ = get_string(v,"need_topic"); });
+    apply_param(params, "proximity_range",  [&](auto const& v){ proximity_range_ = get_double(v,"proximity_range"); });
+    apply_param(params, "arrive_range",     [&](auto const& v){ arrive_range_ = get_double(v,"arrive_range"); });
+    apply_param(params, "match_radius",     [&](auto const& v){ match_radius_ = get_double(v,"match_radius"); });
+    apply_param(params, "min_samples",      [&](auto const& v){ min_samples_ = int(get_double(v,"min_samples")); });
+    apply_param(params, "observe_ticks",    [&](auto const& v){ observe_ticks_ = int(get_double(v,"observe_ticks")); });
+    apply_param(params, "min_conf_ticks",   [&](auto const& v){ min_conf_ticks_ = int(get_double(v,"min_conf_ticks")); });
+    apply_param(params, "explore_gain",     [&](auto const& v){ explore_gain_ = get_double(v,"explore_gain"); });
+    apply_param(params, "skill_left",       [&](auto const& v){ skill_left_ = int(get_double(v,"skill_left")); });
+    apply_param(params, "skill_right",      [&](auto const& v){ skill_right_ = int(get_double(v,"skill_right")); });
+    apply_param(params, "peck_id",          [&](auto const& v){ peck_id_ = int(get_double(v,"peck_id")); });
+    apply_param(params, "push_id",          [&](auto const& v){ push_id_ = int(get_double(v,"push_id")); });
+    apply_param(params, "reach_m",          [&](auto const& v){ reach_m_ = get_double(v,"reach_m"); });
+    apply_param(params, "reach_cos",        [&](auto const& v){ reach_cos_ = get_double(v,"reach_cos"); });
+    apply_param(params, "reach_short_m",    [&](auto const& v){ reach_short_m_ = get_double(v,"reach_short_m"); });
+    apply_param(params, "armed_ticks",      [&](auto const& v){ armed_ticks_ = int(get_double(v,"armed_ticks")); });
+    apply_param(params, "context_topic",    [&](auto const& v){ context_topic_ = get_string(v,"context_topic"); });
+    apply_param(params, "context_n",        [&](auto const& v){ context_n_ = std::max(1, int(get_double(v,"context_n"))); });
+    apply_param(params, "pull_topic",       [&](auto const& v){ pull_topic_ = get_string(v,"pull_topic"); });
+    apply_param(params, "answer_m",         [&](auto const& v){ answer_m_ = get_double(v,"answer_m"); });
+    apply_param(params, "context_pool_min", [&](auto const& v){ context_pool_min_ = int(get_double(v,"context_pool_min")); });
+    last_intent_ = intents().back();
+}
+
+void SkillOutcomeLoop::on_param_change(std::string_view key, ParamValue const& value) {
+    const std::string k(key);
+    if      (k == "proximity_range") proximity_range_ = get_double(value, k);
+    else if (k == "arrive_range")    arrive_range_ = get_double(value, k);
+    else if (k == "match_radius")    match_radius_ = get_double(value, k);
+    else if (k == "min_samples")     min_samples_ = int(get_double(value, k));
+    else if (k == "observe_ticks")   observe_ticks_ = int(get_double(value, k));
+    else if (k == "min_conf_ticks")  min_conf_ticks_ = int(get_double(value, k));
+    else if (k == "explore_gain")    explore_gain_ = get_double(value, k);
+    else if (k == "reach_m")         reach_m_ = get_double(value, k);
+    else if (k == "reach_cos")       reach_cos_ = get_double(value, k);
+    else if (k == "reach_short_m")   reach_short_m_ = get_double(value, k);
+    else if (k == "armed_ticks")     armed_ticks_ = int(get_double(value, k));
+    else if (k == "answer_m")        answer_m_ = get_double(value, k);
+    else if (k == "context_pool_min") context_pool_min_ = int(get_double(value, k));
+    else throw std::invalid_argument("SkillOutcomeLoop: param '" + k + "' is construction-only / unknown");
+}
+
+void SkillOutcomeLoop::tick(uint64_t tick_id) {
+    if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(pose_topic_)))
+        if (pt->values.size() >= 3) { px_ = pt->values[0]; py_ = pt->values[1]; pyaw_ = pt->values[2]; have_pose_ = true; }
+    float vx = 0.0f, vy = 0.0f, prox = 0.0f;
+    if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(bearing_topic_)))
+        if (pt->values.size() >= 3) { vx = pt->values[0]; vy = pt->values[1]; prox = pt->values[2]; }
+    int node = -1;
+    if (auto rt = std::dynamic_pointer_cast<const RealityToken>(bus_->last_value(thing_topic_))) node = rt->winner_id;
+    int ctx_now = -1;
+    if (!context_topic_.empty())
+        if (auto rt = std::dynamic_pointer_cast<const RealityToken>(bus_->last_value(context_topic_)))
+            ctx_now = std::clamp(rt->winner_id, 0, context_n_ - 1);
+    if (!context_topic_.empty() && node >= 0) node = node * context_n_ + std::max(0, ctx_now);
+    float seek_v = 0.0f, seek_r = 9.0f;
+    if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(seek_value_topic_))) if (pt->values.size() > 0) seek_v = pt->values[0];
+    if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(seek_range_topic_))) if (pt->values.size() > 0) seek_r = pt->values[0];
+
+    // the thing as seen now: fix its position once the bearing has been live for a few ticks
+    const bool live = prox > 0.02f && (vx * vx + vy * vy) > 1e-6f && have_pose_;
+    seen_run_ = live ? seen_run_ + 1 : 0;
+    double sx = 0.0, sy = 0.0; bool fixed = false;
+    if (live && seen_run_ >= min_conf_ticks_) {
+        const double n = std::sqrt(double(vx) * vx + double(vy) * vy);
+        const double fwd = vy / n, left = -vx / n, range = std::max(0.0, 1.0 - double(prox)) * proximity_range_;
+        const double bx = fwd * range, by = left * range, c = std::cos(pyaw_), s = std::sin(pyaw_);
+        sx = px_ + c * bx - s * by; sy = py_ + s * bx + c * by; fixed = true;
+        seen_ = true; tx_ = sx; ty_ = sy; if (node >= 0) node_ = node; if (ctx_now >= 0) ctx_ = ctx_now;
+    }
+
+    // an outcome in flight: the same thing seen again within the radius is the answer
+    bool outcome_now = false;
+    if (pending_) {
+        ++wait_;
+        if (fixed && std::hypot(sx - kx_, sy - ky_) < match_radius_ && wait_ > 25) {
+            const double disp = std::hypot(sx - kx_, sy - ky_);
+            Stat& st = stats_[key_of(knode_, kintent_)];
+            const double pred = st.n > 0 ? st.mean : 0.0, sd = std::sqrt(st.var());
+            last_pred_ = pred; last_obs_ = disp; last_node_ = knode_;
+            last_surprise_ = std::fabs(disp - pred) / (sd + 0.02);
+            st.n += 1; const double d = disp - st.mean; st.mean += d / st.n; st.m2 += d * (disp - st.mean);
+            if (disp > answer_m_) ++st.ans;
+            if (!context_topic_.empty()) { Stat& cs = ctx_stats_[kctx_]; ++cs.n; if (disp > answer_m_) ++cs.ans; }
+            ++observed_; pending_ = false; outcome_now = true;
+        } else if (wait_ > observe_ticks_) { ++unknown_; pending_ = false; }
+    }
+
+    // the rule an arrival asks by: a node x intent is uncertain with fewer than min_samples outcomes, or a
+    // spread above explore_gain x the mean spread of the known ones.  The need below is the same rule.
+    double mean_sd = 0.0; int nn = 0;
+    for (auto const& [k, s] : stats_) if (s.n >= min_samples_) { mean_sd += std::sqrt(s.var()); ++nn; }
+    mean_sd = nn ? mean_sd / nn : 0.0;
+    const auto uncertain_at = [&](int nd, int intent) {
+        const auto it = stats_.find(key_of(nd, intent));
+        if (it == stats_.end()) return true;
+        const Stat& st = it->second;
+        return st.n < min_samples_ || (explore_gain_ > 0.0 && std::sqrt(st.var()) > explore_gain_ * mean_sd);
+    };
+
+    // the ask: the least-known intent for this thing's node, if its answer is still uncertain
+    request_now_ = false;
+    const auto ask = [&](uint64_t now, double range_seen) {
+        const int nd = node_ < 0 ? 0 : node_;
+        // the intent whose answer for this thing is least known: the fewest outcomes, then the largest
+        // spread, then one not tried last (the vocabulary cycles at a thing)
+        auto avail = intents();
+        if (range_seen > reach_short_m_) {                                  // beyond a kick's reach: only the push
+            std::vector<int> far; for (int i : avail) if (i == 2) far.push_back(i);
+            avail = far;
+        }
+        if (avail.empty()) return;
+        int intent = avail[0];
+        if (avail.size() > 1) {
+            auto n_of  = [&](int i) { auto it = stats_.find(key_of(nd, i)); return it == stats_.end() ? 0 : it->second.n; };
+            auto sd_of = [&](int i) { auto it = stats_.find(key_of(nd, i)); return it == stats_.end() ? 0.0 : std::sqrt(it->second.var()); };
+            int best_n = n_of(avail[0]); for (int i : avail) best_n = std::min(best_n, n_of(i));
+            std::vector<int> cand; for (int i : avail) if (n_of(i) == best_n) cand.push_back(i);
+            if (cand.size() > 1) {
+                double best_sd = -1.0; for (int i : cand) best_sd = std::max(best_sd, sd_of(i));
+                std::vector<int> c2; for (int i : cand) if (std::fabs(sd_of(i) - best_sd) <= 1e-9) c2.push_back(i);
+                cand = c2;
+            }
+            intent = cand[0];
+            // among ties, the one after the last asked in the cycle (the last starts as the vocabulary's end,
+            // so the first ask is its first intent, the kick)
+            for (size_t k = 0; k < cand.size(); ++k) if (cand[k] == last_intent_) { intent = cand[(k + 1) % cand.size()]; break; }
+        }
+        if (uncertain_at(nd, intent)) {
+            // the side: the thing's bearing from the body now (+ left in the body frame => the left foot)
+            const double dx = tx_ - px_, dy = ty_ - py_, c = std::cos(pyaw_), s = std::sin(pyaw_);
+            const double by = -s * dx + c * dy;
+            request_id_ = intent == 1 ? peck_id_ : intent == 2 ? push_id_ : (by >= 0.0 ? skill_left_ : skill_right_);
+            request_now_ = true; ++requests_; last_intent_ = intent; kintent_ = intent;
+            pending_ = true; kx_ = tx_; ky_ = ty_; knode_ = nd; kctx_ = ctx_; wait_ = 0; kicked_tick_ = now;
+        }
+    };
+    // the arrival: the seek need falls to 0 with the range under arrive_range
+    const bool arrival = seek_prev_ > 0.0f && seek_v == 0.0f && seek_r < arrive_range_ && seen_ && !pending_;
+    if (reach_m_ <= 0.0) {
+        if (arrival) ask(tick_id, 0.0);                                // the old rule: ask on the arrival tick
+    } else {
+        if (arrival) armed_left_ = armed_ticks_;                       // fire at what you see: arm, then wait for a sighting within reach
+        if (armed_left_ > 0) {
+            --armed_left_;
+            if (fixed && !pending_) {
+                const double n = std::sqrt(double(vx) * vx + double(vy) * vy);
+                const double range = std::max(0.0, 1.0 - double(prox)) * proximity_range_;
+                if (range <= reach_m_ && vy / n >= reach_cos_) { ask(tick_id, range); armed_left_ = 0; }
+            }
+            if (armed_left_ == 0 && !request_now_) ++misses_;
+        }
+    }
+    seek_prev_ = seek_v;
+
+    auto sk = std::make_shared<ProprioToken>();
+    sk->tick_id = tick_id; sk->producer_id = id_.empty() ? std::string("outcome") : id_; sk->sensor = "skill_request";
+    sk->values = Eigen::VectorXf(2); sk->values[0] = float(request_id_); sk->values[1] = request_now_ ? 1.0f : 0.0f;
+    bus_->publish(skill_topic_, sk);
+    auto oc = std::make_shared<ProprioToken>();
+    oc->tick_id = tick_id; oc->producer_id = sk->producer_id; oc->sensor = "outcome";
+    oc->values = Eigen::VectorXf::Zero(6);
+    if (outcome_now) { oc->values[0] = float(last_node_); oc->values[1] = float(last_pred_); oc->values[2] = float(last_obs_); oc->values[3] = float(last_surprise_); oc->values[4] = float(stats_[key_of(last_node_, kintent_)].n); oc->values[5] = float(kintent_); }
+    bus_->publish(outcome_topic_, oc);
+
+    // the need: what the intents still have to tell about the last attended thing.  Zero while an outcome is
+    // in flight (the loop is looking, not asking) and before anything was seen; else the unknown intents' share.
+    need_ = 0.0;
+    if (seen_ && !pending_) {
+        const int nd = node_ < 0 ? 0 : node_;
+        const auto avail = intents();
+        int open = 0; for (int i : avail) if (uncertain_at(nd, i)) ++open;
+        need_ = double(open) / double(avail.size());
+    }
+    // S3: the pull -- the expected answer at the attended thing's cell
+    if (!pull_topic_.empty()) {
+        pull_ = 1.0;
+        if (seen_) {
+            const int nd = node_ < 0 ? 0 : node_;
+            const auto avail = intents();
+            bool open = false; int n = 0, ans = 0;
+            for (int i : avail) {
+                if (uncertain_at(nd, i)) open = true;
+                auto it = stats_.find(key_of(nd, i));
+                if (it != stats_.end()) { n += it->second.n; ans += it->second.ans; }
+            }
+            if (!open) pull_ = double(ans + 1) / double(n + 2);
+            else if (!context_topic_.empty()) {
+                // an uncertain cell in a context whose pooled outcomes already number a full vocabulary's worth: the
+                // context's answered share stands in ("things standing on walls do not answer")
+                auto it = ctx_stats_.find(ctx_);
+                const int bar = context_pool_min_ > 0 ? context_pool_min_ : min_samples_ * int(avail.size());
+                if (it != ctx_stats_.end() && it->second.n >= bar)
+                    pull_ = double(it->second.ans + 1) / double(it->second.n + 2);
+            }
+        }
+        auto pt = std::make_shared<ProprioToken>();
+        pt->tick_id = tick_id; pt->producer_id = sk->producer_id; pt->sensor = "outcome_pull";
+        pt->values = Eigen::VectorXf(1); pt->values[0] = float(pull_);
+        bus_->publish(pull_topic_, pt);
+    }
+    if (!need_topic_.empty()) {
+        auto nt = std::make_shared<ProprioToken>();
+        nt->tick_id = tick_id; nt->producer_id = sk->producer_id; nt->sensor = "outcome_need";
+        nt->values = Eigen::VectorXf(3); nt->values[0] = float(need_); nt->values[1] = float(tx_); nt->values[2] = float(ty_);
+        bus_->publish(need_topic_, nt);
+    }
+}
+
+nlohmann::json SkillOutcomeLoop::snapshot_state() const {
+    nlohmann::json st = nlohmann::json::object();
+    for (auto const& [k, s] : stats_) {
+        st[std::to_string(k)] = {{"n", s.n}, {"mean", s.mean}, {"m2", s.m2}};
+        if (s.ans > 0) st[std::to_string(k)]["ans"] = s.ans;     // S3; absent = 0 (older snapshots read unchanged)
+    }
+    nlohmann::json j{{"version", 1}, {"stats", st}, {"requests", requests_}, {"observed", observed_}, {"unknown", unknown_}};
+    if (!ctx_stats_.empty()) {
+        nlohmann::json cs = nlohmann::json::object();
+        for (auto const& [k, s] : ctx_stats_) cs[std::to_string(k)] = {{"n", s.n}, {"ans", s.ans}};
+        j["ctx_stats"] = cs;
+    }
+    return j;
+}
+void SkillOutcomeLoop::restore_state(nlohmann::json const& s) {
+    if (s.is_null() || s.empty() || s.value("version", 0) != 1) return;
+    stats_.clear();
+    // a snapshot taken with no cell yet carries "stats": null (a default json is null, not {}); read it as empty
+    const nlohmann::json stats = s.contains("stats") && s["stats"].is_object() ? s["stats"] : nlohmann::json::object();
+    for (auto const& [k, v] : stats.items())
+        if (v.is_object()) stats_[std::stoi(k)] = Stat{v.value("n", 0), v.value("mean", 0.0), v.value("m2", 0.0), v.value("ans", 0)};
+    ctx_stats_.clear();
+    if (s.contains("ctx_stats") && s["ctx_stats"].is_object())
+        for (auto const& [k, v] : s["ctx_stats"].items())
+            if (v.is_object()) ctx_stats_[std::stoi(k)] = Stat{v.value("n", 0), 0.0, 0.0, v.value("ans", 0)};
+    requests_ = s.value("requests", 0); observed_ = s.value("observed", 0); unknown_ = s.value("unknown", 0);
+}
+nlohmann::json SkillOutcomeLoop::diag_lite() const {
+    int pecks = 0, pushes = 0; for (auto const& [k, s] : stats_) { if (k % kMaxIntents == 1) pecks += s.n; if (k % kMaxIntents == 2) pushes += s.n; }
+    return nlohmann::json{{"requests", requests_}, {"observed", observed_}, {"unknown", unknown_}, {"pending", pending_}, {"peck_outcomes", pecks}, {"push_outcomes", pushes}, {"misses", misses_}, {"armed", armed_left_ > 0},
+                          {"node", node_}, {"surprise", last_surprise_}, {"need", need_}, {"nodes_known", int(std::count_if(stats_.begin(), stats_.end(), [&](auto const& kv){ return kv.second.n >= min_samples_; }))}};
+}
+nlohmann::json SkillOutcomeLoop::diag_snapshot() const {
+    nlohmann::json j = diag_lite();
+    nlohmann::json st = nlohmann::json::object();
+    // keyed "node:intent" (2026-10-02: it read k / 2 and k % 2, a two-intent leftover -- with kMaxIntents 4 every
+    // label was wrong; diagnostic only)
+    static const char* const kNames[kMaxIntents] = {"kick", "peck", "push", "intent3"};
+    for (auto const& [k, s] : stats_)
+        st[std::to_string(k / kMaxIntents) + ":" + kNames[k % kMaxIntents]] = {{"n", s.n}, {"mean", s.mean}, {"sd", std::sqrt(s.var())}, {"ans", s.ans}};
+    j["stats"] = st; j["tx"] = tx_; j["ty"] = ty_;
+    j["last"] = {{"node", last_node_}, {"pred", last_pred_}, {"obs", last_obs_}, {"surprise", last_surprise_}};
+    j["min_samples"] = min_samples_; j["kicked_node"] = knode_;
+    j["pull"] = pull_; j["context"] = ctx_; j["context_n"] = context_topic_.empty() ? 0 : context_n_;
+    nlohmann::json cs = nlohmann::json::object();
+    for (auto const& [k, c] : ctx_stats_) cs[std::to_string(k)] = {{"n", c.n}, {"ans", c.ans}};
+    j["ctx_stats"] = cs;
+    return j;
+}
+
+}  // namespace ogma

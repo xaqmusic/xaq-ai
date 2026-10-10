@@ -1,0 +1,100 @@
+{
+  "body": "cell",
+  "host": "godot",
+  "env_target": "cell",
+  "title": "Cell (Godot)",
+  "launch_hint": "godot_host launcher -> cell; the config must be in the cell allowlist",
+  "description": "The flagellate cell in the Godot host (godot_host/project/scripts/body_controller.gd): whiskers, scent, energy, a first-person camera, two flagella.",
+  "sources": [
+    {
+      "name": "imu",
+      "topic": "reality.proprio.imu",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "sin(h), cos(h), vx, vz - kinematic only (whiskers split off)"
+    },
+    {
+      "name": "whiskers",
+      "prefix": "reality.proprio.whisker_",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "per-whisker contact intensity, one topic per whisker: reality.proprio.whisker_0 .. whisker_5 (one EPM per channel)"
+    },
+    {
+      "name": "energy",
+      "topic": "reality.proprio.energy",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "internal energy 0..1 (passive drain + hit replenish)"
+    },
+    {
+      "name": "scent",
+      "topic": "reality.proprio.scent",
+      "payload": "ProprioToken",
+      "dims": 8,
+      "description": "8 body-relative nostrils, scalar concentration only"
+    },
+    {
+      "name": "terrain",
+      "topic": "reality.proprio.terrain",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "slope_x, slope_z, roughness, height_below_body"
+    },
+    {
+      "name": "camera",
+      "topic": "host.video.color",
+      "payload": "RawImageFrame",
+      "dims": 0,
+      "description": "raw first-person RGB frame (food is green against a grey/blue scene)"
+    },
+    {
+      "name": "motor_energy",
+      "topic": "reality.proprio.motor_energy",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "per-flagellum leaky energy budget (drains with paddling, recharges at rest)"
+    }
+  ],
+  "sinks": [
+    {
+      "name": "out",
+      "topic": "action.out",
+      "payload": "ActionOut",
+      "description": "accel [-4,+4] -> per-flagellum spike rates (legacy single channel; superseded when left + right are both driven)"
+    },
+    {
+      "name": "left",
+      "topic": "action.left",
+      "payload": "ActionOut",
+      "description": "accel [-4,+4] -> left-flagellum spike rate; paired with action.right for differential steering"
+    },
+    {
+      "name": "right",
+      "topic": "action.right",
+      "payload": "ActionOut",
+      "description": "accel [-4,+4] -> right-flagellum spike rate; paired with action.left"
+    }
+  ],
+  "reads": [],
+  "events": [
+    {
+      "name": "hit",
+      "topic": "events.hit",
+      "event_type": "hit",
+      "description": "reward"
+    },
+    {
+      "name": "eat",
+      "topic": "events.eat",
+      "event_type": "eat",
+      "description": "ground-truth consummatory event (real nutrient collision only)"
+    },
+    {
+      "name": "wall_stuck",
+      "topic": "events.wall_stuck",
+      "event_type": "wall_stuck",
+      "description": "aversive"
+    }
+  ]
+}

@@ -31,6 +31,7 @@ int GNG::add_node(const Eigen::VectorXf& prototype) {
     n.visits            = 0;
     n.last_visited_step = step_;
     n.health            = 1.0f;  // born young — must earn resilience through visits
+    n.p                 = cfg_.kalman_p0;
     adj_[id];           // ensure adjacency entry exists (empty set)
     return id;
 }
@@ -126,16 +127,30 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
         if (autotune_hist_.size() > kAutotuneHistoryMax) autotune_hist_.pop_front();
     }
 
-    // 3. Move winner toward input — health-dampened plasticity.
-    //    High-health nodes move less (consolidated). Fully consolidated
-    //    (visits >= baking_threshold AND low error) are frozen.
-    if (s1.visits < cfg_.baking_threshold) {
-        // Stability from both visits AND health: health adds smooth damping
-        float visit_stability = static_cast<float>(s1.visits) / cfg_.baking_threshold;
-        float health_damping = std::min(1.0f, s1.health * 0.02f); // health=50 → 100% damped
-        float stability = std::max(visit_stability, health_damping);
-        float eff_eb    = cfg_.epsilon_b * (1.0f - 0.9f * stability);
-        s1.prototype   += eff_eb * (x - s1.prototype);
+    // 3. Move winner toward input.
+    if (cfg_.gain_kind == GainKind::Linear) {
+        // Legacy: health-dampened plasticity.  High-health nodes move less
+        // (consolidated). Fully consolidated (visits >= baking_threshold AND
+        // low error) are frozen.
+        if (s1.visits < cfg_.baking_threshold) {
+            // Stability from both visits AND health: health adds smooth damping
+            float visit_stability = static_cast<float>(s1.visits) / cfg_.baking_threshold;
+            float health_damping = std::min(1.0f, s1.health * 0.02f); // health=50 → 100% damped
+            float stability = std::max(visit_stability, health_damping);
+            float eff_eb    = cfg_.epsilon_b * (1.0f - 0.9f * stability);
+            s1.prototype   += eff_eb * (x - s1.prototype);
+        }
+    } else {
+        // Kalman: the node's own scalar filter (see Config).  A baked node
+        // moves only when process noise is declared (kalman_q > 0).
+        const bool baked = s1.visits >= cfg_.baking_threshold;
+        if (!baked || cfg_.kalman_q > 0.0f) {
+            s1.p += cfg_.kalman_q;
+            float K = s1.p / (s1.p + 1.0f);
+            if (K > cfg_.kalman_gain_cap) K = cfg_.kalman_gain_cap;
+            s1.prototype += K * (x - s1.prototype);
+            s1.p *= (1.0f - K);
+        }
     }
 
     // 4. Move neighbours toward input (skip consolidated neighbours)
@@ -230,7 +245,11 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
 
             // Track the weakest node for potential death (near-baked nodes
             // remain eligible, but near-baked decay is halved above, so they
-            // rarely reach the threshold).
+            // rarely reach the threshold).  With the spares-baked guard on,
+            // BAKED nodes are exempt — see the config note: earned regimes are
+            // permanent facts, not casualties of a long absence.
+            if (cfg_.health_death_spares_baked
+                && node.visits >= cfg_.baking_threshold) continue;
             if (node.health < worst_health) {
                 worst_health = node.health;
                 worst_id = id;
@@ -269,7 +288,7 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
     last_step_baked_ = false;
     if (!s1.bake_checked && s1.visits >= cfg_.baking_threshold) {
         s1.bake_checked = true;
-        if (s1.ema_error >= effective_min_insertion_error()) {
+        if (s1.ema_error >= (cfg_.bake_gate > 0.0f ? cfg_.bake_gate : effective_min_insertion_error())) {
             // Demotion: concept not tight enough
             s1.bake_checked = false;  // allow re-check after demotion
             s1.visits     = std::max(0, cfg_.baking_threshold - 3);
@@ -284,6 +303,11 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
     if (s1.visits > cfg_.baking_threshold) {
         s1.post_bake_visits++;
         s1.post_bake_error += static_cast<double>(d1_sq);
+        if (cfg_.drift_ratio > 0.0f) {                      // Stage 4: innovation sum
+            if (s1.post_bake_resid_sum.size() != x.size())
+                s1.post_bake_resid_sum = Eigen::VectorXf::Zero(x.size());
+            s1.post_bake_resid_sum += (x - s1.prototype);
+        }
     }
 
     return {s1_id, d1};
@@ -473,6 +497,11 @@ int GNG::get_visit_count(int node_id) const {
     return (it != nodes_.end()) ? it->second.visits : 0;
 }
 
+double GNG::get_ema_error(int node_id) const {
+    auto it = nodes_.find(node_id);
+    return (it != nodes_.end()) ? it->second.ema_error : 0.0;
+}
+
 bool GNG::is_crystallised(int node_id) const {
     return get_visit_count(node_id) >= cfg_.baking_threshold;
 }
@@ -512,6 +541,7 @@ void GNG::reset_topology() {
     adj_.clear();
     step_             = 0;
     mitosis_count_    = 0;
+    drift_count_      = 0;
     last_step_baked_  = false;
     last_pruned_ids_.clear();
     last_death_step_  = -1000000;
@@ -540,10 +570,29 @@ bool GNG::maybe_mitosis(int winner_id, const Eigen::VectorXf& x) {
 
     // Check post-bake mean error against threshold
     double mean_pb_error = q.post_bake_error / q.post_bake_visits;
+
+    // Stage 4 — the innovation-mean test, before the split decision.  A biased
+    // post-bake residual means the world moved: correct the prototype and keep
+    // the node.  An unbiased but wide residual falls through to mitosis.
+    if (cfg_.drift_ratio > 0.0f && q.post_bake_resid_sum.size() == q.prototype.size()) {
+        Eigen::VectorXf mean_resid = q.post_bake_resid_sum / float(q.post_bake_visits);
+        const float bias   = mean_resid.norm();
+        const float spread = std::sqrt(float(std::max(mean_pb_error, 1e-12)));
+        if (spread > 1e-9f && bias / spread > cfg_.drift_ratio) {
+            q.prototype += cfg_.drift_gain * mean_resid;
+            q.post_bake_visits = 0;
+            q.post_bake_error  = 0.0;
+            q.post_bake_resid_sum.setZero();
+            ++drift_count_;
+            return false;
+        }
+    }
+
     if (mean_pb_error < cfg_.mitosis_error_threshold) {
         // Not saturated — reset window and continue
         q.post_bake_visits = 0;
         q.post_bake_error  = 0.0;
+        if (q.post_bake_resid_sum.size() > 0) q.post_bake_resid_sum.setZero();
         return false;
     }
 
@@ -608,6 +657,12 @@ nlohmann::json GNG::to_json() const {
     j["step"]                = step_;
     j["next_id"]             = next_id_;
     j["mitosis_count"]       = mitosis_count_;
+    // Stage 4 drift state — emitted ONLY when the test is on (byte-identical otherwise).
+    if (cfg_.drift_ratio > 0.0f) {
+        j["drift_ratio"] = cfg_.drift_ratio;
+        j["drift_gain"]  = cfg_.drift_gain;
+        j["drift_count"] = drift_count_;
+    }
     j["running_mean_error"]  = running_mean_error_;
     // Insertion-gate self-tuning state.  Emitted ONLY when enabled, so a GNG
     // with autotune off serialises byte-identically to the pre-feature form.
@@ -619,6 +674,13 @@ nlohmann::json GNG::to_json() const {
         j["insertion_autotune_quantile"] = cfg_.insertion_autotune_quantile;
         j["autotune_value"]              = autotune_value_;
         j["autotune_hist"]               = autotune_hist_;
+    }
+    // Per-node Kalman gain: emitted ONLY in Kalman mode (same guard as above).
+    if (cfg_.gain_kind == GainKind::Kalman) {
+        j["gain_kind"]       = "kalman";
+        j["kalman_p0"]       = cfg_.kalman_p0;
+        j["kalman_q"]        = cfg_.kalman_q;
+        j["kalman_gain_cap"] = cfg_.kalman_gain_cap;
     }
     j["last_step_baked"]     = last_step_baked_;
     j["last_death_step"]     = last_death_step_;
@@ -641,7 +703,13 @@ nlohmann::json GNG::to_json() const {
         nj["bake_checked"]     = node.bake_checked;
         nj["post_bake_visits"] = node.post_bake_visits;
         nj["post_bake_error"]  = node.post_bake_error;
+        if (cfg_.drift_ratio > 0.0f && node.post_bake_resid_sum.size() > 0) {
+            std::vector<float> rs(node.post_bake_resid_sum.data(),
+                                  node.post_bake_resid_sum.data() + node.post_bake_resid_sum.size());
+            nj["post_bake_resid_sum"] = rs;
+        }
         nj["health"]           = node.health;
+        if (cfg_.gain_kind == GainKind::Kalman) nj["p"] = node.p;
         std::vector<float> proto(node.prototype.data(),
                                   node.prototype.data() + node.prototype.size());
         nj["prototype"] = proto;
@@ -670,6 +738,11 @@ GNG GNG::from_json(const nlohmann::json& j) {
     cfg.min_insertion_error = j.value("min_insertion_error", 0.02f);
     cfg.insertion_autotune          = j.value("insertion_autotune", false);
     cfg.insertion_autotune_quantile = j.value("insertion_autotune_quantile", 0.30f);
+    cfg.gain_kind           = j.value("gain_kind", std::string("linear")) == "kalman"
+                                  ? GainKind::Kalman : GainKind::Linear;
+    cfg.kalman_p0           = j.value("kalman_p0",       1.0f);
+    cfg.kalman_q            = j.value("kalman_q",        0.0f);
+    cfg.kalman_gain_cap     = j.value("kalman_gain_cap", 1.0f);
     cfg.lambda_new          = j.value("lambda_new",          25);
     cfg.max_age             = j.value("max_age",             88);
     cfg.stale_prune_enabled = j.value("stale_prune_enabled", true);
@@ -679,6 +752,9 @@ GNG GNG::from_json(const nlohmann::json& j) {
     gng.step_          = j.value("step",          0);
     gng.next_id_       = j.value("next_id",       0);
     gng.mitosis_count_ = j.value("mitosis_count", 0);
+    gng.cfg_.drift_ratio = j.value("drift_ratio", 0.0f);
+    gng.cfg_.drift_gain  = j.value("drift_gain",  1.0f);
+    gng.drift_count_     = j.value("drift_count", 0);
     gng.autotune_value_ = j.value("autotune_value", -1.0f);
     if (j.contains("autotune_hist") && j["autotune_hist"].is_array()) {
         auto h = j["autotune_hist"].get<std::vector<double>>();
@@ -711,7 +787,12 @@ GNG GNG::from_json(const nlohmann::json& j) {
         node.bake_checked      = nj.value("bake_checked",      false);
         node.post_bake_visits  = nj.value("post_bake_visits",  0);
         node.post_bake_error   = nj.value("post_bake_error",   0.0);
+        if (nj.contains("post_bake_resid_sum") && nj["post_bake_resid_sum"].is_array()) {
+            auto rs = nj["post_bake_resid_sum"].get<std::vector<float>>();
+            node.post_bake_resid_sum = Eigen::Map<const Eigen::VectorXf>(rs.data(), rs.size());
+        }
         node.health            = nj.value("health",            1.0f);
+        node.p                 = nj.value("p",                 cfg.kalman_p0);
         gng.adj_[id];   // ensure adjacency entry
     }
 

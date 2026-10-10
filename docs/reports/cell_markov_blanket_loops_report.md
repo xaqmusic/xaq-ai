@@ -1,5 +1,11 @@
 # The Cell Navigator — A Falsification Testbed for Markov-Blanket-Loop Active Inference
 
+> **Errata (2026-09-06).** A system audit run after this report found that several of the
+> mechanisms it describes differ from what the code ran. The behavioural results stand; the
+> corrections are collected in the [Errata appendix](#errata-2026-09-06) at the end, and the
+> audit itself is [`cell_system_audit_2026-09.md`](cell_system_audit_2026-09.md).
+
+
 ## Executive summary
 
 **Can a machine's intelligence be assembled out of small, independent pieces — and how
@@ -463,3 +469,58 @@ deficiency-safe palette, identity colours, and direct labels.
 ---
 
 *Living document: the phases above are the roadmap, not a promise.*
+
+---
+
+## Errata (2026-09-06)
+
+Each item states what the system did, as established by the
+[system audit](cell_system_audit_2026-09.md) and its [claim register](cell_system_audit_2026-09_appendix.md).
+The behavioural numbers in the sections above were measured as reported; what changes is the
+population they were drawn from and the mechanisms offered for them.
+
+1. **Worlds (§2, §3, §6, Appendix).** The twenty randomised worlds shared one pillar
+   layout, one body random stream and one arbitration random stream. The harness passed a
+   fixed seed to every run, and the world never read the layout seed the harness wrote into
+   the configuration's metadata. Only the two food sites and the starting position varied,
+   drawn from the exploration loop's seed. The paired design is sound; the sampled
+   population is twenty food layouts in one room. A repaired harness draws a distinct world
+   per run. Re-run under it (twenty distinct worlds: food sites, spawn and pillar layout, every
+   random stream varied; the legacy mode of the same harness reproduces this report's numbers
+   exactly), the §6 comparison reads: specialist 2.30 eats, composition 0.75 (paired −1.55,
+   sd 1.99, t −3.5), composition-minus-play 1.65 (paired −0.65 against the specialist, sd 1.84,
+   t −1.6, not significant; −0.90, sd 1.48, t −2.7 against the full composition). The
+   direction of every §6 statement stands; the minus-play arm no longer ties the specialist
+   but trends below it, and every spread is roughly twice the one reported above.
+2. **The exploration loop (§1, §4).** Its climb toward map novelty engaged on none of the
+   recorded runs (the raw file records a climb fraction of zero for every arm). A stall
+   latch forces it back to a memoryless wander thirty ticks after the map stops growing, and
+   in this room the map stops growing early. The loop that took eighty percent of decisions
+   was a random walk with a recency scalar for a value, not an explorer. §1's description of
+   what it infers is the design, not the run.
+3. **Need-gated weighting (§4).** The arbiter shipped with need-gated epistemic weighting on
+   by default, in a form that keeps exploration high while the body is hungry and no
+   pragmatic loop can reach anything. The form §4 proposes as future work, a gate by hunger
+   alone, is the ablation. Measured in this report's own world over twenty paired layouts,
+   that ablation is a null (eats 0.6 against 0.5; exploration's share of decisions 0.91
+   against 0.82). The crowding is a units problem: every pragmatic score is hunger times a
+   scent-scaled reach of a few hundredths, while exploration's value is normalised to its
+   own peak and sits at one. No gate on the epistemic side changes that.
+4. **The perturbation test (§5, Appendix).** The sensor-dropout figure comes from a
+   pillar-free forty-metre room at one fixed world seed with five exploration seeds, on a
+   configuration with no fusion machinery. Its result stands as a within-subject signal in
+   that room; it is not a measurement in the §2 environment.
+5. **The scent loop's leave-one-out lever (§2).** Clearing the loop's input zeroes its
+   epistemic spike but not its pragmatic score, which comes from a self-reported capability
+   that survives, so the loop can still win. The minus-scent contribution is a lower bound
+   on what deadening the loop would show.
+6. **Names and numbers (Introduction, Appendix).** The planner module is `PlaceGraphPlanner`;
+   no module named `PlaceGraphNav` exists. The §2 room is forty metres across, not sixteen,
+   and its scent field is a screened-Poisson relaxation, not an exponential. The study
+   configuration ships with the vision loop weighted to zero; the report's runs enabled it
+   through the harness, as the fused arm's decision shares show.
+7. **The perceptual path (Introduction).** The consensus layer described in "How it is
+   built" exists only in the six maze-fusion configurations, whose perceptual modules were
+   fed zero vectors by a dimension mismatch; their published trust was a constant. The study
+   brain has no consensus layer: its loops feed the arbiter directly. A repaired fusion
+   configuration exists and is where precision-weighted fusion has since been measured.

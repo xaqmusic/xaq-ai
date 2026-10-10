@@ -30,6 +30,10 @@ they refer to the same project. New Python code uses the `xaq` /
   FetchContent (needs ZeroMQ). Generic audio front-end is `encoder_stft.*`.
 - `godot_host/` — Godot 4.6 GDExtension embodying the runtime (the Cell env). The
   `.so` is rebuilt from source (gitignored).
+- `brain_builder/` — the Dear ImGui desktop app for wiring a brain from scratch
+  (palette of every registered module, the body's sources/sinks as nodes,
+  drag-to-wire, validate, dry-run, publish). Links `cpp_core` directly; edits the
+  GraphConfig JSON the hosts run unchanged.
 - `python/xaq_core/` — shared substrate (bus, torch predictor/memory, RNG,
   logging protocol).
 - `python/xaq/` — the Python engine + the generic STFT audio encoder + the

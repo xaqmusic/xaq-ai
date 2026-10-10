@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "Cell \u2014 MAZE FUSION + VISION DROPOUT (bar d)",
-    "description": "Perturbation\u2192recovery: fused arm with VisualBearing.lesion_after_ticks=3600 (~60s @60Hz, mid-run). At the lesion the vision bearing\u2192[0,0], BearingFusion drops w_vision\u21920, and the fused agent must ride on scent. Recovery = keeps foraging vs the vision-only arm which collapses.",
+    "description": "AUDIT 2026-09-06: the mechanism described below NEVER OPERATED in this config -- proprio_state_dims 2 vs the compass modules' 3-value tokens fed the EPMs zero vectors, so trust was a constant 0.5/0.5 and BearingFusion blended at 50/50 (Kalman charter Stage 1; audit R4). Use the_cell_maze_fusion__dims3.json for a live fusion. Perturbation\u2192recovery: fused arm with VisualBearing.lesion_after_ticks=3600 (~60s @60Hz, mid-run). At the lesion the vision bearing\u2192[0,0], BearingFusion drops w_vision\u21920, and the fused agent must ride on scent. Recovery = keeps foraging vs the vision-only arm which collapses.",
     "env_target": "cell",
     "phase_tag": "6.12.maze.fusion.dropvision",
     "reflex_modular": true,

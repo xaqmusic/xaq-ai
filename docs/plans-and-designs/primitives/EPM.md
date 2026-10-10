@@ -10,14 +10,14 @@
 
 An EPM (Episodic Predictive Module) is the bath's per-modality clusterer. It owns:
 
-1. **A frozen encoder** — JL projection (visual), Hopf filterbank (cochlear), or RBF grid (proprioceptive). Stateless except for Hopf's per-band MOC EMA. Selected at construction time by `params.modality`.
+1. **A frozen encoder** — JL projection (visual; also `jl_state` over a wide homogeneous state vector such as a depth matrix), Hopf filterbank (cochlear), or RBF grid (proprioceptive, ≲ 12 heterogeneous dims — past that its bandwidth flattens the input; see `jl_state`). Stateless except for Hopf's per-band MOC EMA. Selected at construction time by `params.modality`.
 2. **A GNG topology** — Growing Neural Gas with two-gate baking, mitosis, biological health, and stale-prune. State is per-instance and serializable. Reuses `cpp_core/include/v3/gng.hpp` directly.
 3. **A dual-TLE estimator** — `tle = α·quant_error + β·transition_surprise`. The combined error drives mitosis decisions and is the headline scalar published in `RealityToken`.
 
 The EPM's output is one `RealityToken` per tick, published on `reality.<group>.<modality>` (e.g. `reality.video.retinal`). v4 adds two new behaviours absent in v3:
 
 - **Top-down prediction subtraction.** Before encoding, the EPM reads `prediction.<modality>` (Feedback subscription, prior-tick) from a DescendingPredictor and subtracts the predicted latent from its current encoder output. The GNG topologizes surprise, not raw observation.
-- **Level-N stacking via input source swap.** A Level-1 EPM is the same code as a Level-0 EPM with `params.input_topic` set to `consensus.0` instead of `reality.proprio.<sensor>`/etc. The encoder is the identity passthrough (or optional 128→128 JL rotation per Open Question #7 in `v4_refactor.md`).
+- **Level-N stacking via input source swap** *(no live configuration instantiates this as of 2026-09-06; every identity-encoder config is archived — register O5)*. A Level-1 EPM is the same code as a Level-0 EPM with `params.input_topic` set to `consensus.0` instead of `reality.proprio.<sensor>`/etc. The encoder is the identity passthrough (or optional 128→128 JL rotation per Open Question #7 in `v4_refactor.md`).
 
 ---
 
@@ -52,12 +52,17 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 | `modality_group` | string | ConstructionOnly | — | `video`/`audio`/`proprio` | Determines the topic-name prefix. Required. |
 | `modality_name` | string | ConstructionOnly | — | — | Trailing component of the output topic. Required. |
 | `encoder_kind` | string | ConstructionOnly | — | `jl`/`hopf`/`rbf`/`identity` | Selects the encoder backend. Required. Identity is for Level-N EPMs. |
+| | | | | `jl_state` | The frozen JL projection over a **ProprioToken** of `proprio_state_dims` values (L2-normalised before and after; `FrozenJLEncoder::make_state_encoder`). For a wide, homogeneous state such as a depth matrix: the RBF grid's bandwidth in that many dimensions makes every input the same activation profile (measured on the duck's 64-zone ToF, 2026-09-11: the raw input spread doubled against the 8-column form, the RBF latent spread fell to 0.6×, and neither commissioned ranges nor centring recovered it; the JL latent kept it). Takes no `dim_min`/`dim_max` (throws) — condition the vector at the source; `projection_dim` explicit (no auto-derivation). Added 2026-09-11 for the duck's R36. |
 | `input_topic` | string | ConstructionOnly | — | — | The single subscribed observation topic. Required. |
 | `projection_dim` | int64 | ConstructionOnly | 128 | [16, 1024] | Encoder output dim = GNG input dim. |
-| `baking_threshold` | int64 | HotMutable | 50 | [10, 500] | Visit count required to bake a node. |
+| `baking_threshold` | int64 | HotMutable | 50 | [10, 500] | Visit count required to bake a node. **⚠ The 50 is the schema's advertised default only.** The runtime hands a config's params to `on_setup` verbatim (`OgmaInstance.cpp:45`) and never merges schema defaults, so an EPM whose config *omits* this key runs `GNG::Config`'s own default of **100**. Measured 2026-09-05 (Kalman-lessons Stage 0): 105 EPM instances across 40 configs omit it. State it explicitly in every config; the picrawler stack does. |
 | `min_insertion_error` | double | HotMutable | 0.02 | (0, 1] | The insertion/consistency gate. **Only a floor when `insertion_autotune` is on** — see the correction below. |
 | `insertion_autotune` | bool | ConstructionOnly | false (off) | — | Set the gate from the GNG's own recent squared-TLE distribution; the value above becomes the floor. See "Insertion-gate self-tuning". |
 | `insertion_autotune_quantile` | double | ConstructionOnly | 0.30 | (0, 1) | Percentile used. A *rank*, not a scale — dimensionless, hence adaptive rather than tuned. |
+| `gain_kind` | string | ConstructionOnly | `linear` | `linear`/`kalman` | **Per-node Kalman gain** ([charter](../epm_kalman_lessons_plan.md), Stage 1). `linear` = the legacy anneal `ε_b(1 − 0.9·visits/N)`, byte-identical. `kalman` = each node runs its own scalar Kalman filter: `p += q; K = min(cap, p/(p+1)); w += K(x−w); p *= 1−K`. With `kalman_p0 = 1`, `kalman_q = 0` that is exactly the filter for a constant, gain `1/(n+1)`, and baked nodes stay frozen. Measured 2026-09-05: the legacy anneal leaves 24 % of a baked prototype on its birth point and 2× the MSE of the same samples' mean. `ε_b` and its neuro scaling are unused in this mode; `ε_n` unchanged. |
+| `kalman_p0` | double | ConstructionOnly | 1.0 | (0, ∞) | Initial `p` of every node born; 1 = the seed counts as one sample. |
+| `kalman_q` | double | HotMutable | 0.0 | [0, ∞) | Process-noise ratio added to `p` per win. 0 = baked frozen; > 0 = every node, baked included, settles at the random-walk steady-state gain `(q + √(q²+4q))/2` and tracks slow drift instead of waiting for mitosis. A separate lever from `gain_kind`. |
+| `kalman_gain_cap` | double | HotMutable | 1.0 | (0, 1] | Upper bound on `K`. Lower it if the high early gain drags a young node across a cluster boundary (the risk the bench's S1m scenario watches). |
 | `lambda_new` | int64 | HotMutable | 25 | [5, 200] | Steps between insertion-error reviews. |
 | `max_age` | int64 | HotMutable | 88 | [10, 500] | Edge max age before pruning. |
 | `epsilon_b` | double | HotMutable | 0.05 | (0, 1] | Winner learning rate (modulated by `neuro.state.epsilon_b_scale`). |
@@ -66,8 +71,12 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 | `beta` | double | HotMutable | 0.0005 | (0, 1] | Global error decay per step. |
 | `max_nodes` | int64 | HotMutable | 2000 | [50, 50000] | GNG capacity. |
 | `tle_alpha` | double | HotMutable | 0.7 | [0, 1] | Weight of `quant_error` in dual TLE. |
+| `transition_surprise_kind` | string | HotMutable | `displacement` | `displacement`/`logprob` | **Stage 3 restoration** ([charter](../epm_kalman_lessons_plan.md)). `displacement` = `‖proto_t − proto_{t−1}‖`, the C++ port's stand-in, byte-identical. `logprob` = the Python reference's surprise: `−log P(cur|prev)` from the EPM's own transition counts as they stood before the step, Laplace-smoothed, normalised by `log N` to [0, 1], conditioned on a move (a stay scores 0, a first arrival 1). The bench's S4 showed the displacement cannot separate an expected transition from a teleport (ratio 1.03). |
 | `tle_beta` | double | HotMutable | 0.3 | [0, 1] | Weight of `transition_surprise`. (`tle_alpha + tle_beta` need not sum to 1 — they are independent gains.) |
-| `mitosis_enabled` | bool | HotMutable | true | — | — |
+| `mitosis_enabled` | bool | HotMutable | true | — | **⚠ Has had no effect in v4.** The v4 EPM never called `GNG::maybe_mitosis`; the parameters were plumbed and neuro-scaled but the gatekeeper was never invoked (found 2026-09-05, Kalman-lessons Stage 4; bench mitosis count 0 on every tick). See `mitosis_gatekeeper`. |
+| `mitosis_gatekeeper` | bool | HotMutable | false | — | **Stage 4.** `true` calls the gatekeeper each tick on the winner (the v3 semantics: a baked node whose post-bake mean error stays above `mitosis_error_threshold` splits). `false` = the dead path, byte-identical. |
+| `mitosis_drift_ratio` | double | HotMutable | 0.0 | [0, ∞) | **Stage 4, the innovation-mean test** ([charter](../epm_kalman_lessons_plan.md)). Inside the gatekeeper, before the split decision: bias = ‖mean post-bake residual‖, spread = RMS post-bake residual; `bias/spread > ratio` means the world moved, so the prototype is corrected by `mitosis_drift_gain × mean residual` and the node kept; otherwise the split proceeds. Noise alone gives ≈ 1/√n (0.14 at 50 visits); 0.5 is safe. 0 = off. |
+| `mitosis_drift_gain` | double | HotMutable | 1.0 | (0, 1] | Fraction of the mean residual applied as the correction. |
 | `mitosis_error_threshold` | double | HotMutable | 0.30 | (0, 1] | Post-bake mean error to trigger split (modulated by `neuro.state.mitosis_threshold_scale`). |
 | `mitosis_check_interval` | int64 | HotMutable | 50 | [5, 1000] | Post-bake visits between checks. |
 | `health_base_decay` | double | HotMutable | 0.997 | [0.9, 1.0) | Per-tick health decay multiplicand. |

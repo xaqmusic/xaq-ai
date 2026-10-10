@@ -1,0 +1,46 @@
+{
+  "body": "cartpole",
+  "host": "godot",
+  "env_target": "cartpole",
+  "title": "Cart-pole (Godot)",
+  "launch_hint": "godot_host launcher -> cartpole",
+  "description": "The cart-pole in the Godot host (godot_host/project/scripts/cart_body.gd).",
+  "sources": [
+    {
+      "name": "cart_state",
+      "topic": "reality.proprio.cart_state",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "x/2.4, x_dot/3.0, theta/12deg, theta_dot/pi - normalised cart-pole state"
+    }
+  ],
+  "sinks": [
+    {
+      "name": "force",
+      "topic": "action.out",
+      "payload": "ActionOut",
+      "description": "accel in [-4,+4]; the sign pushes left or right"
+    }
+  ],
+  "reads": [],
+  "events": [
+    {
+      "name": "alive",
+      "topic": "events.alive",
+      "event_type": "alive",
+      "description": "per-tick survival pulse -> drive valence"
+    },
+    {
+      "name": "failed",
+      "topic": "events.failed",
+      "event_type": "failed",
+      "description": "episode terminated by fall or off-track"
+    },
+    {
+      "name": "solved",
+      "topic": "events.solved",
+      "event_type": "solved",
+      "description": "episode survived max_steps"
+    }
+  ]
+}

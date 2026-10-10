@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include <gtest/gtest.h>
+#include <random>
 
 #include <Eigen/Dense>
 #include <cmath>
@@ -260,4 +261,45 @@ TEST(DescendingPredictor, MultipleTargetsPublishIndependently) {
     auto b = f.last_prediction("proprio.imu");
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
+}
+
+// -- Kalman-lessons Stage 3 (K6): true RLS ---------------------------------
+
+// A fixed linear map y = A c + b from a 4-D context to a 2-D target.  RLS
+// (the Kalman filter for a static parameter vector) should reach a tiny error
+// within a few dozen ticks; SGD at its default rate is still far off then.
+TEST(DescendingPredictor, TrueRlsLearnsALinearMapInTensOfTicks) {
+    auto run = [](std::string const& method) {
+        ogma::InProcessBus bus;
+        ogma::DescendingPredictor pred;
+        pred.set_id("pred");
+        pred.on_setup(&bus, {
+            {"consensus_topic",  std::string("consensus.0")},
+            {"targets",          std::vector<std::string>{"reality.proprio.imu"}},
+            {"update_method",    method},
+            {"learning_rate",    0.01},
+            {"init_noise_scale", 0.0},
+        });
+        Eigen::MatrixXf A(2, 4); A << 0.5f, -0.3f, 0.8f, 0.1f,  -0.2f, 0.9f, 0.4f, -0.6f;
+        Eigen::Vector2f b(0.3f, -0.1f);
+        std::mt19937 rng(7);
+        std::normal_distribution<float> nd(0.0f, 1.0f);
+        float last_err = 1.0f;
+        for (int t = 1; t <= 60; ++t) {
+            Eigen::VectorXf c(4); for (int i = 0; i < 4; ++i) c(i) = nd(rng);
+            auto ct = std::make_shared<ogma::ConsensusToken>(); ct->fused_embedding = c;
+            auto rt = std::make_shared<ogma::RealityToken>();
+            rt->winner_id = 0; rt->latent = A * c + b;       // the target for THIS context
+            bus.begin_tick(uint64_t(t));
+            bus.publish("consensus.0", ct);
+            bus.publish("reality.proprio.imu", rt);
+            pred.tick(uint64_t(t));
+            bus.end_tick();
+            auto pt = std::dynamic_pointer_cast<const ogma::PredictionToken>(bus.last_value("prediction.proprio.imu"));
+            if (pt && pt->predicted_latent.size() == 2) last_err = (pt->predicted_latent - (A * c + b)).norm();
+        }
+        return last_err;
+    };
+    EXPECT_LT(run("rls"), 1e-2f);
+    EXPECT_GT(run("sgd"), 1e-2f);
 }

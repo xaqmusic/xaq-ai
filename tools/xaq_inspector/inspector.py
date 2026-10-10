@@ -18,12 +18,12 @@ import argparse
 import sys
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSettings
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSettings, QTimer
 from PyQt6.QtGui import QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QListWidget, QListWidgetItem, QSplitter,
     QStackedWidget, QStatusBar, QVBoxLayout, QWidget, QLabel,
-    QPushButton, QHBoxLayout, QSpinBox, QMessageBox, QLineEdit,
+    QPushButton, QHBoxLayout, QSpinBox, QMessageBox, QLineEdit, QComboBox,
 )
 
 from .transport import ControlClient, DiagSubscriber, DiagPayload
@@ -130,6 +130,7 @@ class InspectorWindow(QMainWindow):
         header = QLabel("Modules")
         header.setStyleSheet("color:#fff; font-weight:bold; font-size: 13px;")
         left_layout.addWidget(header)
+        self._modules_header = header
 
         self._list = QListWidget()
         self._list.itemActivated.connect(self._on_module_activated)
@@ -154,6 +155,25 @@ class InspectorWindow(QMainWindow):
             setattr(self, attr, edit)
             left_layout.addLayout(row)
 
+        # Which brain (2026-10-02).  The duck's MuJoCo host runs up to three brains, each serving its own pair of
+        # ports from the base (OGMA_INSPECTOR_PORT, default 7400): the walker / intent brain at +0, the head brain at +2,
+        # the stop's stand brain at +4 (diag = control + 1).  Picking one re-points both fields and reconnects.
+        brain_row = QHBoxLayout()
+        lab = QLabel("brain")
+        lab.setMinimumWidth(46)
+        brain_row.addWidget(lab)
+        self._brain = QComboBox()
+        for name, off in (("intent / walker  (+0)", 0), ("head  (+2)", 2), ("stand  (+4)", 4)):
+            self._brain.addItem(name, off)
+        self._brain.setToolTip("the duck host's brains: control port = base + offset, diag = control + 1")
+        # a remembered endpoint at 7402 / 7404 reopens on that brain; any other port is the base itself
+        off = int(self.control.port) - 7400
+        self._brain_offset = off if off in (0, 2, 4) else 0
+        self._brain.setCurrentIndex({0: 0, 2: 1, 4: 2}[self._brain_offset])
+        self._brain.activated.connect(self._on_brain_picked)
+        brain_row.addWidget(self._brain, 1)
+        left_layout.addLayout(brain_row)
+
         # Subscribe rate selector
         rate_row = QHBoxLayout()
         rate_row.addWidget(QLabel("hz:"))
@@ -165,6 +185,15 @@ class InspectorWindow(QMainWindow):
         refresh_btn = QPushButton("Connect / Refresh")
         refresh_btn.setToolTip("Apply the host fields and re-list the brain's modules")
         refresh_btn.clicked.connect(self._refresh_modules)
+        # The brain builder (or the Godot panel) can add and remove modules
+        # while this window is open: poll the host's graph version and
+        # re-list on change, keeping the current subscription when its
+        # module survived.
+        self._graph_version = None
+        self._version_timer = QTimer(self)
+        self._version_timer.setInterval(2000)
+        self._version_timer.timeout.connect(self._sync_list_if_changed)
+        self._version_timer.start()
         rate_row.addWidget(refresh_btn)
         left_layout.addLayout(rate_row)
 
@@ -209,6 +238,18 @@ class InspectorWindow(QMainWindow):
 
     # ----- module list / subscription -----
 
+    def _on_brain_picked(self, _index: int) -> None:
+        """Re-point both fields at the picked brain's ports (keeping the host and the base) and reconnect."""
+        c_host, c_port = parse_endpoint(self._ctl_edit.text(), _DEFAULT_HOST, 7400)
+        d_host, _ = parse_endpoint(self._diag_edit.text(), _DEFAULT_HOST, 7401)
+        old_off = getattr(self, "_brain_offset", 0)
+        base = c_port - old_off
+        off = int(self._brain.currentData() or 0)
+        self._brain_offset = off
+        self._ctl_edit.setText(f"{c_host}:{base + off}")
+        self._diag_edit.setText(f"{d_host}:{base + off + 1}")
+        self._refresh_modules()
+
     def _refresh_modules(self) -> None:
         # Force a fresh control-socket connection on every refresh.
         # When Godot relaunches, the prior TCP socket is dead but
@@ -227,6 +268,11 @@ class InspectorWindow(QMainWindow):
         self._settings.setValue("control_port", c_port)
         self._settings.setValue("diag_host", d_host)
         self._settings.setValue("diag_port", d_port)
+        # Connect may have re-pointed us at a DIFFERENT brain, whose graph version is
+        # unrelated to the one we were tracking.  Drop the baseline so the next poll
+        # re-establishes it silently instead of reporting a live edit that never
+        # happened — and overwriting the endpoint the operator just asked to see.
+        self._graph_version = None
         try:
             self.control.reconnect()
             resp = self.control.call("list_modules")
@@ -250,6 +296,8 @@ class InspectorWindow(QMainWindow):
             self._current_widget = None
             self._right.setCurrentWidget(self._placeholder)
         self._modules = list(resp.get("modules", []))
+        brain = resp.get("brain")
+        self._modules_header.setText(f"Modules — {brain} brain" if brain else "Modules")
         self._list.clear()
         for m in self._modules:
             item = QListWidgetItem(f"{m.get('id')}   ({m.get('type')})")
@@ -260,6 +308,59 @@ class InspectorWindow(QMainWindow):
             if prior_module_id is not None and m.get("id") == prior_module_id:
                 self._list.setCurrentItem(item)
         self._set_status(f"{len(self._modules)} modules — control {c_host}:{c_port}, diag {d_host}:{d_port}")
+
+    def _sync_list_if_changed(self) -> None:
+        """Re-list the modules when the host's graph version moved (a live
+        edit from the brain builder).  Hosts without the verb answer with
+        an error and are left alone."""
+        try:
+            resp = self.control.call("graph_version")
+        except Exception:
+            return
+        if resp.get("status") != "ok":
+            return
+        version = resp.get("graph_version")
+        if version == self._graph_version:
+            return
+        first = self._graph_version is None
+        self._graph_version = version
+        if first:
+            return
+        try:
+            listing = self.control.call("list_modules")
+        except Exception as e:
+            self._set_status(f"control error: {e}")
+            return
+        if listing.get("status") != "ok":
+            return
+        modules = list(listing.get("modules", []))
+        ids = {m.get("id") for m in modules}
+        self._modules = modules
+        self._list.clear()
+        current_item = None
+        for m in modules:
+            item = QListWidgetItem(f"{m.get('id')}   ({m.get('type')})")
+            item.setData(Qt.ItemDataRole.UserRole, m)
+            self._list.addItem(item)
+            if m.get("id") == self._current_module_id:
+                current_item = item
+        if self._current_module_id is not None and self._current_module_id not in ids:
+            # The module we were watching was removed on the host.
+            self._current_sub_id = None
+            self._current_topic_prefix = None
+            self._current_module_id = None
+            if self._current_widget is not None:
+                self._right.removeWidget(self._current_widget)
+                self._current_widget.deleteLater()
+                self._current_widget = None
+                self._right.setCurrentWidget(self._placeholder)
+            self._set_status(f"{len(modules)} modules (graph v{version}; the watched module was removed)")
+            return
+        if current_item is not None:
+            self._list.blockSignals(True)
+            self._list.setCurrentItem(current_item)
+            self._list.blockSignals(False)
+        self._set_status(f"{len(modules)} modules (graph v{version})")
 
     def _on_module_activated(self, item: QListWidgetItem) -> None:
         m = item.data(Qt.ItemDataRole.UserRole) or {}

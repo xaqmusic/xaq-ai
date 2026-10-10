@@ -280,3 +280,63 @@ int main(int argc, char** argv) {
     std::cout << " ===\n";
     return result;
 }
+
+// ---------------------------------------------------------------------------
+// Kalman-lessons Stage 4 — drift versus split (the innovation-mean test)
+// ---------------------------------------------------------------------------
+
+// A baked node whose input then moves by a constant offset has a BIASED
+// post-bake residual: with drift_ratio on the gatekeeper corrects the prototype
+// and keeps the node (no mitosis); with it off (default) the same stream splits.
+TEST(Mitosis, DriftTestMovesInsteadOfSplitting) {
+    auto run = [](float drift_ratio) {
+        GNG::Config cfg = fast_cfg();
+        cfg.drift_ratio = drift_ratio;
+        GNG gng(cfg);
+        Eigen::VectorXf a = Eigen::VectorXf::Zero(8); a(0) = 1.0f;
+        Eigen::VectorXf b = Eigen::VectorXf::Zero(8); b(1) = 1.0f;
+        gng.step(a); gng.step(b);
+        int w = bake_node(gng, a);
+        Eigen::VectorXf shifted = a; shifted(2) = 0.5f;      // the world moved
+        bool split = false;
+        for (int i = 0; i < cfg.mitosis_check_interval + 1; ++i) {
+            auto [ww, qe] = gng.step(shifted);
+            split = gng.maybe_mitosis(ww, shifted) || split;
+        }
+        // A second window, now entirely post-shift, must finish the correction.
+        for (int i = 0; i < cfg.mitosis_check_interval + 1; ++i) {
+            auto [ww, qe] = gng.step(shifted);
+            split = gng.maybe_mitosis(ww, shifted) || split;
+        }
+        auto proto = gng.get_prototype(w);
+        return std::make_tuple(split, gng.drift_count(), proto.has_value() ? (proto.value() - shifted).norm() : 9.0f);
+    };
+    auto [split_on, drifts_on, dist_on] = run(0.5f);
+    EXPECT_FALSE(split_on);
+    EXPECT_GE(drifts_on, 1);                     // the first window held one pre-shift sample
+    EXPECT_LT(dist_on, 0.02f);                   // corrected onto the moved input
+    auto [split_off, drifts_off, dist_off] = run(0.0f);
+    EXPECT_TRUE(split_off);                      // the legacy path splits it
+    EXPECT_EQ(drifts_off, 0);
+}
+
+// A baked node fed two symmetric alternatives has an UNBIASED but wide
+// residual: the drift test must not fire, and the split must still happen.
+TEST(Mitosis, DriftTestLeavesASymmetricSpreadToMitosis) {
+    GNG::Config cfg = fast_cfg();
+    cfg.drift_ratio = 0.5f;
+    GNG gng(cfg);
+    Eigen::VectorXf a = Eigen::VectorXf::Zero(8); a(0) = 1.0f;
+    Eigen::VectorXf b = Eigen::VectorXf::Zero(8); b(1) = 1.0f;
+    gng.step(a); gng.step(b);
+    int w = bake_node(gng, a);
+    Eigen::VectorXf left = a, right = a; left(2) = 0.5f; right(2) = -0.5f;
+    bool split = false;
+    for (int i = 0; i < 2 * cfg.mitosis_check_interval + 2; ++i) {
+        Eigen::VectorXf const& x = (i % 2) ? left : right;
+        auto [ww, qe] = gng.step(x);
+        if (ww == w) split = gng.maybe_mitosis(ww, x) || split;
+    }
+    EXPECT_TRUE(split);
+    EXPECT_EQ(gng.drift_count(), 0);
+}

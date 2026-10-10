@@ -2,6 +2,7 @@
 #include "ogma/modules/MotorEPMv2.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <random>
 #include <sstream>
@@ -146,6 +147,497 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"velocity_objective_topics", ParamMutability::ConstructionOnly,
          "Optional per-leg PredictionToken topics carrying a phase-indexed SOFT VELOCITY target (predicted_latent = motor_dim target joint velocities = the propulsive trajectory; confidence = w). Needs cpg_embed + cpg_phase_topic: a second learned feed-forward Cvel is trained to reduce the velocity error (v*−ẋ) at the command phase → the body keeps moving THROUGH the pose (propulsion), where the posture objective only holds it AT the pose. Empty = Cvel stays 0 = byte-identical.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_indices", ParamMutability::HotMutable,
+         "STATE-SPACE PRIOR (2026-08-31, the microduck lever): state-vector indices a soft prior "
+         "applies to. NEGATIVE = from the end (−1 = the last element), so one config expression "
+         "addresses the bridge's appended load slot in every group regardless of group_size. "
+         "Motivation: the objective socket above can retarget only JOINT-POSITION components "
+         "(idx = 3j), and the microduck A1 campaign measured three verified-fired nulls (postural "
+         "reflex, lean-in-the-loop, conditioning/gain sweep) that together localise the failure to "
+         "the OBJECTIVE — the rule cannot rest at standing, and giving it the lean SENSOR without a "
+         "lean PRIOR left it no reason to use it (port plan §A1). This socket lets a prior live on "
+         "any state element the forward model already learns — e.g. predicted lean = 0. Same ξ̃ "
+         "mechanism as the keyframe socket (objective-change, not additive; the MODEL keeps raw ξ); "
+         "applied AFTER the keyframe/plan blend, so it wins where indices collide. Per-leg path "
+         "only, like the objective sockets (the whole_body_c path carries neither). Empty = off.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_motors", ParamMutability::HotMutable,
+         "THE PRIOR'S MOTOR MASK (2026-09-30, §17.86): parallel to state_prior_indices, the number of LEADING motors "
+         "that prior index may descend through (0 = all). A motor that moves the sensor can satisfy a sensor prior by "
+         "looking away (the seven-motor walker's head pitch carries the largest authority over the ToF's contact "
+         "share); the ToF priors then descend through the twist motors only. Empty = no mask (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_weights", ParamMutability::HotMutable,
+         "THE PRIOR'S PER-INDEX PRECISION (2026-10-01, the lean's settle): parallel to state_prior_indices, a weight on "
+         "that index's descent, C and h alike (1 = as before). Two priors that pull one motor in opposite directions "
+         "settle where their weighted gradients balance, so the weight is the one number the trade between them is "
+         "made in (the six-motor walker's head: the speed prior leans it, a level prior brings it home). Empty = all 1 "
+         "(byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_c_weights", ParamMutability::HotMutable,
+         "THE FEEDBACK HALF'S PER-INDEX WEIGHT (2026-10-01, the learned gaze): parallel to state_prior_indices, a weight on "
+         "the index's C (feedback) descent only; its h (tonic) descent is untouched. The roles this module documents: C "
+         "balances, h reaches a target away from the current state. A reach with a large, step-like error (the head's "
+         "gaze: where the walk is going minus where the head points) grew a feedback gain above one on its own error "
+         "through a lagging servo (+2.41 in 300 s: the yaw thrashed at 2.7 rad/s and the duck fell); 0 here makes that "
+         "index a pure reach. Empty = 1 everywhere (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gated_by", ParamMutability::HotMutable,
+         "THE TARGET'S GATE (2026-10-01, the arrival that faces its thing): parallel to state_prior_indices, the state "
+         "element whose SIZE scales that index's target (>= 9999 = ungated): target x (1 - |x_j| / rms_j) clamped to "
+         "[0, 1], rms_j the element's own running RMS (a 30 s EMA of its square: adapted, not tuned). The use it was built "
+         "for: the walker's forward-speed prior scaled by the heading error -- full speed asked for while the target is "
+         "ahead, none once the error reaches its typical size -- so the walk slows and turns to face a thing instead of "
+         "carrying its turn into the arrival (the kick and peck fire straight ahead). Acts on the descent's error and on "
+         "the model-implied step's. Empty = byte-identical.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gate_cos", ParamMutability::HotMutable,
+         "THE TARGET'S GATE, GEOMETRIC (2026-10-01, the operator: the facing walk shuffles in place): parallel to "
+         "state_prior_indices, > 0 replaces the RMS form of state_prior_target_gated_by for that index with "
+         "max(0, cos(x_j * value))^state_prior_target_gate_pow, value = radians per unit of the gating element (pi for the "
+         "walker's heading slot). For a forward-speed target gated by the heading error this is the speed that CLOSES on "
+         "the target (walking at angle e off the nose closes at v cos e): it cannot tighten itself as the RMS form did "
+         "(the error's RMS shrank 65 -> 35 deg as the walk improved, and the speed halved at 18 deg). Empty = the RMS form.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gate_pow", ParamMutability::HotMutable,
+         "The power on the geometric target gate (1 = the closing speed; 2 = stricter off the nose). Default 1.",
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{8.0}},
+        {"state_prior_target_gate_reach", ParamMutability::HotMutable,
+         "TURN BEFORE YOU ARRIVE (2026-10-01, the walk's dynamic range): parallel to state_prior_indices, the state element "
+         "holding the distance to the target (>= 9999 = none); the target's gate becomes min(the gate above, "
+         "clamp(k * range / |x_j|, 0, 1)) with x_j the gated_by element (the heading error): the time to turn the error "
+         "(|e| / omega) must not exceed the time to arrive (r / v), so far away the walk keeps its speed and curves in, "
+         "and near the thing it slows only as much as the remaining error needs. k = state_prior_target_gate_reach_k. "
+         "Empty = byte-identical.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gate_reach_k", ParamMutability::HotMutable,
+         "k = (range unit x omega) / (heading unit x v): the body's turn rate omega against the speed v the prior asks for, in "
+         "the two elements' units (for the walker: 2 m x 1 rad/s / (pi x 0.3 m/s) = 2.1).",
+         ParamValue{2.0}, ParamValue{0.0}, ParamValue{100.0}},
+        {"state_prior_gated_by", ParamMutability::HotMutable,
+         "THE PACE GATE (2026-10-01, the bird's neck): parallel to state_prior_indices, the state element whose STEADINESS "
+         "gates that index's precision (>= 9999 = ungated). The element's change at the stride's timescale -- its 0.5 s "
+         "EMA minus its 2 s EMA -- is read against that difference's own running RMS (a 30 s EMA: adapted, not tuned), "
+         "and the gate is 1 - |d| / rms clamped to [0, 1]: full precision while the element holds, none while it is "
+         "changing by its typical amount. It multiplies the index's descent and its row in the model-implied step. The "
+         "use it was built for: a centring prior on where the head sits fore-aft, on at a steady pace and off while the "
+         "speed changes, so the head may reach into an acceleration and come home at a cruise. Empty = byte-identical.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_grow_at", ParamMutability::HotMutable,
+         "GROW ON RESTORE (2026-10-01): a restored module whose state arrives WIDER than its snapshot inserts the new "
+         "elements at this index of the new layout -- the model's rows, the controller's columns, the state model's "
+         "rows and columns all zero there (an unidentified sense: no authority, no feedback) -- instead of dropping "
+         "every frame. A second babble (--rebabble) then identifies the new rows while the old ones keep what they "
+         "learned. -1 = off (a wider frame is dropped, as before).",
+         ParamValue{int64_t(-1)}, ParamValue{int64_t(-1)}, ParamValue{int64_t(4096)}},
+        {"state_prior_targets", ParamMutability::HotMutable,
+         "Target values x* for state_prior_indices, parallel arrays. A mismatch in length "
+         "disables the prior (and shows as state_prior_active=false in diag — check it, per §3.2 "
+         "rule 5, before crediting or blaming this lever). For the microduck lean element the "
+         "target 0 is NOT a tuned constant: the host centres the lean channel on measured gravity, "
+         "so 0 is the signal's own origin (upright), CLAUDE.md §5.5-clean.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_gain", ParamMutability::HotMutable,
+         "Weight w of the state prior, gating BOTH halves of the mechanism: "
+         "(1) ξ̃[idx] *= (1−w) — the HK error at the prior-owned index is attenuated, so the "
+         "sensitivity rule may REST on that dimension (at w=1, fully); "
+         "(2) C and h descend the prior's own error e = x* − x[idx] THROUGH THE LEARNED MODEL: "
+         "per motor j, ΔC(j,:) = lr·w·e·A(idx,j)·G(j,j)·prev_xᵀ and Δh(j) likewise — A(idx,j) is "
+         "the model's own estimate of motor j's authority over the target, so HOW to satisfy the "
+         "prior is discovered, never wired, and C(:,idx) acquires the NEGATIVE-feedback sign by "
+         "itself. ⚠ NOT the keyframe socket's ξ̃-replacement, by measurement (test_state_prior "
+         "2026-08-31): the HK dC update is quadratic in q — sign-blind — so a goal error fed "
+         "through it is AMPLIFIED, not closed (a closed 1-D plant learned positive feedback and "
+         "pushed WITH the fall). Also measured there: sat_lr unwinds the tonic command a "
+         "standing prior needs at ~5× the rate the prior builds it, and the descent's feedback "
+         "column keeps a slow growth pressure on residual noise. Configs running this should set "
+         "sat_lr = 0: measured on the plant, sat erodes the learned feedback column IN "
+         "PROPORTION TO ITS USE (its erosion is ∝ gs·prev_xᵀ, and prev_x carries the very "
+         "element the feedback reads), leaving the prior arm WORSE than no control (261 vs 97 "
+         "falls). ctrl_damping is NOT the brake here — L2 cannot distinguish the feedback "
+         "column from the windup bias and killed balance first (measured 201 vs 141); the h "
+         "path instead carries conditional anti-windup at the use site. KNOWN LIMIT, "
+         "understood and accepted for this lever: under sustained tight regulation the "
+         "closed loop de-identifies A(idx,:) (causal term and feedback confound cancel — "
+         "textbook), so long balanced stretches end in a collapse-and-re-identify cycle; "
+         "the structural fix (IV identification / state-augmented self-model) is a future "
+         "lever. 0 = off, byte-identical (the gain-0 guard).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_model_lr", ParamMutability::HotMutable,
+         "STATE-AUGMENTED SELF-MODEL (2026-08-31, the microduck lever's companion): when > 0 "
+         "the forward model gains a learned state-transition term, x_hat = A·y + Bx·x + b, "
+         "with Bx trained by the same LMS as A (Bx += lr·ξ·prev_xᵀ). Motivation, measured "
+         "three ways on the duck: x_hat = A·y + b cannot represent a body whose state has its "
+         "own dynamics (an inverted pendulum's lean GROWS), so (1) A is forced to absorb state "
+         "persistence into action authority and de-identifies under feedback (the closed-loop "
+         "confound — A(lean,·) decayed to zero and flipped sign in every long run); (2) the "
+         "state prior's GN descent through that A is myopic — it corrects present lean while "
+         "unable to know lean grows; (3) C4 grew 3→17 over 30 min with zero behavioural "
+         "effect. The model was built for position-servo limbs where x follows y; a biped's "
+         "lean is a genuine dynamical state. With Bx absorbing the pole, A identifies the "
+         "honest action authority and everything downstream (ξ, TLE, lookahead, the prior) "
+         "sharpens. 0 = Bx never allocated, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"reset_breaks_model_pairing", ParamMutability::HotMutable,
+         "BUG FIX BEHIND A GUARD (2026-08-31): when 1, events.miss/reset also invalidate the "
+         "model's (prev_y, x) pairing (have_prev, the command trace, DEP's Δy) so the first "
+         "post-disruption tick does not regress the pre-disruption command against the "
+         "post-disruption state — one giant-ξ poison sample per episode, ~40/min on the duck "
+         "recovery harness, enough to keep A(lean,·) sign-scrambled against the empirically "
+         "probed authority in every arm measured. The ledger records this bug's phase-clock "
+         "sibling; this is the same fake one level deeper. Default 0 is BUG-COMPATIBLE on "
+         "purpose: the v2 invariant (byte-identical to MotorEPM with every feature at 0) "
+         "outranks the fix, so the correction ships as a lever like everything else.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"model_trace", ParamMutability::HotMutable,
+         "ELIGIBILITY TRACE on the self-model's action input (2026-08-31): when > 0, A learns "
+         "against (and predicts from) an EMA of the command, ỹ += β·(y − ỹ), instead of the "
+         "raw previous command. Measured motivation: the empirical authority probe needed "
+         "6-TICK pulses to read ∂pitch/∂joint cleanly, because a position-servo body answers a "
+         "command over its servo/inertia timescale, not in one tick — so one-step regression "
+         "of pitch on prev_y has abysmal SNR by construction, and the learned A(lean,·) held "
+         "wrong signs at 10x-low magnitudes against the probe's J in every run it was checked. "
+         "The trace IS the physically effective input (the servo-filtered command), so A's "
+         "units become per-sustained-command — the same thing the probe measures. β ≈ 1/servo "
+         "ticks (try 0.15). 0 = raw prev_y, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_calm_indices", ParamMutability::HotMutable,
+         "State indices the calm KEY reads (negative = from the end); empty = all "
+         "state_prior_indices. The key and the descent have different roles and need "
+         "different signals, measured over four key iterations: the descent needs the RATE "
+         "elements (damping), but rates are storm-coupled by definition — a flailing body "
+         "at perfect uprightness reads as high error, so any rate-inclusive key holds its "
+         "own squelch open. The key should ask only WHERE AM I: the angle elements.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_split", ParamMutability::HotMutable,
+         "SEPARATED CONTROLLERS (2026-09-01, the gain-gap study's structural conclusion): when "
+         "1, the prior's descent writes its OWN matrix Cp (zero-init) and HK keeps C; the "
+         "command is y = tanh(calm·(C·x) + Cp·x + h). Why, each measured on hour-long soaks: "
+         "in the shared matrix, HK INFLATES THROUGH any fixed squelch (|u|-quiet 0.3 → 0.92 as "
+         "ctrl_lr consumed the headroom), ctrl_damping bounds the inflation but crushes the "
+         "prior's columns with it (Cp 15 → 0.7, falls worse), and every adaptive key is "
+         "storm-coupled. Nothing in a shared C can tell prior-serving content from "
+         "sensitivity-seeking content — so they get separate matrices with separate dynamics: "
+         "the squelch and the L2 brake act on HK's C alone, and Cp grows under the descent's "
+         "own self-limiting rule. 0 = legacy shared C, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_isolate", ParamMutability::HotMutable,
+         "LESION (2026-09-12, the W5 fork item (a); design doc §17.17): when 1, the "
+         "controller's columns are held to the prior's OWN indices — after every update, "
+         "C(:, i) (and Cp's, in split mode) is zeroed for every state column i that is not a "
+         "resolved state_prior_indices entry. Measured motivation at the duck's intent boundary: "
+         "part 2's Gauss-Newton step writes the FULL outer product, C(j,:) += g·prev_xᵀ, so an "
+         "error on ONE index deposits content in EVERY column of every motor's row, with no "
+         "objective behind any of it. With the heading reference standing still (R38) the twist "
+         "brain's yaw row let go of the heading error altogether and settled on whatever else "
+         "moved at the gait frequency — the right ToF column at +1.97 against the heading's "
+         "−0.12 — a saturated 2.4 Hz oscillation with |vyaw| at 0.95 of range and the heading "
+         "error parked at 2 rad. This is the DIAGNOSTIC, not the fix: if straightness jumps with "
+         "it on, the swamping is proven and the mechanism is the prior's weight rather than a new "
+         "control law. h is untouched on purpose (h reaches, C balances — the measured role "
+         "dissociation; zeroing it would be a second lever). Per-leg path only, like the prior "
+         "itself. Read back as spIso in diag_lite (columns kept; -1 = off). 0 = off, "
+         "byte-identical (the gain-0 guard).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_step_gain", ParamMutability::HotMutable,
+         "THE MODEL-IMPLIED STEP (2026-09-12, the W5 fork item (b); design doc §17.17, §17.26): "
+         "when > 0, the command gains a term COMPUTED from the identified model instead of "
+         "accumulated into C — the least-squares command that closes the prior's error in one "
+         "step, y* = argmin ||A_p·y − e||² + reg_eps·||y||², where A_p is the rows of A at "
+         "state_prior_indices and e their errors (x* − x). The ridge is the module's own "
+         "reg_eps, so there is no new constant and the gain is still the model's own authority — "
+         "discovered, never wired, exactly the justification part 2's Gauss-Newton descent has. "
+         "Clamped to ±1 per motor and added to the PRE-tanh operating point, so it rides the same "
+         "squash and the same rails as everything else. Measured motivation (§17.26): part 2 "
+         "spreads its aim over every column of C by construction (C(j,:) += g·prev_xᵀ), so the aim "
+         "is an accumulation over the whole state vector rather than a computation — a lesion that "
+         "removed the cross-talk removed the aim with it (68 % → 44 % of ticks opposing the "
+         "heading error). This is the same objective, computed. Independent of state_prior_gain "
+         "on purpose: a config may run the computed step INSTEAD of the descent (gain 0, step 1), "
+         "or both. The step the command carried is stored per leg and added back when the update "
+         "reconstructs its operating point, or G would lie about the rail the body actually ran. "
+         "Read back as spStep in diag_lite (|step|; -1 = off). 0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+        {"consolidate_gain", ParamMutability::HotMutable,
+         "EARNED CONSOLIDATION (2026-09-01): anneal ALL learning rates by a factor "
+         "(1 − gain·c), where c ∈ [0,1] ramps up (τ ≈ 10 s) while BOTH hold — the state "
+         "prior's error EMA sits below 0.15, a fixed fraction of the unit-conditioned "
+         "channel (§5.5: the conditioning already normalised the scale; every adaptive "
+         "reference tried was measured self-defeating) AND no fall for 30 s "
+         "(ticks_since_reset > 1500, which a fall-cycle fails) — and decays fast (τ ≈ 2 s) "
+         "when either breaks, so plasticity returns the moment the world changes.  Measured "
+         "motivation: seeds find standing in their first minutes (0.99 upright) and continued "
+         "learning then DESTROYS it (0.63, falls 22/min); a hand freeze at minute 5 preserved "
+         "0.93 for the remaining 25 — but a hand-picked time is a scaffold.  This is the GNG's "
+         "earned-node-permanence principle at the controller level: a solution that keeps the "
+         "body standing has EARNED slow plasticity; it is not unlearned for the crime of "
+         "working.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"consolidate_n", ParamMutability::HotMutable,
+         "GATE/OBJECTIVE SEPARATION (2026-09-01, the R4-neck lesson): the consolidation "
+         "gate's satisfaction EMA reads only the FIRST N state_prior_indices; 0 = all of "
+         "them (legacy, byte-identical).  Measured motivation: widening the prior to the "
+         "head-CoM slots poisoned the gate — the achievable standing stance sits ~0.4 off "
+         "the scaffold-calibrated origin on that channel, the 6-index EMA hovered at "
+         "0.14–0.28 while the body stood at 1–5° tilt, consolidation never armed, and "
+         "continued learning destroyed standing that had already been found (the exact "
+         "disease consolidation exists to cure; seeds 5/6, found-then-lost time course).  "
+         "The gate asks one question — IS THE BALANCE SOLVED — so it reads the attitude "
+         "indices; extra objective terms (reach targets like the head-CoM origin) pull "
+         "without holding permanence hostage.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{16.0}},
+        {"state_prior_gate_weight", ParamMutability::HotMutable,
+         "ATTITUDE PRECISION (2026-09-02, the §12.5 discriminator): the gate subset — the "
+         "first consolidate_n state_prior_indices, attitude and its rates — descends at this "
+         "multiple of the prior's rate, C and h alike; inert when consolidate_n is 0.  "
+         "1 = byte-identical.  Measured motivation: the consolidated stance has no catch "
+         "(knocked over at 0.15–0.2 N·s, the support polygon's own envelope, identical at "
+         "5–10× controller gain) and leans while plastic taught none — the pull is one "
+         "equal-weight descent on ten pose elements and four attitude elements, and a catch "
+         "is a move AWAY from the pose target.  The attitude columns of C grow ∝ E[x_att²] "
+         "only while learning runs; this weight multiplies that pressure.  A fixed-weight "
+         "probe of whether attitude precision changes the answer; the adaptive form "
+         "(precision earned from the channel's own error) follows only if it does.",
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{100.0}},
+        {"consolidate_spares_prior", ParamMutability::HotMutable,
+         "When > 0 the state prior's own descent (lw, and its h share) is NOT annealed by "
+         "consolidation.  The lr_scale anneal exists to stop the DESTROYER — the sign-blind "
+         "HK sensitivity descent, which cannot rest at standing — but the prior's "
+         "Gauss-Newton step self-terminates at its target (e → 0), so freezing it buys no "
+         "stability and costs the objective: measured (R4-neck, seed 4), the one seed that "
+         "consolidated held its head exactly where the slump left it, the pull frozen at "
+         "lr_scale = 0.  0 = legacy (prior anneals with everything else), byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"consolidate_reach", ParamMutability::HotMutable,
+         "BALANCE FIRST, THEN REACH (2026-09-01, the R4b race): prior indices at/after "
+         "consolidate_n become REACH terms — their descent is scaled by consolidate_c, so "
+         "they are DORMANT until the balance subset has consolidated, then engage at lw·c "
+         "with an h share equal to lw (the measured dissociation: C balances, h reaches; a "
+         "C-only pull left seed 4's head exactly where the slump put it).  Measured "
+         "motivation for the dormancy: the full-weight head-CoM pull live from tick 0 cost "
+         "enough pre-consolidation robustness (6.4 vs 2.6 falls/min in bucket 0) that the "
+         "30 s calm window never arrived — consolidation lost the race and the destroyer "
+         "ate the standing (seeds 5/6, twice).  The ratchet is safe by construction: a "
+         "fall collapses c in ~2 s, disengaging the reach (and its h) before a fall epoch "
+         "can wind it up.  0 = off, byte-identical.  MODE 2 (2026-09-01, the R4d "
+         "refutation): mode 1's dormancy was measured to be the poison — the basin is "
+         "found WITHOUT the pull, consolidation freezes the loop, and the waking pull "
+         "pushes a frozen controller out of a basin it never learned to widen (3/3 "
+         "standing seeds destroyed 3–28 s after engagement, bit-identical to control "
+         "before it).  Mode 2 keeps the reach pull live from tick 0 at full lw — the "
+         "R4/R4b-measured semantics under which learning co-adapts around the pull and "
+         "still finds standing (R4b seed 4: permanent 1.00 upright WITH the pull) — and "
+         "adds only the h share (C balances, h reaches: R4b's C-only pull never moved "
+         "the head).  Attenuation and calm exemption stay full, as in R4b.  MODE 3 "
+         "(R4e refuted mode 2: full-rate h live through the pre-standing fall epochs "
+         "wound up to 2.67 and re-created the windup disease): C-pull live from tick 0 "
+         "as in mode 2, but the reach bias goes to a SEPARATE vector hr, written only "
+         "in consolidated quiet (rate ∝ c) and applied as c·hr — no chaos windup by "
+         "construction, and the force ramps in/out smoothly with consolidation instead "
+         "of waking against a frozen loop.  MODE 4 (R5 measured mode 3's always-on "
+         "whole-body pull: pose 2-3x closer to home on every seed and a crouch seed "
+         "rescued to 0.93 upright, but the race lost everywhere — no 30 s calm window, "
+         "cons never armed): the pull scales with the BALANCE SUBSET'S OWN SATISFACTION "
+         "s = 1 − gate_ema/0.15 (the gate's own fraction, no new constant) — zero during "
+         "chaos with exemption scoped away (chaos ≈ control exactly), engaging within "
+         "~10 s of standing WITH HK live, so co-adaptation happens in the quiet "
+         "stretches.  Self-limiting sign: pull → tilt → s falls → pull backs off.  hr "
+         "as mode 3.  MODE 5 (R5b measured mode 4 still losing the race — the balance "
+         "gate engages after ~10 s of mere quiet, long before consolidation): BIAS-ONLY "
+         "— no reach C-pull, no attenuation, no exemption; pre-consolidation is "
+         "bit-identical to control BY CONSTRUCTION, then hr walks the equilibrium at "
+         "the µ-rate consolidate_reach_lr through the consolidated C's live feedback — "
+         "quasi-static drift, not a waking force.  A fall collapses c (the force fades "
+         "as c·hr), the brief plasticity burst re-learns near the edge, consolidation "
+         "re-arms, the walk resumes: a ratchet whose pawl is consolidation itself.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{5.0}},
+        {"consolidate_reach_lr", ParamMutability::HotMutable,
+         "Mode 5's hr write rate — the µ-rate of the quasi-static walk (the GN step "
+         "e·A·G/‖A‖² times this, times c).  The gate is the design (c-gating, GN "
+         "direction); this magnitude sets only how fast the equilibrium drifts.  "
+         "0 = the walk never moves, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"regime_c_banks", ParamMutability::HotMutable,
+         "R3 of the rung-2 design — per-regime CONTROLLERS (C, h, hr, and the regime's "
+         "earned consolidation), swapped with the R1 model banks.  Its design gate was "
+         "'only if R1/R2 leave a measured residual demanding it', and the R4/R5 families "
+         "measured that residual nine arms deep: a single shared C is slump-hours-"
+         "dominated, the tall-local corrections learned in the seconds after every "
+         "scaffold handback are overwritten, and NO force schedule (always-on, dormant, "
+         "balance-gated, µ-rate bias) can deform a slump-consolidated controller to the "
+         "tall pose — its feedback correlations are slump-local and plasticity is what "
+         "consolidation removed.  With controller banks the tall regime (a distinct "
+         "vocabulary token — measured: post-handback pose = token 1, slump standing = "
+         "token 0) keeps its own solution and earns its own permanence; a fresh regime "
+         "warm-starts from the incumbent's controller but its cons_c starts 0 — "
+         "permanence is earned, never inherited.  Requires regime_topic.  0 = off, "
+         "byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"regime_dwell", ParamMutability::HotMutable,
+         "Ticks a NEW regime slot must persist before the bank swap executes.  Measured "
+         "motivation (R6a): the raw winner_id flickers at ~10 Hz near standing (median "
+         "dwell 0.10 s across 25+ tokens), so controller banks swap every ~5 ticks, every "
+         "swap drops the boundary pairing sample, and no bank owns its own topple onset — "
+         "the pre-fall second belongs to other tokens and the tall bank cannot learn from "
+         "its mistakes.  A real transition (a fall) persists and still switches within "
+         "dwell ticks; flicker does not.  0 = immediate (legacy), byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{250.0}},
+        {"consolidate_calm_ticks", ParamMutability::HotMutable,
+         "No-fall ticks required before consolidation may ramp.  The 1500 default (30 s) "
+         "was picked, not derived, and it is the measured binding constraint on any stance "
+         "whose early fall gaps run 10-15 s: R5's seed 2 held 0.93 upright at 4 deg and "
+         "pose-distance 0.075 — the tallest sustained stance of the campaign — and could "
+         "never consolidate it (mean gap 13.6 s < 30 s), while c's own ramp (τ ≈ 10 s) "
+         "already provides a demonstration period on top of this window.  Default 1500 = "
+         "byte-identical legacy.",
+         ParamValue{1500.0}, ParamValue{100.0}, ParamValue{15000.0}},
+        {"consolidate_down_rate", ParamMutability::HotMutable,
+         "c's per-tick decay rate while the gate is unsatisfied.  Measured motivation "
+         "(R7, 90 min): the tall stance held 0.92-0.96 upright at pose-distance 0.072 the "
+         "whole run with falls drifting 5.4 → 3.6/min — but c saw-toothed to 0.03: each "
+         "16 s gap ramps +~0.5 at the up-rate and each fall wipes it in ~2 s at the "
+         "legacy 0.01.  A symmetric rate (0.002) lets c compound across the gap-fall "
+         "cycle so annealing can engage and shrink the falls it needs.  The calm gate "
+         "still blocks up-ramping for consolidate_calm_ticks after every reset — chaos "
+         "is never consolidated into.  Default 0.01 = byte-identical legacy.",
+         ParamValue{0.01}, ParamValue{0.0005}, ParamValue{0.1}},
+        {"consolidate_hold", ParamMutability::HotMutable,
+         "1 = THREE-STATE ratchet: ramp c when satisfied-and-calm, decay (at "
+         "consolidate_down_rate) only while genuinely unsatisfied, HOLD otherwise.  "
+         "Measured triangulation: legacy two-state decays c through topple + frozen "
+         "rescue + the whole calm window (~13 s ≈ e⁻⁷ per fall — R7's tall stance held "
+         "0.92-0.96 upright for 90 min and could never keep a tenth of its earned c), "
+         "while a slow symmetric decay (R7b) annealed adaptation during real chaos and "
+         "made falls WORSE (6-10/min).  The three-state splits them: a caught stumble "
+         "costs only its ~2 s of true chaos (×0.5), a genuine regime change still "
+         "restores full plasticity at the legacy rate.  v2: decay keys on the INSTANT "
+         "gate error > 0.30 (2× the satisfaction fraction — a topple crosses within "
+         "~0.3 s, where the 2 s EMA never catches it: R7c held c=0.94 through 21 "
+         "falls/min) or sustained EMA ≥ 0.15.  REQUIRES consolidate_n > 0 (the gate "
+         "subset is what the discriminator reads).  0 = legacy, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"calm_exempt_n", ParamMutability::HotMutable,
+         "The calm squelch's full-slope exemption covers only the FIRST N prior "
+         "indices.  Measured motivation (the R9 energy study, from the tall snapshot): "
+         "a whole-body prior lists 8-9 indices, the exemption then covers most of the "
+         "state's columns and calm_fixed squelches almost nothing — the tall stance ran "
+         "at full slope everywhere (C norms 40-60 vs the slump era's 1.4-2, head "
+         "clip_duty 0.40) in a ~12 mrad/tick limit cycle that resting the prior (null), "
+         "removing dither (worse) and damping C (worse) all failed to quiet.  The "
+         "exemption's purpose is the BALANCE error's full slope; position columns ride "
+         "the squelch.  0 = all prior indices (legacy), byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{16.0}},
+        {"ctrl_damping_lr_scaled", ParamMutability::HotMutable,
+         "1 = ctrl_damping's weight decay is scaled by consolidation's lr_scale — decay "
+         "is part of learning and rests when learning rests.  The two measured failure "
+         "modes it splits: unscaled decay at cons=1 shrank a frozen controller to zero "
+         "(R9c: C 0.01 at cons 1.00, 24 falls/min); no decay lets the tall-basin fight "
+         "ratchet C unboundedly because nothing prices gain (40-60 raw, 108-248 through "
+         "the servo filter — the descent pushes harder through any attenuation).  With "
+         "this on, decay bounds C DURING the fight and freezes WITH the solution.  "
+         "0 = legacy (decay always on), byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"consolidate_rests_act", ParamMutability::HotMutable,
+         "CONSOLIDATION RESTS THE EFFERENCE FEEDBACK: the command's act-element input "
+         "is scaled by (1 − gain·c).  The measured chain (2026-09-01 energy study): the "
+         "consolidated tall stance oscillated in a coherent ~5.5 Hz whole-body limit "
+         "cycle (~11-12 mrad/tick, 134× the slump) that survived a 10× gain reduction, "
+         "dither removal, a full freeze, calm-exemption scoping and a servo filter — "
+         "and collapsed 160× to 0.069 mrad (quieter than the slump) the moment C's act "
+         "columns were lesioned.  Command-self-feedback at one-tick lag IS the "
+         "oscillator; at earned stillness it is pure fuel, and the live prior regrows "
+         "the columns within minutes so a one-time lesion cannot hold.  This scales the "
+         "COMMAND's view only: learning sees the true x (efference stays for "
+         "identification and gait), and a fall collapses c, restoring the full pathway "
+         "with plasticity.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_calm_mode", ParamMutability::HotMutable,
+         "R2 (rung-2 design §4): 0 = the continuous calm key (legacy — five designs, all "
+         "measured storm-coupled: the flail generates the very error that holds its own "
+         "squelch open). 1 = REGIME-KEYED: the target is the ACTIVE BANK's prior-error EMA "
+         "against the worst seen across banks — a discrete key on slow statistics the storm "
+         "cannot fake, with the reference supplied by the vocabulary's own spread (no "
+         "constant, no self-referential average). A bank that satisfies the prior anneals "
+         "toward quiet; a bank that does not keeps full drive; nothing is hand-labeled "
+         "'standing'. Requires engaged regime banks (else mult stays 1). The ratchet "
+         "(attack 0.03 / release 0.2) still smooths bank transitions; state_prior_calm_fixed "
+         "still pins when set. 0 = byte-identical to the continuous key.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"babble_owns_a", ParamMutability::HotMutable,
+         "ONE OWNER PER ESTIMAND, extended past warmup (2026-09-01, the R1 gate's finding): "
+         "when 1 and babble_isolate is configured, the paired-difference babble owns A "
+         "PERMANENTLY — closed-loop LMS never writes it (b and Bx stay LMS-owned).  Measured: "
+         "the babble identifies authority to 4/5 correct signs, and post-babble closed-loop "
+         "LMS then erodes it (the de-identification confound, now within one regime bank — "
+         "A(pitch,·) at 900 s bore no resemblance to its babble-window values).  The module's "
+         "own self-measured authority is a calibration; a confounded estimator does not get "
+         "to overwrite a clean one.  0 = legacy (LMS resumes after warmup).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"regime_topic", ParamMutability::ConstructionOnly,
+         "R1 REGIME SOCKET (2026-09-01, rung-2 design §4): a RealityToken topic whose "
+         "winner_id keys PER-REGIME SELF-MODEL BANKS (A, Bx, b, per-bank TLE). The measured "
+         "motivation is the whole A1-v2 campaign: one linear self-model fit to the mixture of "
+         "falling/fallen/flailing/standing data holds sign-scrambled authority (A(lean,·) "
+         "de-identified in every long run), and identification only ever succeeded when a "
+         "regime was carved out by hand.  The banks make that carve-out LEARNED: each regime's "
+         "model sees only its own data.  L.A/Bx/b stay the active working copy — banks swap on "
+         "winner change, so every model path is untouched; a new winner's bank warm-starts "
+         "from the incumbent model; the cross-regime pairing sample is dropped at each switch "
+         "(the boundary sample is exactly the mixture poison, the reset-pairing lesson one "
+         "level up).  Empty = no banks, byte-identical.",
+         ParamValue{std::string("")}},
+        {"regime_banks", ParamMutability::ConstructionOnly,
+         "Bank slots. Winners claim slots in first-seen order (high-share regimes claim "
+         "early); when full, unseen winners share the LAST slot (the overflow bank).",
+         ParamValue{int64_t(6)}, ParamValue{int64_t(2)}, ParamValue{int64_t(32)}},
+        {"state_prior_damping", ParamMutability::HotMutable,
+         "L2 decay on Cp alone (split mode) — the separation's payoff: the storm's brake "
+         "(ctrl_damping on C) and the prior's brake are finally different knobs. Measured "
+         "need: without it, and with the descent's G computed blind to Cp's own contribution, "
+         "Cp grew until the output railed permanently (|u| 0.994 with C at 0.03 — the split's "
+         "first soak).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.01}},
+        {"state_prior_calm_fixed", ParamMutability::HotMutable,
+         "Pin the calm multiplier to this value instead of the adaptive ratchet (0 = adaptive). "
+         "The gate (squelch the non-attitude command, keep the prior's slope) is the design; "
+         "this makes its magnitude plain tuning. Measured: the adaptive key TIES base at n=6 "
+         "after five key iterations — every error signal is storm-coupled to some degree — "
+         "while the fixed bench produced the scaffold-shaped profile (quiet 0.11 rising to "
+         "0.51 under error) with the study's best individual runs.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_calm", ParamMutability::HotMutable,
+         "EXPLORATION-PRECISION ANNEALING (2026-09-01, the gain-gap study's answer): scale the "
+         "NON-attitude part of the pre-tanh command — and the exploration noise — by the ratio "
+         "of the prior error's short EMA to its own long EMA (clamped [0.1, 1]: play never "
+         "abstains). Convergence quiets the storm by itself; a perturbation spikes the short "
+         "EMA over the long and re-arms exploration instantly. The prior's OWN feedback "
+         "columns (state_prior_indices) are exempt, so the error response keeps full slope. "
+         "Measured motivation: the base arm ANTI-converges (quiet-band |u| trend 0.04→0.97 "
+         "over 10 min — HK grows its own storm), and at |u|~0.9 the tanh is railed so the "
+         "probe-grade gains ALREADY IN C (Cp 15–17) cannot act — G=1−tanh² gates every "
+         "learning rule, so the storm freezes the very columns that would quiet it. The "
+         "amplitude homeostat alternative crushes the storm but flattens the response with it "
+         "(|u| flat across tilt bands, Cp→2): a volume knob, where this is a squelch. "
+         "0 = off, byte-identical. 1 = full modulation.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_h_lr", ParamMutability::HotMutable,
+         "Separate rate for the h (tonic) half of the state prior's descent; the C (feedback) "
+         "half always runs at state_prior_lr. The roles dissociate cleanly, measured on the "
+         "unit plant: C is what BALANCES (C-only passed the unstable-plant test) and h is what "
+         "REACHES a target away from the current state (direction failed without it). A body "
+         "whose target IS its calibrated origin needs no tonic at all — and on the microduck "
+         "the h integrator wound to |h| 3.5-4.1 through the flail (tanh(3.5)=0.999: motors "
+         "DC-railed, every post-handback first command a full yank) even under the conditional "
+         "anti-windup. -1 = follow state_prior_lr (the plant tests' regime). 0 = C-only.",
+         ParamValue{-1.0}, ParamValue{-1.0}, ParamValue{1.0}},
+        {"state_prior_lr", ParamMutability::HotMutable,
+         "Descent rate of the state prior's C/h update (half 2 above), as a FRACTION of the "
+         "model-implied (Gauss-Newton) correction per tick: the step is normalised by "
+         "||A(idx,:)||² + reg_eps, so it is scale-free across bodies (§5.5 — adapted, not "
+         "tuned) and self-damping wherever the authority channel is not yet identified. "
+         "Effective rate = state_prior_lr·state_prior_gain. 0 disables half 2 while keeping "
+         "half 1 (a lesion arm, not an operating mode).",
+         ParamValue{0.1}, ParamValue{0.0}, ParamValue{1.0}},
         {"n_legs", ParamMutability::ConstructionOnly, "number of legs",
          ParamValue{int64_t(4)}, ParamValue{int64_t(1)}, ParamValue{int64_t(8)}},
         {"motor_dim", ParamMutability::ConstructionOnly, "motors per leg",
@@ -220,6 +712,21 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"babble_ticks", ParamMutability::ConstructionOnly,
          "motor-babble warmup: for this many proprio frames the model learns from small random commands while the controller stays idle, so HK starts from a model that predicts the body (no startup convulsion).",
          ParamValue{int64_t(200)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
+        {"babble_isolate", ParamMutability::HotMutable,
+         "STRUCTURED BABBLE (2026-08-31): when 1, the warmup babbles ONE MOTOR AT A TIME with "
+         "a HELD constant pulse (babble_hold ticks, alternating sign, cycling motors) instead "
+         "of all-motor white noise. Measured motivation: an empirical authority probe using "
+         "exactly this shape — isolated held pulses — identified the body's pitch/roll "
+         "Jacobian cleanly and a hand-gained PD on it stood the duck at 7 rescues/min, while "
+         "the model regressed from all-joint white babble plus closed-loop storm held "
+         "sign-scrambled authority in every run checked. Isolation removes the inter-motor "
+         "confound; the hold matches the servo's multi-tick response (the reason model_trace "
+         "exists). Infant motor babbling has exactly this structure. 0 = legacy white babble, "
+         "byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"babble_hold", ParamMutability::HotMutable,
+         "Held-pulse length in ticks for babble_isolate (the probe's own pulse length).",
+         ParamValue{int64_t(6)}, ParamValue{int64_t(1)}, ParamValue{int64_t(50)}},
         {"babble_scale", ParamMutability::HotMutable, "amplitude of warmup babble commands",
          ParamValue{0.3}, ParamValue{0.0}, ParamValue{1.0}},
         {"sat_lr", ParamMutability::HotMutable,
@@ -685,6 +1192,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["seed"]         = base_seed_;
     m["babble_ticks"]  = babble_ticks_;
     m["babble_scale"]  = babble_scale_;
+    m["babble_isolate"] = babble_isolate_;
+    m["babble_hold"]    = int64_t(babble_hold_);
     m["sat_lr"]        = sat_lr_;
     m["postural_gain"]    = postural_gain_;
     m["postural_gain_joints"] = postural_gain_joints_;
@@ -700,6 +1209,44 @@ ParamMap MotorEPMv2::current_params() const {
     m["intent_yaw_gain"] = intent_yaw_gain_;
     m["lookahead_gain"] = lookahead_gain_;
     m["lookahead_mode"] = lookahead_mode_;
+    m["state_prior_indices"] = state_prior_indices_; m["state_prior_motors"] = state_prior_motors_;
+    m["state_prior_weights"] = state_prior_weights_; m["state_grow_at"] = int64_t(state_grow_at_);
+    m["state_prior_gated_by"] = state_prior_gated_by_; m["state_prior_c_weights"] = state_prior_c_weights_;
+    m["state_prior_target_gated_by"] = state_prior_target_gated_by_;
+    m["state_prior_target_gate_cos"] = state_prior_target_gate_cos_; m["state_prior_target_gate_pow"] = state_prior_target_gate_pow_;
+    m["state_prior_target_gate_reach"] = state_prior_target_gate_reach_; m["state_prior_target_gate_reach_k"] = state_prior_target_gate_reach_k_;
+    m["state_prior_targets"] = state_prior_targets_;
+    m["state_prior_gain"]    = state_prior_gain_;
+    m["state_prior_lr"]      = state_prior_lr_;
+    m["state_prior_h_lr"]    = state_prior_h_lr_;
+    m["state_prior_calm"]    = state_prior_calm_;
+    m["state_prior_calm_fixed"] = state_prior_calm_fixed_;
+    m["state_prior_split"]   = state_prior_split_;
+    m["state_prior_isolate"] = state_prior_isolate_;
+    m["state_prior_step_gain"] = state_prior_step_gain_;
+    m["state_prior_damping"] = state_prior_damping_;
+    m["regime_topic"] = regime_topic_;
+    m["babble_owns_a"] = babble_owns_a_;
+    m["state_prior_calm_mode"] = state_prior_calm_mode_;
+    m["consolidate_gain"] = consolidate_gain_;
+    m["consolidate_n"] = consolidate_n_;
+    m["consolidate_spares_prior"] = consolidate_spares_prior_;
+    m["consolidate_reach"] = consolidate_reach_;
+    m["consolidate_reach_lr"] = consolidate_reach_lr_;
+    m["regime_c_banks"] = regime_c_banks_;
+    m["regime_dwell"] = regime_dwell_;
+    m["consolidate_calm_ticks"] = consolidate_calm_ticks_;
+    m["consolidate_down_rate"] = consolidate_down_rate_;
+    m["consolidate_hold"] = consolidate_hold_;
+    m["state_prior_gate_weight"] = state_prior_gate_weight_;
+    m["calm_exempt_n"] = calm_exempt_n_;
+    m["ctrl_damping_lr_scaled"] = ctrl_damping_lr_scaled_;
+    m["consolidate_rests_act"] = consolidate_rests_act_;
+    m["regime_banks"] = int64_t(regime_banks_);
+    m["state_prior_calm_indices"] = state_prior_calm_indices_;
+    m["state_model_lr"]      = state_model_lr_;
+    m["model_trace"]         = model_trace_;
+    m["reset_breaks_model_pairing"] = reset_breaks_pairing_;
     m["lookahead_null"] = lookahead_null_;
     m["intent_rhythm_gain"] = intent_rhythm_gain_;
     m["fwd_resonance_gain"] = fwd_resonance_gain_;
@@ -839,6 +1386,11 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "seed",       [&](auto const& v){ base_seed_  = get_int(v, "seed"); });
     apply_param(params, "babble_ticks", [&](auto const& v){ babble_ticks_ = get_int(v, "babble_ticks"); });
     apply_param(params, "babble_scale", [&](auto const& v){ babble_scale_ = get_double(v, "babble_scale"); });
+    apply_param(params, "babble_isolate", [&](auto const& v){ babble_isolate_ = get_double(v, "babble_isolate"); });
+    apply_param(params, "babble_hold", [&](auto const& v){
+        if (auto pv = std::get_if<int64_t>(&v)) babble_hold_ = std::max(1, int(*pv));
+        else if (auto dv = std::get_if<double>(&v)) babble_hold_ = std::max(1, int(*dv));
+    });
     apply_param(params, "sat_lr",       [&](auto const& v){ sat_lr_       = get_double(v, "sat_lr"); });
     apply_param(params, "postural_gain", [&](auto const& v){ postural_gain_ = get_double(v, "postural_gain"); });
     apply_param(params, "postural_gain_joints", [&](auto const& v){ postural_gain_joints_ = get_double_vec(v, "postural_gain_joints"); });
@@ -854,6 +1406,52 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "intent_yaw_gain", [&](auto const& v){ intent_yaw_gain_ = get_double(v, "intent_yaw_gain"); });
     apply_param(params, "lookahead_gain", [&](auto const& v){ lookahead_gain_ = get_double(v, "lookahead_gain"); });
     apply_param(params, "lookahead_mode", [&](auto const& v){ lookahead_mode_ = get_double(v, "lookahead_mode"); });
+    apply_param(params, "state_prior_indices", [&](auto const& v){ state_prior_indices_ = get_double_vec(v, "state_prior_indices"); });
+    apply_param(params, "state_prior_motors", [&](auto const& v){ state_prior_motors_ = get_double_vec(v, "state_prior_motors"); });
+    apply_param(params, "state_prior_weights", [&](auto const& v){ state_prior_weights_ = get_double_vec(v, "state_prior_weights"); });
+    apply_param(params, "state_prior_gated_by", [&](auto const& v){ state_prior_gated_by_ = get_double_vec(v, "state_prior_gated_by"); });
+    apply_param(params, "state_prior_c_weights", [&](auto const& v){ state_prior_c_weights_ = get_double_vec(v, "state_prior_c_weights"); });
+    apply_param(params, "state_prior_target_gated_by", [&](auto const& v){ state_prior_target_gated_by_ = get_double_vec(v, "state_prior_target_gated_by"); });
+    apply_param(params, "state_prior_target_gate_cos", [&](auto const& v){ state_prior_target_gate_cos_ = get_double_vec(v, "state_prior_target_gate_cos"); });
+    apply_param(params, "state_prior_target_gate_pow", [&](auto const& v){ state_prior_target_gate_pow_ = get_double(v, "state_prior_target_gate_pow"); });
+    apply_param(params, "state_prior_target_gate_reach", [&](auto const& v){ state_prior_target_gate_reach_ = get_double_vec(v, "state_prior_target_gate_reach"); });
+    apply_param(params, "state_prior_target_gate_reach_k", [&](auto const& v){ state_prior_target_gate_reach_k_ = get_double(v, "state_prior_target_gate_reach_k"); });
+    apply_param(params, "state_grow_at", [&](auto const& v){ state_grow_at_ = int(get_double(v, "state_grow_at")); });
+    apply_param(params, "state_prior_targets", [&](auto const& v){ state_prior_targets_ = get_double_vec(v, "state_prior_targets"); });
+    apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
+    apply_param(params, "state_prior_lr",      [&](auto const& v){ state_prior_lr_      = get_double(v, "state_prior_lr"); });
+    apply_param(params, "state_prior_h_lr",    [&](auto const& v){ state_prior_h_lr_    = get_double(v, "state_prior_h_lr"); });
+    apply_param(params, "state_prior_calm",    [&](auto const& v){ state_prior_calm_    = get_double(v, "state_prior_calm"); });
+    apply_param(params, "state_prior_calm_fixed", [&](auto const& v){ state_prior_calm_fixed_ = get_double(v, "state_prior_calm_fixed"); });
+    apply_param(params, "state_prior_split",   [&](auto const& v){ state_prior_split_   = get_double(v, "state_prior_split"); });
+    apply_param(params, "state_prior_isolate", [&](auto const& v){ state_prior_isolate_ = get_double(v, "state_prior_isolate"); });
+    apply_param(params, "state_prior_step_gain", [&](auto const& v){ state_prior_step_gain_ = get_double(v, "state_prior_step_gain"); });
+    apply_param(params, "state_prior_damping", [&](auto const& v){ state_prior_damping_ = get_double(v, "state_prior_damping"); });
+    apply_param(params, "regime_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) regime_topic_ = *p; });
+    apply_param(params, "babble_owns_a", [&](auto const& v){ babble_owns_a_ = get_double(v, "babble_owns_a"); });
+    apply_param(params, "state_prior_calm_mode", [&](auto const& v){ state_prior_calm_mode_ = get_double(v, "state_prior_calm_mode"); });
+    apply_param(params, "consolidate_gain", [&](auto const& v){ consolidate_gain_ = get_double(v, "consolidate_gain"); });
+    apply_param(params, "consolidate_n", [&](auto const& v){ consolidate_n_ = get_double(v, "consolidate_n"); });
+    apply_param(params, "state_prior_gate_weight", [&](auto const& v){ state_prior_gate_weight_ = get_double(v, "state_prior_gate_weight"); });
+    apply_param(params, "consolidate_spares_prior", [&](auto const& v){ consolidate_spares_prior_ = get_double(v, "consolidate_spares_prior"); });
+    apply_param(params, "consolidate_reach", [&](auto const& v){ consolidate_reach_ = get_double(v, "consolidate_reach"); });
+    apply_param(params, "consolidate_reach_lr", [&](auto const& v){ consolidate_reach_lr_ = get_double(v, "consolidate_reach_lr"); });
+    apply_param(params, "regime_c_banks", [&](auto const& v){ regime_c_banks_ = get_double(v, "regime_c_banks"); });
+    apply_param(params, "regime_dwell", [&](auto const& v){ regime_dwell_ = get_double(v, "regime_dwell"); });
+    apply_param(params, "consolidate_calm_ticks", [&](auto const& v){ consolidate_calm_ticks_ = get_double(v, "consolidate_calm_ticks"); });
+    apply_param(params, "consolidate_down_rate", [&](auto const& v){ consolidate_down_rate_ = get_double(v, "consolidate_down_rate"); });
+    apply_param(params, "consolidate_hold", [&](auto const& v){ consolidate_hold_ = get_double(v, "consolidate_hold"); });
+    apply_param(params, "calm_exempt_n", [&](auto const& v){ calm_exempt_n_ = get_double(v, "calm_exempt_n"); });
+    apply_param(params, "ctrl_damping_lr_scaled", [&](auto const& v){ ctrl_damping_lr_scaled_ = get_double(v, "ctrl_damping_lr_scaled"); });
+    apply_param(params, "consolidate_rests_act", [&](auto const& v){ consolidate_rests_act_ = get_double(v, "consolidate_rests_act"); });
+    apply_param(params, "regime_banks", [&](auto const& v){
+        if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
+        else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
+    });
+    apply_param(params, "state_prior_calm_indices", [&](auto const& v){ state_prior_calm_indices_ = get_double_vec(v, "state_prior_calm_indices"); });
+    apply_param(params, "state_model_lr",      [&](auto const& v){ state_model_lr_      = get_double(v, "state_model_lr"); });
+    apply_param(params, "model_trace",         [&](auto const& v){ model_trace_         = get_double(v, "model_trace"); });
+    apply_param(params, "reset_breaks_model_pairing", [&](auto const& v){ reset_breaks_pairing_ = get_double(v, "reset_breaks_model_pairing"); });
     apply_param(params, "lookahead_null", [&](auto const& v){ lookahead_null_ = get_double(v, "lookahead_null"); });
     apply_param(params, "intent_rhythm_gain", [&](auto const& v){ intent_rhythm_gain_ = get_double(v, "intent_rhythm_gain"); });
     apply_param(params, "fwd_resonance_gain", [&](auto const& v){ fwd_resonance_gain_ = get_double(v, "fwd_resonance_gain"); });
@@ -1161,6 +1759,19 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
             velocity_objective_topics_[leg], SubscriptionKind::Feedback,
             [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective_vel(leg, p); }));
     }
+    // R1 regime socket: one body-level RealityToken stream keys the model banks.
+    // Direct (not Feedback): the token for THIS tick's state should gate THIS
+    // tick's learning where available; a one-tick lag only shifts the boundary
+    // sample, which is dropped at switches anyway.
+    if (!regime_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            regime_topic_, SubscriptionKind::Direct,
+            [this](std::string_view /*topic*/, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                if (auto rt = std::dynamic_pointer_cast<const RealityToken>(p))
+                    regime_winner_ = rt->winner_id;
+            }));
+    }
     // Coherent-scaffold phase (L-1b): an optional global CPG phase (rhythm.cpg.body,
     // ProprioToken [cos φ, sin φ]) to drive the per-joint rhythm from — a CLEAN entrained phase,
     // so all joints lock to ONE frequency (intra-leg coherence) vs the noisy proprio L.phase.
@@ -1230,6 +1841,28 @@ void MotorEPMv2::handle_event(std::string_view topic, MessagePtr payload) {
             // step_per_ema is DELIBERATELY kept: the body's stride period is a property
             // of the morphology and gait, not of the episode, so re-measuring it from
             // scratch after every stumble would throw away good information.
+            //
+            // THE MODEL PAIRING MUST ALSO BREAK (2026-08-31).  A reset is a
+            // discontinuity in the body's state; with have_prev kept, the first
+            // model update after it regresses the PRE-disruption command against
+            // the POST-disruption state — one giant-ξ poison sample per episode,
+            // which on the duck harness (~40 rescues/min) outweighed every honest
+            // sample and kept A(lean,·) sign-scrambled against the empirically
+            // probed authority in every arm measured.  The ledger already records
+            // this bug's phase-clock sibling ("any trend across a reset was
+            // fake"); this is the same fake, one level deeper.
+            if (reset_breaks_pairing_ > 0.0) {
+                L.have_prev = false;
+                if (L.ytrace.size() > 0) L.ytrace.setZero();
+                L.prev_prev_y.setZero();   // DEP's Δy pairing straddles the gap too
+                L.pulse_motor = -1;        // a pulse window straddling the reset is garbage
+                L.pulse_sign  = 0.0f;      // (measured: the leg whose pulses topple more
+                                           // wrote scrambled columns until invalidated)
+                // The COMPLETED d+ half of a pair is kept: with identification
+                // episodes the harness settles between windows, so both halves
+                // start still and stay comparable — clearing it here left every
+                // pair half-finished and A at its init (measured: all ~0.01).
+            }
         }
     }
 }
@@ -2185,10 +2818,40 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "reg_eps")   reg_eps_   = get_double(value, "reg_eps");
     else if (key == "max_dctrl") max_dctrl_ = get_double(value, "max_dctrl");
     else if (key == "babble_scale") babble_scale_ = get_double(value, "babble_scale");
+    else if (key == "babble_isolate") babble_isolate_ = get_double(value, "babble_isolate");
+    else if (key == "babble_hold") {
+        if (auto pv = std::get_if<int64_t>(&value)) babble_hold_ = std::max(1, int(*pv));
+        else if (auto dv = std::get_if<double>(&value)) babble_hold_ = std::max(1, int(*dv));
+    }
     else if (key == "sat_lr")       sat_lr_       = get_double(value, "sat_lr");
     else if (key == "plan_gain") plan_gain_ = get_double(value, "plan_gain");
     else if (key == "plan_fade") plan_fade_ = get_double(value, "plan_fade");
     else if (key == "plan_puppet_gain") plan_puppet_gain_ = get_double(value, "plan_puppet_gain");
+    else if (key == "state_prior_indices") state_prior_indices_ = get_double_vec(value, "state_prior_indices");
+    else if (key == "state_prior_motors") state_prior_motors_ = get_double_vec(value, "state_prior_motors");
+    else if (key == "state_prior_weights") state_prior_weights_ = get_double_vec(value, "state_prior_weights");
+    else if (key == "state_prior_gated_by") state_prior_gated_by_ = get_double_vec(value, "state_prior_gated_by");
+    else if (key == "state_prior_c_weights") state_prior_c_weights_ = get_double_vec(value, "state_prior_c_weights");
+    else if (key == "state_prior_target_gated_by") state_prior_target_gated_by_ = get_double_vec(value, "state_prior_target_gated_by");
+    else if (key == "state_prior_target_gate_cos") state_prior_target_gate_cos_ = get_double_vec(value, "state_prior_target_gate_cos");
+    else if (key == "state_prior_target_gate_pow") state_prior_target_gate_pow_ = get_double(value, "state_prior_target_gate_pow");
+    else if (key == "state_prior_target_gate_reach") state_prior_target_gate_reach_ = get_double_vec(value, "state_prior_target_gate_reach");
+    else if (key == "state_prior_target_gate_reach_k") state_prior_target_gate_reach_k_ = get_double(value, "state_prior_target_gate_reach_k");
+    else if (key == "state_grow_at") state_grow_at_ = int(get_double(value, "state_grow_at"));
+    else if (key == "state_prior_targets") state_prior_targets_ = get_double_vec(value, "state_prior_targets");
+    else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
+    else if (key == "state_prior_lr")      state_prior_lr_      = get_double(value, "state_prior_lr");
+    else if (key == "state_prior_h_lr")    state_prior_h_lr_    = get_double(value, "state_prior_h_lr");
+    else if (key == "state_prior_calm")    state_prior_calm_    = get_double(value, "state_prior_calm");
+    else if (key == "state_prior_calm_fixed") state_prior_calm_fixed_ = get_double(value, "state_prior_calm_fixed");
+    else if (key == "state_prior_split")   state_prior_split_   = get_double(value, "state_prior_split");
+    else if (key == "state_prior_isolate") state_prior_isolate_ = get_double(value, "state_prior_isolate");
+    else if (key == "state_prior_step_gain") state_prior_step_gain_ = get_double(value, "state_prior_step_gain");
+    else if (key == "state_prior_damping") state_prior_damping_ = get_double(value, "state_prior_damping");
+    else if (key == "state_prior_calm_indices") state_prior_calm_indices_ = get_double_vec(value, "state_prior_calm_indices");
+    else if (key == "state_model_lr")      state_model_lr_      = get_double(value, "state_model_lr");
+    else if (key == "model_trace")         model_trace_         = get_double(value, "model_trace");
+    else if (key == "reset_breaks_model_pairing") reset_breaks_pairing_ = get_double(value, "reset_breaks_model_pairing");
     else if (key == "postural_gain") postural_gain_ = get_double(value, "postural_gain");
     else if (key == "postural_gain_joints") postural_gain_joints_ = get_double_vec(value, "postural_gain_joints");
     else if (key == "explore_noise") explore_noise_ = get_double(value, "explore_noise");
@@ -2436,6 +3099,7 @@ void MotorEPMv2::ensure_leg_init(int leg, int n) {
     L.Cvel = Eigen::MatrixXf::Zero(m, 2);   // velocity feed-forward starts at 0 (byte-identical until learned)
     L.prev_phi_ctx.setZero();
     L.h = Eigen::VectorXf::Zero(m);
+    L.hr = Eigen::VectorXf::Zero(m);
     // A: small random motor→sensor (model learns the real coupling quickly).
     // C: small random sensor→motor so the initial command y≈0 → body holds the
     //    export-default (standing) pose; HK then destabilizes it.
@@ -2465,6 +3129,96 @@ void MotorEPMv2::ensure_leg_init(int leg, int n) {
     L.initialized = true;
 }
 
+// THE PACE GATE (state_prior_gated_by): once a tick, per prior index, the steadiness of its gating element.
+void MotorEPMv2::update_prior_gates(Leg& L) {
+    const size_t K = state_prior_indices_.size();
+    if (L.gate_g.size() != K) {
+        L.gate_fast.assign(K, 0.0f); L.gate_slow.assign(K, 0.0f); L.gate_var.assign(K, 0.0f); L.gate_g.assign(K, 1.0f);
+        for (size_t k = 0; k < K && k < state_prior_gated_by_.size(); ++k) {
+            int j = int(state_prior_gated_by_[k]);
+            if (j >= 9999) continue;
+            if (j < 0) j += L.n;
+            if (j >= 0 && j < L.n) { L.gate_fast[k] = L.gate_slow[k] = L.x[j]; }
+        }
+    }
+    float sum = 0.0f; int cnt = 0;
+    for (size_t k = 0; k < K; ++k) {
+        L.gate_g[k] = 1.0f;
+        if (k >= state_prior_gated_by_.size() || state_prior_gated_by_[k] >= 9999.0) continue;
+        int j = int(state_prior_gated_by_[k]);
+        if (j < 0) j += L.n;
+        if (j < 0 || j >= L.n) continue;
+        L.gate_fast[k] += (1.0f / 25.0f) * (L.x[j] - L.gate_fast[k]);     // 0.5 s: the stride averaged out
+        L.gate_slow[k] += (1.0f / 100.0f) * (L.x[j] - L.gate_slow[k]);    // 2 s
+        const float d = L.gate_fast[k] - L.gate_slow[k];
+        L.gate_var[k] += (1.0f / 1500.0f) * (d * d - L.gate_var[k]);      // 30 s: the change's own typical size
+        const float rms = std::sqrt(L.gate_var[k]) + 1e-6f;
+        L.gate_g[k] = std::clamp(1.0f - std::fabs(d) / rms, 0.0f, 1.0f);
+        sum += L.gate_g[k]; ++cnt;
+    }
+    gate_mean_ = cnt ? sum / float(cnt) : 1.0f;
+    // the target's gate (state_prior_target_gated_by): the gating element's size against its own running RMS
+    if (!state_prior_target_gated_by_.empty()) {
+        if (L.tgate.size() != K) { L.tgate.assign(K, 1.0f); L.tgate_var.assign(K, 0.0f); }
+        for (size_t k = 0; k < K; ++k) {
+            L.tgate[k] = 1.0f;
+            if (k >= state_prior_target_gated_by_.size() || state_prior_target_gated_by_[k] >= 9999.0) continue;
+            int j = int(state_prior_target_gated_by_[k]);
+            if (j < 0) j += L.n;
+            if (j < 0 || j >= L.n) continue;
+            const float v = L.x[j];
+            L.tgate_var[k] += (1.0f / 1500.0f) * (v * v - L.tgate_var[k]);
+            if (k < state_prior_target_gate_cos_.size() && state_prior_target_gate_cos_[k] > 0.0) {
+                // geometric: the closing speed's factor, cos of the error (in radians), floored at 0
+                const double c = std::max(0.0, std::cos(double(v) * state_prior_target_gate_cos_[k]));
+                L.tgate[k] = float(std::pow(c, state_prior_target_gate_pow_));
+            } else {
+                const float rms = std::sqrt(L.tgate_var[k]) + 1e-6f;
+                L.tgate[k] = std::clamp(1.0f - std::fabs(v) / rms, 0.0f, 1.0f);
+            }
+            if (k < state_prior_target_gate_reach_.size() && state_prior_target_gate_reach_[k] < 9999.0) {
+                // turn before you arrive: the error must be turnable in the time left to the target
+                int jr = int(state_prior_target_gate_reach_[k]);
+                if (jr < 0) jr += L.n;
+                if (jr >= 0 && jr < L.n) {
+                    const float e = std::fabs(v);
+                    const float reach = e > 1e-6f ? std::clamp(float(state_prior_target_gate_reach_k_) * std::max(0.0f, L.x[jr]) / e, 0.0f, 1.0f) : 1.0f;
+                    L.tgate[k] = std::min(L.tgate[k], reach);
+                }
+            }
+        }
+    }
+}
+
+// GROW ON RESTORE (state_grow_at): insert k zero state elements at index g of every n-sized member of the leg.
+// Zero rows of A = no authority identified; zero columns of C / Cp / Cdep = no feedback from the new sense; zero rows
+// and columns of Bx = no state dynamics.  The old elements keep what they learned, at their shifted positions.
+void MotorEPMv2::grow_leg(Leg& L, int g, int k) {
+    const int n0 = L.n, n1 = n0 + k;
+    g = std::clamp(g, 0, n0);
+    auto rows = [&](Eigen::MatrixXf& M) {           // insert k zero ROWS at g (n0 x c -> n1 x c)
+        if (M.rows() != n0) return;
+        Eigen::MatrixXf R = Eigen::MatrixXf::Zero(n1, M.cols());
+        R.topRows(g) = M.topRows(g); R.bottomRows(n0 - g) = M.bottomRows(n0 - g); M = R; };
+    auto cols = [&](Eigen::MatrixXf& M) {           // insert k zero COLUMNS at g (r x n0 -> r x n1)
+        if (M.cols() != n0) return;
+        Eigen::MatrixXf R = Eigen::MatrixXf::Zero(M.rows(), n1);
+        R.leftCols(g) = M.leftCols(g); R.rightCols(n0 - g) = M.rightCols(n0 - g); M = R; };
+    auto vec = [&](Eigen::VectorXf& v) {
+        if (v.size() != n0) return;
+        Eigen::VectorXf R = Eigen::VectorXf::Zero(n1);
+        R.head(g) = v.head(g); R.tail(n0 - g) = v.tail(n0 - g); v = R; };
+    rows(L.A); rows(L.Bx); cols(L.Bx); cols(L.C); cols(L.Cp); cols(L.Cdep);
+    vec(L.b); vec(L.x); vec(L.prev_x); vec(L.pulse_x0); vec(L.pulse_dplus);
+    for (auto& bk : L.banks) {
+        rows(bk.A); rows(bk.Bx); cols(bk.Bx); cols(bk.C);
+        if (bk.b.size() == n0) vec(bk.b);
+    }
+    L.n = n1;
+    std::fprintf(stderr, "  MotorEPMv2 %s: the state grew %d -> %d, %d unidentified element(s) inserted at %d\n",
+                 id_.c_str(), n0, n1, k, g);
+}
+
 void MotorEPMv2::handle_proprio(int leg, MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
@@ -2472,6 +3226,7 @@ void MotorEPMv2::handle_proprio(int leg, MessagePtr payload) {
     int n = int(pt->values.size());
     ensure_leg_init(leg, n);
     Leg& L = legs_[leg];
+    if (L.n != n && state_grow_at_ >= 0 && n > L.n) grow_leg(L, state_grow_at_, n - L.n);
     if (L.n != n) return;            // dimensionality must be stable
     L.x = pt->values;
     // Capture the spawn pose (first frame = body standing) as the postural rest
@@ -3463,16 +4218,192 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         bool warmup = (wb_on ? (wb_steps_ <= babble_ticks_)
                              : (L.steps_seen <= babble_ticks_));
 
+        // ---- R1: regime-bank swap (regime_topic set and a token seen) ----
+        // L.A/Bx/b are the ACTIVE bank's working copy; on a winner change the
+        // incumbent is stored and the new regime's bank is loaded (warm-started
+        // from the incumbent on first sight).  The cross-regime pairing sample
+        // is dropped — the boundary sample is the mixture poison.
+        // Engagement waits for the identification phase to finish: babble writes
+        // land in ONE shared model (the harness holds the body near-standing
+        // through identification), and every bank then warm-starts from the
+        // IDENTIFIED model rather than scattering pair-writes across flickering
+        // banks (measured: engaged-during-babble left every bank at init noise).
+        if (!regime_topic_.empty() && regime_winner_ >= 0 && !warmup) {
+            // winner_id -> slot, first-seen; overflow shares the last slot.
+            int w = regime_winner_;
+            if (w >= int(bank_of_winner_.size())) bank_of_winner_.resize(size_t(w) + 1, -1);
+            if (bank_of_winner_[size_t(w)] < 0) {
+                int next = 0;
+                for (int b : bank_of_winner_) if (b >= 0 && b < regime_banks_ - 1) next = std::max(next, b + 1);
+                bank_of_winner_[size_t(w)] = std::min(next, regime_banks_ - 1);
+            }
+            const int slot = bank_of_winner_[size_t(w)];
+            if (int(L.banks.size()) < regime_banks_) L.banks.resize(size_t(regime_banks_));
+            // regime_dwell: a CONTROLLER's regime key must be sticky.  Measured
+            // (R6a): the raw winner_id flickers at ~10 Hz near the standing
+            // region (median dwell 0.10 s across 25+ tokens) — banks swap every
+            // ~5 ticks, every swap drops the boundary sample, and no bank ever
+            // owns its own topple onset (the pre-fall second belongs to OTHER
+            // tokens), so the tall bank cannot learn from its mistakes.  A swap
+            // now executes only after the new slot persists regime_dwell
+            // consecutive ticks (leg-0 driven; legs move in lockstep).  0 =
+            // immediate, byte-identical.  First assignment is always immediate.
+            if (leg == 0) {
+                if (slot == L.active_bank)      { pending_slot_ = -1; pending_count_ = 0; }
+                else if (slot == pending_slot_) { ++pending_count_; }
+                else                            { pending_slot_ = slot; pending_count_ = 1; }
+            }
+            const bool may_swap = L.active_bank < 0 || regime_dwell_ <= 0.0
+                                  || pending_count_ >= int(regime_dwell_);
+            if (L.active_bank != slot && may_swap) {
+                if (L.active_bank >= 0) {          // store the incumbent
+                    auto& ob = L.banks[size_t(L.active_bank)];
+                    ob.A = L.A; ob.Bx = L.Bx; ob.b = L.b; ob.tle_ema = L.tle_ema;
+                    // R3: the CONTROLLER is the regime's too.  The nine-arm
+                    // measurement behind this (R4/R5 families): a single shared C
+                    // is slump-hours-dominated — tall-local corrections learned in
+                    // the seconds after every scaffold handback are overwritten,
+                    // and no force schedule can deform a slump-consolidated
+                    // controller to the tall pose.  Bank C/h/hr and the regime's
+                    // EARNED permanence, and each regime keeps its own solution.
+                    if (regime_c_banks_ > 0.0) {
+                        ob.C = L.C; ob.h = L.h; ob.hr = L.hr;
+                        if (leg == 0) {
+                            ob.cons_c   = consolidate_c_;
+                            ob.gate_ema = state_prior_gate_ema_;
+                        }
+                    }
+                }
+                auto& nb = L.banks[size_t(slot)];
+                if (nb.A.size() == 0) {            // first sight: warm-start from incumbent
+                    nb.A = L.A; nb.Bx = L.Bx; nb.b = L.b; nb.tle_ema = L.tle_ema;
+                }
+                L.A = nb.A; L.Bx = nb.Bx; L.b = nb.b; L.tle_ema = nb.tle_ema;
+                if (regime_c_banks_ > 0.0) {
+                    if (nb.C.size() == 0) {        // first sight: inherit the incumbent's
+                        nb.C = L.C; nb.h = L.h; nb.hr = L.hr;
+                        // cons_c/gate_ema start 0: permanence is EARNED per regime,
+                        // never inherited — a fresh regime learns at full rate on
+                        // its warm-started copy without touching the incumbent's.
+                    }
+                    L.C = nb.C; L.h = nb.h; L.hr = nb.hr;
+                    if (leg == 0) {
+                        consolidate_c_        = nb.cons_c;
+                        state_prior_gate_ema_ = nb.gate_ema;
+                    }
+                }
+                L.active_bank = slot;
+                L.have_prev = false;               // drop the boundary sample
+                if (L.ytrace.size() > 0) L.ytrace.setZero();
+                ++bank_switches_;
+            }
+            if (L.active_bank >= 0) ++L.banks[size_t(L.active_bank)].samples;
+        }
+
+        // ---- Earned consolidation (consolidate_gain > 0): see the param note.
+        // The satisfaction threshold is a FIXED FRACTION OF THE UNIT CHANNEL —
+        // and that is not a tuned constant (§5.5): the sense channels are
+        // conditioned to [−1,1] by construction, a fall drives the attitude
+        // elements toward 1, standing sits near 0.07.  Every adaptive reference
+        // tried first was measured self-defeating: the long average had seen no
+        // bad times when the good phase came first; the smoothed peak diluted
+        // fall spikes to the standing level; the decaying instant peak collapsed
+        // during exactly the long quiet stretches it should protect.  The
+        // conditioning already normalised the scale — use it.
+        if (consolidate_gain_ > 0.0 && leg == 0) {
+            // consolidate_n > 0: the gate reads the balance subset's own EMA, so
+            // reach-type prior terms (head-CoM) cannot hold permanence hostage.
+            const float gate_ema = (consolidate_n_ > 0.0) ? state_prior_gate_ema_
+                                                          : state_prior_err_ema_;
+            const bool sat  = gate_ema > 0.0f && gate_ema < 0.15f;
+            const bool calm = ticks_since_reset_ > int(consolidate_calm_ticks_);
+            const float tgt = (sat && calm) ? 1.0f : 0.0f;
+            // Down-rate parameterized (R7 measured why): at 3.6 falls/min the tall
+            // stance's 16 s gaps ramp c by ~+0.5 while each fall's 0.01/tick decay
+            // wipes it in ~2 s — the ratchet can never climb through residual falls.
+            // 0.01 default = legacy.  A symmetric rate lets c compound across the
+            // gap-fall cycle; the calm gate still blocks UP-ramping for
+            // consolidate_calm_ticks after every reset, so chaos is never
+            // consolidated INTO — it just stops instantly un-earning the stance.
+            if (consolidate_hold_ > 0.0) {
+                // THREE-STATE ratchet (R7/R7b triangulated it): legacy decays c
+                // through topple + frozen rescue + the whole calm window (~13 s
+                // ≈ e⁻⁷ — every fall wipes the earned stance), while R7b's slow
+                // symmetric decay annealed adaptation DURING real chaos and made
+                // falls worse.  So: ramp when satisfied-and-calm; decay at the
+                // legacy rate only while genuinely UNSATISFIED (real chaos —
+                // plasticity back in ~2 s); HOLD otherwise (standing again but
+                // calm-blocked, or frozen — the meter decays toward 0 when the
+                // prior loop is off, which reads as satisfied, which holds).
+                // v3 discriminator.  v1 (EMA) missed 1 s topples (R7c: c held
+                // 0.94 through 21 falls/min).  v2 (instant error) was BLIND
+                // DURING FALLS: past ~25° the harness regime-gate freezes
+                // learning, the prior loop stops, and the meters read 0 — a
+                // topple transits the visible band in ~10 ticks (R9c: C damped
+                // to zero at cons 1.00 through 24 falls/min).  v3 adds the one
+                // signal the meters cannot hide: the harness's own reset event.
+                // A rescued fall decays c for its first 100 ticks (~2 s, a
+                // bounded ×0.37 slice); a caught wobble with no reset still
+                // holds.  This is the same reset-mask discipline the rest of
+                // the module already lives by.
+                const bool chaos = gate_err_inst_ > 0.30f
+                                   || (state_prior_gate_ema_ >= 0.15f
+                                       && consolidate_n_ > 0.0)
+                                   || ticks_since_reset_ < 100;
+                if (chaos)
+                    consolidate_c_ -= float(consolidate_down_rate_) * consolidate_c_;
+                else if (sat && calm)
+                    consolidate_c_ += 0.002f * (1.0f - consolidate_c_);
+            } else {
+                const float k   = (tgt > consolidate_c_)
+                                  ? 0.002f : float(consolidate_down_rate_);
+                consolidate_c_ += k * (tgt - consolidate_c_);
+            }
+        }
+        const float lr_scale = (consolidate_gain_ > 0.0)
+            ? 1.0f - float(consolidate_gain_) * consolidate_c_ : 1.0f;
+
         // ---- Learn from the previous command's outcome (motor TLE) ----
         // The MODEL always learns (also during babble warmup, where it learns the
         // body's response to small random commands).  The CONTROLLER (HK + anti-
         // saturation) only learns after warmup, once the model can predict.
         if (L.have_prev && !wb_on) {
-            Eigen::VectorXf x_hat = L.A * L.prev_y + L.b;          // forward-model prediction
+            // State-augmented model (state_model_lr > 0): x̂ = A·y + Bx·x + b.  Bx
+            // carries what the state does BY ITSELF (the pendulum's pole), so A can
+            // identify what actions do TO it — see the state_model_lr docstring.
+            const bool smodel = state_model_lr_ > 0.0;
+            if (smodel && L.Bx.rows() != n) L.Bx = Eigen::MatrixXf::Zero(n, n);
+            // Eligibility trace (model_trace > 0): the model's action input is the
+            // servo-filtered command ỹ, the physically effective input — see the
+            // model_trace docstring.  The trace is updated BEFORE use so ỹ already
+            // contains prev_y (the command whose outcome x is).
+            const bool traced = model_trace_ > 0.0;
+            if (traced) {
+                if (L.ytrace.size() != m) L.ytrace = Eigen::VectorXf::Zero(m);
+                L.ytrace += float(model_trace_) * (L.prev_y - L.ytrace);
+            }
+            const Eigen::VectorXf& yin = traced ? L.ytrace : L.prev_y;
+            Eigen::VectorXf x_hat = L.A * yin + L.b;               // forward-model prediction
+            if (smodel) x_hat.noalias() += L.Bx * L.prev_x;
             Eigen::VectorXf xi    = L.x - x_hat;                   // motor TLE ξ
-            // (1) model descent: A += η_M ξ yᵀ ; b += η_M ξ
-            L.A.noalias() += float(model_lr_) * xi * L.prev_y.transpose();
-            L.b.noalias() += float(model_lr_) * xi;
+            // (1) model descent: A += η_M ξ ỹᵀ ; b += η_M ξ  (+ Bx += η_S ξ xᵀ)
+            // ONE OWNER PER ESTIMAND: during isolate-babble the paired-difference
+            // writer owns A (measured: with both estimators live the columns
+            // wandered run-to-run and TLE hit 2.0 — the two fighting); LMS keeps
+            // b and Bx, which the differencing cannot see.
+            const bool a_lms = !(babble_isolate_ > 0.0 && warmup)
+                               && !(babble_owns_a_ > 0.0 && babble_isolate_ > 0.0);
+            if (a_lms) L.A.noalias() += lr_scale * float(model_lr_) * xi * yin.transpose();
+            L.b.noalias() += lr_scale * float(model_lr_) * xi;
+            if (smodel) {
+                // NLMS, not raw LMS: raw LMS converges at lr·σ² and a regulated
+                // state's variance is tiny (measured on the plant: Bx found 0.13 of
+                // a 0.98 pole in 4000 ticks).  Normalising by the state's own power
+                // makes lr the FRACTION of each sample's error explained per tick —
+                // scale-free across bodies (§5.5), reg_eps as the numerical floor.
+                const float xpow = L.prev_x.squaredNorm() + float(reg_eps_);
+                L.Bx.noalias() += lr_scale * (float(state_model_lr_) / xpow) * xi * L.prev_x.transpose();
+            }
             L.tle_ema = (1.0f - kTeleEmaAlpha) * L.tle_ema + kTeleEmaAlpha * xi.norm();
 
             if (!warmup) {
@@ -3482,6 +4413,12 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     z.noalias() += L.Cphi * L.prev_phi_ctx;        // posture phase-conditioned bias at command time
                     z.noalias() += L.Cvel * L.prev_phi_ctx;        // velocity feed-forward bias (0 until the socket trains it)
                 }
+                // The model-implied step the LAST command carried (W5 fork item (b)).  G is the
+                // slope at the operating point the body actually ran; leaving this out would put
+                // the descent's Jacobian at a different point on the tanh than the command used —
+                // the same dishonest-G trap the split and squelch branches below document.
+                // Empty unless state_prior_step_gain > 0, so this is byte-identical when off.
+                if (L.prior_step.size() == m) z.noalias() += L.prior_step;
                 Eigen::MatrixXf G = Eigen::MatrixXf::Zero(m, m);
                 float sat = 0.0f;
                 for (int i = 0; i < m; ++i) {
@@ -3546,6 +4483,56 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                         xi_tilde[idx] = (1.0f - eff_w[j]) * xi[idx] + eff_w[j] * goal_err;
                     }
                 }
+                // STATE-SPACE PRIOR, part 1 of 2 (2026-08-31, the microduck lever):
+                // ATTENUATE the HK error at the prior-owned indices — ξ̃[idx] *= (1−w) —
+                // so the sensitivity rule progressively loses interest in that dimension
+                // and, at w=1, may fully REST there.  Negative indices resolve from the
+                // end (−1 = the bridge's load slot in every group, whatever its
+                // group_size).  The MODEL keeps the raw ξ — the self-model stays honest.
+                //
+                // ⚠ Why the prior is NOT the keyframe socket's ξ̃-replacement, measured
+                // rather than argued (test_state_prior, 2026-08-31): the HK dC update is
+                // QUADRATIC in q — sign-blind — so feeding it a goal error just amplifies
+                // loop gain ALONG the goal-error direction.  On a closed 1-D plant that
+                // learned C(:,lean) as POSITIVE feedback (push +0.100 at lean +1.10 —
+                // driving the fall), and the goal side inverted mirror-symmetrically
+                // (+0.4 → −0.067, −0.4 → +0.113).  Goal-SEEKING lives in part 2 below.
+                {
+                    const bool sp_ok = state_prior_gain_ > 0.0
+                                       && !state_prior_indices_.empty()
+                                       && state_prior_indices_.size() == state_prior_targets_.size();
+                    if (sp_ok) {
+                        const float w = float(state_prior_gain_);
+                        for (size_t k = 0; k < state_prior_indices_.size(); ++k) {
+                            int idx = int(state_prior_indices_[k]);
+                            if (idx < 0) idx += n;
+                            if (idx < 0 || idx >= n) continue;        // out of range: skip, never throw
+                            // Reach terms attenuate only as consolidation engages them
+                            // (w·c): at c = 0 the listing must be INVISIBLE to HK —
+                            // measured (R4c): attenuating a dormant reach index blinded
+                            // HK to head-CoM surprise with no counter-pull, and every
+                            // standing seed degraded from bucket 1.
+                            const bool scoped = consolidate_reach_ < 1.5     // mode 1
+                                                || consolidate_reach_ > 3.5; // mode 4
+                            const bool reach_k = consolidate_reach_ > 0.0
+                                                 && scoped
+                                                 && consolidate_n_ > 0.0
+                                                 && int(k) >= int(consolidate_n_);
+                            // Mode 1 scales by c; mode 4 by the balance satisfaction
+                            // (same factor as its pull) — attenuation must track the
+                            // pull, or HK goes blind to a dimension nothing defends
+                            // (the R4c lesson).
+                            const float att_s =
+                                (consolidate_reach_ > 4.5) ? 0.0f   // mode 5: never blind
+                                : (consolidate_reach_ > 3.5)
+                                    ? std::clamp(1.0f - state_prior_gate_ema_ / 0.15f,
+                                                 0.0f, 1.0f)
+                                    : consolidate_c_;
+                            const float w_k = reach_k ? w * att_s : w;
+                            xi_tilde[idx] = (1.0f - w_k) * xi[idx];
+                        }
+                    }
+                }
                 // ---- DEP: C from the correlation of MOTOR and SENSOR derivatives -----
                 // Causal pairing: the command CHANGE we made last tick (Δprev_y) and the
                 // sensor CHANGE it produced (Δx).  Row-normalised so dep_gain is the
@@ -3563,7 +4550,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     }
                 }
                 Eigen::VectorXf q  = P * xi_tilde;
-                Eigen::MatrixXf dC = 2.0f * float(ctrl_lr_)
+                Eigen::MatrixXf dC = 2.0f * lr_scale * float(ctrl_lr_)
                                      * (AG.transpose() * q) * (q.transpose() * Lp);
                 // I2 — the CONFINING term, ported from sos_avggrad.cpp's `epsrel`.
                 // Dimensions follow PM exactly with q qᵀ standing in for their averaged Q:
@@ -3584,7 +4571,260 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     dC *= float(max_dctrl_) / dC_norm;             // ignition clamp
                 if (dep_gain_ <= 0.0) L.C.noalias() += dC;         // DEP owns C when on
                 Eigen::VectorXf mu = G * (L.A.transpose() * q);    // bias toward less surprise
-                L.h.noalias() += float(bias_lr_) * mu;
+                L.h.noalias() += lr_scale * float(bias_lr_) * mu;
+                // STATE-SPACE PRIOR, part 2 of 2: the goal-seeker.  Descend the prior's
+                // own error THROUGH THE LEARNED MODEL — the Cphi pattern below, aimed at
+                // the main controller:
+                //   e = x* − x[idx];  per motor j:
+                //   C(j,:) += lr·w·e·A(idx,j)·G(j,j)·prev_xᵀ ;   h(j) += lr·w·e·A(idx,j)·G(j,j)
+                // A(idx,j) is the model's CURRENT estimate of motor j's authority over the
+                // target index, so HOW to satisfy the prior is discovered, never wired —
+                // and the negative-feedback sign of C(:,idx) arises by itself (e ∝ −x[idx]
+                // for a zero target, prev_x carries +x[idx]).  Self-limiting as e → 0; on
+                // residual noise the feedback column keeps a slow growth pressure ∝ E[x²],
+                // so configs running this SHOULD set ctrl_damping > 0 (PM's own brake).
+                // Placed AFTER the HK dC/dh application, in the same slot as Cphi/Cvel —
+                // the house position for goal-error learners.
+                {
+                    const bool sp_ok = state_prior_gain_ > 0.0 && state_prior_lr_ > 0.0
+                                       && !state_prior_indices_.empty()
+                                       && state_prior_indices_.size() == state_prior_targets_.size();
+                    float sp_err = 0.0f; int sp_n = 0;
+                    float gate_err = 0.0f; int gate_n = 0;
+                    if (sp_ok && (!state_prior_gated_by_.empty() || !state_prior_target_gated_by_.empty())) update_prior_gates(L);
+                    if (sp_ok) {
+                        // consolidate_spares_prior: the anneal stops the destroyer (HK),
+                        // not the objective — the GN step self-terminates at e = 0.
+                        const float sp_scale = (consolidate_spares_prior_ > 0.0)
+                                               ? 1.0f : lr_scale;
+                        const float lw = sp_scale * float(state_prior_lr_ * state_prior_gain_);
+                        const float hlw = float((state_prior_h_lr_ < 0.0 ? state_prior_lr_
+                                                                        : state_prior_h_lr_)
+                                                * state_prior_gain_);
+                        for (size_t k = 0; k < state_prior_indices_.size(); ++k) {
+                            int idx = int(state_prior_indices_[k]);
+                            if (idx < 0) idx += n;
+                            if (idx < 0 || idx >= n) continue;
+                            const float tg = (!state_prior_target_gated_by_.empty() && k < L.tgate.size()) ? L.tgate[k] : 1.0f;   // the target's gate
+                            const float e = float(state_prior_targets_[k]) * tg - L.x[idx];
+                            // Gauss-Newton normalisation (§5.5: adapt to the signal's own
+                            // scale, never tune to it): the raw gradient is DOUBLY small —
+                            // e routed through a small-authority channel A(idx,j) — so the
+                            // step is normalised by the model's own authority scale
+                            // ||A(idx,:)||².  reg_eps (the module's existing metric
+                            // regulariser) damps the step wherever the channel is not yet
+                            // identified — pushing hard through an unlearned model is how
+                            // a prior becomes a flail.  lr is then a FRACTION of the
+                            // model-implied correction per tick, comparable across bodies.
+                            const float anorm = L.A.row(idx).squaredNorm() + float(reg_eps_);
+                            // consolidate_reach: indices at/after consolidate_n are REACH
+                            // terms — dormant until the balance subset has consolidated,
+                            // then engaged at lw·c WITH an h share (the measured role
+                            // dissociation: C balances, h reaches — a C-only pull cannot
+                            // relocate an equilibrium, seed 4's unmoved head).  A fall
+                            // collapses c (τ ≈ 2 s), disengaging the reach BEFORE any
+                            // fall-epoch h integration — the windup disease structurally
+                            // cannot start.  The R4/R4b measurement behind the split: the
+                            // full-weight pull live from tick 0 cost enough robustness
+                            // (6.4 vs 2.6 falls/min, bucket 0) that the 30 s calm window
+                            // never arrived and consolidation lost the race.
+                            const bool reach_k = consolidate_reach_ > 0.0
+                                                 && consolidate_n_ > 0.0
+                                                 && int(k) >= int(consolidate_n_);
+                            // Mode 1 (dormant, lw·c) was measured REFUTED: the basin is
+                            // found WITHOUT the pull, consolidation freezes the
+                            // controller, and the waking pull then pushes a frozen loop
+                            // out of a basin it never learned to widen (all three
+                            // standing seeds destroyed 3–28 s after engagement).  Mode 2
+                            // keeps the pull live from tick 0 — the R4/R4b measurement:
+                            // learning CO-ADAPTS around the pull and still finds
+                            // standing — and adds only what R4b's seed 4 proved missing:
+                            // the h share, because C balances while h reaches.
+                            const bool dormant = consolidate_reach_ < 1.5;
+                            // Modes 3 AND 4 route the reach bias through hr (c-gated).
+                            const bool mode3   = consolidate_reach_ > 2.5;
+                            // Mode 4: BALANCE-GATED pull.  R5 measured mode 3's
+                            // always-on whole-body pull dragging every pose 2-3x
+                            // closer to home but costing the race everywhere (no seed
+                            // reached 30 fall-free seconds).  The scale s is the
+                            // balance subset's own satisfaction against the SAME 0.15
+                            // unit-channel fraction the gate uses — no new constant —
+                            // and the feedback sign is self-limiting: pull → tilt →
+                            // s falls → pull backs off.  During chaos s = 0 exactly.
+                            const bool mode4   = consolidate_reach_ > 3.5
+                                                 && consolidate_reach_ < 4.5;
+                            // Mode 5: BIAS-ONLY reach.  Seven arms measured the same
+                            // two walls: a reach force live before consolidation loses
+                            // the race (R4b/R5/R5b), and one waking abruptly after it
+                            // breaks the basin (R4d).  Mode 5 has NO reach C-pull at
+                            // all — pre-consolidation is bit-identical to control by
+                            // construction — and hr then walks the equilibrium at the
+                            // µ-rate consolidate_reach_lr through the consolidated C's
+                            // live feedback: quasi-static drift, not a waking force.
+                            // A fall collapses c (force fades c·hr), the brief
+                            // plasticity burst re-learns near the edge, consolidation
+                            // re-arms, the walk resumes — a ratchet whose pawl is
+                            // consolidation itself.
+                            const bool mode5   = consolidate_reach_ > 4.5;
+                            const float bal_s  = mode4
+                                ? std::clamp(1.0f - state_prior_gate_ema_ / 0.15f,
+                                             0.0f, 1.0f)
+                                : 1.0f;
+                            const float lw_raw  = reach_k ? (mode5 ? 0.0f
+                                                            : dormant ? lw * consolidate_c_
+                                                                      : lw * bal_s)
+                                                          : lw;
+                            const float hlw_raw = reach_k ? lw_raw : hlw;
+                            // state_prior_gate_weight: the gate (attitude) subset's
+                            // PRECISION relative to the rest of the prior — its descent,
+                            // C and h alike, runs at gw× the rate (1 = byte-identical;
+                            // the reach terms are never in the subset).  See the param's
+                            // note for the §12.5 measurement behind it.
+                            const float gw = (consolidate_n_ > 0.0 && int(k) < int(consolidate_n_))
+                                             ? float(state_prior_gate_weight_) : 1.0f;
+                            // state_prior_weights: this index's own precision (empty = 1, byte-identical)
+                            float pw = (k < state_prior_weights_.size()) ? float(state_prior_weights_[k]) : 1.0f;
+                            if (k < L.gate_g.size() && !state_prior_gated_by_.empty()) pw *= L.gate_g[k];   // the pace gate
+                            const float lw_k  = gw * lw_raw * pw;
+                            const float hlw_k = gw * hlw_raw * pw;
+                            if (reach_k) reach_lw_last_ = lw_k;
+                            const bool split = state_prior_split_ > 0.0;
+                            if (split && L.Cp.rows() != m) L.Cp = Eigen::MatrixXf::Zero(m, n);
+                            Eigen::MatrixXf& Cdst = split ? L.Cp : L.C;
+                            // The step's G must be the TRUE actuator Jacobian — the
+                            // operating point the body actually ran, INCLUDING the
+                            // calm squelch (and Cp in split mode).  Computed blind,
+                            // the descent writes at G≈1 into a rail of its own
+                            // making and the target columns grow without bound —
+                            // measured in split mode (|u| 0.994 at C 0.03) and
+                            // AGAIN in shared mode under the R2 regime calm
+                            // (attitude columns to 103, the 25-minute quiet
+                            // re-inflating).  Honest G restores the self-limit.
+                            Eigen::VectorXf Gt = G.diagonal();
+                            // Mirror the command path's act-rest view, or G lies at
+                            // the efference columns.
+                            const float ract = (consolidate_rests_act_ > 0.0)
+                                ? 1.0f - float(consolidate_rests_act_) * consolidate_c_
+                                : 1.0f;
+                            Eigen::VectorXf pxr = L.prev_x;
+                            if (ract < 1.0f && n >= 3 * m)
+                                for (int jj = 0; jj < m; ++jj) pxr[3 * jj + 1] *= ract;
+                            if (split) {
+                                Eigen::VectorXf zt = L.last_mult * (L.C * pxr + L.h
+                                                                    + float(consolidate_c_) * L.hr)
+                                                     + L.Cp * pxr;
+                                for (int j = 0; j < m; ++j) {
+                                    const float t = std::tanh(zt[j]);
+                                    Gt[j] = 1.0f - t * t;
+                                }
+                            } else if (L.last_mult < 1.0f) {
+                                // shared C under the squelch: z_actual =
+                                // mult·(z − z_att) + z_att; recompute G there.
+                                Eigen::VectorXf zfull = L.C * pxr + L.h
+                                                        + float(consolidate_c_) * L.hr;
+                                Eigen::VectorXf zatt  = Eigen::VectorXf::Zero(m);
+                                for (size_t kk = 0; kk < state_prior_indices_.size(); ++kk) {
+                                    int ai = int(state_prior_indices_[kk]);
+                                    if (ai < 0) ai += n;
+                                    if (ai < 0 || ai >= n) continue;
+                                    // Must mirror the command path's exemption subset
+                                    // exactly, or G is dishonest at the reach columns.
+                                    if (consolidate_reach_ > 0.0
+                                        && (consolidate_reach_ < 1.5 || consolidate_reach_ > 3.5)
+                                        && consolidate_n_ > 0.0
+                                        && int(kk) >= int(consolidate_n_)) continue;
+                                    if (calm_exempt_n_ > 0.0 && int(kk) >= int(calm_exempt_n_)) continue;
+                                    zatt.noalias() += L.C.col(ai) * L.prev_x[ai];
+                                }
+                                for (int j = 0; j < m; ++j) {
+                                    const float zt = L.last_mult * (zfull[j] - zatt[j]) + zatt[j];
+                                    const float t = std::tanh(zt);
+                                    Gt[j] = 1.0f - t * t;
+                                }
+                            }
+                            const int motor_limit = (k < state_prior_motors_.size() && state_prior_motors_[k] > 0.0) ? int(state_prior_motors_[k]) : m;
+                            for (int j = 0; j < m; ++j) {
+                                if (j >= motor_limit) continue;   // the prior's motor mask: this index does not descend through motor j
+                                const float g = lw_k * e * L.A(idx, j) * Gt[j] / anorm;
+                                if (k < state_prior_c_weights_.size()) {   // the feedback half's own weight (the h half below uses g unscaled)
+                                    const float cw = float(state_prior_c_weights_[k]);
+                                    if (cw != 0.0f) Cdst.row(j).noalias() += (cw * g) * L.prev_x.transpose();
+                                } else {
+                                    Cdst.row(j).noalias() += g * L.prev_x.transpose();
+                                }
+                                // h with CONDITIONAL ANTI-WINDUP.  The roles dissociate
+                                // cleanly (measured, this lever's plant): C is what
+                                // BALANCES (feedback; C-only passed the unstable-plant
+                                // test) and h is what REACHES a target away from the
+                                // current state (C·x cannot push off x≈0; direction
+                                // failed without h).  h's failure mode is the classic
+                                // saturated-integrator windup: during a fall the error
+                                // rails one-sided for a whole epoch and h integrates a
+                                // DC that then destabilises the NEXT epoch (traced:
+                                // balanced 4500 ticks, h crept 0.2→3.5, collapsed, never
+                                // recovered — the repo's homeostat-windup lesson in
+                                // miniature).  So: block only the rail-DEEPENING update
+                                // (command already saturated in g's own direction);
+                                // an unwinding update always passes.
+                                const float t_j = std::tanh(z[j]);
+                                const float gh = (lw_k > 0.0f) ? g * (hlw_k / lw_k) : 0.0f;
+                                const bool deepening = std::fabs(t_j) > 0.95f
+                                                       && ((gh > 0.0f) == (t_j > 0.0f));
+                                // Modes 3-5: the reach's bias goes to hr, written only
+                                // in consolidated quiet (rate ∝ c) — at c = 0 nothing
+                                // accumulates (no chaos windup, the R4e disease), and
+                                // the applied force c·hr ramps in/out with consolidation
+                                // (no waking jolt, the R4d disease).  Mode 5 writes at
+                                // its own µ-rate (consolidate_reach_lr): g is zero
+                                // there (no C-pull), so the GN step is rebuilt at the
+                                // reach rate directly.
+                                if (reach_k && mode5) {
+                                    const float ghr = float(consolidate_reach_lr_)
+                                        * e * L.A(idx, j) * Gt[j] / anorm
+                                        * consolidate_c_;
+                                    const bool deep_r = std::fabs(t_j) > 0.95f
+                                                        && ((ghr > 0.0f) == (t_j > 0.0f));
+                                    if (!deep_r) L.hr[j] += ghr;
+                                } else if (!deepening) {
+                                    if (reach_k && mode3)
+                                        L.hr[j] += gh * consolidate_c_;
+                                    else
+                                        L.h[j] += gh;
+                                }
+                            }
+                            sp_err += std::fabs(e); ++sp_n;
+                            if (int(k) < int(consolidate_n_)) { gate_err += std::fabs(e); ++gate_n; }
+                        }
+                    }
+                    // Frozen-meter lesson (2026-08-14): an inactive prior must DECAY the
+                    // meter, or a mid-run gain drop reads as "still pulling" in the (d)-test.
+                    state_prior_err_ema_ += 0.01f * ((sp_n ? sp_err / float(sp_n) : 0.0f)
+                                                     - state_prior_err_ema_);
+                    // The gate subset's own EMA (same cadence, same frozen-meter decay).
+                    state_prior_gate_ema_ += 0.01f * ((gate_n ? gate_err / float(gate_n) : 0.0f)
+                                                      - state_prior_gate_ema_);
+                    gate_err_inst_ = gate_n ? gate_err / float(gate_n) : 0.0f;
+                    // The calm reference: the same error on a ~40 s horizon.  The
+                    // annealing ratio short/long is self-scaled — no constant to
+                    // tune to the signal (§5.5).
+                    state_prior_err_long_ += 0.0005f * ((sp_n ? sp_err / float(sp_n) : 0.0f)
+                                                        - state_prior_err_long_);
+                    state_prior_applied_ = sp_n;
+                    // Consolidation reference: peak of the INSTANT error (falls
+                    // drive it to 0.5+), minutes-scale decay.  Peaking the
+                    // smoothed EMA diluted fall spikes toward the standing level
+                    // and 0.2·peak became unreachably strict (measured: cons
+                    // stayed 0.00 in every seed, including ones standing at 1.0).
+                    if (sp_n && leg == 0)
+                        sp_err_peak_ = std::max(sp_err_peak_ * 0.9999f, sp_err / float(sp_n));
+                    // R2: the ACTIVE bank's own prior-error EMA — the discrete
+                    // calm key's statistic (slow, regime-local, storm-proof).
+                    if (sp_n && L.active_bank >= 0 && L.active_bank < int(L.banks.size())) {
+                        auto& bk = L.banks[size_t(L.active_bank)];
+                        const float e = sp_err / float(sp_n);
+                        bk.sp_err = (bk.sp_err < 0.0f) ? e : bk.sp_err + 0.01f * (e - bk.sp_err);
+                    }
+                }
                 // Phase-conditioned feed-forward: train Cphi to REDUCE the keyframe error (x* − x)
                 // at the command phase — NOT HK surprise (which damps motion).  Self-limiting: as
                 // the bias moves the body toward x*, the error shrinks and learning stops.  Small
@@ -3626,8 +4866,39 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // I2 companion: the explicit bound on C and h that lets sat_lr be retired
                 // without reproducing its windup.  PM's `damping`.
                 if (ctrl_damping_ > 0.0) {
-                    L.C *= (1.0f - float(ctrl_damping_));
-                    L.h *= (1.0f - float(ctrl_damping_));
+                    // ctrl_damping_lr_scaled: weight decay is PART OF LEARNING —
+                    // when consolidation rests the learning, the decay rests too.
+                    // Measured both ways: unscaled decay at cons=1 shrank a frozen
+                    // C to zero (R9c, 24 falls/min at cons 1.00); and with NO decay
+                    // the tall fight ratchets C unboundedly (40-60 unfiltered,
+                    // 108-248 through the servo filter — the descent pushes harder
+                    // through any attenuation because nothing prices gain).
+                    const float d = float(ctrl_damping_)
+                                    * (ctrl_damping_lr_scaled_ > 0.0 ? lr_scale : 1.0f);
+                    L.C *= (1.0f - d);
+                    L.h *= (1.0f - d);
+                }
+                // STATE-PRIOR ISOLATION (the W5 lesion) — LAST writer of C in the update, so
+                // nothing downstream repopulates a column the lesion has taken out.  See the
+                // state_prior_isolate docstring for what it tests and why h is spared.
+                if (state_prior_isolate_ > 0.0 && !state_prior_indices_.empty()) {
+                    if (int(prior_col_keep_.size()) != n) prior_col_keep_.assign(size_t(n), 0);
+                    else std::fill(prior_col_keep_.begin(), prior_col_keep_.end(), 0);
+                    int kept = 0;
+                    for (double di : state_prior_indices_) {
+                        int idx = int(di);
+                        if (idx < 0) idx += n;
+                        if (idx < 0 || idx >= n) continue;          // out of range: skip, as part 2 does
+                        if (!prior_col_keep_[size_t(idx)]) { prior_col_keep_[size_t(idx)] = 1; ++kept; }
+                    }
+                    if (kept > 0) {                                  // every index out of range = no lesion
+                        for (int i = 0; i < n; ++i) {
+                            if (prior_col_keep_[size_t(i)]) continue;
+                            L.C.col(i).setZero();
+                            if (L.Cp.rows() == m && L.Cp.cols() == n) L.Cp.col(i).setZero();
+                        }
+                        state_prior_isolate_kept_ = kept;
+                    }
                 }
                 L.gain_ema = (1.0f - kTeleEmaAlpha) * L.gain_ema + kTeleEmaAlpha * Lp.norm();
                 L.sat_ema  = (1.0f - kTeleEmaAlpha) * L.sat_ema  + kTeleEmaAlpha * (sat / float(m));
@@ -3637,10 +4908,77 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // ---- Emit the new command ----
         Eigen::VectorXf y(m);
         if (warmup) {
-            // motor babble: small random commands so the model learns A,B,b before
-            // the controller rides the loop.
-            std::uniform_real_distribution<float> ud(-float(babble_scale_), float(babble_scale_));
-            for (int j = 0; j < m; ++j) y[j] = std::clamp(ud(L.babble_rng), -1.0f, 1.0f);
+            if (babble_isolate_ > 0.0) {
+                // Structured babble: one motor IN THE WHOLE INSTANCE at a time,
+                // held pulse, alternating sign — the empirically measured
+                // identification shape (see the babble_isolate docstring).
+                // Time-multiplexed ACROSS legs too: on a mirrored body, left and
+                // right pulsing the same motor index simultaneously cancel in the
+                // very channel being identified (measured: both hips' pitch
+                // authority regressed to ~0 with scrambled signs until the legs
+                // were staggered).
+                const int64_t slot   = (L.steps_seen - 1) / std::max(1, babble_hold_);
+                const int     active = int(slot % int64_t(n_legs_));
+                y.setZero();
+                int   pulse_motor = -1; float pulse_sign = 0.0f;
+                if (leg == active) {
+                    const int64_t lslot = slot / int64_t(n_legs_);
+                    pulse_motor = int((lslot / 2) % int64_t(m));   // m0+, m0−, m1+, m1−, …
+                    pulse_sign  = (lslot % 2 == 0) ? 1.0f : -1.0f;
+                    y[pulse_motor] = pulse_sign * float(babble_scale_);
+                }
+                // PAIRED-DIFFERENCE IDENTIFICATION (the probe's estimator, inside
+                // the module's own babble).  Continuous LMS through pulse
+                // aftermaths mis-attributes the pendulum's delayed counter-swing
+                // to whatever motor pulses next (measured: the higher-authority
+                // hip's sign inverted while its mirror identified).  The babble
+                // KNOWS its own pulse structure, so it can difference over the
+                // pulse window exactly as the probe does and write A's column
+                // with a clean per-tick response.  Self-experiment: the module's
+                // own commands, its own sensors, nothing external.
+                // ANTISYMMETRIC PAIRS, exactly as the probe measures: the body's own
+                // topple drift rides every window and is ~20x the pulse effect, and
+                // it GROWS — so unpaired windows invert columns wholesale (measured:
+                // 4/5 signs flipped, deterministically).  A +/− pair on the same
+                // motor cancels the drift to first order; only completed pairs
+                // write the column.  The write happens at the window's FINAL tick
+                // (not the next boundary), so a harness settle scheduled between
+                // pairs cannot swallow a completed measurement; the final command's
+                // one-tick-late effect is excluded by construction, hence the
+                // (hold−1) denominator and the x0 capture at the window's first
+                // tick.
+                {
+                    const int hold = std::max(2, babble_hold_);
+                    const bool window_starts    = ((L.steps_seen - 1) % int64_t(hold)) == 0;
+                    const bool window_completes = (L.steps_seen % int64_t(hold)) == 0;
+                    if (window_starts) {
+                        L.pulse_motor = pulse_motor;   // −1 when this leg is passive
+                        L.pulse_sign  = pulse_sign;
+                        L.pulse_x0    = L.x;
+                    }
+                    if (window_completes && L.pulse_motor >= 0 && L.pulse_motor == pulse_motor
+                        && L.pulse_x0.size() == n) {
+                        const Eigen::VectorXf d = (L.x - L.pulse_x0) / float(hold - 1);
+                        if (L.pulse_sign > 0.0f) {
+                            L.pulse_dplus = d;                   // first half of the pair
+                            L.pulse_dplus_motor = L.pulse_motor;
+                        } else if (L.pulse_dplus_motor == L.pulse_motor
+                                   && L.pulse_dplus.size() == n) {
+                            const Eigen::VectorXf resp =
+                                (L.pulse_dplus - d) / (2.0f * float(babble_scale_));
+                            L.A.col(L.pulse_motor) =
+                                0.8f * L.A.col(L.pulse_motor) + 0.2f * resp;
+                            L.pulse_dplus_motor = -1;
+                        }
+                        L.pulse_motor = -1;                      // window consumed
+                    }
+                }
+            } else {
+                // motor babble: small random commands so the model learns A,B,b before
+                // the controller rides the loop.
+                std::uniform_real_distribution<float> ud(-float(babble_scale_), float(babble_scale_));
+                for (int j = 0; j < m; ++j) y[j] = std::clamp(ud(L.babble_rng), -1.0f, 1.0f);
+            }
         } else {
             // per-leg homeostat gain scales the HK oscillation toward amp_target
             float ag = (amp_homeo_gain_ > 0.0) ? L.amp_gain : 1.0f;
@@ -3665,8 +5003,30 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // lookahead_null drops the A·y term (x̂ := b), testing whether the benefit is
             // the model's DYNAMICS or merely shrinking x toward a constant.
             // gain 0 => x_eff == x exactly => byte-identical to MotorEPM.
+            // The reach bias rides with h everywhere h appears (command AND the
+            // honest-G reconstructions below), applied as c·hr — zero until mode 3
+            // writes hr, so plain adds are byte-identical for every other config.
+            const float cr = float(consolidate_c_);
+            // consolidate_rests_act: scale the ACT (efference-copy) elements the
+            // COMMAND sees by (1 − gain·c).  The measured motivation (the energy
+            // study's lesion, 2026-09-01): the tall stance's ~5.5 Hz whole-body
+            // limit cycle survived 10× gain reduction, dither removal and a full
+            // freeze — and collapsed 160× (11.1 → 0.069 mrad/tick, quieter than
+            // the slump) the moment C's act columns were zeroed.  Command-self-
+            // feedback at one-tick lag is the oscillator; at earned stillness it
+            // is pure fuel.  Learning still sees the TRUE x (efference stays for
+            // identification and gait), and a fall collapses c, restoring the
+            // full pathway with plasticity.
+            const float act_s = (consolidate_rests_act_ > 0.0)
+                ? 1.0f - float(consolidate_rests_act_) * consolidate_c_ : 1.0f;
+            const bool  rest_act = act_s < 1.0f && L.n >= 3 * m;
+            Eigen::VectorXf x_cmd;
+            if (rest_act) {
+                x_cmd = L.x;
+                for (int j = 0; j < m; ++j) x_cmd[3 * j + 1] *= act_s;
+            }
             y = wb_on ? Eigen::VectorXf(Zw_.segment(leg * m, m))   // I7: this leg's slice
-                      : Eigen::VectorXf(L.C * L.x + L.h);
+                      : Eigen::VectorXf(L.C * (rest_act ? x_cmd : L.x) + L.h + cr * L.hr);
             if (!wb_on && lookahead_gain_ != 0.0 && L.A.size() > 0 && L.have_prev) {
                 const float lam = float(lookahead_gain_);
                 Eigen::VectorXf y0 = y;                       // pre-tanh operating point
@@ -3676,9 +5036,13 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 Eigen::VectorXf xhat = (lookahead_null_ > 0.0)
                     ? Eigen::VectorXf(L.b)                     // null: no dynamics term
                     : Eigen::VectorXf(L.A * yref + L.b);
+                if (lookahead_null_ <= 0.0 && state_model_lr_ > 0.0 && L.Bx.rows() == L.x.size())
+                    xhat.noalias() += L.Bx * L.x;              // the state term of the same model
                 if (xhat.size() == L.x.size()) {
-                    const Eigen::VectorXf x_eff = (1.0f - lam) * L.x + lam * xhat;
-                    y = L.C * x_eff + L.h;
+                    Eigen::VectorXf x_eff = (1.0f - lam) * L.x + lam * xhat;
+                    if (rest_act)
+                        for (int j = 0; j < m; ++j) x_eff[3 * j + 1] *= act_s;
+                    y = L.C * x_eff + L.h + cr * L.hr;
                     la_dev_ema_ = (1.0f - kTeleEmaAlpha) * la_dev_ema_
                                 + kTeleEmaAlpha * (x_eff - L.x).norm();
                 }
@@ -3687,6 +5051,192 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 Eigen::Vector2f ctx(std::cos(cpg_phase_), std::sin(cpg_phase_));
                 y.noalias() += L.Cphi * ctx;   // posture feed-forward (pose)
                 y.noalias() += L.Cvel * ctx;   // velocity feed-forward (propulsive push; 0 until trained)
+            }
+            // Exploration-precision annealing (state_prior_calm > 0): squelch the
+            // NON-attitude part of the pre-tanh command by the prior error's
+            // short/long EMA ratio; the prior's own feedback columns keep full
+            // slope.  See the param docstring for the measured motivation.
+            if (state_prior_split_ > 0.0 && L.Cp.rows() == m) {
+                // Separated controllers: the ENTIRE legacy z is HK content; the
+                // prior's own term is added outside the squelch.  See the
+                // state_prior_split docstring for the measured motivation.
+                float mult = 1.0f;
+                if (state_prior_calm_ > 0.0 || state_prior_calm_fixed_ > 0.0) {
+                    float e_now = 0.0f; int e_n = 0;
+                    const auto& key_idx = state_prior_calm_indices_.empty()
+                                          ? state_prior_indices_ : state_prior_calm_indices_;
+                    for (double di : key_idx) {
+                        int idx = int(di);
+                        if (idx < 0) idx += L.n;
+                        if (idx < 0 || idx >= L.n) continue;
+                        e_now += std::fabs(L.x[idx]); ++e_n;
+                    }
+                    if (e_n) e_now /= float(e_n);
+                    float target;
+                    if (state_prior_calm_mode_ > 0.0) {
+                        // R2: the regime key — the active bank's slow prior-error
+                        // EMA against the worst across banks.  Discrete, regime-
+                        // local, storm-proof; 1.0 (full drive) until banks engage.
+                        target = 1.0f;
+                        if (L.active_bank >= 0 && L.active_bank < int(L.banks.size())
+                            && L.banks[size_t(L.active_bank)].sp_err >= 0.0f) {
+                            float ref = 0.0f;
+                            for (auto const& bk : L.banks)
+                                if (bk.sp_err >= 0.0f && bk.samples > 500)
+                                    ref = std::max(ref, bk.sp_err);
+                            if (ref > 1e-6f)
+                                target = std::clamp(
+                                    L.banks[size_t(L.active_bank)].sp_err / ref, 0.1f, 1.0f);
+                        }
+                    } else {
+                        L.calm_peak = std::max(L.calm_peak * 0.999f, e_now);
+                        target = std::clamp(e_now / (L.calm_peak + 1e-6f), 0.1f, 1.0f);
+                    }
+                    const float k = (target > L.calm_state) ? 0.2f : 0.03f;
+                    L.calm_state += k * (target - L.calm_state);
+                    mult = 1.0f - float(state_prior_calm_) * (1.0f - L.calm_state);
+                    if (state_prior_calm_fixed_ > 0.0) mult = float(state_prior_calm_fixed_);
+                }
+                if (state_prior_damping_ > 0.0) L.Cp *= (1.0f - float(state_prior_damping_));
+                y = mult * y + L.Cp * L.x;
+                calm_mult_ = mult;
+                L.last_mult = mult;
+            } else if (state_prior_calm_ > 0.0 && state_prior_gain_ > 0.0
+                && !state_prior_indices_.empty()
+                && state_prior_indices_.size() == state_prior_targets_.size()) {
+                Eigen::VectorXf z_att = Eigen::VectorXf::Zero(m);
+                for (size_t k = 0; k < state_prior_indices_.size(); ++k) {
+                    int idx = int(state_prior_indices_[k]);
+                    if (idx < 0) idx += L.n;
+                    if (idx < 0 || idx >= L.n) continue;
+                    // Reach terms are NEVER calm-exempt: the exemption exists so the
+                    // BALANCE error keeps full slope through the squelch; granting it
+                    // to a reach column hands the HK loop a new full-gain channel
+                    // (measured, R4c: listed-but-dormant head-CoM columns, all three
+                    // standing seeds degraded).  The reach pull acts through the
+                    // squelched slope — honest-G below must use this same subset.
+                    // (Modes 1 and 4: mode 2 keeps R4b's full exemption, the measured
+                    // semantics under which seed 4 stood permanently with the pull;
+                    // mode 4 scopes it away so chaos phases match control exactly.)
+                    if (consolidate_reach_ > 0.0
+                        && (consolidate_reach_ < 1.5 || consolidate_reach_ > 3.5)
+                        && consolidate_n_ > 0.0
+                        && int(k) >= int(consolidate_n_)) continue;
+                    // calm_exempt_n (R9d, the energy study): with a whole-body prior
+                    // the exemption covers 8-9 of the state's columns and the squelch
+                    // loses its bite — the tall stance ran at full slope everywhere,
+                    // C norms 40-60, ~12 mrad/tick of limit-cycle oscillation.  Scope
+                    // the exemption to the first N indices (the balance subset);
+                    // position columns ride the squelch.  0 = all (legacy).
+                    if (calm_exempt_n_ > 0.0 && int(k) >= int(calm_exempt_n_)) continue;
+                    z_att.noalias() += L.C.col(idx) * L.x[idx];
+                }
+                // The calm KEY reads its own index list (angles), not the full
+                // prior (whose rate elements are the storm) — see the
+                // state_prior_calm_indices docstring.
+                float e_now = 0.0f; int e_n = 0;
+                const auto& key_idx = state_prior_calm_indices_.empty()
+                                      ? state_prior_indices_ : state_prior_calm_indices_;
+                for (double di : key_idx) {
+                    int idx = int(di);
+                    if (idx < 0) idx += L.n;
+                    if (idx < 0 || idx >= L.n) continue;
+                    e_now += std::fabs(L.x[idx]); ++e_n;
+                }
+                if (e_n) e_now /= float(e_n);
+                // Keyed to the INSTANTANEOUS attitude error against its own
+                // long-run scale — not to improvement.  The first (short/long
+                // EMA) version was measured null: the storm prevents the very
+                // improvement that would have quieted it, a self-referential
+                // trap.  Per-tick state avoids it: standing moments are quiet
+                // the moment they happen, and a shove restores full drive the
+                // same tick — the scaffold's own quiet-until-perturbed shape.
+                // FOURTH iteration, and the reference was the bug all along: an
+                // average of the error is ≈ the error half the time BY
+                // CONSTRUCTION, so target ≈ 1 and no key can engage (measured
+                // three ways).  The honest reference for "how bad is bad" is the
+                // error's own decaying PEAK — falls dominate it — so a typical
+                // standing moment reads as a small fraction and the squelch
+                // engages, while a genuine perturbation drives e toward the peak
+                // and releases full drive.  Peak decay 0.999/tick (~20 s); the
+                // ratchet stays (attack 0.005, release 0.2) so single noisy
+                // ticks cannot flip the state.  All dimensionless, self-scaled.
+                float target;
+                if (state_prior_calm_mode_ > 0.0) {
+                    // R2: the regime key — see the split branch and the
+                    // state_prior_calm_mode docstring.
+                    target = 1.0f;
+                    if (L.active_bank >= 0 && L.active_bank < int(L.banks.size())
+                        && L.banks[size_t(L.active_bank)].sp_err >= 0.0f) {
+                        float ref = 0.0f;
+                        for (auto const& bk : L.banks)
+                            if (bk.sp_err >= 0.0f && bk.samples > 500)
+                                ref = std::max(ref, bk.sp_err);
+                        if (ref > 1e-6f)
+                            target = std::clamp(
+                                L.banks[size_t(L.active_bank)].sp_err / ref, 0.1f, 1.0f);
+                    }
+                } else {
+                    L.calm_peak = std::max(L.calm_peak * 0.999f, e_now);
+                    target = std::clamp(
+                        e_now / (L.calm_peak + 1e-6f), 0.1f, 1.0f);
+                }
+                // Attack must FIT INSIDE an upright episode: at 0.005/tick the
+                // descent needed ~300 consecutive quiet ticks while episodes ran
+                // 100–150, and every fall's release reset it — the squelch never
+                // accumulated (measured).  0.03 descends in ~2 s.
+                const float k = (target > L.calm_state) ? 0.2f : 0.03f;
+                L.calm_state += k * (target - L.calm_state);
+                float mult = 1.0f - float(state_prior_calm_) * (1.0f - L.calm_state);
+                if (state_prior_calm_fixed_ > 0.0) mult = float(state_prior_calm_fixed_);
+                y = z_att + mult * (y - z_att);
+                calm_mult_ = mult;
+                L.last_mult = mult;
+            } else {
+                calm_mult_ = 1.0f;
+            }
+            // ── THE MODEL-IMPLIED STEP (W5 fork item (b)) ───────────────────────
+            // The command that closes the prior's error in one identified step, solved as a
+            // ridge least squares over the prior's own rows of A — what part 2's descent is
+            // meant to converge to and, at the duck's intent boundary, does not (§17.26).
+            // See the state_prior_step_gain docstring.  Pre-tanh, so it rides the same squash.
+            if (L.prior_step.size() != m) L.prior_step = Eigen::VectorXf::Zero(m);
+            else L.prior_step.setZero();
+            if (!wb_on && state_prior_step_gain_ > 0.0 && !state_prior_indices_.empty()
+                && state_prior_indices_.size() == state_prior_targets_.size()
+                && L.A.rows() == L.n && L.A.cols() == m) {
+                const int K = int(state_prior_indices_.size());
+                Eigen::MatrixXf Ap(K, m);
+                Eigen::VectorXf ep(K);
+                int kk = 0;
+                for (int k = 0; k < K; ++k) {
+                    int idx = int(state_prior_indices_[size_t(k)]);
+                    if (idx < 0) idx += L.n;
+                    if (idx < 0 || idx >= L.n) continue;      // out of range: skip, as the descent does
+                    Ap.row(kk) = L.A.row(idx);
+                    const float tgs = (!state_prior_target_gated_by_.empty() && size_t(k) < L.tgate.size()) ? L.tgate[size_t(k)] : 1.0f;
+                    ep[kk] = float(state_prior_targets_[size_t(k)]) * tgs - L.x[idx];
+                    // state_prior_weights: a weighted least squares, the row and its error scaled by sqrt(w)
+                    // (absent = 1, byte-identical; 0 = the row has no say in the step)
+                    if (size_t(k) < state_prior_weights_.size() || (!state_prior_gated_by_.empty() && size_t(k) < L.gate_g.size())) {
+                        float wk = size_t(k) < state_prior_weights_.size() ? float(state_prior_weights_[size_t(k)]) : 1.0f;
+                        if (!state_prior_gated_by_.empty() && size_t(k) < L.gate_g.size()) wk *= L.gate_g[size_t(k)];   // the pace gate
+                        const float sw = std::sqrt(std::max(0.0f, wk));
+                        Ap.row(kk) *= sw; ep[kk] *= sw;
+                    }
+                    ++kk;
+                }
+                if (kk > 0) {
+                    const Eigen::MatrixXf Aps = Ap.topRows(kk);
+                    Eigen::MatrixXf H = Aps.transpose() * Aps;
+                    H.diagonal().array() += float(reg_eps_);  // the module's own ridge — no new constant
+                    Eigen::VectorXf step = H.ldlt().solve(Aps.transpose() * ep.head(kk));
+                    for (int j = 0; j < m; ++j)
+                        step[j] = float(state_prior_step_gain_) * std::clamp(step[j], -1.0f, 1.0f);
+                    y.noalias() += step;
+                    L.prior_step = step;
+                    state_prior_step_norm_ = step.norm();
+                }
             }
             for (int j = 0; j < m; ++j) y[j] = mg * ag * std::tanh(y[j]);
             // Phase-0 saturation instrument: HK's own contribution, BEFORE any of the
@@ -3927,6 +5477,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // shakes loose (alongside the coord phase-search enlargement above).
         float noise_sigma = float(explore_noise_) * (1.0f + float(stuck_explore_gain_) * stuck_boost_) * explore_mult
                           + pe * float(panic_noise_);   // C damps explore_noise (not panic)
+        if (state_prior_calm_ > 0.0) noise_sigma *= calm_mult_;   // annealed with the storm
         if (!warmup && noise_sigma > 0.0f) {
             if (explore_noise_tau_ > 0.0) {
                 // OU per joint, unit stationary variance, scaled by the same sigma.  One draw
@@ -4574,6 +6125,32 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
         lj["C"] = flat(L.C); lj["h"] = flat(L.h);
         lj["Cphi"] = flat(L.Cphi);
         lj["Cvel"] = flat(L.Cvel);
+        // 2026-09-01 (the tall-standing campaign): reach bias, command trace, calm
+        // ratchet.  A restored stander that dropped these would wake with its earned
+        // stance intact but its bias/trace state cold.
+        if (L.hr.size() > 0)     lj["hr"]     = flat(L.hr);
+        if (L.ytrace.size() > 0) lj["ytrace"] = flat(L.ytrace);
+        lj["calm_state"] = L.calm_state;
+        lj["calm_peak"]  = L.calm_peak;
+        lj["last_mult"]  = L.last_mult;
+        if (L.Bx.size() > 0) lj["Bx"] = flat(L.Bx);   // state-model term, only when in use
+        if (L.Cp.size() > 0) lj["Cp"] = flat(L.Cp);   // the prior's own controller (split mode)
+        if (!L.banks.empty()) {                        // R1 regime banks
+            nlohmann::json banks = nlohmann::json::array();
+            for (auto const& bk : L.banks) {
+                nlohmann::json bj;
+                bj["n"] = bk.samples; bj["tle"] = bk.tle_ema; bj["err"] = bk.sp_err;
+                if (bk.A.size() > 0) { bj["A"] = flat(bk.A); bj["Bx"] = flat(bk.Bx); bj["b"] = flat(bk.b); }
+                if (bk.C.size() > 0) {                 // R3 controller banks
+                    bj["C"] = flat(bk.C); bj["h"] = flat(bk.h);
+                    if (bk.hr.size() > 0) bj["hr"] = flat(bk.hr);
+                }
+                bj["cons_c"] = bk.cons_c; bj["gate_ema"] = bk.gate_ema;
+                banks.push_back(bj);
+            }
+            lj["banks"] = banks;
+            lj["active_bank"] = L.active_bank;
+        }
         lj["prev_x"] = flat(L.prev_x); lj["prev_y"] = flat(L.prev_y);
         lj["rows_A"] = int(L.A.rows()); lj["cols_A"] = int(L.A.cols());
         legs.push_back(std::move(lj));
@@ -4615,6 +6192,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     // consumer-fired check every lever has needed)
     mod["plan_pull"]  = plan_pull_ema_;
     mod["plan_w"]     = plan_w_mean_;
+    mod["state_prior_err"] = state_prior_err_ema_;   // mirrored from diag_snapshot()
+    mod["state_prior_w"]   = state_prior_gain_;
     mod["plan_fade"]  = plan_fade_;
     // swing-detector observability (the gate stance_lift / Cruse ride on).  Mirrors
     // height_bias: serialized so the BODY can surface it in its stdout diag JSON.
@@ -4647,6 +6226,18 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     // Gate 0 reset-masking counters (reset_hit_this_tick_ is intra-tick → omitted)
     mod["reset_count"]       = reset_count_;
     mod["ticks_since_reset"] = ticks_since_reset_;
+    // 2026-09-01: EARNED CONSOLIDATION IS WORKING STATE — a restored stander that
+    // dropped consolidate_c would wake fully plastic and the destroyer would eat
+    // the very stance the snapshot preserved.  Gate EMAs and the bank-slot map
+    // travel with it for the same reason.
+    mod["consolidate_c"]  = consolidate_c_;
+    mod["gate_ema"]       = state_prior_gate_ema_;
+    mod["gate_inst"]      = gate_err_inst_;
+    mod["sp_err_long"]    = state_prior_err_long_;
+    mod["sp_err_peak"]    = sp_err_peak_;
+    mod["bank_of_winner"] = bank_of_winner_;
+    mod["pending_slot"]   = pending_slot_;
+    mod["pending_count"]  = pending_count_;
     mod["reset_rate_ema"]    = reset_rate_ema_;
     mod["reset_rate_init"]   = reset_rate_init_;
     mod["heading_bearing"]   = heading_bearing_;   // integrator (yaw_rate_ema_ is transient, this is not)
@@ -4982,7 +6573,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["stroke_gate_mean"]   = stroke_gate_mean_;
     mod["stroke_gate_spread"] = stroke_gate_spread_;
     mod["stroke_load_ema"]    = stroke_load_ema_;
-    return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}};
+    // wb_steps: the whole-body babble counter (2026-09-29) -- a restored brain must not babble again
+    return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}, {"wb_steps", wb_steps_}};
 }
 
 // The high-rate payload (xaq_voice at up to 60 Hz).  Every field is an already-computed
@@ -5012,6 +6604,8 @@ nlohmann::json MotorEPMv2::diag_lite() const {
         {"boredom",        boredom_},                       // sensorimotor predictability
         {"interest",       interest_},                      // curiosity drive
         {"hunger",         hunger_},                        // 0 sated → 1 starving
+        {"spIso",          state_prior_isolate_kept_},       // W5 lesion: columns C keeps; -1 = off
+        {"spStep",         state_prior_step_norm_},          // W5 (b): |the model-implied step|; -1 = off
     };
 }
 
@@ -5069,6 +6663,60 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
         j["obj_vel_active"] = on;
         j["obj_vel_weight"] = oc ? wsum / float(oc) : 0.0f;
     }
+    // State-space prior (2026-08-31) — active means the gain is up AND the arrays parse;
+    // a mis-sized config shows FALSE here, which is the §3.2 rule-5 read-back.
+    j["state_prior_active"] = state_prior_gain_ > 0.0
+                              && !state_prior_indices_.empty()
+                              && state_prior_indices_.size() == state_prior_targets_.size();
+    j["state_prior_err"] = state_prior_err_ema_;   // mean |x[idx] − x*| (EMA; decays when off)
+    j["state_prior_w"]   = state_prior_gain_;
+    j["state_prior_applied"] = state_prior_applied_;
+    // for the inspector (2026-10-02): the prior's own arrays, so the state bar chart can draw each prior index's
+    // nominal target and precision beside the state it pulls (gated targets move from these).  Diagnostic only.
+    j["state_prior_idx"] = state_prior_indices_;
+    j["state_prior_tgt"] = state_prior_targets_;
+    j["state_prior_wts"] = state_prior_weights_;
+    if (!state_prior_gated_by_.empty()) j["state_prior_gate"] = gate_mean_;   // the pace gate (mean over gated indices)
+    j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied
+    j["consolidate_c"] = consolidate_c_;       // 1 = fully consolidated (earned slow plasticity)
+    j["consolidate_gate"] = state_prior_gate_ema_;  // the gate subset's own satisfaction EMA
+    j["gate_err_inst"] = gate_err_inst_;            // the same subset's INSTANT error — the attitude prior's
+                                                    // own "how far am I from what I expect to feel" this tick;
+                                                    // the ratchet reads it (> 0.30 = chaos) and so does the
+                                                    // intent boundary's step hand-off (phase 1a)
+    j["reach_lw"] = reach_lw_last_;            // reach terms' effective lw (0 until consolidated)
+    {
+        float hrm = 0.0f;
+        for (auto const& L : legs_)
+            if (L.hr.size() > 0) hrm = std::max(hrm, L.hr.cwiseAbs().maxCoeff());
+        j["hr_max"] = hrm;                     // mode-3 reach bias magnitude (applied as c·hr)
+    }
+    if (regime_c_banks_ > 0.0 && !legs_.empty()) {
+        auto bc = nlohmann::json::array();     // per-regime earned permanence (leg 0)
+        for (size_t bi = 0; bi < legs_[0].banks.size(); ++bi)
+            bc.push_back(int(legs_[0].active_bank) == int(bi)
+                         ? consolidate_c_ : legs_[0].banks[bi].cons_c);
+        j["bank_cons"] = bc;
+    }
+    {
+        double cpn = 0.0;
+        for (auto const& L : legs_) if (L.Cp.size() > 0) cpn += double(L.Cp.squaredNorm());
+        j["state_prior_cp_norm"] = std::sqrt(cpn);  // the prior's own controller (split mode)
+    }
+    // R1 regime banks — the §3.2 consumer surface: switches counted, per-bank
+    // sample counts and TLEs (leg 0), and the live winner/slot.
+    if (!regime_topic_.empty()) {
+        j["regime_winner"]   = regime_winner_;
+        j["bank_switches"]   = bank_switches_;
+        if (!legs_.empty()) {
+            j["active_bank"] = legs_[0].active_bank;
+            nlohmann::json bs = nlohmann::json::array();
+            for (auto const& b : legs_[0].banks)
+                bs.push_back({{"n", b.samples}, {"tle", b.tle_ema}, {"err", b.sp_err}});
+            j["banks"] = bs;
+        }
+    }  // indices resolved last controller tick;
+                                                      // active && applied==0 → indices out of range
     // Propulsive-credit homeostat: per-leg functional forward contribution + the
     // group mean, so the L/R propulsion imbalance (the drag → spin) is observable.
     j["prop_balance_active"] = (propulsion_balance_gain_ > 0.0);
@@ -5425,6 +7073,7 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
     if (version != 1 && version != 2)
         throw std::runtime_error("MotorEPMv2::restore_state: unknown version " + std::to_string(version));
     auto const& legs = s.at("legs");
+    wb_steps_ = s.value("wb_steps", int64_t(0));
     legs_.assign(n_legs_, Leg{});
     int m = motor_dim_;
     for (int leg = 0; leg < n_legs_ && leg < int(legs.size()); ++leg) {
@@ -5474,8 +7123,39 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
         L.Cvel = Eigen::MatrixXf::Zero(m, 2);   // ensure valid (m,2) dims even for snapshots without a velocity map
         if (lj.contains("Cphi")) L.Cphi = toM(vecf(lj.at("Cphi")), m, 2);   // legacy snapshots → keep zero-init
         if (lj.contains("Cvel")) L.Cvel = toM(vecf(lj.at("Cvel")), m, 2);   // legacy snapshots → keep zero-init
+        if (lj.contains("Bx"))   L.Bx   = toM(vecf(lj.at("Bx")), n, n);     // absent = state model off
+        if (lj.contains("Cp"))   L.Cp   = toM(vecf(lj.at("Cp")), m, n);     // absent = split off
+        if (lj.contains("banks")) {                                          // R1 regime banks
+            L.banks.clear();
+            for (auto const& bj : lj["banks"]) {
+                Leg::ModelBank bk;
+                bk.samples = bj.value("n", int64_t(0));
+                bk.tle_ema = bj.value("tle", 0.0f);
+                bk.sp_err  = bj.value("err", -1.0f);
+                if (bj.contains("A")) {
+                    bk.A  = toM(vecf(bj.at("A")), n, m);
+                    bk.Bx = bj.contains("Bx") && !bj["Bx"].empty() ? toM(vecf(bj.at("Bx")), n, n) : Eigen::MatrixXf();
+                    bk.b  = toM(vecf(bj.at("b")), n, 1);
+                }
+                if (bj.contains("C")) {                // R3 controller banks
+                    bk.C = toM(vecf(bj.at("C")), m, n);
+                    bk.h = toM(vecf(bj.at("h")), m, 1);
+                    if (bj.contains("hr")) bk.hr = toM(vecf(bj.at("hr")), m, 1);
+                }
+                bk.cons_c   = bj.value("cons_c", 0.0f);
+                bk.gate_ema = bj.value("gate_ema", 0.0f);
+                L.banks.push_back(std::move(bk));
+            }
+            L.active_bank = lj.value("active_bank", -1);
+        }
         L.b = toM(vecf(lj.at("b")), n, 1);
         L.h = toM(vecf(lj.at("h")), m, 1);
+        L.hr = lj.contains("hr") ? toM(vecf(lj.at("hr")), m, 1)
+                                 : Eigen::VectorXf::Zero(m);
+        if (lj.contains("ytrace")) L.ytrace = toM(vecf(lj.at("ytrace")), m, 1);
+        L.calm_state = lj.value("calm_state", 1.0f);
+        L.calm_peak  = lj.value("calm_peak", 0.0f);
+        L.last_mult  = lj.value("last_mult", 1.0f);
         L.prev_x = toM(vecf(lj.at("prev_x")), n, 1);
         L.prev_y = toM(vecf(lj.at("prev_y")), m, 1);
         L.x = Eigen::VectorXf::Zero(n);
@@ -5530,6 +7210,17 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
         interest_ema_init_ = mod.value("interest_ema_init", interest_ema_init_);
         reset_count_       = mod.value("reset_count",       reset_count_);
         ticks_since_reset_ = mod.value("ticks_since_reset", ticks_since_reset_);
+        // 2026-09-01: the earned consolidation and its gate travel with the brain.
+        state_prior_err_ema_  = mod.value("state_prior_err", state_prior_err_ema_);
+        consolidate_c_        = mod.value("consolidate_c", consolidate_c_);
+        state_prior_gate_ema_ = mod.value("gate_ema",      state_prior_gate_ema_);
+        gate_err_inst_        = mod.value("gate_inst",     gate_err_inst_);
+        state_prior_err_long_ = mod.value("sp_err_long",   state_prior_err_long_);
+        sp_err_peak_          = mod.value("sp_err_peak",   sp_err_peak_);
+        if (mod.contains("bank_of_winner"))
+            bank_of_winner_ = mod["bank_of_winner"].get<std::vector<int>>();
+        pending_slot_  = mod.value("pending_slot",  pending_slot_);
+        pending_count_ = mod.value("pending_count", pending_count_);
         reset_rate_ema_    = mod.value("reset_rate_ema",    reset_rate_ema_);
         reset_rate_init_   = mod.value("reset_rate_init",   reset_rate_init_);
         heading_bearing_   = mod.value("heading_bearing",   heading_bearing_);

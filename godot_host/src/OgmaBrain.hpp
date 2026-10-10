@@ -18,6 +18,7 @@
 #include <vector>
 
 namespace ogma {
+class LiveGraph;
 class OgmaInstance;
 class DiagPublisher;
 }
@@ -255,6 +256,7 @@ public:
 
 private:
     std::unique_ptr<ogma::OgmaInstance> instance_;
+    std::unique_ptr<ogma::LiveGraph>    live_graph_;   // the live graph as a document, for the builder's verbs
 
     // UI-dev W2 — inspector control surface.
     // ControlServer hosts the JSON-RPC command verbs (list_modules,

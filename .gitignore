@@ -63,3 +63,5 @@ godot_host/project/addons/ami_ogma/configs/e3b_*.json
 # repo would publish the strings it exists to protect, so the real files stay untracked.
 .secrets-local
 docs/operational/local_env.md
+# MuJoCo drops this wherever it is run from
+MUJOCO_LOG.TXT

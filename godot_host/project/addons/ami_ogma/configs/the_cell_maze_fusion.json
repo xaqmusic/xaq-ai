@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "Cell \u2014 MAZE FUSION (vision+scent via LateralVoter)",
-    "description": "Sensor-fusion proof-of-concept. ScentCompass (around-corner diffusion bearing) + VisualBearing (line-of-sight food-pixel bearing) \u2192 per-modality EPMs \u2192 informativeness-gated LateralVoter \u2192 BearingFusion (trust-weighted blend) \u2192 percept.fused_bearing \u2192 the de-hacked action layer. Vision occluded behind the L-bend wall \u2192 its EPM bakes a degenerate node \u2192 trust\u21920 \u2192 scent carries; food in view \u2192 vision earns trust \u2192 locks the approach. FUSED arm of the 3-arm ablation.",
+    "description": "AUDIT 2026-09-06: the mechanism described below NEVER OPERATED in this config -- proprio_state_dims 2 vs the compass modules' 3-value tokens fed the EPMs zero vectors, so trust was a constant 0.5/0.5 and BearingFusion blended at 50/50 (Kalman charter Stage 1; audit R4). Use the_cell_maze_fusion__dims3.json for a live fusion. Sensor-fusion proof-of-concept. ScentCompass (around-corner diffusion bearing) + VisualBearing (line-of-sight food-pixel bearing) \u2192 per-modality EPMs \u2192 informativeness-gated LateralVoter \u2192 BearingFusion (trust-weighted blend) \u2192 percept.fused_bearing \u2192 the de-hacked action layer. Vision occluded behind the L-bend wall \u2192 its EPM bakes a degenerate node \u2192 trust\u21920 \u2192 scent carries; food in view \u2192 vision earns trust \u2192 locks the approach. FUSED arm of the 3-arm ablation.",
     "env_target": "cell",
     "phase_tag": "6.12.maze.fusion",
     "reflex_modular": true,

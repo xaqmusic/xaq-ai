@@ -33,6 +33,12 @@
 namespace ami_ogma {
 namespace v3 {
 
+// Winner-update gain schedule (Kalman-lessons Stage 1,
+// docs/plans-and-designs/epm_kalman_lessons_plan.md).
+//   Linear — the legacy anneal eps_b * (1 - 0.9 * visits / N), frozen at bake.
+//   Kalman — per-node scalar Kalman gain; see Config below.
+enum class GainKind { Linear, Kalman };
+
 struct GNGNode {
     Eigen::VectorXf prototype;
     double  error             = 0.0;
@@ -43,6 +49,10 @@ struct GNGNode {
     // Post-bake tracking for Mitosis Gatekeeper
     int     post_bake_visits  = 0;
     double  post_bake_error   = 0.0;
+    // Kalman-lessons Stage 4: the post-bake residual SUM (x - w), so the gatekeeper
+    // can test the innovation MEAN against its spread.  Accumulated only when
+    // Config::drift_ratio > 0; serialised only then.
+    Eigen::VectorXf post_bake_resid_sum;
 
     // --- Biological health model ---
     // Health grows with activity and decays non-linearly: mature nodes
@@ -53,6 +63,12 @@ struct GNGNode {
     // volatile (LTD-prone). Heavily-used synapses develop LTP and become
     // increasingly resistant to decay. Death is gradual, individual, smooth.
     float   health            = 1.0f;   // accumulated activity strength
+
+    // Prior-variance ratio for the per-node Kalman gain, in units of the
+    // node's own observation noise (so the schedule is dimensionless).  Read
+    // only when Config::gain_kind == GainKind::Kalman, and serialised only
+    // then, so a Linear-mode snapshot is byte-identical to the pre-feature form.
+    float   p                 = 1.0f;
 };
 
 class GNG {
@@ -72,6 +88,11 @@ public:
         float beta                = 0.0005f;
         int   baking_threshold    = 100;
         float min_insertion_error = 0.02f;
+        // THE BAKE GATE (2026-10-04, design doc §17.108): > 0 = the consistency gate a node must pass to bake, apart from
+        // the insertion floor.  A host that freezes insertion by raising min_insertion_error (the duck's --map-on-stop)
+        // otherwise opens the bake check too: every node reaching baking_threshold bakes unchecked.  0 = the insertion
+        // floor, as before (byte-identical).
+        float bake_gate = 0.0f;
 
         // ---------------------------------------------------------------------
         // Ecological self-tuning of the insertion gate
@@ -109,13 +130,68 @@ public:
         // false (default) = exactly the pre-2026-08-06 fixed-threshold path.
         bool  insertion_autotune          = false;
         float insertion_autotune_quantile = 0.30f;
+
+        // ---------------------------------------------------------------------
+        // Per-node Kalman gain (Kalman-lessons Stage 1)
+        // ---------------------------------------------------------------------
+        //
+        // The winner update w += g (x - w) has the form of the Kalman filter
+        // for a constant, but the legacy schedule g_n = eps_b (1 - 0.9 n/N)
+        // is not its gain: measured on the bench (2026-09-05) a baked
+        // prototype keeps 24 % of its weight on the point it was born at and
+        // carries 2x the MSE of the mean of the same samples.  The Kalman gain
+        // for a constant is 1/(n+1).
+        //
+        // In Kalman mode each node carries p, its prior variance as a ratio
+        // of its own observation noise.  Per win:
+        //     p += kalman_q;  K = min(kalman_gain_cap, p / (p + 1));
+        //     w += K (x - w);  p *= (1 - K).
+        // With kalman_p0 = 1 and kalman_q = 0 that is exactly 1/(n+1) (the
+        // seed counts as one sample) and baked nodes stay frozen.  With
+        // kalman_q > 0 every node — baked included — settles at the random-
+        // walk steady-state gain (q + sqrt(q^2 + 4q))/2 and tracks slow drift
+        // instead of waiting for mitosis.  eps_b, the visit/health damping and
+        // the neurochemical eps_b scale are not consulted in this mode; the
+        // neighbour pull eps_n is unchanged.
+        //
+        // Linear (default) leaves step() byte-identical.
+        GainKind gain_kind       = GainKind::Linear;
+        float    kalman_p0       = 1.0f;
+        float    kalman_q        = 0.0f;
+        float    kalman_gain_cap = 1.0f;
+
         bool  stale_prune_enabled = true;
         float stale_window_factor = 12000.0f; // absolute steps (~400s at 30fps)
+        // 2026-09-01 (guarded; default false = byte-identical everywhere): exempt
+        // BAKED nodes from the health-death sweep.  The health system replaced
+        // binary baked-immunity with a smooth gradient — and thereby silently
+        // removed the "baked = permanent" contract the header still promises:
+        // during a long perturbation (fall, inversion, rescue) an unvisited baked
+        // node's health decays to the death threshold in minutes, the operator's
+        // observed prune-then-relearn cascade.  Measured on the microduck regime
+        // EPM: 25 of 41 node ids dead within 50 minutes, the standing regime's
+        // identity churning 1→16→29 — which orphans any consumer keyed by
+        // winner_id.  A REGIME vocabulary is a set of permanent facts about the
+        // body; earned nodes should not be forgotten for the crime of a long
+        // absence.
+        bool  health_death_spares_baked = false;
         // Mitosis Gatekeeper
         bool  mitosis_enabled         = true;
         float mitosis_error_threshold = 0.30f;
         int   mitosis_check_interval  = 50;
         float mitosis_split_distance  = 0.10f;
+        // ---------------------------------------------------------------------
+        // Drift-versus-split (Kalman-lessons Stage 4) — the innovation-mean test
+        // ---------------------------------------------------------------------
+        // A well-tuned filter's innovations are zero-mean.  At a gatekeeper check
+        // the node's post-bake residual mean (bias) is compared with its RMS
+        // residual (spread): bias/spread > drift_ratio means the world moved and
+        // the prototype is corrected by drift_gain * mean residual instead of
+        // being split; otherwise the split decision proceeds as before.  Noise
+        // alone gives bias/spread ~ 1/sqrt(n) (0.14 at n = 50), so 0.5 is a safe
+        // ratio.  0 (default) = off, byte-identical (nothing accumulated).
+        float drift_ratio             = 0.0f;
+        float drift_gain              = 1.0f;
         // Biological health model (replaces metabolic mass-culling)
         float health_boost             = 0.5f;    // health gained per visit (activity-dependent potentiation)
         float health_base_decay        = 0.995f;  // decay rate at health=0 (young, volatile)
@@ -161,6 +237,9 @@ public:
     std::optional<Eigen::VectorXf> get_prototype(int node_id) const;
 
     int  get_visit_count(int node_id) const;
+    /// The node's running EMA of its squared quantisation error (0 if unknown):
+    /// its own innovation variance, per mode.  Kalman-lessons Stage 2.
+    double get_ema_error(int node_id) const;
     bool is_crystallised(int node_id) const;
 
     /// True if the winner from the last step() just crossed the baking gate.
@@ -203,6 +282,7 @@ public:
     // ---------------------------------------------------------------------------
 
     void set_stale_prune_enabled(bool enabled) { cfg_.stale_prune_enabled = enabled; }
+    void set_health_death_spares_baked(bool v) { cfg_.health_death_spares_baked = v; }
     void set_stale_window_factor(float factor) { cfg_.stale_window_factor = factor; }
     void set_min_insertion_error(float e)      { cfg_.min_insertion_error = e; }
 
@@ -230,15 +310,22 @@ public:
     float autotune_value() const { return autotune_value_; }
     void set_epsilon_b(float e)                { cfg_.epsilon_b = e; }
     void set_epsilon_n(float e)                { cfg_.epsilon_n = e; }
+    void set_kalman_q(float q)                 { cfg_.kalman_q = q; }
+    void set_kalman_gain_cap(float c)          { cfg_.kalman_gain_cap = c; }
+    GainKind gain_kind() const                 { return cfg_.gain_kind; }
     void set_lambda_new(int l)                 { cfg_.lambda_new = l; }
     void set_max_age(int a)                    { cfg_.max_age = a; }
     void set_baking_threshold(int t)           { cfg_.baking_threshold = t; }
+    void set_bake_gate(float g)                { cfg_.bake_gate = g; }
     void set_mitosis_enabled(bool e)           { cfg_.mitosis_enabled = e; }
     void set_mitosis_error_threshold(float t)  { cfg_.mitosis_error_threshold = t; }
     void set_mitosis_check_interval(int n)     { cfg_.mitosis_check_interval = n; }
     void set_mitosis_split_distance(float d)   { cfg_.mitosis_split_distance = d; }
 
     int  mitosis_count() const { return mitosis_count_; }
+    int  drift_count()   const { return drift_count_; }
+    void set_drift_ratio(float r)             { cfg_.drift_ratio = r; }
+    void set_drift_gain(float g)              { cfg_.drift_gain = g; }
 
     const std::vector<int>& last_pruned_ids() const { return last_pruned_ids_; }
 
@@ -285,6 +372,8 @@ private:
 
     // Mitosis counter
     int mitosis_count_ = 0;
+    // Stage 4: drift corrections applied by the gatekeeper
+    int drift_count_   = 0;
 
     // Set by step() when the winner just crossed the baking gate
     bool last_step_baked_ = false;

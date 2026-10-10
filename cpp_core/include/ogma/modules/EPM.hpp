@@ -61,7 +61,7 @@ public:
     // v5.4.L Diagnostic B — winner-id histogram for GNG saturation check.
     std::unordered_map<int, int> const& winner_counts() const { return winner_counts_; }
 
-    enum class EncoderKind { JL, STFT, RBF, Identity };
+    enum class EncoderKind { JL, STFT, RBF, Identity, JLState };   // JLState: the JL projection over a ProprioToken vector (2026-09-11)
 
 private:
 
@@ -76,7 +76,16 @@ private:
     void compute_dual_tle(float quant_error,
                           int   winner_id,
                           float& transition_surp_out,
-                          float& tle_out);
+                          float& tle_out,
+                          float  logprob_surp = -1.0f);   // >= 0 overrides the displacement (Stage 3, K2)
+    // Kalman-lessons Stage 3 (K2): the transition surprise as the Python reference had it,
+    // -log P(cur | prev) from the transition table BEFORE this step is added, Laplace-
+    // smoothed and normalised by log N to [0, 1], conditioned on a move having happened
+    // (a stay scores 0, a first arrival 1).  The C++ port had replaced it with the
+    // displacement ||proto_t - proto_{t-1}||, which the bench showed cannot tell an
+    // expected transition from a teleport (S4 ratio 1.03).  false (default) = displacement,
+    // byte-identical.
+    float transition_logprob_surprise(int prev_id, int cur_id) const;
     void publish_token(uint64_t tick_id,
                        int      winner_id,
                        float    quant_error,
@@ -182,6 +191,22 @@ private:
     // (W2 EPM dashboard / v3 visualizer.py parity.)
     float           last_tle_           = 0.0f;
     float           last_quant_error_   = 0.0f;
+    // Kalman-lessons Stage 0.4 instruments (docs/plans-and-designs/
+    // epm_kalman_lessons_plan.md).  Diagnostic-only and deliberately NOT
+    // serialised, so snapshots stay byte-identical; they rebuild from zero
+    // after a restore.
+    //   tle_norm = last_tle / ema_tle — the normalised innovation the Python
+    //              reference folded into serotonin (1/(1 + tle/running_avg));
+    //              a scale-free surprise for xaq_voice and the inspector.
+    //   qe_lag1  = lag-1 autocorrelation of quant_error — innovation
+    //              whiteness.  A well-modelled stream leaves white residuals;
+    //              sustained positive lag-1 means the vocabulary (or the
+    //              descending predictor) is missing dynamics.
+    float           qe_mean_ema_        = 0.0f;
+    float           qe_sq_ema_          = 0.0f;
+    float           qe_lag1_ema_        = 0.0f;
+    float           prev_qe_            = 0.0f;
+    bool            has_prev_qe_        = false;
     std::deque<int> history_trace_;
 
     // Phase 6.6.E: per-node successor counts.  Updated each tick from the
@@ -189,6 +214,13 @@ private:
     // for predicted_pathway emission.  Cleaned up when GNG prunes a node.
     int prev_winner_id_for_transitions_ = -1;
     std::unordered_map<int, std::unordered_map<int, int>> transition_counts_;
+    bool transition_logprob_ = false;   // transition_surprise_kind == "logprob" (Stage 3, K2)
+    // Stage 4: the v4 EPM never called GNG::maybe_mitosis (found 2026-09-05: mitosis_enabled
+    // and its threshold were plumbed and neuro-scaled, but the gatekeeper was never invoked,
+    // so mitosis has been dead in every v4 EPM).  mitosis_gatekeeper=true restores the v3
+    // call, each tick on the winner; false (default) keeps the dead path, byte-identical.
+    bool mitosis_gatekeeper_ = false;
+    bool last_just_mitosis_  = false;
 
     // v5.4.L Diagnostic B — per-winner-id histogram across all ticks.
     // Identifies premature GNG saturation: if 1-2 winner_ids account
