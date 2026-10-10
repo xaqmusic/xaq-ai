@@ -7941,3 +7941,34 @@ sent play's climb to other places, and those were no better. The likely reason i
 are VIEWS (pose, head yaw and the ToF columns), so the least-habituated nodes near a known region are often close views of a
 wall. A longer memory of "recent" without a memory of what the place costs pushes play toward exactly those — which is M1's
 question. Re-use: on top of M1, once a stuck place is a hole in the field, a longer habituation may sweep the open ground.
+
+**M1 measured (`log/ten/pm1`, n = 24, `--place-stall` + `play.stall_topic` / `stall_weight 1`; every seed echoes the place
+stall, the per-node read-back `pst` live: 24–35 places learned a run, 5–14 of them above 0.3, the worst 0.78–0.98).** Against
+★ E4 it read as a regression — traps +1.6 [+0.6, +2.7], escapes +1.5 [+0.2, +2.8], skills −1.9 [−3.9, +0.2] — and so did M2.
+Both levers moved the same numbers the same way, so a **placebo arm** was run: ★ E4 with only `play.explore_seed` 11 → 12
+(`log/ten/pplc`, the wander's RNG; it diverges from `se4` from the first minute). **The placebo against ★ E4: traps +1.0
+[+0.1, +1.9], corner +2.0, cells −5.0, skills −0.2.** The `se4` sweep is a favourable draw on traps and escapes — a re-roll
+of the play loop's dice costs a trap a run. Against the placebo:
+
+| paired vs placebo `pplc`, n = 24 | traps | back | cells | walls / min | escapes | skills | boring % | falls |
+|---|---|---|---|---|---|---|---|---|
+| M2 places stay boring | +0.2 | +0.3 | −3.1 [−13.2, +6.9] | +1.3 | +0.5 | −0.3 | −1.2 | +0.5 |
+| M1 the stuck place | +0.6 | +0.3 | +1.9 [−8.8, +12.6] | +1.1 | +0.6 | −1.0 | +0.5 | +0.2 |
+
+(traps / back from `places.py`, the rest `fx_study.py`; every CI spans 0.) **M1 `NULL`, M2 `NULL`** — both in the context of
+play steering ~23 % of the walk. The diagnosis is the consumer, not the memory: the memory is live and permanent, but the traps
+it would prevent are mostly not play's. Traps by the loop steering the 5 s before them (a run): ★ E4 play 0.62 / seek 1.58 /
+escape 0.38; M1 play 0.58 / seek 2.79 / escape 0.67 — play's own traps did not fall, and they were a quarter of the total to
+begin with. The seek loop walks a straight bearing to a remembered thing and reads no place memory.
+
+**A correction to §17.115 from the placebo:** E4's "sits 3.3 → 2.4 a run" is inside the spread a dice re-roll gives (traps
+±1 a run); the way-out numbers (0.6 m in 18 s against 25, 0.57 m in an escape's 6 s, backing 30 → 12 %) are per-sit and
+stand. **Method note for the duck:** a single base sweep is one draw of a chaotic walk; a lever whose deltas against the base
+sit near ±1 trap or ±1 escape a run needs a placebo arm (a seed of a module the lever does not touch) beside it.
+
+**Re-use and next.** The stuck place now exists as a learned, permanent, per-place quantity (`PlayLoop.stall`). It earns its
+keep only with a consumer that steers where the traps are: (a) the SEEK loop — a target whose approach runs through stuck
+places loses value the way play's nodes do (sweeps 33–35 refused targets outright and lost a quarter of the walk's targets; a
+graded cost is the untried form); (b) the escape — choosing among the cloud's free sectors the one whose places have not
+stalled. M2's re-use stands: a longer habituation is worth retrying only once something makes stuck places unattractive to
+the consumer that walks into them.
