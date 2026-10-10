@@ -426,7 +426,12 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
             if (detour_arm_ >= detour_arm_ticks_) {
                 detour_arm_ = 0; detour_left_ = detour_max_ticks_; detour_age_ = 0; ++detours_; detour_started_ = true;
                 // + yaw = left; slot 0 = left, 2 = right: toward the lower proximity, the target's side on a tie
-                detour_dir_ = tof[0] < tof[2] ? 1.0 : tof[2] < tof[0] ? -1.0 : (seek_ego_ > 0.0 ? -1.0 : 1.0);
+                const bool repeat = detour_commit_ && int(tick_id_) - detour_last_end_ <= 500;   // D1b: within 10 s
+                if (repeat) { ++detour_repeats_; detour_out_now_ = std::min(2 * detour_out_now_, 4 * detour_out_ticks_); }
+                else {
+                    detour_out_now_ = detour_out_ticks_;
+                    detour_dir_ = tof[0] < tof[2] ? 1.0 : tof[2] < tof[0] ? -1.0 : (seek_ego_ > 0.0 ? -1.0 : 1.0);
+                }
             }
         }
         if (detour_left_ > 0) {
@@ -436,7 +441,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
             if (clear || detour_left_ == 0) {
                 if (clear) ++detour_clear_;
                 detour_left_ = 0;
-                set_ref_hold(0.0, detour_out_ticks_);   // the heading found, held: the walk out
+                set_ref_hold(0.0, detour_commit_ ? detour_out_now_ : detour_out_ticks_);   // the heading found, held: the walk out
+                detour_last_end_ = int(tick_id_) + (detour_commit_ ? detour_out_now_ : detour_out_ticks_);
             } else {
                 last_twist_[0] = -detour_back_vx_;
                 last_twist_[2] = detour_dir_ * yaw_range_;
