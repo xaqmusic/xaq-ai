@@ -7784,3 +7784,9 @@ asks: skill → unwind → look → skill. The standing brain's 1.6 s settle had
 (the next lever, not a timer): the outcome loop arms only where acting still has something to teach — a thing just acted on
 whose answer was just observed carries little expected information; its own outcome statistics are the measure. Preset P1b for
 the eye: whether the stop now reads as continuous, and whether repeated batting at a thing is lively or a stutter.
+
+**★ L1 PROMOTED on the operator's eye (2026-10-10):** "the L1 saccade looks better with no noticeable dropoff in object
+engagement." The stack: ★ T1 + the slow train (S0) + `--stop-saccade 2.0` (launcher preset ★ L1, first row). On P1b: "the kicks
+seem to be clashing with walking since they are fired when the robot is in motion. The delay before a kick or peck is fine since
+it makes those skills obvious to the eye. The delay before the look was the problem to solve." Next: P2, the two combined with
+the settle kept before a skill only.
