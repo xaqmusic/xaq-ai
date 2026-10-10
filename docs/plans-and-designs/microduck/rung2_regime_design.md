@@ -8008,3 +8008,24 @@ seeing what blocks the straight line), not a memory of where the walk failed. (2
 WIN the race at a stuck place, not halve the need — e.g. the excess subtracted from seek's trust rather than its need, or the
 stuck places as obstacles in play's own route (M1's weight on, with S1). (3) The "back" measure needs a wall-run form (a trap
 within 0.4 m of the previous trap's escape path).
+
+### 17.117 First-time traps — perception on the approach (2026-10-10)
+
+**The operator, 2026-10-10: "go after the first-time traps with perception on the approach."** §17.116 left 70–77 % of traps at
+places the duck had never been trapped at; a memory cannot prevent those.
+
+**What precedes a first-time trap (★ E4 + the placebo, 115 first-time traps, truth labels for scoring only).** 82 come while
+the seek loop steers. 1 s before them the trunk is within 0.25 m of: a chair 21, the train 18, a wall 17, nothing (open floor)
+14, a block 5, the table or the shelf 6. The seek gate (`--seek-gate`, things phase T2: while seek holds the reference, its
+target's ToF sector reads free so the walker's avoidance does not push the duck off the thing it walks to) fired in the 5 s
+before 67 of the 82. It erases the sector whatever the return's range: a chair leg 0.3 m ahead of a target 1.2 m away reads
+"free" as surely as the target itself. **The sensory channel carries the signal and the gate removes it**: in the 5 s before 52
+of the 82, the target's sector held a return nearer than the target's range by 0.15 m or more, while the seek gate was erasing
+that sector; on seek walking at large such a return occurs in 43 % of 5 s windows (63 % before the traps, ×1.5).
+
+**G1 — the gate erases only what could be the target** (`--seek-gate-near M`, 0 = off and byte-identical): the sector reads free
+only when its nearest return is no nearer than the target's range less M; a return nearer than that is something on the approach
+and the walker keeps seeing it (and the reference's free-space check, where on, keeps releasing into it). No new behaviour is
+written: the walker's own proximity prior does the avoiding, as it does everywhere else. M = 0.15 m (a thing's own half-extent
+plus the sector's range spread). Predicted: seek-led first-time traps at chairs, walls and furniture ↓; arrivals, skills and
+the train's chase tie (the target's own return stays erased). Against ★ E4 and the placebo, n = 24.
