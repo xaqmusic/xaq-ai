@@ -333,3 +333,44 @@ TEST(PlayLoop, HeadingSignTurnsTheReflectionIntoARotation) {
     EXPECT_GT(duck.first, +5.0) << "heading_sign -1: forward at +pi/2 is +x";
     EXPECT_NEAR(cell.second, 0.0, 1e-4); EXPECT_NEAR(duck.second, 0.0, 1e-4);
 }
+
+// §17.116 M1, THE STUCK PLACE: two equally novel branches from node 0; the walk stalls at node 1 (progress error 1 there,
+// 0 at node 2).  With the stall weighted, node 1's value is a hole and the climb takes node 2; the memory never decays.
+namespace {
+void stall_world(Fixture& f, bool publish_stall) {
+    const auto step = [&](uint64_t t, int node, float h, float tle, float err, bool valid) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.cognitive.place", place(node, tle));
+        f.bus.publish("reality.proprio.heading", p1(h));
+        if (publish_stall) f.bus.publish("reality.proprio.progress", p2(err, valid ? 1.0f : 0.0f));
+        f.play.tick(t);
+        f.bus.end_tick();
+    };
+    uint64_t t = 0;
+    step(t++, 0, 0.0f, 0.0f, 0.0f, false);
+    for (int i = 0; i < 200; ++i) step(t++, 1, 0.0f, 1.0f, 1.0f, true);     // node 1: novel, the walk stalls
+    step(t++, 0, PI, 0.0f, 0.0f, false);
+    for (int i = 0; i < 200; ++i) step(t++, 2, PI / 2, 1.0f, 0.0f, true);   // node 2: as novel, the walk goes
+    step(t++, 0, -PI / 2, 0.0f, 0.0f, false);
+    for (int i = 0; i < 3000; ++i) step(t++, 0, 0.0f, 0.0f, 0.0f, false);  // a minute at node 0: habituation recovers
+}
+}  // namespace
+
+TEST(PlayLoop, StuckPlaceIsAHoleInTheValueField) {
+    Fixture on({{"stall_topic", ogma::ParamValue{std::string("reality.proprio.progress")}}, {"stall_weight", ogma::ParamValue{1.0}}});
+    stall_world(on, true);
+    EXPECT_GT(on.play.stall(1), 0.9f);
+    EXPECT_LT(on.play.stall(2), 0.05f);
+    EXPECT_LT(on.play.value(1), 0.5f * on.play.value(2)) << "the stuck place loses its value";
+    EXPECT_EQ(on.play.next_node(), 2) << "the climb routes to the place the walk can reach";
+}
+
+TEST(PlayLoop, StuckPlaceOffByDefault) {
+    Fixture off, zero({{"stall_topic", ogma::ParamValue{std::string("reality.proprio.progress")}}});
+    stall_world(off, true);
+    stall_world(zero, true);
+    EXPECT_EQ(off.play.stall(1), 0.0f) << "no topic: nothing learned";
+    EXPECT_GT(zero.play.stall(1), 0.9f) << "weight 0: learned, not used";
+    EXPECT_FLOAT_EQ(off.play.value(1), zero.play.value(1));
+    EXPECT_FLOAT_EQ(off.play.value(2), zero.play.value(2));
+}
