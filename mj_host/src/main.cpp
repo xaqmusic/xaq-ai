@@ -1312,7 +1312,8 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
-bool g_sit_progress = false;   // --sit-on-stall F [HOLD_S]: the progress form (S1b)
+bool g_sit_progress = false, g_sit_settle = false;   // --sit-settle (§17.114 S2): stillness before the sit, and habituation
+   // --sit-on-stall F [HOLD_S]: the progress form (S1b)
 double g_sit_k = 0.0, g_sit_hold_s = 3.0, g_sit_rise_s = 1.0; double g_sit_need_s = 1.0;   // --sit-on-surprise K [HOLD_S] (§17.114 S1)
 bool g_stop_skill_settle = false;   // --stop-skill-settle (§17.114 P2): under the walker hold, a kick or peck waits for stillness (the settle's test, at most its timeout); the look does not
 bool g_stop_walker_hold = false;   // --stop-walker-hold (§17.114 P1): the walking policy holds the stop's stance from its first tick (no settle, no standing brain)
@@ -2016,6 +2017,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
     bool wh_ready = true; int wh_settle_left = 0;   // §17.114 P2
+    int sit_pre_left = 0; double sit_hab = 1.0;   // §17.114 S2
     double sit_rho_f = 0.75, sit_rho_b = 0.5; int sit_dir = 0, sit_dir_ticks = 0, sit_rise_extra = 0;   // §17.114 S1 progress form
     double sit_applied_vx = 0.0, sit_applied_yaw = 0.0, sit_ema = -1.0, sit_tle = -1.0; int sit_over = 0, sit_walk_ticks = 0, sits = 0;   // §17.114 S1
     int fix_ticks = -1, fix_n = 0; double fix_peak = 0.0, fix_len_sum = 0.0; std::deque<int> fix_vox;   // §17.114 L1: the fixation (-1 = in a saccade)
@@ -2168,10 +2170,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         }
         if (driver == Driver::Brain) command.twist = twist;
         if (g_body_pitch != 0.0 && driver == Driver::Brain) command.body_pitch = g_body_pitch;
+        const bool sit_hold_now = sit_pre_left > 0;   // §17.114 S2: the walker holds still before the sit (applied after the chase floor below)
         if (g_chase_vx > 0.0 && driver == Driver::Brain && chase_on && (brain.chase_active() || brain.chase_coasting()) && stop_phase == StopPhase::None)
             command.twist[0] = std::max(command.twist[0], g_chase_vx_facing
                 ? g_chase_vx * std::max(0.0, std::cos(brain.seek_ego()))   // §17.113 C1: the floor only as the nose faces the mover
                 : g_chase_vx);                                              // the pursuit at speed
+        if (sit_hold_now) command.twist = {0.0, 0.0, 0.0};
         if (g_yaw_lin && driver == Driver::Brain) command.twist[2] = yaw_calibrated(command.twist[2], command.twist[0]);   // the yaw motor's calibration
         else if (g_yaw_lin_below > 0.0 && driver == Driver::Brain && std::fabs(command.twist[0]) < g_yaw_lin_below)
             command.twist[2] = yaw_calibrated(command.twist[2], command.twist[0]);   // only the in-place deadband: the walk's own yaw untouched
@@ -2212,6 +2216,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 // (R82: without it the arrival stop never came, and 2 of 39 answers were seen)
                 if (g_skill_unwind_s > 0.0 && (stop_phase == StopPhase::Brain || (g_stop_walker_hold && stop_phase == StopPhase::Walker) || (g_skill_now && stop_phase == StopPhase::None && skill_name != "approach"))) { stop_left = 0; unwind_left = int(g_skill_unwind_s * kBrainHz); unwind_then_stop = true; ++unwinds; }
             }
+            if (sit_pre_left > 0) {
+                // §17.114 S2: the walker holds still (zero command) until the body is still, at most 2 s; then the sit
+                --sit_pre_left;
+                const bool still_now = g[2] < -0.999 && std::max({std::fabs(w[0]), std::fabs(w[1]), std::fabs(w[2])}) < 0.15;
+                if (stop_phase != StopPhase::None || skill_active || driver != Driver::Brain) sit_pre_left = 0;   // something else took the body
+                else if ((still_now || sit_pre_left == 0) && skill_start("sit")) {
+                    sit_pre_left = 0; skill_left = std::max(1, int((g_sit_hold_s + g_sit_rise_s) * kBrainHz)); skill_total = skill_left;
+                    ++sits; stop_event = "skill:sit"; sit_rise_extra = 0; sit_hab *= 0.5;
+                }
+            }
             if (g_sit_k > 0.0) {
                 // §17.114 S1, THE SIT ON SURPRISE: on the walk, the traversal EPM's TLE (its error on [applied forward command,
                 // sensed forward speed]) against its own running mean; held above K x the mean for SIT_NEED, the duck sits
@@ -2235,10 +2249,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     ++sit_walk_ticks;
                     sit_ema = frac;
                     sit_over = (sit_walk_ticks > 1500 && sit_dir_ticks >= 50 && frac < g_sit_k) ? sit_over + 1 : 0;
-                    if (sit_over >= int(g_sit_need_s * kBrainHz) && skill_start("sit")) {
-                        skill_left = std::max(1, int((g_sit_hold_s + g_sit_rise_s) * kBrainHz)); skill_total = skill_left;
-                        sit_over = 0; ++sits; stop_event = "skill:sit"; sit_rise_extra = 0;
-                        unwind_left = 0; imp_back_left = 0;   // the sit answers the surprise: a pending back-off and its stop are dropped
+                    sit_hab = std::min(1.0, sit_hab + 1.0 / 3000.0);   // S2: habituation recovers over ~60 s
+                    if (sit_pre_left == 0 && sit_over >= int(g_sit_need_s * kBrainHz) && (!g_sit_settle || frac < g_sit_k * sit_hab)) {
+                        sit_over = 0; unwind_left = 0; imp_back_left = 0;   // the sit answers the surprise: a pending back-off and its stop are dropped
+                        if (g_sit_settle) { sit_pre_left = 2 * int(kBrainHz); stop_event = "sit:settle"; }
+                        else if (skill_start("sit")) {
+                            skill_left = std::max(1, int((g_sit_hold_s + g_sit_rise_s) * kBrainHz)); skill_total = skill_left;
+                            ++sits; stop_event = "skill:sit"; sit_rise_extra = 0;
+                        }
                     }
                 } else if (walking && sit_tle >= 0.0) {
                     ++sit_walk_ticks;
@@ -3388,7 +3406,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (sweep_on)
             std::fprintf(stderr, "  sweep: %d moves; the gaze grid covered %.0f %% of its cells per stop (%d stops); 'saccades' below count HOLD-long windows\n",
                          sweep_moves, 100.0 * sweep_cover_sum / std::max(1, sweep_cover_n), sweep_cover_n);
-        if (g_sit_k > 0.0) std::fprintf(stderr, "  sit on surprise: %d sits (the traversal TLE above %.1f x its running mean for %.1f s; %.1f s seated)\n", sits, g_sit_k, g_sit_need_s, g_sit_hold_s);
+        if (g_sit_k > 0.0) std::fprintf(stderr, g_sit_progress ? "  sit on stall: %d sits (progress under %.2f of its own prediction for %.1f s; %.1f s seated)\n" : "  sit on surprise: %d sits (the traversal TLE above %.1f x its running mean for %.1f s; %.1f s seated)\n", sits, g_sit_k, g_sit_need_s, g_sit_hold_s);
         if (sweep_on && g_saccade_speed > 0.0)
             std::fprintf(stderr, "  saccade and fixate: %d fixations, mean %.2f s (saccades at %.2f rad/s)\n", fix_n, fix_len_sum / std::max(1, fix_n), g_saccade_speed);
         if (look_on || gaze_on)
@@ -3709,6 +3727,8 @@ int main(int argc, char** argv) {
             DuckBody::bam.dump = next("--bam-dump");
         } else if (a == "--stop-walker-hold") {
             g_stop_walker_hold = true;
+        } else if (a == "--sit-settle") {
+            g_sit_settle = true;
         } else if (a == "--sit-on-stall") {
             g_sit_progress = true; g_sit_k = std::stod(next("--sit-on-stall"));
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_sit_hold_s = std::stod(next("--sit-on-stall"));
