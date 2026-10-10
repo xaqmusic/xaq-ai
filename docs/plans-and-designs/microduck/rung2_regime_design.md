@@ -8191,3 +8191,18 @@ as often as the placebo's — **with a cost of ~3 skills a run** (the detour fam
 wait adds a little), interesting time −5.9 inside the dice, and the walls back to a tie (D1c alone was the only arm to cut
 them beyond the dice). Preset ST1 (seed 22 from 120 s: detours at 127, 187, 255–263 s, a kick at 220 s, no sits; ★ E4 sits
 four times on this seed). The operator's eye decides between ST1, D1c and K1 alone.
+
+**The resonance (the operator, 2026-10-10, watching ST1: "the detour is causing the robot to walk forward and back repeatedly
+when approaching objects. If we can damp that resonance or uncertainty then the kicks and interaction metrics should
+improve").** ST1's detours (`log/ten/pstk`, 536): 71 % come within 10 s of the last one; over their 0.5 s arm window the
+target's range does not close (median 0.000 m), so a progress gate would not thin them; 0–5 % are followed by a skill within
+10 s; 53 % fire with the target 1 m or more away. What the nearer return is (truth labels, the point at the return's range on
+the sector's bearing): a wall 288, a chair 134, the shelf or the table 46, a thing 63. With the D1c finding that 36–55 % of the
+detours' targets have no thing within 0.2 m of the remembered position, the loop reads: **the held target is a position the
+walk cannot reach — drifted behind a wall or a chair, or never a thing — and each walk out hands back to a seek loop that aims
+at the same wall again.** The uncertainty is the target belief's, and the oscillation is the belief failing to update.
+**DF** (`--detour-forget N`): the N-th detour of a chain (each within 10 s of the last one's walk out, the reopened ones
+included) makes the seek loop forget its static target — the progress forget's kind: forgotten, not refused (sweeps 33–35
+refused and lost a quarter of the targets); a real thing is seen again at the next look, at its corrected position. Byte-
+identical off (E4, P2, ST1 seed 16). Seed 22, ST1 + DF 2: detours 18 → 10, repeats 10 → 4, 3 forgets, skills 12 → 11.
+Sweep `log/ten/pdf` (ST1 + `--detour-forget 2`).
