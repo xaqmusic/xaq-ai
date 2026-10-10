@@ -409,6 +409,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (esc) hr_share_ = 1.0;
         last_twist_[2] = hr_share_ * reflex + (1.0 - hr_share_) * last_twist_[2];
         if (esc && last_twist_[0] < 0.0) last_twist_[0] = 0.0;   // §17.114 E2: the way out is walked, not backed
+        if (esc && escape_vx_ > 0.0) last_twist_[0] = std::max(last_twist_[0], escape_vx_ * std::max(0.0, std::cos(err)));   // §17.114 E4: walked out, as the chase's floor
     }
     ++tick_id_;
     if (has_override_) return override_;

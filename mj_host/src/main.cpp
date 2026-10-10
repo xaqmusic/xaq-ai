@@ -1312,6 +1312,7 @@ bool g_tof_free_rays = false;
 bool g_stop_is_still = false;
 bool g_imp_not_moving = false;
 bool g_stop_head_hold = false;
+double g_escape_vx = 0.0;   // --escape-vx V (§17.114 E4): with --escape-authority, the escape walks forward at least V x cos(heading error)
 bool g_escape_authority = false, g_escape_commit = false;   // --escape-commit (§17.114 E3): no stop or sit starts while an escape holds the reference
    // --escape-authority (§17.114 E2)
 bool g_sit_progress = false, g_sit_settle = false, g_sit_escape = false;   // --sit-then-escape (§17.114 E1): the sit ends in a look stop and the stuck escape (a turn-about when nothing ahead is free)   // --sit-settle (§17.114 S2): stillness before the sit, and habituation
@@ -2156,7 +2157,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_chase_yaw_range > 0.0)   // §17.113 T1: the reflex may turn as hard as the policy can while a mover is chased
             brain.set_reflex_range_override(chase_on && (brain.chase_active() || brain.chase_coasting()) ? g_chase_yaw_range : 0.0);
         if (g_sit_k > 0.0) brain.set_traverse_cmd(sit_applied_vx, sit_applied_yaw);
-        if (g_escape_authority) brain.set_escape_authority(true);   // §17.114 S1: last tick's applied forward command
+        if (g_escape_authority) brain.set_escape_authority(true, g_escape_vx);   // §17.114 S1: last tick's applied forward command
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
         if (cloud_on) {
@@ -3746,6 +3747,8 @@ int main(int argc, char** argv) {
             DuckBody::bam.dump = next("--bam-dump");
         } else if (a == "--stop-walker-hold") {
             g_stop_walker_hold = true;
+        } else if (a == "--escape-vx") {
+            g_escape_vx = std::stod(next("--escape-vx"));
         } else if (a == "--escape-commit") {
             g_escape_commit = true;
         } else if (a == "--escape-authority") {
