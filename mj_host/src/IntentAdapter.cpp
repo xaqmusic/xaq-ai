@@ -141,6 +141,16 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     last_sensed_ = {unit(vel_body[0] / kTwistRangeVx), unit(vel_body[1] / kTwistRangeVy),
                     unit(vel_body[2] / yaw_range_)};
     publish("intent", {last_sensed_[0], last_sensed_[1], last_sensed_[2]});
+    if (traverse_on_) {
+        // §17.114 S1, conditioned (CLAUDE.md §0 rule 2): both averaged over ~1 s, so a walk's restart -- full command, no motion
+        // for its first half second, 40 times a run -- stays near the usual command-to-motion line while both ramp, and only
+        // a block that lasts reaches "commanded, not moving"
+        trv_cmd_ += (unit(traverse_cmd_ / kTwistRangeVx) - trv_cmd_) / 50.0;
+        trv_sen_ += (last_sensed_[0] - trv_sen_) / 50.0;
+        // ...and the turn asked for: a hard turn makes little forward progress by itself, a known context, not a surprise
+        trv_yaw_ += (unit(std::fabs(traverse_yaw_) / kTwistRangeVyaw) - trv_yaw_) / 50.0;
+        publish("traverse_in", {float(trv_cmd_), float(trv_yaw_), float(trv_sen_)});
+    }
     publish("imu", {float(g[0]), float(g[1]), float(g[2]), float(w[0]), float(w[1]), float(w[2])});
     // The 12-slot sense the bridge appends as load slots: attitude, rates, accel, the
     // sensed velocity again, two spare.
@@ -689,6 +699,14 @@ double IntentAdapter::cloud_voxel_m() const {
     return 0.0;
 }
 
+std::array<double, 4> IntentAdapter::traverse_token() const {
+    auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(instance_->bus()->last_value("reality.proprio.traverse"));
+    return {rt ? double(rt->winner_id) : -1.0, rt && rt->is_novel ? 1.0 : 0.0, trv_cmd_, trv_sen_};
+}
+double IntentAdapter::traverse_tle() const {
+    auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(instance_->bus()->last_value("reality.proprio.traverse"));
+    return rt ? double(rt->tle) : -1.0;
+}
 double IntentAdapter::motor_tle() const {
     for (auto* m : instance_->modules()) {
         const std::string type(m->type_name());
