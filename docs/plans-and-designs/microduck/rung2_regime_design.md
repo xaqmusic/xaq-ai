@@ -8206,3 +8206,27 @@ included) makes the seek loop forget its static target — the progress forget's
 refused and lost a quarter of the targets); a real thing is seen again at the next look, at its corrected position. Byte-
 identical off (E4, P2, ST1 seed 16). Seed 22, ST1 + DF 2: detours 18 → 10, repeats 10 → 4, 3 forgets, skills 12 → 11.
 Sweep `log/ten/pdf` (ST1 + `--detour-forget 2`).
+
+**DF measured (`log/ten/pdf`, ST1 + `--detour-forget 2`, n = 24; a run: 18.8 detours (ST1 22.3), 7.4 forgets).** Repeats
+within 10 s 71 → 63 %; against ST1 every places measure ties (skills 8.2 vs 8.3, traps −0.2); against the placebo walls −3.3*,
+interesting −7.0*, skills −3.3*, the rest as ST1. **`NULL` on the resonance** — the forgotten target is re-taken within seconds
+and the approach repeats; it does not reach the interactions.
+
+**The resonance is not the detour's.** Measured on every arm, while the seek loop steers an approach within 1 m (no stop, no
+skill): the forward command reverses sign (|vx| > 0.05 either side) **~60 times a minute on ★ E4 (62) and the placebo (65)**,
+G1 60, and fewer under the detours (D1c 44, ST1 51, DF 50); the walk backs 17–20 % of that time. It is worst close in: within
+0.3 m of the target 95 reversals a minute and 28 % backing (★ E4). A trace (★ E4 seed 3, 264–267 s, range 0.35 → 0.16 m):
+the forward command at +0.40 with single ticks at −0.25, the yaw swinging +0.7 / −0.4 every few tenths of a second, and the
+right sector's proximity toggling 0.47 ↔ 0 as the target's bearing crosses the ahead/right boundary. Within 0.6 m: the seek
+gate's sector switches 66 times a minute, the yaw reverses 69 and the forward command 76 (★ E4; ST1 67 / 70 / 68), and the
+thing's own return lies in a sector the gate is NOT erasing on 11–13 % of the ticks. **The approach's dither is the seek gate
+choosing its sector by the bearing alone:** at a sector boundary the target's return falls on the ungated side, the walker's
+avoidance pushes off it (yaw, a tick of reverse), the bearing moves, the gate switches, and the same happens from the other
+side. It predates today's levers (it is ★ T1's and ★ P2's approach too); the operator saw it as the detour's because ST1 made
+approaches more frequent and closer.
+
+**RG — the gate knows the target by its range** (`--seek-gate-range M`): a return within M (0.15 m) of the target's range is
+the target in any of the three sectors and is erased there too, for the walker's sense slots and for the heading reflex's
+share (the share was G1's missing slice). Byte-identical off (E4, P2, ST1 seed 16). Seed 3 smoke (ST1 vs + RG, 300 s): time
+within 0.6 m of a target 0.5 → 0.9 min, skills 2 → 6; the reversal rates on one seed's short approaches are noise. Sweep
+`log/ten/prg` (ST1 + RG).
