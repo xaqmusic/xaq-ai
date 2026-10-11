@@ -23,6 +23,8 @@
 #include "ogma/modules/TofAvoidLoop.hpp"
 #include "ogma/modules/ProxMemory.hpp"
 #include "ogma/modules/BearingToIntent.hpp"
+#include "ogma/modules/StuckSense.hpp"
+#include "ogma/modules/StuckEscape.hpp"
 #include "ogma/modules/BearingSeekLoop.hpp"
 #include "ogma/modules/SkillOutcomeLoop.hpp"
 #include "ogma/modules/ColumnBuilder.hpp"
@@ -148,6 +150,8 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("TofAvoidLoop",          [](){ return std::make_unique<TofAvoidLoop>(); });         // duck §17.6: avoidance as a loop with a bearing
         reg.register_type("ProxMemory",            [](){ return std::make_unique<ProxMemory>(); });           // picrawler S3: the duck's proximity slots from a single beam + odom
         reg.register_type("BearingToIntent",       [](){ return std::make_unique<BearingToIntent>(); });      // picrawler S3: a loop's bearing -> goal bearing + speed, holding a reference when silent
+        reg.register_type("StuckSense",            [](){ return std::make_unique<StuckSense>(); });           // picrawler S3 lever 2: the range beam as re-afference against the stride's efference
+        reg.register_type("StuckEscape",           [](){ return std::make_unique<StuckEscape>(); });          // picrawler S3 lever 2: confirmed stuck -> back, turn to the freest sector, refract
         reg.register_type("BearingSeekLoop",       [](){ return std::make_unique<BearingSeekLoop>(); });      // duck things phase T2: seeking a thing seen only at stops
         reg.register_type("SkillOutcomeLoop",      [](){ return std::make_unique<SkillOutcomeLoop>(); });     // duck things phase: learning what a kick does (O54)
         // 2026-06 — passive place-recorder (replaces saccade+cylinder mapping):

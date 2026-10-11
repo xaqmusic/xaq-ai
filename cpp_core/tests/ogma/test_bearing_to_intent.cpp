@@ -64,3 +64,23 @@ TEST(BearingToIntent, TheReferenceLeaksWhenAsked) {
     for (uint64_t t = 1; t <= 300; ++t) f.run(t, 0.0, {0.0f, 0.0f, 0.0f});   // 6 s silent, body at 0
     EXPECT_LT(std::fabs(f.m.ref_yaw()), 0.01) << "the reference leaked to the current heading";
 }
+TEST(BearingToIntent, AnOverrideWinsWhileItsValueIsPositiveAndItsSpeedGoesOutUnchanged) {
+    Fix f({{"override_topic", std::string("percept.escape")}, {"speed_pow", 1.0}});
+    f.run(0, 0.0, {0.0f, 1.0f, 0.5f});                         // the loop: dead ahead
+    f.bus.begin_tick(1); f.bus.publish("reality.proprio.odom", pv({0, 0, 0}));
+    f.bus.publish("percept.avoid_bearing", pv({0.0f, 1.0f, 0.5f}));
+    f.bus.publish("percept.escape", pv({-0.7071f, 0.7071f, 1.0f, -0.5f}));   // escape: -45 deg, BACK at 0.5
+    f.m.tick(1); f.bus.end_tick();
+    auto g = f.goal(); EXPECT_NEAR(std::atan2(g.first, g.second), -M_PI / 4.0, 1e-4);
+    EXPECT_NEAR(f.speed(), -0.5f, 1e-6f) << "the override's speed is not gated";
+    EXPECT_NEAR(f.m.ref_yaw(), -M_PI / 4.0, 1e-6) << "the override set the reference";
+    f.bus.begin_tick(2); f.bus.publish("reality.proprio.odom", pv({0, 0, 0}));
+    f.bus.publish("percept.avoid_bearing", pv({0.0f, 0.0f, 0.0f}));           // the loop is silent
+    f.bus.publish("percept.escape", pv({0.0f, 0.0f, 0.0f, 0.0f}));            // released
+    f.m.tick(2); f.bus.end_tick();
+    auto h = f.goal(); EXPECT_NEAR(std::atan2(h.first, h.second), -M_PI / 4.0, 1e-4) << "released and the loop silent: the held reference, which the escape set";
+    f.bus.begin_tick(3); f.bus.publish("reality.proprio.odom", pv({0, 0, 0}));
+    f.bus.publish("percept.avoid_bearing", pv({0.0f, 1.0f, 0.5f}));           // the loop speaks again
+    f.m.tick(3); f.bus.end_tick();
+    auto k = f.goal(); EXPECT_NEAR(std::atan2(k.first, k.second), 0.0, 1e-4) << "released and the loop active: the loop owns the bearing";
+}

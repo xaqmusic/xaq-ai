@@ -1,6 +1,6 @@
 # Porting the MicroDuck's autonomous layer to the PiCrawler
 
-**Status: S0 done; S1 complete in the sim, verified at rest on the robot; S2 done; S3a DONE 2026-10-11 (ledger "S3a: THE AVOID LOOP DRIVES THE GAIT"): form A lever 1 is `WORKING`, loud at n=6 — wall contact 0.53 → 0.008, coverage ×2, 0 falls. Form B deferred by the gate. Next: S3 lever 2 (stuck detector + escape by backing), then S4.**
+**Status: S0 done; S1 complete in the sim, verified at rest on the robot; S2 done; S3a `WORKING` loud (the stack); S3 lever 2 measured 2026-10-11 (ledger "S3 LEVER 2"): the stuck SENSE works as a percept; the scripted escape is `NULL` on the stack in the room and a `REGRESSION` on terrain (it retreats from the hump the body climbs), so it is deferred to a competence-graded loop under S4's arbiter. Next: S4 (the place map, PlayLoop, LoopCompetence, EFEArbiter), with the escape as one of its loops.**
 
 **What this decides.** How the exploration and wall-avoidance machinery built for the
 MicroDuck (branch `master`, `docs/plans-and-designs/microduck/`) becomes a level above the
@@ -232,8 +232,11 @@ byte-identical to P-e·h0; the turn table from S1 reproduces through the socket.
 
 *ProxMemory → TofAvoidLoop (`side_min`) → BearingToIntent, config `…__room_senses__s3a.json`.
 Wall contact 0.53 → 0.008 of ticks, coverage 12.7 → 27.2 cells, path 3.7 → 6.2 m, 0 falls at
-n=6. Lever 2 (stuck + escape) is next; form B is deferred by the gate below, its re-use
-context recorded in the ledger.*
+n=6. Lever 2: StuckSense (the stall, body-scaled; a percept the body did not have — its honest
+distress and slip both read nothing pressed on a wall) is `WORKING`; the scripted escape by
+backing is `NULL` on the stack in the room and a `REGRESSION` in the corridor, where it retreats
+from the hump. The escape returns as a loop with competence under S4's arbiter. Form B is
+deferred by the gate below, its re-use context recorded in the ledger.*
 
 
 **Form A, the reflex layer** (cheap; every module exists after S0):

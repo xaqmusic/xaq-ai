@@ -55,11 +55,16 @@ public:
 private:
     void handle_bearing(MessagePtr p);
     void handle_odom(MessagePtr p);
+    void handle_override(MessagePtr p);
 
     std::string bearing_topic_ = "percept.avoid_bearing";   // [cx, cy, value]; cx = body +X
     std::string odom_topic_    = "reality.proprio.odom";
     std::string goal_topic_    = "reality.proprio.goal_bearing";
     std::string speed_topic_   = "reality.proprio.speed_cmd";
+    // S3 lever 2: an OVERRIDE [cx, cy, value, speed].  While value > 0 it wins: its bearing
+    // sets the reference and its speed (negative = back up) goes out unchanged.  The escape
+    // reflex speaks here.  Empty (default) = no override = byte-identical.
+    std::string override_topic_;
     double floor_      = 0.05;   // |bearing| below this = the loop is silent
     double speed_max_  = 1.0;
     double speed_pow_  = 0.0;    // 0 = no gating (speed_max always)
@@ -69,6 +74,7 @@ private:
     double hz_         = 50.0;
 
     double cx_ = 0.0, cy_ = 0.0, val_ = 0.0; bool have_bearing_ = false;
+    double ocx_ = 0.0, ocy_ = 0.0, oval_ = 0.0, ospeed_ = 0.0; bool override_on_ = false; int64_t override_msgs_ = 0;
     double yaw_ = 0.0; bool have_odom_ = false;
     double ref_yaw_ = 0.0; bool ref_set_ = false;
     bool  active_ = false;

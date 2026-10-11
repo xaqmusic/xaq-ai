@@ -53,6 +53,7 @@ ParamSchema BearingToIntent::params_schema() const {
         {"odom_topic",    ParamMutability::ConstructionOnly, "ProprioToken [x, y, yaw]: the body's dead-reckoned pose; yaw is the heading the reference is kept in.", ParamValue{std::string("reality.proprio.odom")}},
         {"goal_topic",    ParamMutability::ConstructionOnly, "Output: [vx, vy] for MotorEPMv2 goal_bearing_topic.", ParamValue{std::string("reality.proprio.goal_bearing")}},
         {"speed_topic",   ParamMutability::ConstructionOnly, "Output: [s] for MotorEPMv2 speed_topic.", ParamValue{std::string("reality.proprio.speed_cmd")}},
+        {"override_topic", ParamMutability::ConstructionOnly, "ProprioToken [cx, cy, value, speed]: while value > 0 it wins — its bearing sets the reference, its speed (negative = back up) goes out unchanged. The escape reflex speaks here. Empty = none (byte-identical).", ParamValue{std::string("")}},
         {"floor",          ParamMutability::HotMutable, "|bearing| below this = the loop is silent; the goal then points at the held reference.", ParamValue{0.05}},
         {"speed_max",      ParamMutability::HotMutable, "The speed with the goal dead ahead.", ParamValue{1.0}},
         {"speed_pow",      ParamMutability::HotMutable, "s = speed_max * sgn(cos e) * |cos e|^speed_pow. 0 = no gating.", ParamValue{0.0}},
@@ -67,6 +68,7 @@ ParamMap BearingToIntent::current_params() const {
     ParamMap m;
     m["bearing_topic"] = ParamValue{bearing_topic_}; m["odom_topic"] = ParamValue{odom_topic_};
     m["goal_topic"] = ParamValue{goal_topic_}; m["speed_topic"] = ParamValue{speed_topic_};
+    m["override_topic"] = ParamValue{override_topic_};
     m["floor"] = ParamValue{floor_}; m["speed_max"] = ParamValue{speed_max_}; m["speed_pow"] = ParamValue{speed_pow_};
     m["speed_min"] = ParamValue{speed_min_}; m["reverse_behind"] = ParamValue{reverse_behind_};
     m["ref_tau_s"] = ParamValue{ref_tau_s_}; m["hz"] = ParamValue{hz_};
@@ -80,6 +82,7 @@ void BearingToIntent::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "odom_topic",    [&](auto const& v){ odom_topic_    = get_string(v, "odom_topic"); });
     apply_param(params, "goal_topic",    [&](auto const& v){ goal_topic_    = get_string(v, "goal_topic"); });
     apply_param(params, "speed_topic",   [&](auto const& v){ speed_topic_   = get_string(v, "speed_topic"); });
+    apply_param(params, "override_topic", [&](auto const& v){ override_topic_ = get_string(v, "override_topic"); });
     apply_param(params, "floor",      [&](auto const& v){ floor_     = get_double(v, "floor"); });
     apply_param(params, "speed_max",  [&](auto const& v){ speed_max_ = get_double(v, "speed_max"); });
     apply_param(params, "speed_pow",  [&](auto const& v){ speed_pow_ = get_double(v, "speed_pow"); });
@@ -91,6 +94,18 @@ void BearingToIntent::on_setup(Bus* bus, ParamMap const& params) {
         [this](std::string_view, MessagePtr p){ handle_bearing(p); }));
     sub_ids_.push_back(bus_->subscribe(odom_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ handle_odom(p); }));
+    if (!override_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(override_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_override(p); }));
+}
+
+void BearingToIntent::handle_override(MessagePtr p) {
+    if (!input_allowed(p->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+    if (!pt || pt->values.size() < 4) return;
+    ocx_ = double(pt->values[0]); ocy_ = double(pt->values[1]);
+    oval_ = double(pt->values[2]); ospeed_ = double(pt->values[3]);
+    override_on_ = oval_ > 0.0; ++override_msgs_;
 }
 
 void BearingToIntent::on_param_change(std::string_view key, ParamValue const& value) {
@@ -125,6 +140,23 @@ void BearingToIntent::tick(uint64_t tick_id) {
     if (!ref_set_) { ref_yaw_ = yaw_; ref_set_ = true; }
     const double mag = std::sqrt(cx_ * cx_ + cy_ * cy_);
     double e;                                      // the bearing error we publish, rad, + = toward body +X
+    if (override_on_) {
+        // The escape owns the intent: its bearing sets the reference, its speed goes out as is.
+        active_ = true;
+        e = std::atan2(ocx_, ocy_);
+        ref_yaw_ = yaw_ + e;
+        vx_ = float(std::sin(e)); vy_ = float(std::cos(e)); err_ = float(e);
+        speed_ = float(std::clamp(ospeed_, -1.0, 1.0));
+        auto g = std::make_shared<ProprioToken>();
+        g->tick_id = tick_id; g->producer_id = id_.empty() ? std::string("intent") : id_; g->sensor = "goal_bearing";
+        g->values = Eigen::VectorXf(2); g->values[0] = vx_; g->values[1] = vy_;
+        bus_->publish(goal_topic_, g);
+        auto sp = std::make_shared<ProprioToken>();
+        sp->tick_id = tick_id; sp->producer_id = g->producer_id; sp->sensor = "speed_cmd";
+        sp->values = Eigen::VectorXf::Constant(1, speed_);
+        bus_->publish(speed_topic_, sp);
+        return;
+    }
     if (have_bearing_ && mag >= floor_) {
         active_ = true;
         e = std::atan2(cx_, cy_);
@@ -165,7 +197,8 @@ void BearingToIntent::restore_state(nlohmann::json const& s) {
 }
 nlohmann::json BearingToIntent::diag_snapshot() const {
     return nlohmann::json{{"active", active_}, {"err", err_}, {"vx", vx_}, {"vy", vy_}, {"speed", speed_},
-                          {"ref_yaw", ref_yaw_}, {"yaw", yaw_}, {"value", val_}, {"msgs", msgs_}};
+                          {"ref_yaw", ref_yaw_}, {"yaw", yaw_}, {"value", val_}, {"msgs", msgs_},
+                          {"override", override_on_}, {"override_msgs", override_msgs_}};
 }
 
 } // namespace ogma

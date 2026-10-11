@@ -7204,3 +7204,74 @@ reflex's fixed geometry fails (moving obstacles, the robot's real echo statistic
 (d) test) or where avoidance must be shaped by what the body learns of its own turning.
 The (d) test (move the boxes mid-run) is owed; with a 3 s memory it tests the loop, not a
 map, and belongs with S4.
+
+---
+
+### 2026-10-11 — S3 LEVER 2: THE STUCK SENSE WORKS; THE ESCAPE BY BACKING IS NULL ON THE STACK IN THE ROOM AND A REGRESSION ON TERRAIN (n=6)
+
+*Plan §4 S3, form A, lever 2, on S3a. Two modules: **StuckSense** (new, generic), the stall as
+the duck defines it, body-scaled — the stride forward's 2 s mean against a decaying peak-hold
+of itself (the body's own recent best speed), while commanding forward and not turning (the
+NET yaw over 3 s, whole strides); plus a range-deficit channel for the slip case. **StuckEscape**
+(new, generic), the duck's rule: a confirmed stall → back 1.5 s → hold a heading toward the
+freest remembered sector (or an alternating 90°) for 2 s → release, 3 s refractory, through
+BearingToIntent's new `override_topic`. Config `…__room_senses__s3b.json`; the instrument arm
+`…__s3b_escape_only.json` silences the avoid loop so the escape must act alone. Unit tests:
+StuckSense 8, StuckEscape 4, BearingToIntent 7. Gain-0: the three deployed configs byte-identical
+(seed 1 × 6000) at every build. Verdicts below, one per thing measured.*
+
+**The stuck sense: `WORKING` as a percept.** Pressed on a wall this body keeps stepping: its
+honest `distress` stays at 0.000 and its `slip` reads 0.066 against 0.069 free — the stuck
+state was a HIDDEN state with no observation (doctrine §2.1, confirmed a third time). Its
+stride forward estimate oscillates −0.35…+0.46 m/s around a mean of 0.007 against ~0.03
+walking free, so the per-tick stride is useless and its 2 s mean is the signal. Three
+instrument passes found three ways the sense can be silenced, each now a parameter with a
+reason: (1) the range-deficit channel ABSTAINS on the wall, because it only speaks when the
+stride claims walking and the stride's mean there is ~0 — it is the slip channel, not the
+stall channel; (2) gating "not turning" on the COMMANDED bearing silenced it for good once a
+pinned body was commanded to turn away and could not; (3) gating on a short yaw-rate EMA
+silenced it every stride, because a quadruped yaws every stride by construction — the net yaw
+over 3 s is what a turn is. On the escape-only arm (loop silenced, 3 seeds, 6000 ticks) the
+sense fires and the escape acts: 3–5 escapes a seed, **wall contact 0.27–0.35 against 0.45–0.54
+for the same body with only its heading hold**, coverage 14–21 against 13, 0 falls.
+
+**The escape on the stack (S3b vs S3a, room, n=6): `NULL`.**
+
+| metric | S3a | S3b |
+|---|---|---|
+| wall_frac | 0.008 ± 0.013 | 0.016 ± 0.027 |
+| episodes | 3.7 | 8.5 |
+| coverage | 27.2 ± 2.5 | 27.0 ± 2.2 |
+| falls | 0 | 0 |
+| escapes / seed | — | 0 1 1 2 2 1 |
+
+The avoid loop already keeps the body off the walls; what the escape adds is three episodes
+fired while the body was dawdling in open floor (the gait's own pauses: it had not moved for
+2–4 s while commanding forward — the sense told the truth, the escape had nothing to fix),
+and the one seed that did touch (seed 5, the glancing slide) touched longer. Nothing in the
+room needs it.
+
+**The escape on terrain (corridor, difficulty 0.5, 12000 ticks, n=6): `REGRESSION`.** S3a walks
+3.3–4.5 m down the corridor and over the hump in every seed; S3b escapes 4–9 times a seed and
+ends four of six runs **behind the spawn** (z −0.4), one fall. The stall fires on the hump —
+truthfully: a leg snagged on terrain is a stall — and backing-and-turning is the wrong answer
+to it: it retreats from the thing the body was climbing. This is the ledger's own
+`homeo_leak_progress_gate` lesson in a new coat ("blocked at a slanted wall and no longer
+learns how to climb"): **a reflex that retreats from resistance kills climbing.** The duck's
+world had no terrain, so its escape never met this.
+
+**Re-use context, and what the result points at.** The sense stays (an instrument of the
+stall, the brain-side observation the power problem needs: "pushing and not moving" is
+where the servos draw their peaks). The escape as a REFLEX is refuted on this body in both
+scenarios it was tried; it is not dead. What distinguishes a wall-snag from a hump-snag is
+not in the sense — both are "commanding forward, not moving" — it is whether *trying
+differently* restores progress, which is a question for a loop with COMPETENCE under the
+arbiter (S4: LoopCompetence grades "did my escape restore progress", and the arbiter learns
+when to hand the body to it), or for the climbing homeostat. That is the learned form of
+this lever, and the gate that B was deferred by now names it: the reflex's fixed geometry
+fails on terrain. Lever 2's scripted escape is `DEFERRED` to that. The stack remains S3a.
+
+**On the way:** `BearingToIntent.override_topic` (an escape or any loop can own the intent
+outright, with its own speed, negative for backing) and `sense.servo_current` from the sim's
+power model (`OGMA_PICRAWLER_PUBLISH_CURRENT`, opt-in) are built and gain-0, for the
+current channel of the sense on the robot.

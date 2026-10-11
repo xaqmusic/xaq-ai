@@ -1665,6 +1665,10 @@ var _odom_err_m: float = 0.0                    # INSTRUMENT: |odom - truth| in 
 # turning": the steady yaw rate it produces is the turn table's entry for that error.  Off
 # unless the env is set; the config must name the topics for either to reach the gait.
 @export var speed_cmd_scaffold: float = NAN      # OGMA_PICRAWLER_SPEED_CMD=<-1..1>
+# ---- the servo current as a SENSE (S3 lever 2's second stuck channel, later): the power
+# model's battery-side current on the robot's topic sense.servo_current [A], instrument-only.
+# Needs the power model on. Off by default (byte-identical).
+@export var publish_current: bool = false        # OGMA_PICRAWLER_PUBLISH_CURRENT=1
 @export var goal_bearing_scaffold_deg: float = NAN   # OGMA_PICRAWLER_GOAL_BEARING_DEG=<deg, + = to body +X>
 var _dbg_contact_swing: float = 0.0   # TRUE swing fraction from the foot-contact sensor
 var _dbg_fk_cmd_err: float = 0.0      # mean |commanded-FK − achieved-FK| foot height (m)
@@ -3629,7 +3633,8 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
 			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
-			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG"]:
+			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
+			  "OGMA_PICRAWLER_PUBLISH_CURRENT"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3672,6 +3677,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_HONEST_VEL_EGO":    honest_vel_ego    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_SPEED_CMD":         speed_cmd_scaffold = clampf(v.to_float(), -1.0, 1.0)
 			"OGMA_PICRAWLER_GOAL_BEARING_DEG":  goal_bearing_scaffold_deg = v.to_float()
+			"OGMA_PICRAWLER_PUBLISH_CURRENT":   publish_current   = (v != "0" and v != ""); if publish_current: power_model = true
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -11438,6 +11444,10 @@ func _power_setup() -> void:
 func _power_tick() -> void:
 	_power.step(1.0 / float(physics_hz))
 	_power.electrical_step(1.0 / float(physics_hz))
+	if publish_current and brain != null:
+		var ci := PackedFloat64Array()
+		ci.append(_power.i_bat)
+		brain.publish_token(ci, "sense.servo_current", "servo_current")
 	if DisplayServer.get_name() != "headless":
 		_power_hud_step()
 	_power_steps += 1
@@ -12238,6 +12248,20 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["intent_err"] = snappedf(float(im.get("err", 0.0)), 0.001)
 		line["intent_speed"] = snappedf(float(im.get("speed", 1.0)), 0.001)
 		line["intent_ref"] = snappedf(float(im.get("ref_yaw", 0.0)), 0.001)
+	if metrics.has("stuck_sense"):
+		var ss: Dictionary = metrics["stuck_sense"]
+		line["stuck"] = snappedf(float(ss.get("score", 0.0)), 0.001)
+		line["stuck_meas"] = int(ss.get("measurements", 0))
+		line["stuck_def"] = snappedf(float(ss.get("deficit", 0.0)), 0.001)
+		line["stuck_exp"] = snappedf(float(ss.get("expected", 0.0)), 0.0001)
+		line["stuck_obs"] = snappedf(float(ss.get("observed", 0.0)), 0.0001)
+		line["stuck_vf"] = snappedf(float(ss.get("vfwd", 0.0)), 0.0001)
+		line["stuck_cmd"] = snappedf(float(ss.get("speed_cmd", 0.0)), 0.001)
+	if metrics.has("escape"):
+		var es: Dictionary = metrics["escape"]
+		line["esc_state"] = int(es.get("state", 0))
+		line["esc_ep"] = int(es.get("episodes", 0))
+		line["esc_turn"] = snappedf(float(es.get("turn_deg", 0.0)), 0.1)
 	for mid in ["epm_range", "epm_vision", "epm_place"]:
 		if metrics.has(mid):
 			var mm: Dictionary = metrics[mid]

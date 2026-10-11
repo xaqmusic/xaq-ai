@@ -227,6 +227,8 @@ add_library(ogma_core
     src/ogma/modules/TofAvoidLoop.cpp
     src/ogma/modules/ProxMemory.cpp
     src/ogma/modules/BearingToIntent.cpp
+    src/ogma/modules/StuckSense.cpp
+    src/ogma/modules/StuckEscape.cpp
     src/ogma/modules/BearingSeekLoop.cpp
     src/ogma/modules/SkillOutcomeLoop.cpp
     src/ogma/modules/ColumnBuilder.cpp
@@ -325,6 +327,10 @@ add_executable(test_prox_memory tests/ogma/test_prox_memory.cpp)
 target_link_libraries(test_prox_memory PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_bearing_to_intent tests/ogma/test_bearing_to_intent.cpp)
 target_link_libraries(test_bearing_to_intent PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_stuck_sense tests/ogma/test_stuck_sense.cpp)
+target_link_libraries(test_stuck_sense PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_stuck_escape tests/ogma/test_stuck_escape.cpp)
+target_link_libraries(test_stuck_escape PRIVATE ogma_core GTest::gtest_main pthread)
 
 # v4 Phase 1.2 — EPM unit tests
 add_executable(test_epm_module tests/ogma/test_epm_module.cpp)
@@ -588,6 +594,8 @@ gtest_discover_tests(test_rng_parity)
 gtest_discover_tests(test_dead_reckon)
 gtest_discover_tests(test_prox_memory)
 gtest_discover_tests(test_bearing_to_intent)
+gtest_discover_tests(test_stuck_sense)
+gtest_discover_tests(test_stuck_escape)
 gtest_discover_tests(test_inprocess_bus)
 gtest_discover_tests(test_neurochem_state)
 gtest_discover_tests(pair_neurochem_epm)

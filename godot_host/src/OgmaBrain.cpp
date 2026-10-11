@@ -865,7 +865,8 @@ Dictionary OgmaBrain::get_module_metrics() const {
         // S3 of the MicroDuck port: the small loop modules expose their diag_snapshot scalars
         // as-is, so the body's JSONL can carry prox slots, the avoid bearing and the intent
         // without a per-type block each (the keys are the modules' own diag names).
-        else if (type == "ProxMemory" || type == "TofAvoidLoop" || type == "BearingToIntent") {
+        else if (type == "ProxMemory" || type == "TofAvoidLoop" || type == "BearingToIntent" ||
+                 type == "StuckSense" || type == "StuckEscape") {
             const nlohmann::json dj = m->diag_snapshot();   // a named object: items() of a temporary dangles
             for (auto const& [k, v] : dj.items()) {
                 if (v.is_boolean())     d[String(k.c_str())] = v.get<bool>();
