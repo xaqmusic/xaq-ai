@@ -8272,3 +8272,47 @@ placebo's level; inside the dice against ST2, a signal); the skill count stays ~
 REGRESSION on interesting time**: matching the sensor's narrow ahead sector makes the bearing cross a boundary more often — the
 mismatch was hiding a narrower sector's switching, and RG (range) is the better answer to it. Preset ST3 = B (seed 7 from
 200 s: kicks at 216 and 247 s, 19 skills, one sit).
+
+### 17.118 Telling what moves — the chase's false movers, measured (2026-10-11)
+
+**The operator, watching ST3 (seed 7, the first red-ball encounter):** "when the robot notices something moving, according to
+the arrow icon in the UI, it may suddenly sense the object has changed direction. The robot may also sense movement when it does
+not exist." The arrow is the seek loop's chase: its target and its velocity (`chase[2..5]`).
+
+**The case, 165–173 s.** The red ball never moved. The body, impeded at a thing, turned in place; the cloud took the ball as a
+mover CANDIDATE (the pale ring, 165.6 s: young voxels as it came into view). At 166.10 s M1 (§17.113, `static_motion_check`)
+promoted the HELD STATIC target instead — the green block 2.2 m away, its fixes drifting 0.12 m/s while the body turned — so
+the arrow appeared 2 m from the ring (the "change of direction"), and with no sighting after it, coasted on that drift for 7 s.
+
+**Measured over the promoted line (`mj_host/tools/phantom_chase.py`; a chase is PHANTOM when nothing within 0.4 m of its
+start moved over the second around it; scoring only):**
+
+| n = 24 each | ★ M2 `tc4` | A1 `tc7` | ★ L1 `sc1` | ★ P2 `p2a` | ★ E4 `se4` | placebo `pplc` | ST1 | ST2 | ST3 `pghb` |
+|---|---|---|---|---|---|---|---|---|---|
+| chases a run | 13.1 | 15.1 | 13.1 | 16.4 | 18.9 | 16.9 | 15.1 | 16.1 | 15.8 |
+| phantom % | 50 | 50 | 55 | 53 | 62 | 66 | 58 | 53 | 54 |
+
+- **Half the chases have always been phantoms** — since the chase began; not something the walking work introduced. E4 raised
+  it (62–66 %); ST3 is back at P2's level. (The train slowed to 0.12 m/s at ★ L1, three cm/s over the motion bar `chase_min_v`
+  0.1, which the 55 % reflects.)
+- **On the real train the belief is good:** the believed heading's median error 10–11° on every arm; > 90° wrong on 5 % of
+  updates (P2) to 7 % (ST3), 1.3–1.9 reversals a chase.
+- **Where the phantoms start:** a cloud candidate that "moved" (decision 5; 143 of 273 in ST3) — a static ball, block, wall
+  base or chair leg whose visible part changes as it comes into view (45 % at nothing movable); half of them with the body
+  STANDING (moved < 1 cm over the watch; the real ones 21 %); their apparent speed is HIGHER than the train's (0.20 against
+  0.14 m/s median) — nothing in the start's own evidence separates them (AUCs 0.30–0.69 for speed, scatter, sightings, range,
+  yaw and head travel). And M1's promotions (decision 7): 57 of 81 phantoms (70 %, as on every arm since M1).
+- **What the operator sees is mostly the COAST:** ST3's phantom seconds a run are 18 (real movers 45): 10 of them coasting —
+  the pursuit extrapolating a velocity that no sighting after the start ever confirmed (phantom coasts: median ONE velocity
+  update, 1.0 s of chase; real coasts: 26). The 293 s red ball (seed 7) is the other form: a static ball held as the mover by
+  the follow's any-age hold for 5.5 s, its velocity at 0.01–0.07 m/s with the heading flipping on every update.
+
+**Two levers, one at a time against ST3 (n = 24 each, with a placebo arm `pp3` = ST3 on the play dice re-rolled):**
+- **VC, the verified coast** (`BearingSeekLoop.coast_needs_confirm` 1, config `pvc`): a chase coasts only after a sighting
+  fulfilled its prediction since it began; one whose velocity no sighting confirmed ends as a thing that stopped (its last
+  sighting a remembered place — what a static thing newly in view is). Offline on ST1–ST3's logs: phantom coast seconds −65 %,
+  real −28 % (M1's train promotions are mostly unconfirmed coasts too). Unit tests `AChaseNoSightingConfirmedEndsAsAThingThatStopped`,
+  `AChaseWithAConfirmedPredictionStillCoasts`, `TheVerifiedCoastIsOffByDefault`; ST3 seed 7 tick-identical without it (240 s).
+- **VM, the motion sensor vouches** (re-use of §17.103 M7 in today's stack; config `pvm`): MotionField between the cloud and the
+  seek loop, a cloud sighting passing to the chase only with ray-traced motion evidence within 0.3 m in the last 0.6 s. M7 was
+  `PARTIAL` (precision up, a third less chasing) before the slow train and the any-age follow.

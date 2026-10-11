@@ -3468,7 +3468,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_dash) std::fprintf(stderr, "  dashes: %d leaned toward a mover, %d released by the lean hand-off, %d timed out\n", dashes, dash_released, dash_timeouts);
         if (chase_on) { const auto cf = brain.chase_cand_fates();
             std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase; candidates not chased: %d replaced (missed the gate), %d too fast, %d still, %d timed out; targets taken from the walk: %d; chases yielded near tall structure: %d, sightings dropped at a yielded place: %d; static targets yielded near tall structure: %d, sightings dropped there: %d; targets forgotten for no progress: %d\n",
-                         brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3], brain.walk_takes(), brain.chases_yielded(), brain.yield_drops(), brain.static_yielded(), brain.static_yield_drops(), brain.progress_forgets()); }
+                         brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3], brain.walk_takes(), brain.chases_yielded(), brain.yield_drops(), brain.static_yielded(), brain.static_yield_drops(), brain.progress_forgets());
+            if (brain.coasts_refused() >= 0)   // §17.118
+                std::fprintf(stderr, "  verified coast: %d chases ended as a thing that stopped -- no sighting confirmed their velocity\n", brain.coasts_refused()); }
         if (g_imp_s > 0.0) std::fprintf(stderr, "  impeded looks: %d (seek's range unclosed %.1f s); walls %d (forgotten, escaped), things %d (kept)\n",
                                         imp_n, g_imp_s, imp_wall, imp_thing);
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes; %d stalls fired by contact, %d seek targets dropped by them\n",

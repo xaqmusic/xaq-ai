@@ -338,6 +338,7 @@ public:
     std::array<double, 3> chase_last_judgement() const;   // miss (m), implied speed (m/s), decision code    // the bearing the head should turn to (rad, + = right), NaN when nothing moving is in mind
     bool   chase_coasting() const;    // the target is the lost thing's prediction, coasting (chase_permanence_ticks)
     int    chases_reacquired() const;
+    int    coasts_refused() const;     // §17.118: chases ended as a stopped thing for want of a confirmed velocity; -1 = the lever off
     void   restore_brain_state(nlohmann::json const& s);
     bool   chase_lost_now() const;    // this tick a chase was dropped with the thing still moving...
     double chase_lost_ego() const;    // ...and where it was last predicted: bearing (rad, + = right) and range from the body

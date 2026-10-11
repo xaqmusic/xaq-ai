@@ -766,3 +766,51 @@ TEST(BearingSeekLoop, TheApproachCostIsOffByDefault) {
     r.step(0, 0, 0, 0.0f, 1.0f, 0.6f);
     EXPECT_EQ(r.m.value(), 1.0f);
 }
+
+// §17.118 THE VERIFIED COAST: a chase whose velocity no sighting confirmed after it began is not coasted on -- it ends as a
+// thing that stopped, at its last sighting; one with a confirmed prediction coasts as before; off by default.
+namespace {
+// sightings every 4 ticks of a thing walking away at 0.2 m/s, until the chase starts plus `after` more sightings
+void chase_then_vanish(Rig& r, int after) {
+    int k = 0, more = -1;
+    while (k < 40 && more != 0) {
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        if (more < 0 && r.m.chasing()) more = after; else if (more > 0) --more;
+        ++k;
+    }
+    ASSERT_TRUE(r.m.chasing());
+    for (int i = 0; i < 60; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);   // out of sight past chase_forget_ticks
+}
+}  // namespace
+
+TEST(BearingSeekLoop, AChaseNoSightingConfirmedEndsAsAThingThatStopped) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_permanence_ticks"] = int64_t{150}; p["coast_needs_confirm"] = int64_t{1};
+    Rig r(p);
+    chase_then_vanish(r, 0);
+    EXPECT_FALSE(r.m.chasing());
+    EXPECT_FALSE(r.m.coasting()) << "no prediction of the chase was ever fulfilled: nothing to coast on";
+    EXPECT_TRUE(r.m.have_target()) << "the thing is where it was last seen";
+    EXPECT_EQ(r.m.chases_stopped(), 1);
+    EXPECT_EQ(r.m.coasts_refused(), 1);
+    EXPECT_EQ(r.m.diag_snapshot()["counts"]["coasts_refused"], 1);
+}
+
+TEST(BearingSeekLoop, AChaseWithAConfirmedPredictionStillCoasts) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_permanence_ticks"] = int64_t{150}; p["coast_needs_confirm"] = int64_t{1};
+    Rig r(p);
+    chase_then_vanish(r, 2);
+    EXPECT_TRUE(r.m.coasting()) << "two sightings where the chase predicted: the velocity is a belief";
+    EXPECT_EQ(r.m.coasts_refused(), 0);
+}
+
+TEST(BearingSeekLoop, TheVerifiedCoastIsOffByDefault) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_permanence_ticks"] = int64_t{150};
+    Rig r(p);
+    chase_then_vanish(r, 0);
+    EXPECT_TRUE(r.m.coasting()) << "as before: every chase may coast";
+    EXPECT_FALSE(r.m.diag_snapshot()["counts"].contains("coasts_refused"));
+}

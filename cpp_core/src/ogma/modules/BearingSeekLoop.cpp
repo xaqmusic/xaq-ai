@@ -165,6 +165,10 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "OBJECT PERMANENCE: when a chased thing's sightings stop, its predicted position keeps moving at the last velocity for up "
             "to this many ticks (the need falling 1 -> 0), a sighting near the prediction resumes the chase, and the loss is reported "
             "at the end.  0 = the loss at once.", ParamValue{int64_t{0}}},
+        {"coast_needs_confirm", ParamMutability::HotMutable,
+            "§17.118 THE VERIFIED COAST: a chase coasts (chase_permanence_ticks) only after this many sightings fulfilled its "
+            "prediction since it began; one whose velocity no sighting confirmed ends as a thing that stopped, its last sighting a "
+            "remembered place.  0 = off.", ParamValue{int64_t{0}}},
         {"yield_topic", ParamMutability::ConstructionOnly,
             "THE YIELD: ProprioToken [tall_count, range] (CloudMap target_tall_topic) -- the tall voxels around this loop's held target.  Empty = off.",
             ParamValue{std::string("")}},
@@ -218,7 +222,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["chase_confirm"] = ParamValue{int64_t(chase_confirm_)}; m["chase_confirm_ticks"] = ParamValue{int64_t(chase_confirm_ticks_)};
     m["chase_forget_ticks"] = ParamValue{int64_t(chase_forget_ticks_)}; m["chase_lead_s"] = ParamValue{chase_lead_s_};
     m["chase_v_max"] = ParamValue{chase_v_max_}; m["chase_min_v"] = ParamValue{chase_min_v_}; m["chase_stop_v"] = ParamValue{chase_stop_v_};
-    m["chase_permanence_ticks"] = ParamValue{int64_t(chase_permanence_ticks_)}; m["chase_memory_ticks"] = ParamValue{int64_t(chase_memory_ticks_)};
+    m["chase_permanence_ticks"] = ParamValue{int64_t(chase_permanence_ticks_)}; m["coast_needs_confirm"] = ParamValue{int64_t(coast_needs_confirm_)}; m["chase_memory_ticks"] = ParamValue{int64_t(chase_memory_ticks_)};
     m["chase_memory_holds"] = ParamValue{chase_memory_holds_};
     m["static_yield_tall"] = ParamValue{int64_t(static_yield_tall_)};
     m["progress_walk_m"] = progress_walk_m_; m["progress_m"] = progress_m_;
@@ -273,6 +277,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "chase_min_v",     [&](auto const& v){ chase_min_v_   = get_double(v,"chase_min_v"); });
     apply_param(params, "chase_stop_v",    [&](auto const& v){ chase_stop_v_  = get_double(v,"chase_stop_v"); });
     apply_param(params, "chase_permanence_ticks", [&](auto const& v){ chase_permanence_ticks_ = std::max(0, int(get_double(v,"chase_permanence_ticks"))); });
+    apply_param(params, "coast_needs_confirm", [&](auto const& v){ coast_needs_confirm_ = std::max(0, int(get_double(v,"coast_needs_confirm"))); });
     apply_param(params, "yield_topic",     [&](auto const& v){ yield_topic_   = get_string(v,"yield_topic"); });
     apply_param(params, "chase_yield_tall", [&](auto const& v){ chase_yield_tall_ = std::max(0, int(get_double(v,"chase_yield_tall"))); });
     apply_param(params, "chase_yield_look", [&](auto const& v){ chase_yield_look_ = get_double(v,"chase_yield_look") > 0.5; });
@@ -308,6 +313,7 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "chase_min_v")     chase_min_v_ = get_double(value, k);
     else if (k == "chase_stop_v")    chase_stop_v_ = get_double(value, k);
     else if (k == "chase_permanence_ticks") chase_permanence_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "coast_needs_confirm") coast_needs_confirm_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_yield_tall") chase_yield_tall_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_yield_look") chase_yield_look_ = get_double(value, k) > 0.5;
     else if (k == "static_yield_tall") static_yield_tall_ = std::max(0, int(get_double(value, k)));
@@ -431,7 +437,7 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
                     have_cand_ = true; cand_x_ = cand_x0_ = tx_; cand_y_ = cand_y0_ = ty_; cand_vx_ = vx; cand_vy_ = vy;
                     cand_tick_ = cand_first_ = tick_id; cand_n_ = chase_confirm_;
                     sight_.clear(); sight_.push_back({double(tick_id), tx_, ty_});
-                    chasing_ = true; ++chases_; ++static_promoted_; last_decision_ = 7; static_ring_.clear();
+                    chasing_ = true; ++chases_; ++static_promoted_; last_decision_ = 7; chase_confirms_ = 0; static_ring_.clear();
                 }
             }
         }
@@ -628,6 +634,7 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
                 else { const double a = cand_n_ >= 2 ? 0.5 : 1.0; cand_vx_ = (1.0 - a) * cand_vx_ + a * vx; cand_vy_ = (1.0 - a) * cand_vy_ + a * vy; }
                 sight_.push_back({double(tick_id), fx, fy});
                 cand_x_ = fx; cand_y_ = fy; cand_tick_ = tick_id; ++cand_n_;
+                if (chasing_ || coasting_) ++chase_confirms_;                // §17.118: a prediction of the chase fulfilled
                 if (coasting_) { coasting_ = false; chasing_ = true; ++chases_reacquired_; }   // found where predicted: the chase resumes
                 if (chasing_ && !mover_pos_topic_.empty()) {
                     // §17.113 A0: where a confirmed mover was seen -- the motion map's input (odometry / 2, the place map's pose scale)
@@ -653,7 +660,7 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
                 if (std::hypot(fx - (mem_x_ + mem_vx_ * dt), fy - (mem_y_ + mem_vy_ * dt)) <= chase_gate_m_) {
                     cand_vx_ = mem_vx_; cand_vy_ = mem_vy_; cand_n_ = chase_confirm_;
                     cand_first_ = tick_id >= uint64_t(chase_confirm_ticks_) ? tick_id - uint64_t(chase_confirm_ticks_) : 0;
-                    chasing_ = true; ++chases_; ++chases_reacquired_; have_memory_ = false;
+                    chasing_ = true; ++chases_; ++chases_reacquired_; have_memory_ = false; chase_confirms_ = 0;
                 }
             }
         }
@@ -664,7 +671,7 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
                 const double disp = std::hypot(cand_x_ - cand_x0_, cand_y_ - cand_y0_);
                 moved = std::hypot(cand_vx_, cand_vy_) >= chase_min_v_ && watched > 0.0 && disp / watched >= chase_min_v_;
             }
-            if (moved) { chasing_ = true; ++chases_; last_decision_ = 5; } else { ++cand_still_; last_decision_ = 6; }
+            if (moved) { chasing_ = true; ++chases_; last_decision_ = 5; chase_confirms_ = 0; } else { ++cand_still_; last_decision_ = 6; }
         }
     }
     if (coasting_ && tick_id - coast_from_ >= uint64_t(chase_permanence_ticks_)) {
@@ -673,7 +680,10 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
     }
     if (have_cand_ && !coasting_ && tick_id - cand_tick_ > uint64_t(chase_forget_ticks_)) {
         if (chasing_) {
-            const bool stopped = chase_stop_v_ <= 0.0 || std::hypot(cand_vx_, cand_vy_) < chase_stop_v_;
+            // §17.118: a velocity no sighting confirmed is not coasted on -- the thing is where it was last seen
+            const bool unverified = coast_needs_confirm_ > 0 && chase_confirms_ < coast_needs_confirm_;
+            const bool stopped = chase_stop_v_ <= 0.0 || std::hypot(cand_vx_, cand_vy_) < chase_stop_v_ || unverified;
+            if (unverified && !(chase_stop_v_ <= 0.0 || std::hypot(cand_vx_, cand_vy_) < chase_stop_v_)) ++coasts_refused_;
             if (stopped) {
                 // the thing stopped: where it was last seen is an ordinary remembered target from here
                 tx_ = cand_x_; ty_ = cand_y_; have_target_ = true; conf_ = 1.0f; ++chases_stopped_; target_set_tick_ = tick_id; target_px_ = tx_; target_py_ = ty_; target_src_ = 3;
@@ -850,6 +860,7 @@ nlohmann::json BearingSeekLoop::diag_snapshot() const {
                    {"cand_fast", cand_fast_}, {"cand_still", cand_still_}, {"cand_timeout", cand_timeout_},
                    {"progress_forgets", progress_forgets_}, {"contact_forgets", contact_forgets_},
                    {"static_yielded", static_yielded_}, {"walk_takes", walk_takes_}};
+    if (coast_needs_confirm_ > 0) j["counts"]["coasts_refused"] = coasts_refused_;   // §17.118
     j["progress"] = {{"walked", walked_}, {"best_range", best_range_ < 1e8 ? best_range_ : -1.0}};
     return j;
 }

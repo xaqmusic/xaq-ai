@@ -186,6 +186,12 @@ private:
     // recovers by 1/chase_pull_recover_ticks per tick; the need while chasing is the pull.  A thing that keeps getting
     // away loses its hold, the way a known kind does.  1 = no decay.
     int    chase_permanence_ticks_ = 0;
+    // THE VERIFIED COAST (2026-10-11, §17.118, the operator: "the robot may also sense movement when it does not exist"):
+    // coast_needs_confirm -- a chase coasts (permanence) only after this many of its own predictions were fulfilled (a
+    // sighting where the candidate should be, after the chase began); a chase whose velocity no sighting ever confirmed
+    // ends as a thing that stopped (its last sighting a remembered place).  A static thing newly in view starts a chase
+    // and is never sighted as a mover again; a moving one is.  0 = off (every chase may coast).
+    int    coast_needs_confirm_ = 0, chase_confirms_ = 0, coasts_refused_ = 0;
     // PERMANENCE IN RECOGNITION (2026-09-29, after coasting regressed -- §17.61): chase_memory_ticks -- a lost mover is
     // kept in mind (its last predicted position and velocity, extrapolated) for this long WITHOUT driving the walk;
     // a single mover sighting within chase_gate_m of where it should now be re-acquires the chase at once, no
@@ -272,6 +278,8 @@ private:
 public:
     int    chases_lost()    const { return chases_lost_; }
     int    chases_stopped() const { return chases_stopped_; }
+    int    coasts_refused() const { return coasts_refused_; }
+    int    coast_needs_confirm() const { return coast_needs_confirm_; }
     bool   chase_lost_now() const { return lost_now_; }
     // THE GAZE (2026-09-29, the operator: "the robot should be able to turn its head while it's walking to try to reacquire
     // the moving target"): the bearing (body frame, + = right) the head should turn to -- the chased or coasted target's,

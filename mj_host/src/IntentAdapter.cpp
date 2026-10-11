@@ -695,6 +695,7 @@ int    IntentAdapter::seek_lead_option() const { auto* q = find_seek(*instance_)
 int    IntentAdapter::seek_lead_node()   const { auto* q = find_seek(*instance_); return q ? q->lead_node() : 0; }
 bool   IntentAdapter::chase_coasting() const { auto* q = find_seek(*instance_); return q && q->coasting(); }
 int    IntentAdapter::chases_reacquired() const { auto* q = find_seek(*instance_); return q ? q->chases_reacquired() : 0; }
+int    IntentAdapter::coasts_refused() const { auto* q = find_seek(*instance_); return q && q->coast_needs_confirm() > 0 ? q->coasts_refused() : -1; }
 void   IntentAdapter::restore_brain_state(nlohmann::json const& s) { if (g_brain_tape) g_brain_tape->restore(0, s.dump()); instance_->restore_state(s); }
 bool   IntentAdapter::chase_lost_now() const { auto* q = find_seek(*instance_); return q && q->chase_lost_now(); }
 double IntentAdapter::chase_lost_ego() const { auto* q = find_seek(*instance_); return q ? q->chase_lost_ego() : 0.0; }
