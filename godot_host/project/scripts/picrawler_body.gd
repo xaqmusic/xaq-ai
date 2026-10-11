@@ -173,7 +173,26 @@ const MAX_SERVO_TORQUE: float = 0.15      # Nm — gentle enough that motor reac
 										  # exceed Euler stability and look like flailing.
 										  # 0.3 Nm still gives ~20× headroom over the
 										  # gravitational moment at hip2 (~0.013 Nm).
-const MAX_SERVO_SPEED: float = 6.0        # rad/s — matches doc spec (6-10).  Now that joints
+# ⚠ const -> var 2026-09-13, so the HARDWARE's slew budget can be imposed on the sim.
+# OGMA_PICRAWLER_MAX_SERVO_SPEED overrides it; the default is unchanged, so gain-0.
+#
+# ⚠ THE SIM HAS BEEN FASTER THAN THE ROBOT IS ALLOWED TO BE.  At the standard hobby-servo
+# scale (500-2500 us = 180 deg, 636.6 us/rad) 6.0 rad/s is ~76 us/tick at the 50 Hz tick,
+# and BOM §3.8.2's measured duty budget reads:
+#     <= 50 us/tick (3.93 rad/s) -> <= 1.90 A   ✅ the budget
+#        80 us/tick (6.28 rad/s) ->    2.61 A   ⚠ at the edge
+#     >= 200 us/tick             ->   ~3.00 A   ❌ over the 5 V rail's 3 A rating
+# So the sim sits on the "at the edge" row, while the DEPLOYED ServoDriver default is
+# 40 us/tick = 3.14 rad/s — half the sim's speed.  Whatever gait the sim settles on is
+# therefore not the gait the robot will execute on first power-on.
+# ⚠ The us/rad scale above is the STANDARD.  The bench check has since been done:
+# ROBOT_US_PER_RAD below is MEASURED (pi_host/calib/sensors.json, RL knee, 2026-09-13), and
+# at that scale the deployed 40 us/tick is 3.67 rad/s, not 3.14.  The operator's call
+# (2026-10-02): keep the robot at 40 us/tick and match the sim to it.  The robot-faithful
+# config (P-e, ..._tofboom__fsrleg) sets OGMA_PICRAWLER_MAX_SERVO_SPEED=3.668 in its
+# body_env; this default stays 6.0 so every historical config reproduces.
+const ROBOT_US_PER_RAD: float = 545.2      # measured; pi_host/calib/sensors.json servo.us_per_rad
+var MAX_SERVO_SPEED: float = 6.0          # rad/s — matches doc spec (6-10).  Now that joints
 										  # use right-handed bases (constraint solver stable)
 										  # and chassis is suspended during calibration,
 										  # higher speed is safe.  At 6 rad/s a full ±80° throw
@@ -808,10 +827,24 @@ const _LAYER_CHASSIS: int = 1 << 2   # chassis-only layer — floor.mask does
 # drag)" for hump traversal; the real mechanism is worse than frictionless drag — there is no
 # belly contact at all.
 #
-# DEFAULT OFF, so every historical number stays reproducible and this is a LEVER rather than a
-# silent re-basing of the whole campaign (CLAUDE.md §3: gain-0-guarded, A/B'd, then promoted
-# on evidence).  Turn it on with the export, OGMA_PICRAWLER_CHASSIS_COLLIDE=1, or [J].
-@export var chassis_collides: bool = false
+# ⚠ DEFAULT FLIPPED TO **ON**, 2026-09-13, BY OPERATOR DECISION — and this IS the re-basing
+# the paragraph above warned about, so it is named rather than slipped in.
+#
+# WHY IT WAS OFF: so every historical number stayed reproducible and this stayed a LEVER.
+# WHY IT IS NOW ON: a ghost chassis cannot touch the ground, so every belly/clearance result
+# in the ledger was measured on a body for which "belly grounding" meant the belly
+# INTERPENETRATING the floor.  That is not a conservative approximation, it is a different
+# physics, and it silently invalidates the one channel the promoted height homeostat rides.
+# The 2026-09-13 boom-ToF and height-ratchet work is the case in point: both were measured
+# on a ghost body before this flip and both were re-checked after it.
+#
+# ⚠ CONSEQUENCE FOR THE RECORD, stated plainly: numbers taken before this date are NOT
+# directly comparable to numbers taken after it unless the arm set the env var explicitly.
+# `seedavg.py` does NOT set it, so most of the campaign ran ghost.  To reproduce a
+# historical figure, set OGMA_PICRAWLER_CHASSIS_COLLIDE=0 and say so.
+#
+# The startup receipt prints the state unconditionally, ON or off, so no run is ambiguous.
+@export var chassis_collides: bool = true
 # Sliding friction of the chassis shell against the world, INDEPENDENT of the feet (mu=1.5)
 # and the climbing wedges (3.0).  0.20 ~ plastic on concrete.  Raise it to make a downed
 # robot stick where it falls; drop it toward 0 for a body that slides freely on its belly.
@@ -850,6 +883,10 @@ var _chassis_com_valid: bool = false
 # Measured two-box body: the top of the RPi / Robot-HAT stack.  The belly-up
 # auto-reset keys off this; see _LEGACY_INVERTED_REST_H.
 var _chassis_top_local: float = 0.021
+# Underside of the lowest chassis box, rel the chassis origin — the BELLY plane.  For a
+# multi-box body it is NOT -CHASSIS_Y/2: the measured body's origin is not its centre
+# (boxes span -26 mm to +77 mm), and using the half-height there is a 25 mm error.
+var _chassis_bottom_local: float = -0.021
 # Walking-trail UI helper (sibling node found at _build time); cached so
 # _do_hard_reset() can wipe its X-markers without re-traversing the tree.
 # Burst-onset probe state — see the trigger in _clip_record().
@@ -1045,6 +1082,20 @@ var _hip2_axes:   Array[Vector3] = []   # per-leg lateral, used for torque appli
 var _knee_axes:   Array[Vector3] = []   # same — knee axis is the same lateral as hip2
 # Construction-time world positions of the joint anchors per leg, used
 # by the calibration FK to compute body transforms from slider angles.
+# ⚠ FK NOW RUNS IN C++ — cpp_core/include/ogma/body/LegKinematics.hpp, bound as the
+# LegKinematics class (port doc Phase 4, step (a)).  It CACHES the anchors below, which
+# means it can go stale exactly the way _retarget_body_watchers()'s consumers can: see
+# the warning above that function.  _build_body() refreshes it as its last act, so both
+# the initial build and the live [B] morphology swap are covered.
+# The swap is verified byte-identical — cpp_core/tests/body/leg_kinematics_parity_check.cpp.
+var _legkin = null                          # LegKinematics (GDExtension)
+# Test hook, OFF by default (0 = never), so the build is gain-0 and byte-identical.
+# ⚠ EXISTS BECAUSE THE BYTE-IDENTITY GATE CANNOT SEE THIS BUG.  A trace diff proves the
+# FK port is exact on a run that never rebuilds the body; the anchor cache only goes
+# stale on the live [B] swap, which was reachable ONLY from a keypress and therefore
+# never exercised headlessly.  OGMA_PICRAWLER_BODY_SWAP_AT=<tick> performs the same swap
+# mid-run and prints a verdict.
+var _body_swap_at_tick: int = 0
 var _hip1_world_c: Array[Vector3] = []
 var _hip2_world_c: Array[Vector3] = []
 var _knee_world_c: Array[Vector3] = []
@@ -1540,6 +1591,12 @@ var _dbg_att_err_imu: float = 0.0     # gyro-fused attitude error vs exact (deg)
 var _dbg_acc_mag: float = 0.0         # |accelerometer| m/s^2 (should hover near 9.81)
 var _dbg_acc_trust: float = 0.0       # adaptive correction gain actually applied
 var _prev_lin_vel: Vector3 = Vector3.ZERO   # for finite-differencing body acceleration
+# ⚠ THE FILTER ITSELF NOW LIVES IN C++ — cpp_core/include/ogma/body/ImuAttitude.hpp,
+# bound as the ImuAttitude class (port doc Phase 4, Order step (a)).  The two Vector3s
+# below are kept as the published mirrors of its state, because half the file and the
+# HUD read them; they are WRITTEN FROM the filter each substep, never computed here.
+# The swap is verified byte-identical — cpp_core/tests/body/imu_attitude_parity_check.cpp.
+var _imu_att = null                         # ImuAttitude (GDExtension), made on first use
 var _up_est_body: Vector3 = Vector3.ZERO    # complementary-filter gravity-up estimate (body frame)
 var _up_acc_last: Vector3 = Vector3.ZERO    # last accel-only gravity-up (body frame)
 var _accel_body_last: Vector3 = Vector3.ZERO  # last modelled accelerometer reading
@@ -1579,7 +1636,9 @@ var _strido_prev_meas: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector
 # Servo forward-model state: per-joint first-order lag on the EFFECTIVE target (the
 # slew-limited command the PD actually tracks, _eff_target_* — itself pure efference).
 # Cleared on hard reset; re-seeded from the current effective target on first use.
-var _strido_lp: Array = []                    # 12 floats, index = leg*3 + joint
+# ⚠ NOW IN C++ — ogma::body::ServoForwardModel, bound as ServoLag (port doc Phase 4,
+# step (b)).  State and arithmetic both live there; this holds only the handle.
+var _servo_lag = null                         # ServoLag (GDExtension), made on first use
 const STRIDO_LP_ALPHA: float = 0.2
 var _strido_prev_loaded: Array = [false, false, false, false]
 var _strido_prev_contact: Array = [false, false, false, false]
@@ -1628,6 +1687,16 @@ const STRIDE_V_BIAS_KI: float = 0.1       # PI bias-estimator gain (integral of 
 const STRIDE_V_SLIP_ALPHA: float = 0.05   # slip EMA (~0.4 s)
 const STRIDE_V_COAST_LEAK: float = 0.005  # leak toward 0 when no stance feet (~4 s tau)
 var _stridev_prev_loaded: Array = [false, false, false, false]
+# ⚠ "right" below is the LEG NAMING MIRROR (:325), not a sign error: the picrawler's forward
+# is +Z, so with Y up in a right-handed frame its +X is anatomically LEFT.  Every producer
+# and consumer in this stack labels +X "right" consistently, so the mirror is behaviorally
+# null — do NOT rename piecemeal; the note at :325 says why and where it must be resolved.
+# ⚠ THE FUSION NOW RUNS IN C++ — ogma::body::StrideV, bound as StrideVNode (port doc
+# Phase 4, step (b)), so the sim and ogma_host share one estimator.  The three vars
+# below are MIRRORS for the trace/HUD, written FROM the filter each tick, never
+# computed here — the same arrangement _up_est_body has with ImuAttitude.
+var _stridev = null                       # StrideVNode (GDExtension), made on first use
+var _stridemath = null                    # StrideMath (GDExtension), stateless helpers
 var _stridev_est: Vector2 = Vector2.ZERO  # [x = right, y = forward] body frame, m/s
 var _stridev_bias: Vector2 = Vector2.ZERO # learned accel bias [x, z], m/s^2
 var _stridev_slip: float = 0.0
@@ -2357,6 +2426,131 @@ func _sg_pattern_offsets(name: String) -> Array:
 #
 # Opt-in (default off) so existing baselines reproduce byte-identically.
 @export var publish_tilt: bool = false
+# ---- SIM-HONESTY SUBSTITUTES (port doc Phase 4, step (c)) ----------------------------
+# The deployed config has never run on its legal inputs: five of the twelve topics it
+# consumes are oracle-fed (ledger ★★★ 2026-08-28).  These three switches replace the
+# oracle publishers with the honest ones the file ALREADY computes, so the A/B measures
+# what the robot can actually know — before any hardware result is attributed to the gait.
+#
+# ⚠ ALL DEFAULT FALSE and each is byte-identical off.  ⚠ ONE LEVER AT A TIME: they are
+# three separate substitutions with three separate consumers, and they are measured
+# separately before any combined arm (CLAUDE.md §3 rule 1).
+#
+# ⚠ WHAT THE CONSUMER MAP ACTUALLY SAYS, checked in the config rather than assumed —
+# two of the ledger's stated consumers do not exist in `native_measured`:
+#   upright -> GainEvolver.upright_topic only.  `tilt` is NOT in the config at all, so
+#             the tilt half of that switch is INERT here (kept for configs that read it).
+#   joints  -> JointSensorimotorBridge + 2x EPM (body_pose, body_pose_t).
+#   imu     -> MotorEPMv2 ONLY.  GainEvolver subscribes but `handle_imu` discards every
+#             value while `travel_topic` is set, and the config sets it to stride_v — so
+#             GainEvolver's flow term is ALREADY legal and this lever cannot move it.
+#             Of imu's four values MotorEPMv2 reads only [2] (fwd_v) and [3] (yaw rate);
+#             [0]/[1] (sin/cos yaw) have no consumer in this config.
+# ---- BOOM-MOUNTED BELLY ToF (the as-built sensor) -------------------------------------
+# The real VL53L0X is NOT under the belly centre: it is on a boom out the BACK, at the
+# height of the top of the Robot HAT.  That geometry is not cosmetic — it puts a long
+# lever arm on PITCH, so nose-down/nose-up changes the reading far more than the belly
+# actually moves, and the ray is cast along a tilted body axis besides.
+#
+# ⚠ DEFAULT OFF and byte-identical: turning it on CHANGES A PROMOTED INPUT
+# (ground_clearance feeds the height homeostat), so it is a lever, not a bug fix.
+var _dbg_gc_belly: float = -1.0   # belly-centre truth proxy while tof_boom is on
+@export var tof_boom: bool = false
+# Sensor position in the BODY frame, metres.  Defaults are the as-built boom: 70 mm aft
+# of centre (forward is +Z, so the boom is -Z) and level with the top of the HAT, which
+# the geometry receipt reports as +77.0 mm rel the chassis origin on the measured body.
+# y <= 0 means "use the body's own measured top surface" so the two cannot disagree.
+@export var tof_boom_z: float = -0.07
+@export var tof_boom_y: float = 0.0
+# Negate the tilt effect using the FUSED attitude estimate — never an exact basis, so it
+# is exactly what the robot can compute.  0 = publish the raw along-ray reading (what a
+# naive driver would emit); 1 = resolve it to true belly clearance.
+@export var tof_tilt_comp: bool = false
+# Restore the pre-2026-10-02 belly-centre ray, which subtracted CHASSIS_Y/2 and read
+# 25.5 mm short on the measured bodies (see _compute_ground_clearance_centre).  Only for
+# reproducing earlier results; a no-op on cad.
+@export var belly_ray_legacy: bool = false
+# Source of the commanded angles behind the *_cmd foot-height signals (see _cmd_angle).
+# 0 = legacy servo_targets (stays 0 in brain mode — byte-identical), 1 = slew-limited targets.
+@export var cmd_fk_source: int = 0
+# Robot-faithful inputs the robot can actually compute (port doc "Brain input contract",
+# operator's decisions 2026-10-02).  Both default off: byte-identical.
+#   honest_distress   — distress from stride odometry × fused tilt (shared C++), not world
+#                       XZ position × the exact basis.
+#   joint_torque_zero — publish zeros: hobby servos report no torque.
+@export var honest_distress: bool = false
+@export var joint_torque_zero: bool = false
+# Servo power model (power-budget plan S1, 2026-10-05).  INSTRUMENT ONLY: recovers each servo's
+# motor torque from the physics (scripts/servo_power_model.gd, Newton-Euler on the distal
+# subchain), for the servo-current / HAT-rail model to stand on.  Writes nothing to the physics;
+# its one side effect, contact reporting on the coxa and upper segments, exists only when ON.
+#   OGMA_PICRAWLER_POWER_MODEL=1        enable
+#   OGMA_PICRAWLER_POWER_LOG=<path>     per-physics-step CSV (implies enable)
+# off = byte-identical.
+@export var power_model: bool = false
+# HONEST TORQUE CAP (2026-10-05).  Godot Physics 3D's HingeJoint3D motor clamps its impulse on
+# EVERY solver iteration and never accumulates (godot_hinge_joint_3d.cpp, 4.6), and the space runs
+# solver_iterations = 64, so the "0.15 N m" servo has really had a ceiling of 64 x 0.15 = 9.6 N m.
+# The power instrument measured what that buys: stance hip2 at 0.18 N m on average and joints
+# past an MG90S's stall ~25 % of the time.  A real servo stalls there; the sim's never can, so the
+# sim has never met the event that browns the robot out.
+# >0 sets the servo's stall torque (N m) and divides the per-call impulse by the iteration count,
+# so one physics step's motor impulse can never exceed cap / physics_hz.  The other scalings
+# (leg_strength, lesions, servo_ki, motor test) keep their ratio to MAX_SERVO_TORQUE.
+#   OGMA_PICRAWLER_HONEST_TORQUE_CAP  N m; 0 = off = byte-identical.  MG90S at 5 V ~0.18
+@export var honest_torque_cap: float = 0.0
+var _motor_impulse_scale: float = 1.0      # set in _build_body when the cap is on
+# ASYMMETRIC CAP: the HOLD side (2026-10-05).  A geared hobby servo resists being back-driven far
+# harder than it can drive: SunFounder's SF006PRO lists >= 2.2 kgf cm dynamic but >= 5 kgf cm
+# static, and the scale probe measured ~0.25 N m driving against ~0.63 N m to back-drive by hand.
+# The extra is gear friction, which is PASSIVE: it can stop motion but never cause it.  So every
+# physics step, a joint that is being pushed back (moving against its command), or has no
+# command to move, gets a BRAKE: target velocity 0, impulse capped at honest_hold_cap.  A braked
+# joint returns to driving at honest_torque_cap only when the motor can WIN: when the torque the
+# brake is holding against, in the commanded direction, is below the drive cap.  That torque is
+# read from the power instrument (servo_power_model.gd), which this switches on.
+# ⚠ First build (2026-10-05) released the brake every step instead.  Under a stance load between
+# the two caps, each drive step slipped and the brake only stopped it: the stance CREPT down (belly
+# 33 -> 20 mm vs the symmetric cap).  Static friction holds without creep; that needs the load test.
+# Hinge backend, and only with honest_torque_cap > 0.
+#   OGMA_PICRAWLER_HONEST_HOLD_CAP  N m; 0 = off (symmetric cap, byte-identical to it)
+@export var honest_hold_cap: float = 0.0
+const HOLD_CMD_EPS: float = 0.02           # rad/s: a command slower than this is "hold still"
+var _motor_cmd: Dictionary = {}             # joint instance id -> Vector2(vel, force) last commanded
+var _brake_steps: int = 0
+var _braked: PackedByteArray = PackedByteArray()
+var _brake_tau: PackedFloat32Array = PackedFloat32Array()   # smoothed instrument torque, per joint
+const BRAKE_TAU_S: float = 0.01            # s, smoothing of the torque the release test reads
+const BRAKE_OMEGA_EPS: float = 0.01        # rad/s, back-drive threshold (solver noise below it)
+var _brake_checks: int = 0
+var _power_log_path: String = ""
+var _power = null
+var _power_log: FileAccess = null
+var _power_steps: int = 0
+var _shot_tick: int = -1
+var _shot_path: String = ""
+# HUD power panel (2026-10-06): the bench dashboard's current graph (current_graph.gd) and the
+# picrawler-dash power lines, fed by the sim's electrical model, so the sim and the robot can be
+# read side by side.  Sampled like the robot: benchd publishes the INA219 at 10 Hz, each reading
+# averaged over its ~68 ms conversion window (state feed `ina_window_ms`).
+var _pw_panel: VBoxContainer = null
+var _pw_graph: Control = null
+var _pw_lbl: Array = []
+var _pw_ring := PackedFloat32Array()
+var _pw_ring_i: int = 0
+var _pw_hist := PackedFloat32Array()      # 10 Hz readings, the last 60 s (peak60)
+var _pw_ema30: float = 0.0
+var _pw_max: float = 0.0
+var _pw_charge: float = 0.0
+var _pw_rail_min1s: float = 3.3
+var _pw_rail_win := PackedFloat32Array()
+var _pw_prev_ang := PackedFloat32Array()
+var _pw_sat_any: bool = false
+const PW_INA_WINDOW_S: float = 0.068
+const PW_SAMPLE_S: float = 0.1
+@export var honest_upright: bool = false   # upright/tilt from the fused attitude estimate
+@export var honest_joints:  bool = false   # joints from the servo forward model
+@export var honest_imu:     bool = false   # imu from ego_heading / stride_v / body gyro
 
 # Ragdoll mode: when true, all servo torques are disabled.  Brain still
 # ticks (proprio published, predictions made), so the perception/learning
@@ -2562,6 +2756,7 @@ const DISTRESS_PERCH_HI: float = 0.30         # rad — tilt_ema at/above this =
 const DISTRESS_RISE: float = 0.006            # accumulate rate × stuck_score
 const DISTRESS_DECAY: float = 0.004           # decay rate × (1 − stuck_score)
 var _distress_pos_history: Array = []         # ring of chassis XZ (Vector2)
+var _distress_node: RefCounted = null         # honest_distress: ogma::body::DistressAccumulator
 var _stuck_deficit: float = 0.0               # fast 2 s net-displacement deficit (stall, 0..1)
 var _tilt_ema: float = 0.0                    # smoothed |tilt| (perch evidence)
 var _distress: float = 0.0                    # slow PERCH×STALL accumulator (the panic signal)
@@ -2702,6 +2897,13 @@ func _ready() -> void:
 		# is physically different from the one that ran.
 		print("PicrawlerBody: \u26a0 OGMA_PICRAWLER_CHASSIS_COLLIDE=%s \u2014 chassis %s" % [
 			ccl, "COLLIDES with the world" if chassis_collides else "is a ghost (historical)"])
+	# ⚠ UNCONDITIONAL RECEIPT.  The block above only spoke when the env var was set, so a
+	# run on the DEFAULT said nothing at all about whether its belly could touch the floor —
+	# and that default has now changed, which makes silence the worst option.  A run whose
+	# log does not carry this line is not evidence about belly clearance.
+	print("PicrawlerBody: chassis_collides = %s%s" % [
+		"ON (solid belly)" if chassis_collides else "off (GHOST belly — historical)",
+		"" if ccl != "" else "  [default]"])
 	var cfr: String = OS.get_environment("OGMA_PICRAWLER_CHASSIS_FRICTION")
 	if cfr != "":
 		chassis_friction = cfr.to_float()
@@ -2783,6 +2985,11 @@ func _ready() -> void:
 		servo_signs[k]   = 1.0
 		servo_origins[k] = 0.0
 	_resolve_env()
+	# The power instrument is byte-identical (trace cmp, 2026-10-05), so a WINDOWED run turns it on
+	# for the HUD's power panel; OGMA_PICRAWLER_POWER_MODEL=0 keeps it off.  Headless runs are
+	# unchanged: they opt in through the env, as before.
+	if DisplayServer.get_name() != "headless" and OS.get_environment("OGMA_PICRAWLER_POWER_MODEL") != "0":
+		power_model = true
 
 	# Curriculum: load file if env var or ExperimentConfig points to one,
 	# then subscribe to stage_changed so future transitions apply their
@@ -2942,10 +3149,10 @@ func _ready() -> void:
 	brain.register_source("EgoHeading", "reality.proprio.ego_heading",
 		"float32[1]: dead-reckoned heading, integrated from the modelled body-frame gyro (drifts, as real dead reckoning does)", true)
 	brain.register_source("VelEgo", "reality.proprio.vel_ego",
-		"float32[2]: [v_right, v_forward] body-frame velocity. ⚠ SOFT ORACLE (world velocity projected) — see sensor_legitimacy doc", true)
+		"float32[2]: [v_right, v_forward] body-frame velocity. ⚠ SOFT ORACLE (world velocity projected) — see sensor_legitimacy doc. ⚠ 'right' is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so +X is anatomically LEFT.", true)
 	# 2026-08-25 — PART V stage B: the LEGAL travel lane (gate A, ledger same date).
 	brain.register_source("StrideV", "reality.proprio.stride_v",
-		"float32[2]: [v_right, v_forward] body-frame velocity ESTIMATED from stance-leg FK " +
+		"float32[2]: [v_right, v_forward] body-frame velocity ESTIMATED from stance-leg FK. ⚠ 'right' is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so +X is anatomically LEFT. " +
 		"on servo forward-model commands, complementary-fused with the IMU. Fully Markov-" +
 		"compliant: commanded angles + foot_load + IMU, nothing else — the legal replacement " +
 		"lane for vel_ego. Gate A 2026-08-25: forward r≈0.75 vs truth at 1 s windows, " +
@@ -3200,6 +3407,27 @@ func _ready() -> void:
 
 	print("PicrawlerBody: built — chassis at y=%.3f, leg_strength=%.2f, reset_mode=%s" % [
 		STANDING_CHASSIS_Y, leg_strength, reset_mode])
+	# ⚠ RECEIPT FOR THE SIM-HONESTY ARMS (port doc step (c)).  Printed unconditionally, and
+	# naming the OFF state too, because the failure this guards against is an arm that
+	# silently did not load — CLAUDE.md §3.2's "did the arm you think you ran actually
+	# load?", which has produced a false verdict here before.  A run whose log does not
+	# say `honest[...]` is not evidence about anything.
+	print("PicrawlerBody: max_servo_speed = %.3f rad/s  (~%.0f us/tick at the 50 Hz tick and the measured %.1f us/rad; robot ServoDriver = 40)"
+		% [MAX_SERVO_SPEED, MAX_SERVO_SPEED * ROBOT_US_PER_RAD / 50.0, ROBOT_US_PER_RAD])
+	print("PicrawlerBody: tof[boom=%s tilt_comp=%s z=%+.3f y=%+.3f]" % [
+		"ON" if tof_boom else "off", "ON" if tof_tilt_comp else "off",
+		tof_boom_z, tof_boom_y if tof_boom_y > 0.0 else _chassis_top_local])
+	print("PicrawlerBody: belly_ray[%s belly %.1f mm below origin]" % [
+		"LEGACY CHASSIS_Y/2" if belly_ray_legacy else "belly-plane",
+		(CHASSIS_Y * 0.5 if belly_ray_legacy else -_chassis_bottom_local) * 1000.0])
+	print("PicrawlerBody: cmd_fk_source=%d (%s)" % [cmd_fk_source,
+		"slew-limited targets" if cmd_fk_source == 1 else "legacy servo_targets — 0 in brain mode"])
+	print("PicrawlerBody: honest_distress=%s joint_torque_zero=%s" % [
+		"ON" if honest_distress else "off", "ON" if joint_torque_zero else "off"])
+	print("PicrawlerBody: honest[upright=%s joints=%s imu=%s]" % [
+		"ON" if honest_upright else "off",
+		"ON" if honest_joints else "off",
+		"ON" if honest_imu else "off"])
 	print("  _chassis_rest_xform.origin = %v" % _chassis_rest_xform.origin)
 	for i in range(4):
 		print("  leg %d %s: coxa=%v upper=%v lower=%v" % [
@@ -3263,6 +3491,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_AUTO_RESET_MAX_HEIGHT",
 			  "OGMA_PICRAWLER_AUTO_RESET_DWELL_TICKS",
 			  "OGMA_PICRAWLER_LEG_SYMMETRY", "OGMA_PICRAWLER_LEG_SYMMETRY_FR_BLEND",
+			  "OGMA_PICRAWLER_BODY_SWAP_AT",
 			  "OGMA_PICRAWLER_HOMEO_STEP_GAIN",
 			  "OGMA_PICRAWLER_HOMEO_PAYOUT_NORM",
 			  "OGMA_PICRAWLER_HOMEO_PHASE_COUPLE",
@@ -3277,7 +3506,19 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_PYRAMID_COUNT",
 			  "OGMA_PICRAWLER_JOINT_BACKEND",
 			  "OGMA_PICRAWLER_JOINT_DAMPING",
-			  "OGMA_PICRAWLER_MOTOR_FREEPLAY"]:
+			  "OGMA_PICRAWLER_MOTOR_FREEPLAY",
+			  "OGMA_PICRAWLER_MAX_SERVO_SPEED",
+			  "OGMA_PICRAWLER_TOF_BOOM",
+			  "OGMA_PICRAWLER_TOF_TILT_COMP",
+			  "OGMA_PICRAWLER_BELLY_RAY_LEGACY",
+			  "OGMA_PICRAWLER_CMD_FK_SOURCE",
+			  "OGMA_PICRAWLER_HONEST_DISTRESS",
+			  "OGMA_PICRAWLER_JOINT_TORQUE_ZERO",
+			  "OGMA_PICRAWLER_HONEST_UPRIGHT",
+			  "OGMA_PICRAWLER_HONEST_JOINTS",
+			  "OGMA_PICRAWLER_HONEST_IMU",
+			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
+			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3298,6 +3539,20 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_ANTIROT_SCALE":     antirot_scale     = max(0.001, v.to_float())
 			"OGMA_PICRAWLER_ANTIROT_GAIN":      antirot_gain      = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_PUBLISH_TILT":      publish_tilt      = (v != "0" and v != "")
+			"OGMA_PICRAWLER_MAX_SERVO_SPEED":   MAX_SERVO_SPEED   = max(0.1, v.to_float())
+			"OGMA_PICRAWLER_TOF_BOOM":          tof_boom          = (v != "0" and v != "")
+			"OGMA_PICRAWLER_TOF_TILT_COMP":     tof_tilt_comp     = (v != "0" and v != "")
+			"OGMA_PICRAWLER_BELLY_RAY_LEGACY":  belly_ray_legacy  = (v != "0" and v != "")
+			"OGMA_PICRAWLER_CMD_FK_SOURCE":     cmd_fk_source     = clampi(v.to_int(), 0, 1)
+			"OGMA_PICRAWLER_HONEST_DISTRESS":   honest_distress   = (v != "0" and v != "")
+			"OGMA_PICRAWLER_JOINT_TORQUE_ZERO": joint_torque_zero = (v != "0" and v != "")
+			"OGMA_PICRAWLER_HONEST_UPRIGHT":    honest_upright    = (v != "0" and v != "")
+			"OGMA_PICRAWLER_HONEST_JOINTS":     honest_joints     = (v != "0" and v != "")
+			"OGMA_PICRAWLER_HONEST_IMU":        honest_imu        = (v != "0" and v != "")
+			"OGMA_PICRAWLER_POWER_MODEL":       power_model       = (v != "0" and v != "")
+			"OGMA_PICRAWLER_POWER_LOG":         _power_log_path = v; power_model = true
+			"OGMA_PICRAWLER_HONEST_TORQUE_CAP": honest_torque_cap = maxf(0.0, v.to_float())
+			"OGMA_PICRAWLER_HONEST_HOLD_CAP":   honest_hold_cap   = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -3376,6 +3631,8 @@ func _resolve_env() -> void:
 					push_warning("PicrawlerBody: ignoring OGMA_PICRAWLER_LEG_SYMMETRY=%s (expected off/lr_pairs/lr_and_fr_pairs)" % v)
 			"OGMA_PICRAWLER_LEG_SYMMETRY_FR_BLEND":
 				leg_symmetry_fr_blend = clamp(v.to_float(), 0.0, 1.0)
+			"OGMA_PICRAWLER_BODY_SWAP_AT":
+				_body_swap_at_tick = max(0, v.to_int())
 			"OGMA_PICRAWLER_HOMEO_STEP_GAIN":
 				homeo_step_gain = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_HOMEO_PAYOUT_NORM":
@@ -3475,6 +3732,13 @@ func _resolve_env() -> void:
 	height_penalty_grace = ExperimentConfig.resolve_picrawler_height_penalty_grace(height_penalty_grace)
 	height_penalty_scale = ExperimentConfig.resolve_picrawler_height_penalty_scale(height_penalty_scale)
 	height_penalty_gain  = ExperimentConfig.resolve_picrawler_height_penalty_gain(height_penalty_gain)
+	# ⚠ RECEIPT, because these are honoured from config metadata ONLY when launched from the
+	# UI — headless falls through to the env var, then 0 — so one config name was two
+	# controllers (ledger 2026-10-02).  Any value > 0 emits events.miss, which MotorEPMv2
+	# treats as a respawn.
+	print("PicrawlerBody: shaping events: stability_gain=%.3f height_penalty_gain=%.3f (%s)" % [
+		stability_gain, height_penalty_gain,
+		"OFF" if stability_gain <= 0.0 and height_penalty_gain <= 0.0 else "ON — events.miss resets MotorEPMv2"])
 	reward_shape         = ExperimentConfig.resolve_picrawler_reward_shape(reward_shape)
 	peak_height          = ExperimentConfig.resolve_picrawler_peak_height(peak_height)
 	band_width           = ExperimentConfig.resolve_picrawler_band_width(band_width)
@@ -4425,12 +4689,15 @@ func _recompute_derived_geometry() -> void:
 
 	# Topmost chassis surface = what touches down when the robot is on its back.
 	_chassis_top_local = CHASSIS_Y * 0.5
+	_chassis_bottom_local = -CHASSIS_Y * 0.5
 	if not _chassis_boxes.is_empty():
 		_chassis_top_local = -INF
+		_chassis_bottom_local = INF
 		for spec in _chassis_boxes:
 			var sz: Vector3 = spec["size"]
 			var off: Vector3 = spec["offset"]
 			_chassis_top_local = max(_chassis_top_local, off.y + sz.y * 0.5)
+			_chassis_bottom_local = min(_chassis_bottom_local, off.y - sz.y * 0.5)
 
 	# target_height / peak_height follow the body's standing height, but ONLY
 	# while still sitting at the class-level literal.  An explicit scene, env
@@ -4619,6 +4886,15 @@ func _build_body() -> void:
 
 	for i in range(4):
 		_build_leg(i)
+	if honest_torque_cap > 0.0:
+		var iters: float = PhysicsServer3D.space_get_param(get_world_3d().space, PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS)
+		_motor_impulse_scale = (honest_torque_cap / MAX_SERVO_TORQUE) / maxf(1.0, iters)
+		print("PicrawlerBody: HONEST TORQUE CAP %.3f N m drive%s (solver_iterations %d; the legacy ceiling was %.2f N m)%s"
+			% [honest_torque_cap, (", %.3f N m hold (passive brake)" % honest_hold_cap) if honest_hold_cap > 0.0 else "",
+			   int(iters), iters * MAX_SERVO_TORQUE,
+			   "" if joint_backend == "hinge" else "  ⚠ hinge backend only — g6dof unchanged"])
+	if power_model or (honest_hold_cap > 0.0 and honest_torque_cap > 0.0):
+		_power_setup()
 	# 2026-06-03 — verify G6DOF angular params reached the joints.  Bit-
 	# identical-across-tweaks calibration sweep raised the question of
 	# whether changes are reaching the body — this print is the receipt.
@@ -4650,6 +4926,18 @@ func _build_body() -> void:
 			hip1_spring_stiffness, hip1_spring_damping,
 			hip2_spring_stiffness, hip2_spring_damping,
 			knee_spring_stiffness, knee_spring_damping])
+	# ⚠ REFRESH THE FK CACHE BEFORE ANY CONSUMER, and _report_geometry() IS a consumer:
+	# its G2/G3 evidence sweep calls _toe_pose() -> _fk_leg().  Refreshing after it left
+	# _legkin null for five calls ("Nonexistent function 'fk' in base 'Nil'") — invisible
+	# in the trace, because that sweep is print-only, and a broken diagnostic regardless.
+	# The anchors are valid the moment the four _build_leg() calls above have appended
+	# them, so this goes there and not at the end.
+	#
+	# Both entry paths (_ready() and _rebuild_body()) run _build_body(), so refreshing
+	# HERE rather than at either call site is what stops a live [B] body swap leaving FK
+	# on the previous geometry — a stale cache would not fail loudly, it would publish
+	# confident poses for a body that no longer exists, into feet_y_gravity_cmd_imu.
+	_legkin_refresh()
 	_report_geometry()
 
 # Hand the (re)built chassis to everything that tracks it by REFERENCE rather
@@ -5162,9 +5450,11 @@ func _apply_g6dof_default_preset() -> void:
 # 2026-06-03 — Backend-aware per-tick motor setter.  Caller always
 # passes torque (Nm); helper does the per-backend unit conversion.
 func _set_motor_vf(j: Object, vel: float, force: float) -> void:
+	if honest_hold_cap > 0.0:
+		_motor_cmd[j.get_instance_id()] = Vector2(vel, force)
 	if j is HingeJoint3D:
 		(j as HingeJoint3D).set_param(HingeJoint3D.PARAM_MOTOR_TARGET_VELOCITY, vel)
-		(j as HingeJoint3D).set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, force / float(physics_hz))
+		(j as HingeJoint3D).set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, force / float(physics_hz) * _motor_impulse_scale)
 	else:
 		# G6DOF: hinge axis remapped to local +X (twist) in _make_g6dof_joint.
 		(j as Generic6DOFJoint3D).set_param_x(Generic6DOFJoint3D.PARAM_ANGULAR_MOTOR_TARGET_VELOCITY, vel)
@@ -5560,7 +5850,7 @@ func _input(event: InputEvent) -> void:
 		# re-press T to bring them back.  HUD hint line displays current state.
 		# (2026-07-18 — reward / trainer / curriculum panels removed as RL cruft.)
 		_panels_hidden = not _panels_hidden
-		for panel_name in ["MotorEpmPanel"]:
+		for panel_name in ["MotorEpmPanel", "PowerPanel"]:
 			var p: Node = get_tree().get_root().find_child(panel_name, true, false)
 			if p != null and p is Control:
 				(p as Control).visible = not _panels_hidden
@@ -5648,12 +5938,7 @@ func _input(event: InputEvent) -> void:
 		# under the SAME brain, mid-run.  Watch TLE: a spike that then decays is
 		# re-inference against a changed morphology, and is the evidence.  A flat
 		# TLE means the swap did not reach anything the brain predicts with.
-		var next_body: String = "measured" if _geometry_name == "cad" else "cad"
-		var next_path: String = "res://addons/ami_ogma/body/%s.json" % next_body
-		if not FileAccess.file_exists(next_path):
-			_ui_notify("[body] %s.json not present" % next_body)
-		else:
-			_rebuild_body(next_path)
+		_swap_body_geometry()
 	elif key == KEY_1:
 		# Live gym swap — drop the experienced robot (brain intact) into the ARENA (donut).
 		_switch_gym("arena")
@@ -5712,6 +5997,26 @@ func _input(event: InputEvent) -> void:
 			gc.visible = not gc.visible
 			print("PicrawlerBody: [U] gain_evolver_panel = %s" % gc.visible)
 
+# The "discrete" actuation backend: joint-local u (hip1 already splay-signed) → the
+# target angle the PD chases.  Shared by the physics path and export_body_calib.gd, so the
+# robot's port (pi_host Actuation.hpp) is checked against numbers this function produced.
+# ⚠ Returns an Array, NOT a Vector3: Vector3 is float32 and would round the targets.
+func _discrete_joint_targets(u_hip1: float, u_hip2: float, u_knee: float) -> Array:
+	var t_hip1: float = u_hip1 * HIP1_TARGET_RANGE + HIP1_REST
+	var t_hip2: float = u_hip2 * HIP_TARGET_RANGE  + HIP2_REST
+	# 2026-06-03 — asymmetric knee mapping (see KNEE_RANGE_FOLD/HYPEREXT).
+	# u=+1 → max fold (~170° tuck, spider stance reachable).
+	# u=0  → REST = straight leg (KNEE_REST=-1.6 rad).
+	# u=-1 → max hyperextension past straight (-2.45 rad).
+	# knee_widening_enabled=false collapses to symmetric KNEE_RANGE_SYMMETRIC.
+	var discrete_knee_range: float
+	if knee_widening_enabled:
+		discrete_knee_range = KNEE_RANGE_FOLD if u_knee >= 0.0 else KNEE_RANGE_HYPEREXT
+	else:
+		discrete_knee_range = KNEE_RANGE_SYMMETRIC
+	var t_knee: float = u_knee * discrete_knee_range + KNEE_REST
+	return [t_hip1, t_hip2, t_knee]
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
@@ -5726,6 +6031,8 @@ func _physics_process(delta: float) -> void:
 	if brain == null or not brain.is_brain_ready():
 		return
 	_accum_grf()
+	if _power != null:
+		_power_tick()
 	# Apply a deferred teleport (KEY_3 / KEY_4-click / env) HERE in the physics step
 	# so the transform writes stick — input-frame writes get clobbered by the solver.
 	if _pending_teleport != null:
@@ -5750,6 +6057,8 @@ func _physics_process(delta: float) -> void:
 			var saved: String = _save_brain_state(save_name)
 			if saved != "":
 				print("PicrawlerBody: SAVE_STATE_AT_EXIT → %s" % saved)
+		if _brake_checks > 0:
+			print("PicrawlerBody: hold brake engaged on %.1f %% of %d joint-steps" % [100.0 * _brake_steps / _brake_checks, _brake_checks])
 		print("PicrawlerBody: quitting (done=%s, tick=%d, budget=%d)"
 				% [_done, tick_counter, _quit_after_ticks])
 		get_tree().quit()
@@ -5764,6 +6073,61 @@ func _physics_process(delta: float) -> void:
 		_accum -= TAU
 		if _done: return
 		_step_one()
+	if honest_hold_cap > 0.0 and _motor_impulse_scale != 1.0:
+		_hold_brakes()
+	# OGMA_SCREENSHOT=<tick>:<path.png> — one viewport capture at that brain tick (windowed runs),
+	# so a HUD change can be checked without someone at the screen.
+	if _shot_tick < 0:
+		var sh: String = OS.get_environment("OGMA_SCREENSHOT")
+		_shot_tick = sh.get_slice(":", 0).to_int() if sh != "" else 0x7FFFFFFF
+		_shot_path = sh.substr(sh.find(":") + 1) if sh != "" else ""
+	if tick_counter == _shot_tick and _shot_path != "":
+		get_viewport().get_texture().get_image().save_png(_shot_path)
+		print("PicrawlerBody: screenshot -> %s" % _shot_path)
+		_shot_path = ""
+
+# The passive side of the asymmetric cap — see honest_hold_cap.  Runs every physics step, after
+# the 50 Hz motor block, so the decision tracks the joint at the solver's rate.
+func _hold_brakes() -> void:
+	if _power == null:
+		return
+	var hold_ratio: float = honest_hold_cap / honest_torque_cap
+	if _braked.size() != 12:
+		_braked.resize(12); _braked.fill(0)
+		_brake_tau.resize(12); _brake_tau.fill(0.0)
+	var dt: float = 1.0 / float(physics_hz)
+	var a_s: float = dt / (BRAKE_TAU_S + dt)
+	for i in range(_hip1_joints.size()):
+		var js: Array = [_hip1_joints[i], _hip2_joints[i], _knee_joints[i]]
+		for jt in range(3):
+			var j = js[jt]
+			if not (j is HingeJoint3D):
+				continue
+			var k: int = i * 3 + jt
+			_brake_tau[k] += a_s * (_power.tau[k] - _brake_tau[k])
+			var c: Vector2 = _motor_cmd.get(j.get_instance_id(), Vector2.ZERO)
+			if c.y <= 0.0:
+				_braked[k] = 0
+				continue                         # released (freeplay, DEAD, detached): no gear to brake
+			var cmd: float = -c.x                # the motor's velocity sign is inverted vs the angle frame
+			var brake: bool
+			if absf(cmd) < HOLD_CMD_EPS:
+				brake = true                     # holding still: friction carries the load
+			elif _braked[k] != 0:
+				# stay braked unless the drive can beat what the brake is holding against
+				brake = _brake_tau[k] * signf(cmd) >= honest_torque_cap
+			else:
+				brake = _power.omega[k] * signf(cmd) < -BRAKE_OMEGA_EPS
+			_braked[k] = 1 if brake else 0
+			_brake_checks += 1
+			var hj := j as HingeJoint3D
+			if brake:
+				_brake_steps += 1
+				hj.set_param(HingeJoint3D.PARAM_MOTOR_TARGET_VELOCITY, 0.0)
+				hj.set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, c.y * dt * _motor_impulse_scale * hold_ratio)
+			else:
+				hj.set_param(HingeJoint3D.PARAM_MOTOR_TARGET_VELOCITY, c.x)
+				hj.set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, c.y * dt * _motor_impulse_scale)
 
 # ---------------------------------------------------------------------------
 # IMU substep — runs at the PHYSICS rate (physics_hz, default 240), NOT at the
@@ -5827,26 +6191,21 @@ func _imu_substep(dt: float) -> void:
 	# Dead-reckon the ego heading from the gyro's yaw component (this runs at the IMU's own
 	# substep rate, so use that dt rather than the brain tick).
 	_ego_heading = wrapf(_ego_heading + gyro_body.y * dt, -PI, PI)
-	_up_acc_last = accel_meas.normalized() if accel_meas.length() > 1e-4 else _up_acc_last
-
-	# --- complementary filter -------------------------------------------------
-	if _up_est_body.length() < 0.5:
-		_up_est_body = _up_acc_last
-	# Gyro propagation: a WORLD-fixed direction seen from the body frame rotates by
-	# −ω·dt.  Use an EXACT rotation — the first-order `v -= ω×v·dt` form leaves
-	# O((ω·dt)²) error per step, which integrates to radians over a run.
-	var w_mag: float = gyro_body.length()
-	if w_mag > 1e-6:
-		_up_est_body = (Basis(gyro_body / w_mag, -w_mag * dt) * _up_est_body).normalized()
-	# Adaptive-gain correction: the accelerometer only indicates "down" when the body is
-	# quasi-static; during a footfall it is measuring the impact.  Weight its trust by how
-	# close ‖a‖ is to g rather than accepting/rejecting outright (a hard gate starved it).
-	var acc_dev: float = absf(accel_meas.length() - 9.81) / 9.81
-	var trust: float = IMU_ACC_TRUST * clampf(1.0 - acc_dev / IMU_ACC_GATE_FRAC, 0.0, 1.0)
-	if trust > 0.0:
-		_up_est_body = (_up_est_body * (1.0 - trust) + _up_acc_last * trust).normalized()
-	_dbg_acc_mag = accel_meas.length()
-	_dbg_acc_trust = trust
+	# --- complementary filter — ogma::body::ImuAttitude ------------------------
+	# Ported to C++ so the sim and ogma_host run the SAME filter rather than two
+	# implementations that drift apart (port doc Phase 4, step (a)).  Everything it
+	# used to do inline is unchanged in behaviour AND in bits: accel-only gravity-up,
+	# the seed when the estimate is empty, exact-rotation gyro propagation, and the
+	# adaptive accel trust that weights the correction by how close ‖a‖ is to g
+	# (a hard accept/reject gate starved this filter, which is why it is adaptive).
+	if _imu_att == null:
+		_imu_att = ClassDB.instantiate("ImuAttitude")
+		_imu_att.configure(IMU_ACC_TRUST, IMU_ACC_GATE_FRAC, 9.81)
+	_imu_att.step(accel_meas, gyro_body, dt)
+	_up_acc_last   = _imu_att.up_accel()
+	_up_est_body   = _imu_att.up_fused()
+	_dbg_acc_mag   = _imu_att.acc_mag()
+	_dbg_acc_trust = _imu_att.trust()
 	var up_exact: Vector3 = w2b * Vector3.UP
 	_dbg_att_err_acc = rad_to_deg(_up_acc_last.angle_to(up_exact))
 	_dbg_att_err_imu = rad_to_deg(_up_est_body.angle_to(up_exact))
@@ -5974,6 +6333,8 @@ func _step_one() -> void:
 		return
 
 	tick_counter += 1
+	if _body_swap_at_tick > 0 and tick_counter == _body_swap_at_tick:
+		_swap_body_geometry()
 	step_in_episode += 1
 	# Controlled belly-on-ramp test: auto-drop onto the hump at the configured tick
 	# (headless; e.g. after the gait develops).  One-shot.
@@ -6219,10 +6580,36 @@ func _step_one() -> void:
 			_ui_notify("[OUTER WALL] auto-reset at r=%.2f m" % chassis_r)
 
 	# ---- 2. Publish proprio ----
+	# ---- LEVER c3 · honest_imu --------------------------------------------------------
+	# `imu` is entirely god's-eye despite its name: world attitude and world velocity.
+	# The honest vector is built from three channels this file already publishes, so
+	# nothing new is invented here — only re-pointed:
+	#   [0,1] sin/cos yaw  -> sin/cos `_ego_heading`, dead-reckoned from the MODELLED
+	#                         body-frame gyro.  It drifts, exactly as it will on hardware.
+	#   [2]   fwd_v        -> `_stridev_est.y`, the stance-FK ⊕ IMU forward estimate.
+	#                         Same clamp and scale, so the token's shape is unchanged.
+	#   [3]   ang_v        -> yaw rate about the BODY's own up.  imu[3] carries the WORLD
+	#                         vertical component, and the two diverge exactly when the
+	#                         body tilts, which is when it matters.
+	#
+	# ⚠ ONE TICK OF LAG ON [2], AND IT IS DELIBERATE.  `_stridev_est` is updated later in
+	# this same tick (the stride block), so this reads the previous tick's estimate — 20 ms
+	# at 50 Hz.  Reordering to remove it would be less hardware-honest, not more: a real
+	# estimator's output is always at least one cycle behind the motion it describes.
+	#
+	# ⚠ FK READS A STABLE ~75 % OF TRUE SPEED and is NOT rescaled to match (prohibition 5).
+	# So this lever changes the channel's GAIN as well as its noise, and a consumer that
+	# had adapted to the oracle's scale must re-adapt.  That is part of what is measured.
 	var imu := PackedFloat64Array()
-	imu.append(sin(yaw)); imu.append(cos(yaw))
-	imu.append(clamp(fwd_v / 1.0, -1.0, 1.0))
-	imu.append(clamp(ang_v / PI,  -1.0, 1.0))
+	if honest_imu:
+		var _gyb: Basis = chassis_xform.basis
+		imu.append(sin(_ego_heading)); imu.append(cos(_ego_heading))
+		imu.append(clamp(_stridev_est.y / 1.0, -1.0, 1.0))
+		imu.append(clamp(_chassis.angular_velocity.dot(_gyb.y) / PI, -1.0, 1.0))
+	else:
+		imu.append(sin(yaw)); imu.append(cos(yaw))
+		imu.append(clamp(fwd_v / 1.0, -1.0, 1.0))
+		imu.append(clamp(ang_v / PI,  -1.0, 1.0))
 	# Per-metre waypoint (see the state block).  Uses the same path-length accumulation the
 	# red trail does, so the log and the picture cannot disagree.
 	var _wp_now := Vector2(_chassis.global_transform.origin.x, _chassis.global_transform.origin.z)
@@ -6278,6 +6665,8 @@ func _step_one() -> void:
 	eh.append(_ego_heading)
 	brain.publish_proprio(eh, "ego_heading")
 	# [v_right, v_forward] — index 1 is forward, which is the index RunTumbleNavV2 reads.
+	# ⚠ "right" is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so its +X
+	# is anatomically LEFT.
 	# ⚠ SOFT ORACLE, recorded as such: this is world-frame chassis velocity projected into the
 	# body frame, and sensor_legitimacy_and_the_feet_y_oracle.md flags fwd_v/lateral_v as "not
 	# free — worth its own pass".  A real legged robot has no odometry; estimating body speed
@@ -6295,6 +6684,8 @@ func _step_one() -> void:
 	# right.  The MotorEPM agency-reward search penalises |lateral_v| (coord_lat_
 	# penalty) so it self-discovers a straight, lateral-cancelling gait instead of
 	# the rear-fishtail crab the forward-only fitness left unpenalised.
+	# ⚠ MIRRORED (:325): +X is anatomically LEFT, so "its right" above is the mirror.
+	# The search penalises the MAGNITUDE, so the mirror does not change behaviour.
 	var lat_v: float = Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z).dot(Vector2(cos(yaw), -sin(yaw)))
 	_last_lat_v = lat_v
 	var latp := PackedFloat64Array()
@@ -6445,32 +6836,49 @@ func _step_one() -> void:
 	# PERCHED one (tilt high + not translating) is.  Combine translation (2 s net
 	# deficit) AND tilt; accumulate SLOWLY so transient walking tilt-blips stay
 	# harmless while a sustained perch climbs to 1.  Warmup skips the first 10 s.
-	var ch_xz := Vector2(chassis_xform.origin.x, chassis_xform.origin.z)
-	_distress_pos_history.append(ch_xz)
-	if _distress_pos_history.size() > DISTRESS_WINDOW_TICKS:
-		_distress_pos_history.pop_front()
-	if _distress_pos_history.size() == DISTRESS_WINDOW_TICKS:
-		var disp: float = (_distress_pos_history[DISTRESS_WINDOW_TICKS - 1] as Vector2).distance_to(
-			_distress_pos_history[0] as Vector2)
-		var max_disp: float = DISTRESS_REF_SPEED * float(DISTRESS_WINDOW_TICKS) / float(physics_hz)
-		_stuck_deficit = clamp(1.0 - disp / max_disp, 0.0, 1.0) if max_disp > 0.0 else 0.0
-	# Graded PERCH × STALL score (smoothed tilt, not a flickering hard gate — the
-	# wedge tilt oscillates ~0.2-0.39 and dips would wipe a binary accumulator).
-	# perch ∈ [0,1] from smoothed |tilt|; stall = the 2 s deficit.  BOTH needed
-	# (product) → level slow-walking (perch≈0) does not accumulate, a perched stall
-	# does.  Rate scales with severity; slow climb (operator: slow is fine).
-	_tilt_ema = (1.0 - DISTRESS_TILT_EMA_ALPHA) * _tilt_ema \
-			  + DISTRESS_TILT_EMA_ALPHA * absf(_chassis_tilt(chassis_xform.basis))
-	var perch: float = clamp((_tilt_ema - DISTRESS_PERCH_LO) / (DISTRESS_PERCH_HI - DISTRESS_PERCH_LO), 0.0, 1.0)
-	var stuck_score: float = perch * _stuck_deficit
-	if tick_counter < DISTRESS_WARMUP_TICKS:
-		_distress = 0.0
+	if honest_distress:
+		# Robot-faithful form (shared C++, ogma::body::DistressAccumulator): the same
+		# accumulator, with displacement from stride odometry along the dead-reckoned
+		# heading and tilt from the FUSED attitude — no world position, no exact basis.
+		if _distress_node == null:
+			_distress_node = ClassDB.instantiate("DistressNode")
+		if _distress_node == null:
+			push_error("picrawler_body: DistressNode unavailable — honest_distress cannot run")
+		else:
+			var up_t: float = acos(clamp(_up_est_body.y, -1.0, 1.0)) if _up_est_body.length() > 0.5 else 0.0
+			_distress = _distress_node.step(_stridev_est.x, _stridev_est.y, _ego_heading, up_t,
+											TAU, tick_counter)
+			var dpkt := PackedFloat64Array()
+			dpkt.append(_distress)
+			brain.publish_proprio(dpkt, "distress")
+			_update_distress_hud()
 	else:
-		_distress = clamp(_distress + DISTRESS_RISE * stuck_score - DISTRESS_DECAY * (1.0 - stuck_score), 0.0, 1.0)
-	var distress_pkt := PackedFloat64Array()
-	distress_pkt.append(_distress)
-	brain.publish_proprio(distress_pkt, "distress")
-	_update_distress_hud()
+		var ch_xz := Vector2(chassis_xform.origin.x, chassis_xform.origin.z)
+		_distress_pos_history.append(ch_xz)
+		if _distress_pos_history.size() > DISTRESS_WINDOW_TICKS:
+			_distress_pos_history.pop_front()
+		if _distress_pos_history.size() == DISTRESS_WINDOW_TICKS:
+			var disp: float = (_distress_pos_history[DISTRESS_WINDOW_TICKS - 1] as Vector2).distance_to(
+				_distress_pos_history[0] as Vector2)
+			var max_disp: float = DISTRESS_REF_SPEED * float(DISTRESS_WINDOW_TICKS) / float(physics_hz)
+			_stuck_deficit = clamp(1.0 - disp / max_disp, 0.0, 1.0) if max_disp > 0.0 else 0.0
+		# Graded PERCH × STALL score (smoothed tilt, not a flickering hard gate — the
+		# wedge tilt oscillates ~0.2-0.39 and dips would wipe a binary accumulator).
+		# perch ∈ [0,1] from smoothed |tilt|; stall = the 2 s deficit.  BOTH needed
+		# (product) → level slow-walking (perch≈0) does not accumulate, a perched stall
+		# does.  Rate scales with severity; slow climb (operator: slow is fine).
+		_tilt_ema = (1.0 - DISTRESS_TILT_EMA_ALPHA) * _tilt_ema \
+				  + DISTRESS_TILT_EMA_ALPHA * absf(_chassis_tilt(chassis_xform.basis))
+		var perch: float = clamp((_tilt_ema - DISTRESS_PERCH_LO) / (DISTRESS_PERCH_HI - DISTRESS_PERCH_LO), 0.0, 1.0)
+		var stuck_score: float = perch * _stuck_deficit
+		if tick_counter < DISTRESS_WARMUP_TICKS:
+			_distress = 0.0
+		else:
+			_distress = clamp(_distress + DISTRESS_RISE * stuck_score - DISTRESS_DECAY * (1.0 - stuck_score), 0.0, 1.0)
+		var distress_pkt := PackedFloat64Array()
+		distress_pkt.append(_distress)
+		brain.publish_proprio(distress_pkt, "distress")
+		_update_distress_hud()
 
 	# Vision → brain: capture the shaded RGB at a subrate, publish the cached frame
 	# every tick (sub-rate publishes drop out of the voter trust map) so epm_color
@@ -6504,11 +6912,55 @@ func _step_one() -> void:
 			vcp.append(_vision_compass.y)
 			brain.publish_proprio(vcp, "vision_compass")
 
+	# ---- SERVO FORWARD MODEL — advanced ONCE per tick, before its first consumer ------
+	# Hoisted here from the stride block (port doc step (c)) because `joints` needs it too
+	# and the stride block runs later.  ⚠ BYTE-IDENTICAL, and not by argument: nothing
+	# writes `_eff_target_*` between this point and the stride block's old advance site —
+	# the servo command stage that writes them runs LATER in the same tick (~:8217) — so
+	# the lag holds the same value at the stride read either way.  Both original guards
+	# are carried verbatim; dropping either would advance the lag on early ticks where it
+	# previously did not.
+	if _chassis_rest_xform != Transform3D():
+		if _servo_lag == null:
+			_servo_lag = ClassDB.instantiate("ServoLag")
+		var eff_t := PackedFloat64Array()
+		eff_t.resize(12)
+		for k in range(4):
+			eff_t[k * 3]     = _eff_target_hip1[k]
+			eff_t[k * 3 + 1] = _eff_target_hip2[k]
+			eff_t[k * 3 + 2] = _eff_target_knee[k]
+		# ⚠ TWO GUARDS, KEPT APART: the original seeds whenever the block runs but only
+		# advances once the toe offsets exist.  Those probably coincide, and "probably"
+		# is not something a byte-identity change should rest on.
+		if not _servo_lag.seeded():
+			_servo_lag.seed(eff_t)
+		if _toe_off_c.size() == 4:
+			_servo_lag.advance(eff_t, STRIDO_LP_ALPHA)
+
+	# ---- LEVER c2 · honest_joints -----------------------------------------------------
+	# `joints` publishes ACHIEVED hinge angles.  Hobby servos report nothing at all, so on
+	# hardware this channel can only ever be the servo forward model of the command — the
+	# same first-order lag the stride estimator runs on, and the same one measured to match
+	# the achieved angle at r 0.93-0.99 per joint.  The normalization is unchanged, so the
+	# token's shape and scale are identical and every consumer reads it unaltered.
+	#
+	# ⚠ This is the substitution with the WIDEST blast radius of the three: the Bridge's
+	# proprio input and BOTH body-pose EPMs read it, so it changes what the self-model is
+	# a model OF.  §5.6 is the precedent and its direction was surprising — the
+	# hardware-poorer `feet_y_gravity_cmd` beat the achieved-pose twin, because load
+	# deflection is noise from the gate's point of view.  Whether that repeats HERE is the
+	# question; a self-model may want the deflection that a gate did not.
 	var joints := PackedFloat64Array()
-	for i in range(4): joints.append(clamp(hip1_angles[i] / HIP1_LIMIT,    -1.0, 1.0))
-	for i in range(4): joints.append(clamp(hip2_angles[i] / HIP2_LIMIT,    -1.0, 1.0))
-	for i in range(4): joints.append(clamp((knee_angles[i] - KNEE_REST) / 1.0,
-											-1.0, 1.0))
+	if honest_joints and _servo_lag != null and _servo_lag.seeded():
+		for i in range(4): joints.append(clamp(_servo_lag.get(i * 3) / HIP1_LIMIT, -1.0, 1.0))
+		for i in range(4): joints.append(clamp(_servo_lag.get(i * 3 + 1) / HIP2_LIMIT, -1.0, 1.0))
+		for i in range(4): joints.append(clamp((_servo_lag.get(i * 3 + 2) - KNEE_REST) / 1.0,
+			-1.0, 1.0))
+	else:
+		for i in range(4): joints.append(clamp(hip1_angles[i] / HIP1_LIMIT,    -1.0, 1.0))
+		for i in range(4): joints.append(clamp(hip2_angles[i] / HIP2_LIMIT,    -1.0, 1.0))
+		for i in range(4): joints.append(clamp((knee_angles[i] - KNEE_REST) / 1.0,
+												-1.0, 1.0))
 	# --- 2026-08-02 · IMPORT I4: COLORED PROPRIOCEPTIVE NOISE --------------------------
 	# Every Playful Machine legged experiment wires its controller through
 	# ColorUniformNoise(0.1) — ~10% of range, TEMPORALLY CORRELATED — on every sensor,
@@ -6607,10 +7059,17 @@ func _step_one() -> void:
 	# IK ⊕ IMU and nothing else.  It differs from the oracle by exactly the ABSOLUTE
 	# chassis height, which is the god's-eye part and the only part we drop.
 	var up_body: Vector3 = _ch_inv.basis * Vector3.UP
+	# ⚠ `foot·up − L3/2` IS ONE CONTRACT, SHARED BY FIVE VARIANTS, so all five call
+	# ogma::body::feet_y_gravity (port doc Phase 4, step (b)) rather than each spelling
+	# it out.  Both halves matter: WHICH `up` decides whether the channel is legal, and
+	# the offset is what puts the toe rather than the shin's midpoint at the origin.  A
+	# publisher that dropped it emits a plausible wrong number into a promoted input.
+	if _stridemath == null:
+		_stridemath = ClassDB.instantiate("StrideMath")
 	var feet_y_grav_arr := PackedFloat64Array()
 	for i in range(4):
 		var foot_body: Vector3 = _ch_inv * _lowers[i].global_transform.origin
-		feet_y_grav_arr.append(foot_body.dot(up_body) - L3 * 0.5)
+		feet_y_grav_arr.append(_stridemath.feet_y_gravity(foot_body, up_body, L3))
 	brain.publish_proprio(feet_y_grav_arr, "feet_y_gravity")
 
 	# ---- feet_y_gravity_cmd / _fk: the SIM-TO-REAL test (2026-07-25) ----------------
@@ -6639,32 +7098,18 @@ func _step_one() -> void:
 		var toe_cmd_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
 		var toe_cmdlp_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
 		var toe_meas_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
-		if _strido_lp.size() != 12:
-			_strido_lp.resize(12)
-			for k in range(4):
-				_strido_lp[k * 3]     = _eff_target_hip1[k]
-				_strido_lp[k * 3 + 1] = _eff_target_hip2[k]
-				_strido_lp[k * 3 + 2] = _eff_target_knee[k]
 		for i in range(4):
 			# Effective joint-frame target: t = target*sign + origin (see servo_targets doc).
-			var c1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
-				+ servo_origins[servo_idx(i, 0)]
-			var c2: float = servo_targets[servo_idx(i, 1)] * servo_signs[servo_idx(i, 1)] \
-				+ servo_origins[servo_idx(i, 1)]
-			var c3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
-				+ servo_origins[servo_idx(i, 2)]
+			var c1: float = _cmd_angle(i, 0)
+			var c2: float = _cmd_angle(i, 1)
+			var c3: float = _cmd_angle(i, 2)
 			var lower_fk:  Transform3D = _fk_leg(i, hip1_angles[i], hip2_angles[i], knee_angles[i])[2]
 			var lower_cmd: Transform3D = _fk_leg(i, c1, c2, c3)[2]
-			fk_arr.append((rest_inv * lower_fk.origin).dot(up_body) - L3 * 0.5)
-			cmd_arr.append((rest_inv * lower_cmd.origin).dot(up_body) - L3 * 0.5)
+			fk_arr.append(_stridemath.feet_y_gravity(rest_inv * lower_fk.origin, up_body, L3))
+			cmd_arr.append(_stridemath.feet_y_gravity(rest_inv * lower_cmd.origin, up_body, L3))
 			if _toe_off_c.size() == 4:
-				# Servo forward model: first-order lag on the slew-limited effective
-				# target (which drove the physics that produced this tick's pose).
-				_strido_lp[i * 3]     += STRIDO_LP_ALPHA * (_eff_target_hip1[i] - _strido_lp[i * 3])
-				_strido_lp[i * 3 + 1] += STRIDO_LP_ALPHA * (_eff_target_hip2[i] - _strido_lp[i * 3 + 1])
-				_strido_lp[i * 3 + 2] += STRIDO_LP_ALPHA * (_eff_target_knee[i] - _strido_lp[i * 3 + 2])
 				var lower_clp: Transform3D = _fk_leg(i,
-					_strido_lp[i * 3], _strido_lp[i * 3 + 1], _strido_lp[i * 3 + 2])[2]
+					_servo_lag.get(i * 3), _servo_lag.get(i * 3 + 1), _servo_lag.get(i * 3 + 2))[2]
 				toe_cmd_b[i]   = rest_inv * (lower_cmd * _toe_off_c[i])
 				toe_cmdlp_b[i] = rest_inv * (lower_clp * _toe_off_c[i])
 				toe_meas_b[i]  = rest_inv * (lower_fk * _toe_off_c[i])
@@ -6704,15 +7149,12 @@ func _step_one() -> void:
 		var acc_arr := PackedFloat64Array()
 		var imu_arr := PackedFloat64Array()
 		for i in range(4):
-			var d1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
-				+ servo_origins[servo_idx(i, 0)]
-			var d2: float = servo_targets[servo_idx(i, 1)] * servo_signs[servo_idx(i, 1)] \
-				+ servo_origins[servo_idx(i, 1)]
-			var d3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
-				+ servo_origins[servo_idx(i, 2)]
+			var d1: float = _cmd_angle(i, 0)
+			var d2: float = _cmd_angle(i, 1)
+			var d3: float = _cmd_angle(i, 2)
 			var foot_b: Vector3 = rest_inv * _fk_leg(i, d1, d2, d3)[2].origin
-			acc_arr.append(foot_b.dot(up_acc) - L3 * 0.5)
-			imu_arr.append(foot_b.dot(_up_est_body) - L3 * 0.5)
+			acc_arr.append(_stridemath.feet_y_gravity(foot_b, up_acc, L3))
+			imu_arr.append(_stridemath.feet_y_gravity(foot_b, _up_est_body, L3))
 		brain.publish_proprio(acc_arr, "feet_y_gravity_cmd_acc")
 		brain.publish_proprio(imu_arr, "feet_y_gravity_cmd_imu")
 		# (attitude-error diagnostics are set in _imu_substep, at the sensor's own rate)
@@ -6747,16 +7189,21 @@ func _step_one() -> void:
 		# body (prev positions meaningless); hard reset invalidates via _do_hard_reset.
 		if _strido_prev_valid and _suspend_lift_y == 0.0 and _toe_off_c.size() == 4:
 			for i in range(4):
-				var v_clp_i: Vector3 = -((toe_cmdlp_b[i] - _strido_prev_cmdlp[i]) / TAU \
-					+ gyro_mean.cross((toe_cmdlp_b[i] + _strido_prev_cmdlp[i]) * 0.5))
-				var v_meas_i: Vector3 = -((toe_meas_b[i] - _strido_prev_meas[i]) / TAU \
-					+ gyro_mean.cross((toe_meas_b[i] + _strido_prev_meas[i]) * 0.5))
+				# ⚠ ALL FOUR VARIANTS SHARE ONE FORMULA — ogma::body::planted_foot_velocity
+				# (port doc Phase 4, step (b)).  Only `cmdlp` is ported as a channel; the
+				# other three are sim-only diagnostics.  They call the same code anyway,
+				# because the alternative is a C++ copy for the gated variant and a
+				# GDScript copy for the ungated ones, drifting silently apart.
+				var v_clp_i: Vector3 = _stridemath.planted_foot_velocity(
+					toe_cmdlp_b[i], _strido_prev_cmdlp[i], gyro_mean, TAU)
+				var v_meas_i: Vector3 = _stridemath.planted_foot_velocity(
+					toe_meas_b[i], _strido_prev_meas[i], gyro_mean, TAU)
 				_dbg_strido_vleg_clp[i] = v_clp_i.z
 				_dbg_strido_vleg_meas[i] = v_meas_i.z
 				if loaded_now[i] and _strido_prev_loaded[i]:
 					sv_cmdlp += v_clp_i
-					sv_cmd += -((toe_cmd_b[i] - _strido_prev_cmd[i]) / TAU \
-						+ gyro_mean.cross((toe_cmd_b[i] + _strido_prev_cmd[i]) * 0.5))
+					sv_cmd += _stridemath.planted_foot_velocity(
+						toe_cmd_b[i], _strido_prev_cmd[i], gyro_mean, TAU)
 					sv_meas += v_meas_i
 					sv_ns += 1
 				if contact_now[i] and _strido_prev_contact[i]:
@@ -6790,22 +7237,22 @@ func _step_one() -> void:
 		# (gravity removed via the honest fused attitude estimate — the IMU's own, never
 		# exact attitude) minus the LEARNED bias; correct toward stance-FK when stance
 		# feet exist, and let the innovation both teach the bias and feed `slip`.
-		var a_lin: Vector3 = _accel_body_last - 9.81 * _up_est_body
+		# ogma::body::StrideV — the PI complementary filter, now shared with ogma_host.
+		# The coast branch (no planted feet) is inside it: the FK anchor is gone there,
+		# and unleaked integration turns attitude error into phantom velocity within
+		# seconds, which is the shape a hardware audit fails on.
+		if _stridev == null:
+			_stridev = ClassDB.instantiate("StrideVNode")
+			_stridev.configure(STRIDE_V_FUSE_BETA, STRIDE_V_BIAS_KI, STRIDE_V_SLIP_ALPHA,
+				STRIDE_V_COAST_LEAK, 9.81)
+		var a_lin: Vector3 = _stridev.linear_accel(_accel_body_last, _up_est_body)
 		_dbg_stridev_alin = a_lin
-		var v_pred := Vector2(_stridev_est.x + (a_lin.x - _stridev_bias.x) * TAU,
-							  _stridev_est.y + (a_lin.z - _stridev_bias.y) * TAU)
-		if sv_ns_sensor > 0:
-			var v_fk := Vector2(sv_sensor.x / float(sv_ns_sensor),
-								sv_sensor.z / float(sv_ns_sensor))
-			var innov: Vector2 = v_fk - v_pred
-			_stridev_est = v_pred + STRIDE_V_FUSE_BETA * innov
-			_stridev_bias += -STRIDE_V_BIAS_KI * innov
-			_stridev_slip += STRIDE_V_SLIP_ALPHA * (innov.length() - _stridev_slip)
-		else:
-			# No planted feet: coast on the bias-corrected accelerometer with a slow
-			# leak — the FK anchor is gone and unleaked integration turns attitude
-			# error into phantom velocity within seconds (hardware-audit failure shape).
-			_stridev_est = v_pred * (1.0 - STRIDE_V_COAST_LEAK)
+		# sv_sensor is the SUM over planted feet; the filter takes the count and means
+		# it internally, so the stance rule stays here and the estimator stays shared.
+		_stridev.step(a_lin, sv_sensor, sv_ns_sensor, TAU)
+		_stridev_est = _stridev.est()
+		_stridev_bias = _stridev.bias()
+		_stridev_slip = _stridev.slip()
 		var sv_out := PackedFloat64Array()
 		sv_out.append(_stridev_est.x)
 		sv_out.append(_stridev_est.y)
@@ -6847,7 +7294,10 @@ func _step_one() -> void:
 	# high-centered); higher = belly held up off the ground.  Replaces absolute Y.
 	_dbg_gc_raw = _compute_ground_clearance()   # cache raw metres for the ramp-debug diag
 	var clearance_arr := PackedFloat64Array()
-	clearance_arr.append(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0))
+	# ogma::body::ground_clearance — shared with the robot so the NORMALIZER cannot
+	# drift.  It feeds the promoted height homeostat; a publisher dividing by a
+	# different standing height emits a plausible wrong number into it.
+	clearance_arr.append(_stridemath.ground_clearance(_dbg_gc_raw, GROUND_CLEARANCE_STAND))
 	brain.publish_proprio(clearance_arr, "ground_clearance")
 	# Beacon magnitude.  Published every tick from the cached capture (the capture itself is
 	# sub-rated for CPU), matching how ground_clearance and the vision frame are handled.
@@ -6882,8 +7332,24 @@ func _step_one() -> void:
 	# perfectly upright, 0 = on its side, -1 = inverted.  A real IMU (accelerometer
 	# gravity vector) gives this — compliant, always on.  Used to gate keyframe
 	# baking on "am I in a valid posture" (don't learn from a flipped body).
+	# ---- LEVER c1 · honest_upright ----------------------------------------------------
+	# ⚠ THIS IS A FIDELITY SUBSTITUTION, NOT A LEGALITY ONE, and the distinction matters
+	# for how the result is read.  The ledger already rates `upright` LEGAL — basis.y.y is
+	# "literally what an accelerometer reads" — so nothing here is an oracle being removed.
+	# What changes is that the sim publishes the EXACT scalar while a real accelerometer
+	# measures gravity PLUS body linear acceleration, so during a bouncy gait "down"
+	# wobbles in step with the bounce (the §5.4 attitude gap).  `_up_est_body.y` is the
+	# same scalar as the complementary filter actually estimates it, contamination and all.
+	#
+	# The two are the same quantity: basis.y.y = body-up · world-up, and _up_est_body is
+	# world-up expressed in the body frame, so its .y is the same dot product.
 	var upright_arr := PackedFloat64Array()
-	upright_arr.append(_chassis.global_transform.basis.y.y)
+	if honest_upright and _up_est_body.length() > 0.5:
+		# ogma::body::upright_from_up — shared with the robot, which publishes the same
+		# scalar from its own fused estimate.
+		upright_arr.append(_imu_att.upright_from_up(_up_est_body))
+	else:
+		upright_arr.append(_chassis.global_transform.basis.y.y)
 	brain.publish_proprio(upright_arr, "upright")
 
 	# 2026-06-03 — R1a per-leg foot-contact bucket signals (PremotorAI /
@@ -7091,9 +7557,15 @@ func _step_one() -> void:
 	# behavior is bit-identical to pre-3.A.  Stage 3.A.2 wires CruseCoordinator
 	# to subscribe via a new `load_topic` param.
 	var jtorque := PackedFloat64Array()
-	for i in range(4): jtorque.append(clamp(_prev_torque_hip1[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
-	for i in range(4): jtorque.append(clamp(_prev_torque_hip2[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
-	for i in range(4): jtorque.append(clamp(_prev_torque_knee[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
+	if joint_torque_zero:
+		# Robot-faithful: hobby servos report no torque, so the robot publishes zeros
+		# (operator's decision 2026-10-02; port doc "Brain input contract").  The one
+		# consumer, GainEvolver's energy term, goes inert in both bodies alike.
+		for k in range(12): jtorque.append(0.0)
+	else:
+		for i in range(4): jtorque.append(clamp(_prev_torque_hip1[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
+		for i in range(4): jtorque.append(clamp(_prev_torque_hip2[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
+		for i in range(4): jtorque.append(clamp(_prev_torque_knee[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
 	brain.publish_proprio(jtorque, "joint_torque")
 	var jload := PackedFloat64Array()
 	for i in range(4): jload.append(_prev_load_hip1[i])
@@ -7151,6 +7623,17 @@ func _step_one() -> void:
 		var euler: Vector3 = basis.get_euler()    # (pitch, yaw, roll) per Godot XYZ
 		var pitch: float = euler.x
 		var roll:  float = euler.z
+		# honest_upright covers `tilt` too — same exact-basis→fused-estimate substitution.
+		# ⚠ INERT IN `native_measured`: that config names no tilt consumer, and
+		# publish_tilt defaults FALSE headless besides.  Kept so the switch means one
+		# thing ("attitude comes from the filter") rather than two.
+		if honest_upright and _up_est_body.length() > 0.5:
+			# ogma::body::pitch_roll_from_up — the body frame's own tilt about X and Z is
+			# what the accelerometer resolves, so atan2 against the vertical component is
+			# exact over the full range.  Shared with the robot.
+			var pr: Vector2 = _imu_att.pitch_roll_from_up(_up_est_body)
+			pitch = pr.x
+			roll  = pr.y
 		var tilt_arr := PackedFloat64Array()
 		tilt_arr.append(sin(pitch))
 		tilt_arr.append(cos(pitch))
@@ -8130,19 +8613,12 @@ func _step_one() -> void:
 				# trips back to the slider's commanded angle (modulo the
 				# SPLAY_OUT_SIGN cancellation), so discrete G mode behaves
 				# identically to its pre-unification version.
-				t_hip1_cmd = u_hip1 * HIP1_TARGET_RANGE + HIP1_REST
-				t_hip2_cmd = u_hip2 * HIP_TARGET_RANGE  + HIP2_REST
-				# 2026-06-03 — asymmetric knee mapping (see KNEE_RANGE_FOLD/HYPEREXT).
-				# u=+1 → max fold (~170° tuck, spider stance reachable).
-				# u=0  → REST = straight leg (KNEE_REST=-1.6 rad).
-				# u=-1 → max hyperextension past straight (-2.45 rad).
-				# knee_widening_enabled=false collapses to symmetric KNEE_RANGE_SYMMETRIC.
-				var discrete_knee_range: float
-				if knee_widening_enabled:
-					discrete_knee_range = KNEE_RANGE_FOLD if u_knee >= 0.0 else KNEE_RANGE_HYPEREXT
-				else:
-					discrete_knee_range = KNEE_RANGE_SYMMETRIC
-				t_knee_cmd = u_knee * discrete_knee_range + KNEE_REST
+				# The mapping itself lives in _discrete_joint_targets so the robot's
+				# export (export_body_calib.gd "u_check") is computed by THIS code.
+				var dt3: Array = _discrete_joint_targets(u_hip1, u_hip2, u_knee)
+				t_hip1_cmd = dt3[0]
+				t_hip2_cmd = dt3[1]
+				t_knee_cmd = dt3[2]
 			# Rate-limit the EFFECTIVE target (the value the PD chases) to
 			# MAX_SERVO_SPEED per brain tick.  This bounds how fast the
 			# joint can move regardless of how strong the PD is — exactly
@@ -9383,32 +9859,45 @@ func _chassis_tilt(b: Basis) -> float:
 # return [T_coxa, T_upper, T_lower] world transforms.  Used by calibrate
 # mode to write body transforms directly (bypassing motors + joint
 # constraints) so the slider value IS the joint angle, exactly.
+# Push the freshly-built anchors into the C++ FK.  clear() first so a build that fails
+# part-way leaves legs UNSET — LegKinematics::fk() reports that loudly — rather than a
+# mix of old and new geometry, which would look like a working robot.
+# The live morphological swap, shared by [B] and by OGMA_PICRAWLER_BODY_SWAP_AT so the
+# hook exercises the REAL path rather than a parallel one that could drift from it.
+func _swap_body_geometry() -> void:
+	var next_body: String = "measured" if _geometry_name == "cad" else "cad"
+	var next_path: String = "res://addons/ami_ogma/body/%s.json" % next_body
+	if not FileAccess.file_exists(next_path):
+		_ui_notify("[body] %s.json not present" % next_body)
+		return
+	# Same joint angles either side of the swap.  The leg geometry genuinely changes,
+	# so FK MUST change; identical output is the signature of a stale anchor cache
+	# (which would not crash — it would publish poses for the old body).
+	var fk_before: String = ""
+	if _body_swap_at_tick > 0 and _legkin != null:
+		fk_before = str(_fk_leg(0, 0.21, -0.37, 0.53)[2].origin)
+	_rebuild_body(next_path)
+	if _body_swap_at_tick > 0 and _legkin != null:
+		var fk_after: String = str(_fk_leg(0, 0.21, -0.37, 0.53)[2].origin)
+		print("PicrawlerBody: [swap-check] geometry=%s legs_set=%d before=%s after=%s -> %s"
+			% [_geometry_name, _legkin.legs_set(), fk_before, fk_after,
+			   "STALE CACHE" if fk_after == fk_before else "cache refreshed"])
+
+func _legkin_refresh() -> void:
+	if _legkin == null:
+		_legkin = ClassDB.instantiate("LegKinematics")
+	_legkin.clear()
+	for i in range(4):
+		_legkin.set_leg(i,
+			_hip1_world_c[i], _hip2_world_c[i], _knee_world_c[i],
+			_coxa_rest_xform[i].origin, _upper_rest_xform[i].origin, _lower_rest_xform[i].origin,
+			_hip2_axes[i], _knee_axes[i])
+
 func _fk_leg(i: int, t1: float, t2: float, t3: float) -> Array:
-	var lift: Vector3 = Vector3(0, _suspend_lift_y, 0)
-	var hip1_w: Vector3 = _hip1_world_c[i] + lift
-	var hip2_w: Vector3 = _hip2_world_c[i] + lift
-	var knee_w: Vector3 = _knee_world_c[i] + lift
-	var coxa_c:  Vector3 = _coxa_rest_xform[i].origin  + lift
-	var upper_c: Vector3 = _upper_rest_xform[i].origin + lift
-	var lower_c: Vector3 = _lower_rest_xform[i].origin + lift
-	# Hip1 rotation around world UP at hip1 anchor.
-	var rot1: Basis = Basis(Quaternion(Vector3.UP, t1))
-	var h1: Transform3D = Transform3D(rot1, hip1_w - rot1 * hip1_w)
-	var t_coxa: Transform3D = h1 * Transform3D(Basis.IDENTITY, coxa_c)
-	# Hip2 rotation around the leg-local lateral (which has been rotated
-	# by hip1) at the hip2 anchor (which has also moved with hip1).
-	var hip2_w_now: Vector3 = h1 * hip2_w
-	var hip2_axis_now: Vector3 = rot1 * _hip2_axes[i]
-	var rot2: Basis = Basis(Quaternion(hip2_axis_now, t2))
-	var h2: Transform3D = Transform3D(rot2, hip2_w_now - rot2 * hip2_w_now)
-	var t_upper: Transform3D = h2 * h1 * Transform3D(Basis.IDENTITY, upper_c)
-	# Knee rotation — knee axis carried by both hip1 and hip2 rotations.
-	var knee_w_now: Vector3 = h2 * h1 * knee_w
-	var knee_axis_now: Vector3 = rot2 * rot1 * _knee_axes[i]
-	var rot3: Basis = Basis(Quaternion(knee_axis_now, t3))
-	var h3: Transform3D = Transform3D(rot3, knee_w_now - rot3 * knee_w_now)
-	var t_lower: Transform3D = h3 * h2 * h1 * Transform3D(Basis.IDENTITY, lower_c)
-	return [t_coxa, t_upper, t_lower]
+	# Ported to C++ so the sim and ogma_host share one forward kinematics rather than
+	# two that drift (port doc Phase 4, step (a)).  Returns [coxa, upper, lower] exactly
+	# as before, so the six call sites are untouched.
+	return _legkin.fk(i, t1, t2, t3, _suspend_lift_y)
 
 # Powered-servo torque model (docs/servo_dynamics.md):
 #   - PID-like with stiff Kp + heavy Kd, no Ki (matches metal-gear PWM tracker).
@@ -9668,6 +10157,8 @@ func _feet_y_array() -> Array:
 # (move posterior).  A planted foot whose local z increases (anterior) is doing
 # negative work; large |Δx| during stance means it pushes laterally → yaw, not
 # forward pull.  Ground truth, independent of nav intent.
+# ⚠ "right" above is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so its
+# +X is anatomically LEFT.
 func _foot_local_xz_array() -> Array:
 	var inv: Transform3D = _chassis.global_transform.affine_inverse()
 	var out: Array = []
@@ -9851,8 +10342,51 @@ func _compute_ground_clearance() -> float:
 	# Origin: chassis centre raised a further 2 cm along body-up, so the ray always
 	# starts with clear space above whatever the belly rests on (per the operator's
 	# note) and fires down THROUGH the chassis interior — it can never clip into the
-	# obstacle.  belly is CHASSIS_Y/2 below centre → total sensor-to-belly = that + 2cm.
-	var sensor_up: float = CHASSIS_Y * 0.5 + 0.02
+	# obstacle.  The belly is -_chassis_bottom_local below the origin → total
+	# sensor-to-belly = that + 2cm (see _compute_ground_clearance_centre).
+	# ---- BOOM MOUNT (tof_boom) --------------------------------------------------
+	# The as-built sensor is on a boom out the BACK of the robot, level with the top of
+	# the HAT — not under the belly centre.  Two consequences, and the second is the one
+	# that bites:
+	#   1. The ray still leaves along BODY-down (it is bolted to a tilting robot), so the
+	#      along-ray distance is longer than the vertical drop by 1/cos(tilt).
+	#   2. ⚠ THE BOOM IS A LEVER ARM ON PITCH.  70 mm aft means a nose-down pitch raises
+	#      the sensor while the belly itself barely moves, so an uncompensated reading
+	#      reports clearance the belly does not have — and it reports it most confidently
+	#      exactly when the body is pitched, which is when belly-strike is likeliest.
+	# Both are corrected below from the FUSED attitude estimate, which is what the robot
+	# can actually compute (never the exact basis).
+	if tof_boom:
+		# ⚠ MEASURE WHETHER THE SENSOR CAN SEE THE THING IT DEFENDS.  A boom 70 mm aft and
+		# at HAT height looks at ground the belly is not touching, so it can report healthy
+		# clearance while the belly's leading edge drags — a confident, valid, wrong
+		# reading, and the failure is silent.  The belly-centre ray is computed anyway and
+		# kept as the truth proxy so the gap is a measurement, not an argument.
+		_dbg_gc_belly = _compute_ground_clearance_centre(space_state, down)
+		return _compute_ground_clearance_boom(space_state, down)
+	return _compute_ground_clearance_centre(space_state, down)
+
+# The belly-CENTRE downward ray: the original model, and now also the truth proxy the
+# boom arm is scored against.
+#
+# ⚠ THE BELLY IS `_chassis_bottom_local` BELOW THE ORIGIN, NOT CHASSIS_Y/2 (fixed
+# 2026-10-02).  This used CHASSIS_Y/2, which is right only for a single box centred on
+# the origin (cad).  The measured body's origin is not its centre: its belly is 26.0 mm
+# below the origin, where CHASSIS_Y/2 says 51.5, so every reading was 25.5 mm SHORT and
+# floored at 0 while the belly was still ~25 mm up.  Found by checking gc_belly against
+# chassis y in the logs: it tracked the CHASSIS_Y/2 formula to ~3 mm, and the boom tracked
+# the geometry to ~1 mm.  Two consequences, both on measured bodies only:
+#   * WITHOUT tof_boom this ray IS the brain's ground_clearance — the promoted height
+#     homeostat saw a belly ~25 mm lower than it was (native_measured, honestjoints).
+#   * WITH tof_boom it is the gc_belly truth proxy, so P-d's "the boom over-reports by
+#     +25.9 mm and misses 21/21 groundings" measured this offset, not the boom.
+# On cad the two forms are the same number (bottom = -CHASSIS_Y/2 exactly), so cad runs
+# are byte-identical.  belly_ray_legacy restores the old form to reproduce pre-fix results.
+func _compute_ground_clearance_centre(space_state: PhysicsDirectSpaceState3D,
+									  down: Vector3) -> float:
+	var belly_below_origin: float = CHASSIS_Y * 0.5 if belly_ray_legacy \
+		else -_chassis_bottom_local
+	var sensor_up: float = belly_below_origin + 0.02
 	var origin: Vector3 = _chassis.global_transform.origin + (-down) * 0.02
 	var query := PhysicsRayQueryParameters3D.new()
 	query.from = origin
@@ -9864,6 +10398,77 @@ func _compute_ground_clearance() -> float:
 		return GROUND_CLEARANCE_RANGE
 	# Sensor-to-surface distance minus the sensor-to-belly offset = belly clearance.
 	return max(0.0, origin.distance_to(hit.position) - sensor_up)
+
+# The as-built belly ToF: on a boom, aft and high, casting along body-down.
+#
+# GEOMETRY.  Sensor sits at body-frame s = (0, boom_y, boom_z) with boom_z negative
+# (aft; forward is +Z) and boom_y at the top of the HAT.  The ray leaves along body-down.
+#
+# THE CORRECTION, and why each term is there.  Let `up` be world-up expressed in the BODY
+# frame — i.e. the fused gravity estimate, the only attitude a robot has.
+#   * The ray descends at `up.y` metres of ALTITUDE per metre travelled, so a measured
+#     distance d is a vertical drop of `d * up.y`.  (up.y is exactly `upright`.)
+#   * The sensor itself sits `s · up` above the chassis origin, vertically — and THIS is
+#     the term the boom makes large: with s_z = -0.07, a pitch of only 10 deg moves it
+#     12 mm, comparable to the whole belly clearance the homeostat defends.
+#   * The belly plane is `_chassis_bottom_local` below the origin (NOT CHASSIS_Y/2 — the
+#     measured body's origin is not its centre).
+# so   belly_clearance = d*up.y - (s · up) + _chassis_bottom_local * up.y
+#
+# ⚠ THAT LAST TERM USED TO BE WRITTEN UN-PROJECTED — `+ _chassis_bottom_local`, with no
+# `* up.y` — and it was wrong.  The derivation above says the sensor term is a projection
+# and then failed to project the belly term the same way.  The forms agree EXACTLY at zero
+# tilt, which is where this was checked, and diverge by `bottom * (1 - cos θ)`: about
+# -0.3 mm at 10° and -2.8 mm at 30°.  Small, real, conservative in direction, and invisible
+# at the level pose.
+#
+# The shared helper does not correct the term in place — it REMOVES it, by expressing the
+# sensor offset relative to the belly plane instead of the origin, where it cancels exactly.
+# That is also what let the robot use the same code: about the origin the formula needs a
+# third constant (belly-below-origin) that the robot has never fitted; about the belly it
+# needs only the fitted mount offset.  BOM §9.10.2.
+#
+# With tof_tilt_comp off this returns the RAW along-ray reading minus the level-pose
+# offset — what a driver that ignored attitude would publish.  That arm exists so the
+# correction can be shown to be worth something rather than assumed.
+func _compute_ground_clearance_boom(space_state: PhysicsDirectSpaceState3D,
+									down: Vector3) -> float:
+	var by: float = tof_boom_y if tof_boom_y > 0.0 else _chassis_top_local
+	var s_body := Vector3(0.0, by, tof_boom_z)
+	var xf: Transform3D = _chassis.global_transform
+	var origin: Vector3 = xf * s_body
+	var query := PhysicsRayQueryParameters3D.new()
+	query.from = origin
+	query.to = origin + down * (GROUND_CLEARANCE_RANGE + CHASSIS_Y)
+	query.collision_mask = _LAYER_WORLD
+	query.hit_from_inside = true
+	var hit := space_state.intersect_ray(query)
+	if hit.is_empty():
+		return GROUND_CLEARANCE_RANGE
+	var d: float = origin.distance_to(hit.position)
+	# ⚠ SHARED ARITHMETIC (ogma::body::ground_clearance_boom via StrideMath).  Only the
+	# raycast is the sim's own; the geometry is the robot's too, so it lives in cpp_core.
+	# The sensor-above-belly height is the SINGLE parameter that replaced this function's
+	# old (by, _chassis_bottom_local) pair — see the note below on why that is a FIX.
+	var sensor_above_belly: float = by - _chassis_bottom_local
+	# ⚠ Lazy-init, matching _step_one()'s idiom: this function can run EARLIER in a tick
+	# than the feet_y_gravity path that also instantiates it, so relying on that one would
+	# make the first tick return max range.
+	if _stridemath == null:
+		_stridemath = ClassDB.instantiate("StrideMath")
+	if _stridemath == null:
+		# Never silently fall back to a different formula: a missing extension is a build
+		# problem, and a plausible number here would hide it inside a promoted input.
+		push_error("picrawler_body: StrideMath unavailable — boom ToF cannot be computed")
+		return GROUND_CLEARANCE_RANGE
+	if not tof_tilt_comp:
+		return _stridemath.ground_clearance_boom_uncomp(d, sensor_above_belly)
+	# ⚠ The fused estimate, not the exact basis: this is the legal signal, and it is the
+	# one the robot will use.  Fall back to the exact body-up only before the filter has
+	# a value at all (first ticks), so the channel is never silently un-corrected.
+	var up: Vector3 = _up_est_body if _up_est_body.length() > 0.5 \
+		else (xf.basis.inverse() * Vector3.UP)
+	return _stridemath.ground_clearance_boom(d, up, sensor_above_belly, tof_boom_z)
 
 func _compute_target_loom() -> float:
 	# Phase H1 V6 — proxy looming: count rays in a forward FOV grid that
@@ -10318,9 +10923,15 @@ func _do_hard_reset() -> void:
 	# meaningless — skip one displacement tick rather than log a phantom stride.  The
 	# servo forward-model state re-seeds from the post-reset effective targets.
 	_strido_prev_valid = false
-	_strido_lp.clear()
+	if _servo_lag != null:
+		_servo_lag.reset()
 	# stride_v sensor: a hard reset is a velocity discontinuity the fusion must not
-	# integrate across (the bus reset event tells consumers the same thing).
+	# integrate across (the bus reset event tells consumers the same thing).  The
+	# filter owns the state now, so it is reset THERE and the mirrors follow — zeroing
+	# only the mirrors would leave the estimator integrating across the teleport while
+	# the trace and HUD showed a clean zero.
+	if _stridev != null:
+		_stridev.reset()
 	_stridev_est = Vector2.ZERO
 	_stridev_bias = Vector2.ZERO
 	_stridev_slip = 0.0
@@ -10426,6 +11037,158 @@ func _accum_grf() -> void:
 		_grf_nrm[i] += nrm_acc[i]
 		_foot_load_ema[i] = (1.0 - _FOOT_LOAD_ALPHA) * _foot_load_ema[i] + _FOOT_LOAD_ALPHA * nrm_acc[i]
 
+# Servo power model (S1) — see the power_model @export.  Rebuilt with the body, because it holds
+# the segments by reference and their anchors in the parents' frames.
+func _power_setup() -> void:
+	_power = load("res://scripts/servo_power_model.gd").new()
+	_power.setup(_chassis, _coxas, _uppers, _lowers, _hip1_world_c, _hip2_world_c, _knee_world_c,
+				 _hip2_axes)
+	if _power_log_path != "" and _power_log == null:
+		_power_log = FileAccess.open(_power_log_path, FileAccess.WRITE)
+		var hdr := PackedStringArray(["step", "tick"])
+		for pre in ["tau", "w"]:
+			for k in range(12): hdr.append("%s%d" % [pre, k])
+		for i in range(4): hdr.append("load%d" % i)
+		hdr.append_array(["i_bat", "v_pack", "v_rail", "i5"])
+		_power_log.store_line(",".join(hdr))
+	# The solver iteration count the SPACE actually runs: Godot Physics 3D's hinge motor clamps its
+	# impulse on every iteration and never accumulates, so the real torque ceiling is
+	# iterations x MAX_SERVO_TORQUE, and this is the number that sets it.
+	var iters: float = PhysicsServer3D.space_get_param(get_world_3d().space, PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS)
+	print("PicrawlerBody: power_model ON (instrument only)  log=%s  space solver_iterations=%d (hinge motor ceiling %.2f N m)"
+		% [_power_log_path if _power_log_path != "" else "-", int(iters), iters * MAX_SERVO_TORQUE * leg_strength])
+
+func _power_tick() -> void:
+	_power.step(1.0 / float(physics_hz))
+	_power.electrical_step(1.0 / float(physics_hz))
+	if DisplayServer.get_name() != "headless":
+		_power_hud_step()
+	_power_steps += 1
+	if _power_log != null:
+		var row := PackedStringArray([str(_power_steps), str(tick_counter)])
+		for k in range(12): row.append("%.5f" % _power.tau[k])
+		for k in range(12): row.append("%.4f" % _power.omega[k])
+		var fl: float = _fl_norm()
+		for i in range(4): row.append("%.3f" % (_foot_load_ema[i] / fl))
+		row.append_array(["%.4f" % _power.i_bat, "%.4f" % _power.v_pack, "%.4f" % _power.v_rail, "%.4f" % _power.i5])
+		_power_log.store_line(",".join(row))
+
+# One physics step of the HUD's INA219 emulation; a 10 Hz reading every PW_SAMPLE_S of sim time.
+func _power_hud_step() -> void:
+	var n_ring: int = maxi(1, int(round(PW_INA_WINDOW_S * physics_hz)))
+	if _pw_ring.size() != n_ring:
+		_pw_ring.resize(n_ring); _pw_ring.fill(_power.i_bat)
+	_pw_ring[_pw_ring_i % n_ring] = _power.i_bat
+	_pw_ring_i += 1
+	_pw_rail_win.append(_power.v_rail)
+	for k in range(12):
+		if _power.i_servo[k] >= 0.9 * 1.2: _pw_sat_any = true
+	var every: int = maxi(1, int(round(PW_SAMPLE_S * physics_hz)))
+	if _power_steps % every == 0:
+		_power_hud_sample()
+
+func _power_hud_sample() -> void:
+	var amps: float = 0.0
+	for v in _pw_ring: amps += v
+	amps /= float(_pw_ring.size())
+	_pw_ema30 = amps if _pw_hist.is_empty() else _pw_ema30 + (PW_SAMPLE_S / 30.0) * (amps - _pw_ema30)
+	_pw_hist.append(amps)
+	if _pw_hist.size() > int(60.0 / PW_SAMPLE_S):
+		_pw_hist = _pw_hist.slice(_pw_hist.size() - int(60.0 / PW_SAMPLE_S))
+	var peak60: float = 0.0
+	for v in _pw_hist: peak60 = maxf(peak60, v)
+	_pw_max = maxf(_pw_max, amps)
+	_pw_charge += amps * PW_SAMPLE_S
+	var rmin: float = 3.3
+	for v in _pw_rail_win: rmin = minf(rmin, v)
+	_pw_rail_win.clear()
+	_pw_rail_min1s = rmin if _pw_hist.size() % 10 == 1 else minf(_pw_rail_min1s, rmin)
+	# Joint line speed, measured the way picrawler-dash measures the robot: the joint angle sampled
+	# at 10 Hz, mean |change| per second over the 12 joints.  On the robot that is the pulse on the
+	# line (benchd out_us); here it is the joint itself.  Reversals inside 100 ms do not show in
+	# either, so the two are comparable with each other, not with the brain's own command rate.
+	var ang := PackedFloat32Array(); ang.resize(12)
+	for i in range(4):
+		ang[i * 3] = _relative_angle_world_axis(_chassis, _coxas[i], Vector3.UP)
+		ang[i * 3 + 1] = _relative_angle_world_axis(_coxas[i], _uppers[i], _hip2_axes[i])
+		ang[i * 3 + 2] = _relative_angle_world_axis(_uppers[i], _lowers[i], _knee_axes[i])
+	var spd: float = 0.0
+	var spd_max: float = 0.0
+	if _pw_prev_ang.size() == 12:
+		for k in range(12):
+			var v: float = absf(ang[k] - _pw_prev_ang[k]) / PW_SAMPLE_S
+			spd += v / 12.0
+			spd_max = maxf(spd_max, v)
+	_pw_prev_ang = ang
+	var n_stalled: int = 0
+	for k in range(12): n_stalled += int(_power.stalled[k])
+	_power_hud_draw(amps, peak60, spd, spd_max, n_stalled)
+	_pw_sat_any = false
+
+func _power_hud_draw(amps: float, peak60: float, spd: float, spd_max: float, n_stalled: int) -> void:
+	if _pw_panel == null:
+		var hud := get_tree().get_root().find_child("HUD", true, false)
+		if hud == null:
+			return
+		var mono := SystemFont.new()
+		mono.font_names = PackedStringArray(["DejaVu Sans Mono", "Liberation Mono", "Monospace"])
+		_pw_panel = VBoxContainer.new()
+		_pw_panel.name = "PowerPanel"
+		_pw_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		_pw_panel.custom_minimum_size = Vector2(560, 0)
+		_pw_panel.position = Vector2(-574, -178)
+		_pw_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud.add_child(_pw_panel)
+		var title := Label.new()
+		title.text = "POWER — sim model (K fitted to the robot's carpet mean; narrower than the robot)"
+		title.add_theme_font_size_override("font_size", 11)
+		title.add_theme_color_override("font_color", Color(0.7, 0.7, 0.75))
+		_pw_panel.add_child(title)
+		for _k in range(3):
+			var l := Label.new()
+			l.add_theme_font_size_override("font_size", 12)
+			l.add_theme_font_override("font", mono)
+			_pw_panel.add_child(l)
+			_pw_lbl.append(l)
+		_pw_graph = (load("res://scripts/current_graph.gd") as Script).new()
+		_pw_graph.custom_minimum_size = Vector2(560, 76)
+		_pw_panel.add_child(_pw_graph)
+		_pw_panel.visible = not _panels_hidden
+	# Same lines, same formats as picrawler-dash's power rows.
+	_pw_lbl[0].text = "power %+6.3f A   pack %5.3f V   rail %4.2f V (min1s %4.2f)" % [
+		amps, _power.v_pack, _power.v_rail, _pw_rail_min1s]
+	_pw_lbl[1].text = "slow  ema30 %+6.3f A   peak60 %5.3f   max %5.3f   spent %+7.1f A·s" % [
+		_pw_ema30, peak60, _pw_max, _pw_charge]
+	_pw_lbl[2].text = "joints  line speed %4.2f rad/s mean, %4.2f max (10 Hz)   stalled %d" % [
+		spd, spd_max, n_stalled]
+	var col := Color(0.9, 0.9, 0.9)
+	if amps >= 2.7: col = Color(1, 0.3, 0.3)
+	elif amps >= 2.0: col = Color(1, 0.85, 0.4)
+	_pw_lbl[0].add_theme_color_override("font_color", col)
+	# The band along the graph's bottom: on the bench it marks pose moves; here, a servo at its
+	# stall current (driving into a load it cannot move), which is what the spikes are made of.
+	_pw_graph.push(amps, _pw_ema30, peak60, false, _pw_sat_any)
+
+# The COMMANDED joint angle that the *_cmd foot-height signals run FK on.
+#
+# ⚠ 0 (legacy, default) reads servo_targets[], which is written ONLY in calibrate mode, the
+# gang drive and the operator's panels — never in brain mode, where it stays 0.0 (verified
+# live 2026-10-02: knee target swept -1.78..+0.79 rad, servo_targets stayed 0.0000).  So the
+# promoted swing detector feet_y_gravity_cmd_imu has been FK of the CONSTRUCTION POSE rotated
+# by the fused attitude: an attitude detector, gating stance_lift on body rocking.
+# 1 reads the slew-limited target the servo is actually being commanded to this tick
+# (_eff_target_*), which is also what the robot's driver knows (its slewed pulse, mapped to an
+# angle).  Changing it changes a promoted input, so it is a lever and a re-baseline, not a quiet
+# fix; a robot port must match whichever is promoted.
+func _cmd_angle(leg: int, joint: int) -> float:
+	if cmd_fk_source == 1:
+		match joint:
+			0: return _eff_target_hip1[leg]
+			1: return _eff_target_hip2[leg]
+			_: return _eff_target_knee[leg]
+	var k: int = servo_idx(leg, joint)
+	return servo_targets[k] * servo_signs[k] + servo_origins[k]
+
 # ---------------------------------------------------------------------------
 # Attribution trace — one JSON line per brain tick when OGMA_PICRAWLER_TRACE is set.
 # ---------------------------------------------------------------------------
@@ -10500,6 +11263,8 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"sv_ns":   [_dbg_strido_ns, _dbg_strido_ns_tc],
 		# The PUBLISHED fused sensor [x=right, z=forward] — always defined (coasts on the
 		# IMU through full-swing ticks), so no ns gate applies to it.
+		# ⚠ "right" is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so its
+		# +X is anatomically LEFT.
 		"sv_fuse": [snappedf(_stridev_est.x, 0.0001), snappedf(_stridev_est.y, 0.0001)],
 		"sv_slip": snappedf(_stridev_slip, 0.0001),
 		# The IMU linear-acceleration term feeding the fusion [x, z] — lets the filter
@@ -11053,6 +11818,9 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# comparison. h_ema/h_max/h_bias pulled from MotorEPM's snapshot = the homeostat's
 	# smoothed height, self-discovered ceiling, and the integrated lift bias driving hip2.
 	line["gc_raw"]  = snappedf(_dbg_gc_raw, 0.0001)
+	# Belly-centre truth proxy, published ONLY while the boom model is on.  -1 = not
+	# modelled, which is distinguishable from a real reading of 0.
+	line["gc_belly"] = snappedf(_dbg_gc_belly, 0.0001)
 	line["gc_norm"] = snappedf(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0), 0.001)
 	line["cy_norm"] = snappedf(clamp(chassis_y / target_height, 0.0, 1.0), 0.001)
 	# TRUE swing fraction from the physics foot-contact sensor — the ground truth against

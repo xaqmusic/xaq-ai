@@ -18,10 +18,20 @@ add_library(ogma_hw
   src/LinuxI2cBus.cpp
   src/McuReset.cpp
   src/Ina219.cpp
+  src/Vl53l0x.cpp
+  src/Icm20948.cpp
   src/ResourceMonitor.cpp
 )
-target_include_directories(ogma_hw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_options(ogma_hw PRIVATE -Wall -Wextra)
+# ⚠ cpp_core/include is added as a HEADER-ONLY include path, NOT a link dependency.
+# ogma::body::ImuAttitude and GodotFloat.hpp pull in nothing (no Eigen, no godot-cpp, no
+# ogma_core objects), so the rationale at the top of this file still holds: ogma_hw does
+# not link the brain and still builds in seconds.  The alternative was a second copy of
+# the attitude filter on the robot, which is how sim and host drift apart.
+target_include_directories(ogma_hw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                          ${CMAKE_CURRENT_SOURCE_DIR}/../cpp_core/include)
+# ⚠ -ffp-contract=off keeps ogma::body bit-identical to the sim on aarch64; see the
+# note in cpp_core/CMakeLists.txt for the measurement.  No-op on x86.
+target_compile_options(ogma_hw PRIVATE -Wall -Wextra -ffp-contract=off)
 
 add_executable(hat_tool tools/hat_tool.cpp)
 target_link_libraries(hat_tool PRIVATE ogma_hw)
@@ -37,7 +47,7 @@ FetchContent_MakeAvailable(json)
 add_executable(ogma_benchd src/benchd.cpp)
 target_include_directories(ogma_benchd PRIVATE ${ZMQ_INCLUDE_DIRS})
 target_link_libraries(ogma_benchd PRIVATE ogma_hw nlohmann_json::nlohmann_json ${ZMQ_LIBRARIES} pthread)
-target_compile_options(ogma_benchd PRIVATE -Wall -Wextra)
+target_compile_options(ogma_benchd PRIVATE -Wall -Wextra -ffp-contract=off)
 
 # ogma_sensors — the three physical input channels.  Kept OUT of ogma_hw so the
 # servo/driver layer keeps its seconds-long build and gains no ALSA/gpiod deps, but
@@ -79,8 +89,11 @@ if(PI_HOST_BUILD_TESTS)
   set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
   enable_testing()
-  add_executable(test_hw tests/test_hw.cpp)
-  target_link_libraries(test_hw PRIVATE ogma_hw gtest_main)
+  add_executable(test_hw tests/test_hw.cpp tests/test_brain_inputs.cpp tests/test_actuation.cpp)
+  target_link_libraries(test_hw PRIVATE ogma_hw gtest_main nlohmann_json::nlohmann_json)
+  # The brain-input tests read the REAL calibration files (servo map, exported body), so a
+  # re-export or a re-calibration that breaks the contract fails here, not on the robot.
+  target_compile_definitions(test_hw PRIVATE PI_HOST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   if(PI_HOST_HAVE_SENSORS)
     target_link_libraries(test_hw PRIVATE ogma_sensors)
     target_compile_definitions(test_hw PRIVATE PI_HOST_HAVE_SENSORS=1)
@@ -118,6 +131,9 @@ if(PI_HOST_BUILD_BRAIN AND PI_HOST_HAVE_SENSORS)
   add_executable(ogma_host src/ogma_host.cpp)
   target_include_directories(ogma_host PRIVATE ${ZMQ_INCLUDE_DIRS})
   target_link_libraries(ogma_host PRIVATE ogma_hw ogma_sensors ogma_core ogma_infra ${ZMQ_LIBRARIES})
-  target_compile_options(ogma_host PRIVATE -Wall -Wextra)
+  # -ffp-contract=off: ogma_host now includes ogma::body (the belly-clearance
+  # normalizer), and that code only earns its name if it produces the same bits here as
+  # in the sim.  See the note in cpp_core/CMakeLists.txt.
+  target_compile_options(ogma_host PRIVATE -Wall -Wextra -ffp-contract=off)
   target_compile_definitions(ogma_host PRIVATE OGMA_HOST_GIT_SHA="${PI_HOST_GIT_SHA}")
 endif()

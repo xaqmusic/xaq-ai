@@ -2,13 +2,21 @@
 # Checked in 2026-09-01: this was live on the robot but existed only in
 # /etc/systemd/system, so the deployment was undocumented and unreproducible.
 [Unit]
-Description=xaq PiCrawler bench daemon (ogma_benchd) — calibration channel, bench mode only
+Description=xaq PiCrawler servo daemon (ogma_benchd) — calibration channel + loopback brain command path
 After=local-fs.target
 
 [Service]
 User=xaqmusic
 WorkingDirectory=/home/xaqmusic/xaq-ai
-ExecStart=/home/xaqmusic/xaq-ai/pi_host/build/ogma_benchd --body measured
+# 2026-10-03: the brain command path is always present so picrawler-dash can run a config
+# (C "run config").  It changes nothing in bench mode, the mode benchd always starts in:
+#   --state-pub 5592        50 Hz state feed for ogma_host (read-only; measured ~1.8 ms of the
+#                           20 ms tick with the ToF polled from the tick)
+#   --cmd-port 5594         brain commands, bound to 127.0.0.1 only, applied ONLY in dev/autonomous
+#   --ctl-port 5593         run mode / stop / resume, bound to 127.0.0.1 only
+#   --servo-lag-alpha 0.2   the output lag, in brain modes only (operator-approved 2026-10-03:
+#                           "definitely reduces the jitter"; ledger)
+ExecStart=/home/xaqmusic/xaq-ai/pi_host/build/ogma_benchd --body measured --state-pub 5592 --cmd-port 5594 --ctl-port 5593 --servo-lag-alpha 0.2
 Restart=always
 RestartSec=2
 StandardOutput=append:/home/xaqmusic/xaq-ai/pi_host/log/benchd.stdout

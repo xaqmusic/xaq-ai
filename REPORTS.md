@@ -266,6 +266,28 @@ tick, and the wire dropped both" opens a review. "Our brain needs load data" ope
   not.
 - **Our DCO sign-off is our convention, not theirs.** If their history has no `Signed-off-by`,
   adding one is noise. If they require it, follow their instructions exactly.
+- **Real network identifiers never travel — and this repo is public, so that includes our
+  own docs.** A wifi SSID, a BSSID or MAC, a public IP: use the placeholders below, and keep
+  the real values in `docs/operational/local_env.md`, which is gitignored.
+
+  | real thing | write this |
+  |---|---|
+  | wifi SSID | `<your-ssid>` |
+  | BSSID / MAC | `AA:BB:CC:DD:EE:F0` (`:F1` for a second radio) |
+  | public / static IP | `<your-public-ip>` |
+
+  RFC1918 addresses (`10.0.0.114`, `192.168.x.x`) are **fine** and appear throughout the
+  port doc — they mean nothing outside the LAN and redacting them would cost readability
+  for no gain.
+
+  ⚠ **This is a measurement rule, not just a privacy one.** The 2026-09-05 leak happened
+  because a wifi-roaming session was written up *honestly* and the BSSIDs were the
+  evidence for which radio the robot had attached to. That instinct is right — the fix is
+  not to write up less, it is to put the identifier in `local_env.md` and keep the
+  measurement in the report. A BSSID lock is reproducible from "lock to the 2.4 GHz radio
+  of your own AP"; nobody else can use yours. `.githooks/pre-push` enforces this, but it
+  is opt-in (`git config core.hooksPath .githooks`) and bypassable, so it is a backstop
+  for this rule rather than a substitute for it.
 
 ### 9.6 Opening it is the operator's call, always
 

@@ -42,16 +42,15 @@ const _CONFIG_DIR := "res://addons/ami_ogma/configs/"
 # Operator-driven UI diagnosis is first-class (CLAUDE.md §4); the dropdown is an
 # instrument panel, and an entry whose name needs the filename decoded is a
 # broken instrument.
+# ⚠ PRUNED 2026-10-10 (operator): only what runs on the robot.  The thirteen research entries that
+# were here (V3 base, native benchmarks, P-c/P-d/P-e and its variants, the PART IV demo, ...) are
+# still in configs/ and still load by path for scripts and A/B runs; this list is only what the
+# dropdown and picrawler-dash's "run config" offer.  Their annotated entries are in git history
+# (launcher.gd before this commit).
 const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
-	"the_picrawler_motor_epm_arena_ik_plumb.json",  # ── ARENA · IK ── tibia_plumb_gain=0.15. hip2 nulls the shank's deviation from vertical so the knee's drive TRANSLATES the foot instead of arcing it (hip2+knee are a planar 2-link arm; one joint of a 2-DOF pair forces a circular foot path). LARGEST EFFECT MEASURED: net_disp 4.85→6.38 (+32%), straight 0.71→0.82 with std 0.00 across 3 seeds, tilt_sd 0.088→0.069, 0 falls. NOT PROMOTED: belly 0.0221→0.0156 (−29%) and belly-up is a promoted invariant. WATCH: does the shank stay under the knee through the stride, and is the belly scraping? Live slider `tibia_plumb` on [M]; +0.3 goes unstable, NEGATIVE un-plumbs.
-	"the_picrawler_motor_epm_embed_corridor_v3base.json",  # ── ★★★ V3 BASE · TUCK+PAIR CANONICAL (promoted 2026-08-10, all gates) ── the operator-selected point: cv 0.75 arena / 0.77 corridor, 20/20 walkers, ZERO corridor falls, reaction-free swing. The new reference body.
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga.json",  # ── ★★★ V3 BASE+INSTRUMENTS ── the measurement control for every future lever (instrument context rule).
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_cad.json",  # ── ★★ NATIVE BENCHMARK · CAD BODY (stage E3, 2026-08-27) ── the cad body's OWN operating point, settled by the evolver itself (free 3-gain search, σ 0.2, C2 criterion) and DEFENDED: an E3b challenger had better J (1.90 vs 1.99) but 9× the falls frozen (26 vs 3) and the registered better-on-BOTH rule kept the incumbent. Vector: amp 0.186 / coupling 0.878 / postural 1.262 — FROZEN n=3: J3 1.994, 1–5 falls/600k. Evolver LIVE at pinned σ 0.2, ALWAYS EVOLVING around the point (operator 2026-08-28) — expect the vector to walk its viable region (E3: home is a REGION) and falls to run a little above the frozen numbers while candidates probe. metadata.body pins the geometry. PERMANENT DEMO PAIR with native_measured. The recovery demo, measured 6/6 in E3b: [U] σ→0, drag coupling to 0.3 on [M], ADOPT, σ→0.2, watch it come home. WATCH: [U] vector + accept/revert; the inspector's min-form split shows WHICH flow factor binds; the HUD stride line shows fk/fuse/true live.
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured.json",  # ── ★★ NATIVE BENCHMARK · MEASURED BODY (E3b upgrade, 2026-08-27) ── the as-built body's operating point, found by an E3b displacement searcher and PROMOTED over the E3a-settled point by the registered frozen-validation rule (better on BOTH: J3 2.114 vs 2.198, falls 709 vs 879 per 600k). Vector: amp 0.150 / coupling 1.509 / postural 1.078. Evolver LIVE at pinned σ 0.2, ALWAYS EVOLVING (operator 2026-08-28). ⚠ This body is FALL-HEAVY at every point yet measured (~1.2 falls/1000 ticks frozen; searching adds more) — the stage-E "viability does not transfer" finding, live in the benchmark. metadata.body loads measured.json (hip_z +15%, l1 −14%, l2 −10%, mass +14%, real CoM + chassis boxes). The other half of the two-body demo pair — note how far its discovered point sits from cad's.
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__gainevo_demo.json",  # ── ★★★ PART IV PHASE DEMO · WATCH IT CONVERGE (2026-08-25, rehearsed) ── the j1s4 stack started WRONG on purpose: amp_target displaced HIGH to 0.70 (inside its measured BAD band 0.67–0.8), body param displaced to match so the gait opens visibly thrashing; postural and coupling stay at their validated values. Evolver live from boot over the 3-D vector at PINNED σ 0.2. Arena. Generation = 12000 ticks ≈ 3.3 min; first verdict near tick 28000. WATCH in the INSPECTOR's GainEvolver dashboard (the full dynamics live there): amp's incumbent walking INTO its green band (the rack draws the landscape's measured good bands) while the wobble dies — the descent is tilt-led, so watch upright-sd in the term bars — and coupling/postural HOLDING their bands. DRIVE from [U] (σ slider + ADOPT). REHEARSED n=4 × 300k: amp entered its band in 3/4 seeds by generation ~3–6 and held in 2; SEED MAP for the spinbox — seeds 2 and 3 converge cleanly, seed 1 is the don't-compose lesson live (finds a STABLE high-amp posture: coupling up to ~1.96, tilt improving, amp never recovers — worth watching once), seed 4 converges then wanders out late (bands are flat; nothing pins a point). ⚠ An earlier rev displaced postural too: the joint descent escaped the band corner 2/3 — one displaced gain is the honest demo. To watch the coupling two-descent fork instead: [U] σ→0, drag coupling to 0.3 on [M], ADOPT, σ back to 0.2; the criterion usually takes the coupling-0 exit (energy pays, flow suffers). Window 6000 is an observation-cadence compromise — DEMO SCAFFOLD, never evidence.
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__j1s4.json",  # ── ★ CONTROL · JOB #1 ARM j1s4 (the deployed stack) ── the A/B control for the KALMAN·cap005 arm below: byte-identical to it apart from gain_kind on body_pose / body_pose_t. n=6 corridor 12k (2026-09-05): 6/6 walkers, falls 1, flat_v 0.047, t_flat 2416, net_z 7.39±1.35, brt_err 1.55. WATCH: rhythm onset, flat speed and falls — the three things the Kalman arm claims to move.
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__j1s4__kgA__kalman__c5a__cap005.json",  # ── KALMAN·cap005 · PER-NODE KALMAN GAIN, CAPPED AT ε_b (Kalman-lessons Stage 1, 2026-09-05) ── each GNG node in body_pose / body_pose_t runs its own scalar Kalman filter (gain 1/(n+1)) instead of the legacy anneal that leaves 24% of a baked prototype on its birth point; the 0.05 cap keeps only the schedule's tail. n=6 corridor 12k paired vs j1s4: falls 0 vs 1, flat_v 0.057 vs 0.047 (t 2.7), t_flat 2000 vs 2416, brt_err 1.44 vs 1.55 (t −3.3), net_z 8.52±0.94 vs 7.39±1.35 (trend). VERDICT: PARTIAL, promote-or-kill; the uncapped and cap-0.2 arms REGRESSED (falls 6 / 5, vocabulary churn) and are not listed. WATCH: does the walk settle into its rhythm sooner and hold it, with no falls — and does the faster, fewer-feet-planted gait scrape or tilt? Ledger 2026-09-05; charter docs/plans-and-designs/epm_kalman_lessons_plan.md.
-	"the_picrawler_motor_epm_embed_corridor_imufused__stroke12__gng__bellyset__stancehip2.json",  # ── ★ STANCE-GATED HIP2 LIFT (0.25) ── `stance_lift` biases the KNEE on planted legs and explicitly NOT hip2 ("no hip2 -> no foot-lift traction loss") — but that reasoning covers hip2 MINUS (foot up); on a PLANTED foot hip2 PLUS presses down and levers the chassis up (Rule 5: "+hip2 = press foot down"), and the panic pathway drives hip2+ and knee+ together for exactly this. So stance_lift was the ONE-JOINT version of a two-joint raise — in the one carrier that IS live during locomotion (the height path is faded to 0 while cruising, which is why `height_lift_knee` was a NULL). ★ RESULT n=6 corridor SOLID chassis: hip2/knee sign agreement **0.522 -> 0.601 (t=+13.5)** — the mechanism unambiguously reaches locomotion-phase disagreement — and **`fr` is RECRUITED as a propulsor (2/6 -> 5/6 seeds positive), `rr` strengthens (5/6 -> 6/6)**. net_z +1.04, straight/tilt_sd/swing_frac all ns (the old "clamps the swing" objection does NOT appear: swing_frac t=-0.17). ⚠⚠ BUT `fl` BRAKES 2.5x HARDER (-0.00165 -> -0.00407, 0/6 positive) so the NET forward force FALLS (+0.00168 -> +0.00114). **`legs+` is a BLIND COUNT — it tallies propulsors and ignores the brake.** PARTIAL: mechanism confirmed, transport not yet. Higher fracs are worse (0.5 -> tilt_sd 0.225; 1.0 -> straight t=-2.01). ★ NEXT TARGET IS `fl`: it is the consistent brake (0/6 propelling) and this lever deepens it.
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo.json",  # ── P-e·h0 · ROBOT-FAITHFUL + HEIGHT HOMEOSTAT OFF (2026-10-02) ── the safest current-hardware config measured: 0.25 tips per 100k ticks (P-e 8.4, P-e·hr 1.25), n=8 × 100k frozen gains, no seed stuck, belly 26 mm. ⚠ Arena diff 0.3 only — terrain (the hump) is the homeostat's re-use context, untested. ★ WATCH IT.
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__spd459.json",  # ── P-e·h0 @ 4.59 rad/s (2026-10-10) ── the same brain, servos at 50 µs/tick on the robot (dash_run sets benchd's slew from body_env). NOT YET MEASURED.
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__spd600.json",  # ── P-e·h0 @ 6.0 rad/s (2026-10-10) ── the same brain at the sim's original speed, where its gains were found; 65 µs/tick on the robot. NOT YET MEASURED.
 ]
 
 # 2026-06-13 — curriculum dropdown allowlist (same rationale as the config one).
@@ -144,6 +143,10 @@ const _ENV_LABEL := {
 }
 
 # config registry: env_target → list of {path, name, description, phase_tag}
+# body_env keys THIS launcher set, and the value it set.  Static because the launcher and
+# the run share one process (change_scene_to_file) and the launcher is rebuilt on return,
+# so an instance var would forget what an earlier selection left in the environment.
+static var _body_env_applied: Dictionary = {}
 var _configs_by_env: Dictionary = {}
 var _selected_env: String       = "cell"
 var _verbose_check: CheckBox    = null   # 2026-06-14 — picrawler verbose-diag toggle (created in code)
@@ -731,14 +734,32 @@ func _on_config_changed(idx: int) -> void:
 	# Apply the config's declared body env (see the `body_env` note in _read_metadata).
 	# A pre-existing env var wins: an operator who exported one on the command line meant
 	# it, and silently overwriting that would be the same confound in the other direction.
+	#
+	# ⚠ "A pre-existing env var wins" must mean the OPERATOR's, not this launcher's own
+	# leftovers (fixed 2026-10-02).  Selection applies body_env into the shared process, so
+	# selecting P-d (TILT_COMP=1) and then P-e (TILT_COMP=0) used to keep P-d's value as if
+	# the operator had exported it, and P-e ran with tilt compensation ON.  The launcher
+	# auto-selects its remembered config at startup, so this fired with no visible cause.
+	# Now a value the launcher set (and that is still what it set) is the launcher's to
+	# overwrite, and one the new config does not declare is unset.
 	var benv: Dictionary = entry.get("body_env", {})
+	for key in _body_env_applied.keys():
+		if benv.has(key):
+			continue
+		if OS.get_environment(key) == _body_env_applied[key]:
+			OS.unset_environment(key)
+			print("launcher: body_env %s cleared (set by an earlier selection)" % key)
+		_body_env_applied.erase(key)
 	for k in benv.keys():
 		var key := str(k)
-		if OS.get_environment(key) != "":
+		var mine: bool = _body_env_applied.has(key) \
+				and OS.get_environment(key) == _body_env_applied[key]
+		if OS.get_environment(key) != "" and not mine:
 			print("launcher: body_env %s kept from the environment (config wanted %s)"
 					% [key, str(benv[k])])
 			continue
 		OS.set_environment(key, str(benv[k]))
+		_body_env_applied[key] = str(benv[k])
 		print("launcher: body_env %s=%s (from config metadata)" % [key, str(benv[k])])
 
 	# Pre-populate the corridor-difficulty spinbox if the config declares one

@@ -12,6 +12,9 @@ inference loops — each responsible for one hidden feature of the world —
 coordinated by a shared, trust-weighted state bus and a policy selector.
 
 <img width="482" height="497" alt="inspector" src="https://github.com/user-attachments/assets/e21358e1-9723-4a2f-9985-696dc5302f9f" /> <img width="482" height="497" alt="picrawler3" src="https://github.com/user-attachments/assets/8b453783-1193-4d3c-8e5e-d1e746b3135a" />
+<img width="262" height="146" alt="picrawler_rooty" src="https://github.com/user-attachments/assets/4e3a5f84-8197-40f8-ba36-9faaba5679d4" />
+
+YouTube Playlist https://www.youtube.com/watch?v=862uRoQOtKk&list=PLRTI993J63iI&index=1
 
 ## Why?
 

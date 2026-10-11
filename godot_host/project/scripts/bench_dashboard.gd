@@ -3,7 +3,9 @@ extends Node3D
 ##
 ## Talks to ogma_benchd on the Pi through BenchClient (REQ verbs + CONFLATE'd telemetry).
 ## It speaks the CALIBRATION verb set only: there is no path from here to starting the
-## brain (port doc SPEC §1.1) and none may be added.  Everything a servo does goes
+## brain (port doc SPEC §1.1) and none may be added.  It can SEE the daemon's run mode and
+## STOP / resume the robot (SPACE, or the STOP button) — resume lifts a stop and nothing
+## else; the mode, and with it whether a brain may drive, is set on the robot.  Everything a servo does goes
 ## through the daemon's ServoDriver (clamp · slew · watchdog → pulse 0 · time-at-limit).
 ##
 ## The 3-D body below is the sim picrawler in calibrate mode, FK-written from the
@@ -17,7 +19,10 @@ const PUB_PORT := 5591
 const VIDEO_PORT := 7402
 const PING_S   := 0.3
 const SEND_THROTTLE_S := 0.05
-const US_PER_RAD := 636.6            # 500–2500 µs ≙ ±π/2
+# MEASURED, not the 636.6 hobby-servo standard (500–2500 µs ≙ ±π/2): pi_host/calib/
+# sensors.json servo.us_per_rad, RL knee, 2026-09-13.  At 636.6 the mirrored pose read
+# ~14 % small.  One channel measured; part-to-part scale is unchecked.
+const US_PER_RAD := 545.2
 const VBAT_MIN := 6.0
 const VBAT_MAX := 8.4
 
@@ -45,11 +50,27 @@ var _avg_sum: Dictionary = {}          # 1 s box-car of the numeric telemetry
 var _avg_n := 0
 var _avg_started := -1
 var _avg: Dictionary = {}              # last completed 1 s means
+# IMU instrument.  The SAME panel the sim uses (imu_scope.gd), fed through
+# bench_imu_source.gd — see that file for why the units are converted at the boundary.
+var _imu_src: Node = null
+var _imu_scope: Control = null
+var _imu_btn: Button = null
 const UI_FONT := 12
 const TOP_H := 84                      # top bar height the side panels hang from
+const IMU_MARGIN_X := 12               # IMU scope inset from the right edge
+const IMU_MARGIN_Y := 38               # ...and from the bottom, clearing the status strip
+const INA_A4_TOL_V := 0.15             # BOM 3.4: ~1 % on the 20K/10K divider is ordinary
+# Belly geometry (geometry §G2 / picrawler_body.gd GROUND_CLEARANCE_STAND): 56.3 mm
+# standing at spawn, 9.5 mm at the crouch gate. A ToF reading outside a generous band
+# around that is not a clearance, it is a mount or an offset that has not been fitted.
+const TOF_PLAUSIBLE_MIN_M := 0.0
+const TOF_PLAUSIBLE_MAX_M := 0.30
+# Above this, the part is rejecting so many of its own measurements that the channel is
+# not reporting the belly any more. Rate, not distance — the millimetres cannot say it.
+const TOF_BAD_FRAC_WARN := 0.25
 var _cal_content: Control
 var _cal_min_btn: Button
-var _cal_min := false
+var _cal_min := true          # starts folded: calibration is done, and it is the widest panel
 var _tele_content: Control
 var _tele_min_btn: Button
 var _tele_min := false
@@ -68,8 +89,16 @@ var _body_lbl: Label
 var _tele_lbls: Dictionary = {}
 var _check_lbls: Dictionary = {}
 var _status_lbl: Label
+var _stop_btn: Button
+var _stop_lbl: Label
+var _stop_reply_ms: int = -1          # when a stop/resume reply last told us the state
+var _stop_reply_state := false
 var _widen_lbl: Label
 var _tick_meter: Control
+var _power_graph: Control
+var _power_seq := -1              # _update_labels runs per FRAME; the graph wants per SAMPLE
+var _belly_graph: Control
+var _belly_seq := -1
 var _video: Node                     # VideoClient — receive-only, see VideoClient.hpp
 var _view_tex: TextureRect           # what the CAMERA sees
 var _brain_tex: TextureRect          # what the BRAIN sees (the encoder's actual input)
@@ -125,6 +154,33 @@ func _build_ui() -> void:
 	var top := PanelContainer.new()
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	_ui.add_child(top)
+	# The instrument is built once and hidden; it costs nothing while invisible because
+	# imu_scope only redraws from its own _process, which stops with visibility.
+	_imu_src = (load("res://scripts/bench_imu_source.gd") as Script).new()
+	add_child(_imu_src)
+	_imu_scope = (load("res://scripts/imu_scope.gd") as Script).new()
+	_imu_scope.set("body", _imu_src)
+	# The shared panel is translucent so it can float over the sim body; over this
+	# dashboard it needs to read as a solid instrument.
+	_imu_scope.set("bg_alpha", 0.97)
+	_imu_scope.visible = false
+	# ⚠ ADD TO THE TREE BEFORE READING ITS SIZE.  imu_scope sets custom_minimum_size in
+	# _ready(), and _ready does not run until add_child(), so reading it first returns
+	# (0,0) -- which pins a zero-size rect at the corner that then grows right and down
+	# once the minimum lands, putting all but the top-left corner off-screen.
+	_ui.add_child(_imu_scope)
+	# Bottom-right, clear of the top bar and of the 30 px status strip the side panels
+	# already leave.  It sat top-right and read as dim because the shaded top bar was
+	# drawn over it.
+	var isz: Vector2 = _imu_scope.custom_minimum_size
+	if isz.x < 1.0 or isz.y < 1.0:
+		isz = Vector2(250, 330)          # the panel's own W x height, if _ready has not run
+	_imu_scope.anchor_left = 1.0; _imu_scope.anchor_right = 1.0
+	_imu_scope.anchor_top = 1.0;  _imu_scope.anchor_bottom = 1.0
+	_imu_scope.offset_right  = -IMU_MARGIN_X
+	_imu_scope.offset_left   = -IMU_MARGIN_X - isz.x
+	_imu_scope.offset_bottom = -IMU_MARGIN_Y
+	_imu_scope.offset_top    = -IMU_MARGIN_Y - isz.y
 	var topv := VBoxContainer.new(); top.add_child(topv)
 	var row := HBoxContainer.new(); topv.add_child(row)
 	row.add_child(_lbl("ogma_benchd @"))
@@ -133,7 +189,18 @@ func _build_ui() -> void:
 	row.add_child(_lbl(":%d / :%d" % [REP_PORT, PUB_PORT]))
 	var cb := Button.new(); cb.text = "CONNECT"; cb.pressed.connect(_on_connect); row.add_child(cb)
 	var db := Button.new(); db.text = "DISCONNECT"; db.pressed.connect(_on_disconnect); row.add_child(db)
+	# STOP first and loudest: the operator's "do no more harm" control.  SPACE does the same
+	# from anywhere in this window (see _input).
+	_stop_btn = Button.new(); _stop_btn.text = "■ STOP  [space]"; _stop_btn.custom_minimum_size.x = 150
+	_stop_btn.add_theme_color_override("font_color", Color(1, 0.35, 0.35))
+	_stop_btn.focus_mode = Control.FOCUS_NONE     # SPACE must never also "press" a focused button
+	_stop_btn.pressed.connect(_toggle_stop); row.add_child(_stop_btn)
 	var lb := Button.new(); lb.text = "RESCUE POSE"; lb.pressed.connect(_on_limp); row.add_child(lb)
+	_imu_btn = Button.new()
+	_imu_btn.text = "IMU SCOPE"
+	_imu_btn.toggle_mode = true
+	_imu_btn.pressed.connect(_on_imu_toggle)
+	row.add_child(_imu_btn)
 	lb.add_theme_color_override("font_color", Color(1, 0.8, 0.3))
 	_link_lbl = _lbl("link: disconnected"); row.add_child(_link_lbl)
 	var banner := HBoxContainer.new(); topv.add_child(banner)
@@ -148,6 +215,7 @@ func _build_ui() -> void:
 	prb.add_theme_color_override("font_color", Color(1, 0.8, 0.3))
 	var pdb := Button.new(); pdb.text = "delete"; pdb.pressed.connect(_on_pose_delete); prow.add_child(pdb)
 	var prf := Button.new(); prf.text = "⟳"; prf.pressed.connect(_refresh_poses); prow.add_child(prf)
+	_stop_lbl = _lbl("", 15); banner.add_child(_stop_lbl)
 	_mode_lbl = _lbl("MODE: —", 15); banner.add_child(_mode_lbl)
 	banner.add_child(_lbl("      "))
 	_body_lbl = _lbl("BODY: —", 15); banner.add_child(_body_lbl)
@@ -168,12 +236,24 @@ func _build_ui() -> void:
 	_tele_min_btn = Button.new(); _tele_min_btn.text = "▼"; _tele_min_btn.custom_minimum_size.x = 26
 	_tele_min_btn.pressed.connect(_on_tele_min); lhdr.add_child(_tele_min_btn)
 	var lv := VBoxContainer.new(); lroot.add_child(lv); _tele_content = lv
-	for key in ["vbat", "adc", "tick_hz", "cost", "cost_split", "mem", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
+	for key in ["vbat", "power", "belly", "adc", "tick_hz", "cost", "cost_split", "mem", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
 		var l := _lbl(key + ": —"); _tele_lbls[key] = l; lv.add_child(l)
 		if key == "cost":
 			_tick_meter = (load("res://scripts/tick_meter.gd") as Script).new()
 			_tick_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			lv.add_child(_tick_meter)
+		# Sits directly under vbat: the pair is the diagnostic. Sag without draw is a
+		# tired pack; draw without sag is a healthy one. Either alone is ambiguous.
+		if key == "power":
+			_power_graph = (load("res://scripts/current_graph.gd") as Script).new()
+			_power_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			lv.add_child(_power_graph)
+		# Belly contact is a TRANSIENT — a chassis that touches down mid-step and lifts
+		# again is invisible in a mean. The trace is where that shows.
+		if key == "belly":
+			_belly_graph = (load("res://scripts/clearance_graph.gd") as Script).new()
+			_belly_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			lv.add_child(_belly_graph)
 	lv.add_child(_lbl(" "))
 	lv.add_child(_lbl("BOOT SELF-CHECK  (SPEC §6)", 13))
 	for item in ["0x14 present", "Vbat plausible 6.0–8.4 V", "IMU WHO_AM_I = 0xEA", "INA219 ⟷ A4 agree", "ToF plausible", "FSR sum ≈ 1.0 BW"]:
@@ -209,12 +289,13 @@ func _build_ui() -> void:
 	bcol.add_child(_brain_tex)
 	_video_lbl = _lbl("not connected", 11); lv.add_child(_video_lbl)
 
-	# ---- bottom-centre: the honesty label on the 3-D view ----------------------------
-	var cap := _lbl("3-D view = COMMANDED pose", 14)
-	cap.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	cap.offset_top = TOP_H + 4; cap.offset_bottom = TOP_H + 26     # under the top bar, clear of the body's own meters
-	cap.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
-	_ui.add_child(cap)
+	# The floating "3-D view = COMMANDED pose" caption used to live here, centred over the
+	# render area.  Removed 2026-09-11 (operator): it overlapped the calibration panel.
+	# ⚠ THE CLAIM IT MADE IS NOT DROPPED, only moved — it is the only statement in the UI
+	# that the 3-D body is FK-written from COMMANDED pulses rather than measured (hobby
+	# servos report nothing back), and losing it would leave the view looking like
+	# feedback.  It now rides in the calibration panel header, beside the sliders that do
+	# the commanding.
 
 	# ---- right: calibration panel -------------------------------------------------------
 	var right := PanelContainer.new(); _right_panel = right
@@ -225,6 +306,11 @@ func _build_ui() -> void:
 	var rroot := VBoxContainer.new(); rmargin.add_child(rroot)
 	var hdr := HBoxContainer.new(); rroot.add_child(hdr)
 	hdr.add_child(_lbl("SERVO CALIBRATION — robot on a stand", 13))
+	# See the note where the floating caption was removed: this is the UI's only statement
+	# that the 3-D body shows what was COMMANDED, not what the servos did.
+	var cmd_lbl := _lbl("· 3-D view = COMMANDED pose", 11)
+	cmd_lbl.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	hdr.add_child(cmd_lbl)
 	var rv := VBoxContainer.new(); rroot.add_child(rv); _cal_content = rv
 	rv.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var sv := Button.new(); sv.text = "SAVE MAP"; sv.pressed.connect(_on_save_map); hdr.add_child(sv)
@@ -243,6 +329,15 @@ func _build_ui() -> void:
 	# today's finding: P0 = rear-left knee
 	_rows[0]["phys"].select(PHYS_OPTIONS.find("RL"))
 	_rows[0]["joint"].select(JOINT_OPTIONS.find("knee"))
+
+	# Fold the calibration panel NOW rather than relying on _cal_min alone: the flag only
+	# records the state, _apply_min is what moves the panel's anchors and flips the arrow.
+	# Setting one without the other ships a panel that claims to be folded and is not.
+	_apply_min(_right_panel, _cal_content, _cal_min_btn, _cal_min)
+	# Draw the scope LAST so it survives the calibration panel being re-opened: siblings
+	# paint in tree order and the scope is created before the panels, so it would
+	# otherwise be buried the moment the operator un-folds calibration.
+	_ui.move_child(_imu_scope, -1)
 
 
 func _build_row(ch: int) -> Control:
@@ -297,6 +392,93 @@ func _fmt_ms(ms: float) -> String:
 	if ms >= 1.0: return "%.2f ms" % ms
 	if ms >= 0.001: return "%.1f µs" % (ms * 1000.0)
 	return "%.0f ns" % (ms * 1000000.0)
+
+
+# Whole-robot current (BOM §3). Instrument only — nothing in the brain consumes it yet.
+func _update_power_row() -> void:
+	var ina_v: Variant = _tele.get("ina")
+	if not (ina_v is Dictionary) or not bool((ina_v as Dictionary).get("ok", false)):
+		_tele_lbls["power"].text = ("power: —   (no INA219, or a daemon that predates it)"
+			if ina_v == null else "power: INA219 not reading")
+		_tele_lbls["power"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		return
+	var ina: Dictionary = ina_v
+	var amps := float(ina.get("i_a", 0.0))
+	var ema := float(ina.get("i_ema", 0.0))
+	var peak := float(ina.get("i_peak", 0.0))
+	var charging := bool(ina.get("charging", false))
+	var busy := bool(_tele.get("pose_move_active", false)) or bool(_tele.get("rescue_active", false))
+	# Push once per telemetry frame, not once per rendered frame: at 60 fps against a
+	# 10 Hz daemon the trace would be six copies of every sample and the window would
+	# cover 10 s while claiming 60.
+	var seq := int(_tele.get("seq", -1))
+	if _power_graph and seq != _power_seq:
+		_power_seq = seq
+		_power_graph.push(amps, ema, peak, charging, busy)
+	# Spent energy belongs on the label, not the graph: it only ever rises, so as a
+	# trace it would say nothing, while as a number it is the budget itself.
+	_tele_lbls["power"].text = "power: %+.3f A  %.3f V   spent %.3f kJ / %.1f A·s%s" % [
+		amps, float(ina.get("v", 0.0)),
+		float(ina.get("energy_j", 0.0)) / 1000.0, float(ina.get("charge_as", 0.0)),
+		"   CHARGING" if charging else ""]
+	var col := Color(0.9, 0.9, 0.9)
+	if charging: col = Color(0.55, 0.95, 0.55)
+	elif amps >= 3.0: col = Color(1, 0.3, 0.3)
+	elif amps >= 2.25: col = Color(1, 0.85, 0.4)
+	_tele_lbls["power"].add_theme_color_override("font_color", col)
+
+
+# Belly clearance (BOM §2 #4). Instrument only — the height homeostat this will
+# eventually feed lives in the brain, not here.
+#
+# THE STATUS IS NOT DECORATION. A ToF measurement that failed the part's own checks is
+# not a large distance or a small one, it is an arbitrary one, and at a consumer it
+# looks exactly like a good reading. So the invalid rate gets its own number beside the
+# millimetres, and a bad reading colours the row rather than quietly moving it.
+func _update_belly_row() -> void:
+	var tof_v: Variant = _tele.get("tof")
+	if not (tof_v is Dictionary) or not bool((tof_v as Dictionary).get("ok", false)):
+		_tele_lbls["belly"].text = ("belly: —   (no VL53L0X, or a daemon that predates it)"
+			if tof_v == null else "belly: VL53L0X not reading")
+		_tele_lbls["belly"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		return
+	var tof: Dictionary = tof_v
+	var m := float(tof.get("m", 0.0))
+	var valid := bool(tof.get("valid", false))
+	var bad := float(tof.get("bad_frac", 0.0))
+	var age := int(tof.get("age_ms", -1))
+	# raw is shown beside the derived clearance because the offset between them is a
+	# FIT, not a fact — seeing both is how a drifting mount gets noticed.
+	_tele_lbls["belly"].text = "belly: %5.1f mm  (raw %d mm − %.0f offset)   %s   ema30 %5.1f  worst60 %5.1f  min %5.1f mm" % [
+		m * 1000.0, int(tof.get("raw_mm", 0)), float(tof.get("offset_mm", 0.0)),
+		str(tof.get("status", "?")),
+		float(tof.get("m_ema", 0.0)) * 1000.0, float(tof.get("m_min", 0.0)) * 1000.0,
+		float(tof.get("m_min_all", 0.0)) * 1000.0]
+	_tele_lbls["belly"].text += "\n       signal %.2f / ambient %.2f Mcps   spads %.0f   invalid %.0f%%   age %s" % [
+		float(tof.get("signal_mcps", 0.0)), float(tof.get("ambient_mcps", 0.0)),
+		float(tof.get("spads", 0.0)), bad * 100.0,
+		"—" if age < 0 else "%d ms" % age]
+	# Once per telemetry FRAME, not per rendered frame — same reason as the current
+	# graph: at 60 fps against a 10 Hz daemon the window would claim 60 s and hold 10.
+	var seq := int(_tele.get("seq", -1))
+	if _belly_graph and seq != _belly_seq:
+		_belly_seq = seq
+		var busy := bool(_tele.get("pose_move_active", false)) or bool(_tele.get("rescue_active", false))
+		_belly_graph.push(m, float(tof.get("m_ema", 0.0)), float(tof.get("m_min", 0.0)),
+			bad, valid and age >= 0 and age < 2000, busy)
+	# COLOUR REPORTS THE INSTRUMENT, NOT THE WORLD. A belly on the ground is a true
+	# reading of a real state, and colouring it red says "this number is wrong" about the
+	# one moment the number matters most. The trace already carries that: it turns red
+	# inside the drag band, which is where a state belongs. So this row stays the same
+	# 0.9 grey as vbat and power unless the CHANNEL is in trouble —
+	#   red   = ranging has stopped, i.e. the number on screen is stale
+	#   amber = the part is rejecting a sustained fraction of its own readings
+	# A single invalid sample is deliberately NOT amber: one frame of "saw nothing" is a
+	# world state too, and flashing on it would make an open floor look like a fault.
+	var col := Color(0.9, 0.9, 0.9)
+	if bad > TOF_BAD_FRAC_WARN: col = Color(1, 0.85, 0.4)
+	if age > 2000: col = Color(1, 0.3, 0.3)
+	_tele_lbls["belly"].add_theme_color_override("font_color", col)
 
 
 func _update_cost_rows() -> void:
@@ -439,11 +621,58 @@ func _on_connect() -> void:
 func _on_disconnect() -> void:
 	# Disconnect is an ACTION, not a closed window (SPEC §4.2.2).  In bench mode the
 	# daemon's deadman limps the robot when the pings stop — say so.
+	var mode := str(_tele.get("mode", "bench"))     # read BEFORE the frame is cleared
 	_client.call("disconnect_from")
 	_connected = false
 	_tele = {}; _tele_ms = -1
 	for d in _rows: d["armed"] = false
-	_set_status("disconnected — bench deadman on the Pi sends the rescue pose within ~1 s")
+	if mode == "bench":
+		_set_status("disconnected — bench deadman on the Pi sends the rescue pose within ~1 s")
+	else:
+		_set_status("disconnected — %s mode has NO deadman: the robot carries on (SPEC §4.2)" % mode)
+
+# ======================================================================================
+# STOP / resume — SPACE
+# ======================================================================================
+# _input, not _unhandled_input: it runs BEFORE any control sees the key, so SPACE stops
+# the robot even while a text field or slider has focus.  The cost is that the pose-name
+# field cannot take a space, which is the right trade for a safety key.
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo \
+			and (event as InputEventKey).keycode == KEY_SPACE:
+		get_viewport().set_input_as_handled()
+		_toggle_stop()
+
+# Is the robot KNOWN to be stopped right now?  Only fresh evidence counts: a stop/resume
+# reply in the last second, or telemetry under a second old.  Unknown is treated as
+# "not stopped", so an uncertain press always sends STOP and never RESUME.
+func _known_stopped() -> bool:
+	var now := Time.get_ticks_msec()
+	var tele_age: int = (now - _tele_ms) if _tele_ms >= 0 else 1 << 30
+	var reply_age: int = (now - _stop_reply_ms) if _stop_reply_ms >= 0 else 1 << 30
+	if reply_age < 1000 and (reply_age <= tele_age):
+		return _stop_reply_state
+	if tele_age < 1000:
+		return bool(_tele.get("stopped", false))
+	return false
+
+func _toggle_stop() -> void:
+	if not _connected:
+		_set_status("⚠ NOT CONNECTED — STOP cannot reach the robot. Connect, or cut power.")
+		return
+	var resuming := _known_stopped()
+	var rep := _call({"verb": "resume" if resuming else "stop"})
+	if bool(rep.get("ok", false)):
+		_stop_reply_ms = Time.get_ticks_msec()
+		_stop_reply_state = bool(rep.get("stopped", not resuming))
+		_pending.clear()
+		if resuming:
+			_set_status("RESUMED (%s mode)" % str(rep.get("mode", "?")))
+		else:
+			for d in _rows: d["armed"] = false
+			_set_status("STOPPED — every servo frozen where it is. SPACE to resume.")
+	elif not resuming:
+		_set_status("⚠ STOP FAILED: %s — cut power if the robot is at risk" % str(rep.get("error", "no reply")))
 
 func _on_limp() -> void:
 	var rep := _call({"verb": "limp"})
@@ -560,8 +789,21 @@ func _process(delta: float) -> void:
 		if not t.is_empty():
 			_tele = t
 			_tele_ms = Time.get_ticks_msec()
+			if _imu_src != null:
+				_imu_src.call("set_frame", t)
 	_update_labels()
 	_drive_body()
+
+
+func _on_imu_toggle() -> void:
+	if _imu_scope == null:
+		return
+	_imu_scope.visible = _imu_btn.button_pressed
+	# Say WHY it is empty rather than drawing an idle panel: an absent part and a
+	# disconnected daemon look identical on a scope showing zeros.
+	if _imu_btn.button_pressed and (_imu_src == null or not bool(_imu_src.call("has_data"))):
+		print("BenchDashboard: IMU scope on, but no imu block in telemetry — ",
+			"part absent, daemon predates it, or link down.")
 
 
 func _tele_fresh() -> bool:
@@ -580,8 +822,32 @@ func _update_labels() -> void:
 		_link_lbl.text = "link: OK   telemetry age %d ms (1 s mean)" % int(_avg.get("age", age_ms))
 		_link_lbl.add_theme_color_override("font_color", Color(0.3, 1, 0.3))
 	var mode := str(_tele.get("mode", "—"))
-	_mode_lbl.text = "MODE: %s — link loss ⇒ RESCUE POSE (%s)" % [mode, "saved" if _tele.get("rescue_pose") != null else "NONE SAVED — save a pose named rescue"]
-	_mode_lbl.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	# SPEC §4.2.1: "am I in a mode where closing the laptop kills the robot?" must never be
+	# ambiguous.  bench = the deadman sends the rescue pose; dev/autonomous = it does not.
+	if mode == "bench" or mode == "—":
+		_mode_lbl.text = "MODE: %s — link loss ⇒ RESCUE POSE (%s)" % [mode, "saved" if _tele.get("rescue_pose") != null else "NONE SAVED — save a pose named rescue"]
+		_mode_lbl.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	else:
+		var br: Variant = _tele.get("brain")
+		var br_txt := "no brain stream"
+		if br is Dictionary:
+			var d: Dictionary = br
+			br_txt = "brain %s, %d applied, age %s ms" % ["HOLDING (stream lost)" if bool(d.get("holding", false)) else ("streaming" if bool(d.get("have_stream", false)) else "silent"),
+				int(d.get("applied", 0)), str(d.get("age_ms", "—"))]
+		_mode_lbl.text = "MODE: %s — THE BRAIN DRIVES; closing this window does NOT stop it (%s)" % [mode.to_upper(), br_txt]
+		_mode_lbl.add_theme_color_override("font_color", Color(1, 0.4, 1))
+	var stopped := _known_stopped()
+	if not _connected or _tele.is_empty():
+		_stop_lbl.text = ""
+		_stop_btn.text = "■ STOP  [space]"
+	elif stopped:
+		_stop_lbl.text = "■ STOPPED (%s, %.0f s) — SPACE to resume      " % [str(_tele.get("stop_why", "?")), float(_tele.get("stopped_ms", 0)) / 1000.0]
+		_stop_lbl.add_theme_color_override("font_color", Color(1, 0.3, 0.3))
+		_stop_btn.text = "▶ RESUME  [space]"
+	else:
+		_stop_lbl.text = "● RUNNING      "
+		_stop_lbl.add_theme_color_override("font_color", Color(0.3, 1, 0.3))
+		_stop_btn.text = "■ STOP  [space]"
 	if _tele.is_empty():
 		_body_lbl.text = "BODY: — (no telemetry)"
 		_body_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
@@ -599,7 +865,9 @@ func _update_labels() -> void:
 	var vbat := float(_tele.get("vbat", 0.0))            # instantaneous, for the self-check below
 	var adc: Array = _tele.get("adc", [])
 	var sample := {"vbat": float(_tele.get("vbat", 0.0)), "tick_hz": float(_tele.get("tick_hz", 0.0)),
-				   "deadman": float(_tele.get("deadman_ms_left", 0.0)), "age": float(max(age_ms, 0))}
+				   # null in a brain mode: there is no deadman there (SPEC §4.2)
+				   "deadman": float(_tele.get("deadman_ms_left", 0.0)) if _tele.get("deadman_ms_left") != null else -1.0,
+				   "age": float(max(age_ms, 0))}
 	for i in range(adc.size()): sample["adc%d" % i] = float(adc[i])
 	for k in sample: _avg_sum[k] = float(_avg_sum.get(k, 0.0)) + sample[k]
 	_avg_n += 1
@@ -616,9 +884,11 @@ func _update_labels() -> void:
 			parts.append("A%d %4d/%.2fV" % [i, int(a), a * 3.3 / 4095.0])
 		_tele_lbls["adc"].text = "adc: " + ("  ".join(parts) if parts.size() else "—")
 		_tele_lbls["tick_hz"].text = "tick_hz: %.2f   (HAT frame 49.95 Hz — a different clock)" % float(_avg.get("tick_hz", 0.0))
-		_tele_lbls["deadman_ms_left"].text = "deadman_ms_left: %d" % int(_avg.get("deadman", 0.0))
+		_tele_lbls["deadman_ms_left"].text = ("deadman_ms_left: %d" % int(_avg.get("deadman", 0.0))) if _tele.get("deadman_ms_left") != null else "deadman: none (brain mode — SPEC §4.2)"
 		_tele_lbls["age"].text = "frame seq %s   age %d ms (1 s mean)" % [str(_tele.get("seq", "—")), int(_avg.get("age", 0.0))]
 	_update_cost_rows()
+	_update_power_row()
+	_update_belly_row()
 	_tele_lbls["overruns"].text = "overruns: %s   bus_errors: %s" % [str(_tele.get("overruns", "—")), str(_tele.get("bus_errors", "—"))]
 	_tele_lbls["watchdog_trips"].text = "watchdog_trips: %s   low_battery: %s   pi_throttled: %s" % [str(_tele.get("watchdog_trips", "—")), str(_tele.get("low_battery", "—")), str(_tele.get("pi_throttled", "—"))]
 	_tele_lbls["armed_ch"].text = "armed_ch: %s   rescue_pose: %s" % [str(_tele.get("armed_ch", "—")), str(_tele.get("rescue_pose", "NONE"))]
@@ -629,7 +899,40 @@ func _update_labels() -> void:
 	# self-check
 	_set_check("0x14 present", _tele_fresh(), "live" if _tele_fresh() else "no telemetry")
 	_set_check("Vbat plausible 6.0–8.4 V", _tele_fresh() and vbat >= VBAT_MIN and vbat <= VBAT_MAX, "%.2f V" % vbat)
-	for item in ["IMU WHO_AM_I = 0xEA", "INA219 ⟷ A4 agree", "ToF plausible", "FSR sum ≈ 1.0 BW"]:
+	# INA219 ⟷ A4 — two independent paths to one number, so a disagreement is a real
+	# fault rather than a calibration opinion. Same 150 mV gate `hat_tool ina probe`
+	# exits non-zero on (BOM §3.4). The other three are still genuinely unfitted.
+	var chk_ina: Variant = _tele.get("ina")
+	if chk_ina is Dictionary and bool((chk_ina as Dictionary).get("ok", false)):
+		var iv := float((chk_ina as Dictionary).get("v", 0.0))
+		var dv := iv - vbat
+		_set_check("INA219 ⟷ A4 agree", _tele_fresh() and absf(dv) < INA_A4_TOL_V,
+			"%.3f V vs %.3f V   Δ%+.3f V" % [iv, vbat, dv])
+	else:
+		_check_lbls["INA219 ⟷ A4 agree"].text = "○ INA219 ⟷ A4 agree — not fitted"
+		_check_lbls["INA219 ⟷ A4 agree"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	# ToF plausible — the tape-measure check's standing equivalent (BOM §6 step 4). It
+	# asks two things, because either alone passes on a broken sensor: is the distance
+	# in the band a belly can actually be at, and is the part accepting its own
+	# measurements? A ToF wedged at a plausible number with a 90 % invalid rate reads as
+	# perfect on distance alone.
+	var chk_tof: Variant = _tele.get("tof")
+	if chk_tof is Dictionary and bool((chk_tof as Dictionary).get("ok", false)):
+		var t: Dictionary = chk_tof
+		var tm := float(t.get("m", 0.0))
+		var tbad := float(t.get("bad_frac", 0.0))
+		var tage := int(t.get("age_ms", -1))
+		var live := tage >= 0 and tage < 2000
+		_set_check("ToF plausible",
+			_tele_fresh() and live and bool(t.get("valid", false))
+				and tm >= TOF_PLAUSIBLE_MIN_M and tm <= TOF_PLAUSIBLE_MAX_M
+				and tbad <= TOF_BAD_FRAC_WARN,
+			"%.1f mm   %s   invalid %.0f%%%s" % [tm * 1000.0, str(t.get("status", "?")),
+				tbad * 100.0, "" if live else "   STALE"])
+	else:
+		_check_lbls["ToF plausible"].text = "○ ToF plausible — not fitted"
+		_check_lbls["ToF plausible"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	for item in ["IMU WHO_AM_I = 0xEA", "FSR sum ≈ 1.0 BW"]:
 		_check_lbls[item].text = "○ %s — not fitted" % item
 
 	# rows: reflect the daemon's view of each channel

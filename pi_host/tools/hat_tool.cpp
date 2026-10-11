@@ -7,12 +7,17 @@
 //   hat_tool ramp  <ch> <from> <to> [slew_us_per_tick]     one continuous slew-limited move, then limp
 //   hat_tool ina probe [r_shunt]     INA219 at 0x40: bus V, current, and the A4 cross-check
 //   hat_tool ina capture <sec> <file> [r_shunt]  shunt-only burst -> JSONL (the inrush record)
+//   hat_tool ina sag <sec> <file> [r_shunt]      shunt AND bus -> JSONL; reports MIN pack volts
+//   hat_tool tof probe [offset_mm]            VL53L0X at 0x29: ID check + one measurement
+//   hat_tool tof watch [sec] [offset_mm]      live readings — THE TAPE-MEASURE CHECK (BOM 6.4)
+//   hat_tool tof log <sec> <file> [offset_mm] continuous readings -> JSONL, raw mm preserved
 //   hat_tool limptest <ch>          arm at 1500, then hold three candidate 'limp' register values
 //                                   (0, 1, 4095) for 8 s each — feel the servo: which one goes slack?
 // Every servo action goes through ServoDriver: clamp, slew, watchdog, time-at-limit.
 // ROBOT ON A STAND for any servo verb.
 #include "ogma/hw/ServoDriver.hpp"
 #include "ogma/hw/Ina219.hpp"
+#include "ogma/hw/Vl53l0x.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -20,6 +25,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -39,7 +45,7 @@ static void run_ticks(ServoDriver& d, RobotHat& hat, int ch, int n, bool show_vb
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) { std::fprintf(stderr, "usage: hat_tool vbat|adc|limp|pulse|sweep ...\n"); return 2; }
+    if (argc < 2) { std::fprintf(stderr, "usage: hat_tool vbat|adc|limp|pulse|sweep|ina|tof ...\n"); return 2; }
     const std::string verb = argv[1];
     try {
         LinuxI2cBus bus("/dev/i2c-1");
@@ -104,7 +110,135 @@ int main(int argc, char** argv) {
                 if (clipped) std::printf("! PGA CLIPPED -- the peak is a FLOOR.  Widen the range or fit a smaller shunt.\n");
                 return 0;
             }
-            std::fprintf(stderr, "usage: hat_tool ina probe|capture ...\n");
+            if (sub == "sag") {
+                if (argc < 5) { std::fprintf(stderr, "usage: hat_tool ina sag <sec> <file> [r_shunt]\n"); return 2; }
+                const double secs = std::atof(argv[3]);
+                const char*  path = argv[4];
+                const double rs   = argc > 5 ? std::atof(argv[5]) : 0.01;
+                Ina219 ina(bus, rs);
+                const auto cfg = ina219_sag_config();
+                ina.configure(cfg);
+                // Both channels convert, so the pair costs two conversion times.
+                const int period_us = Ina219::conversion_time_us(cfg.sadc) + Ina219::conversion_time_us(cfg.badc);
+                std::FILE* f = std::fopen(path, "w");
+                if (!f) { std::fprintf(stderr, "cannot open %s\n", path); return 2; }
+                std::fprintf(f, "{\"kind\":\"ina219_sag\",\"r_shunt_ohm\":%.6f,\"shunt_lsb_v\":%g,"
+                                "\"bus_lsb_v\":%g,\"period_us\":%d,\"pga_clip_counts\":%d}\n",
+                             rs, Ina219::SHUNT_LSB_V, Ina219::BUS_LSB_V, period_us,
+                             Ina219::pga_clip_counts(cfg.pga));
+                const auto t0 = std::chrono::steady_clock::now();
+                auto next = t0;
+                long n = 0; int peak = 0; double vmin = 1e9; bool clipped = false;
+                while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < secs) {
+                    const auto s2 = ina.read();
+                    const long us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                        std::chrono::steady_clock::now() - t0).count();
+                    std::fprintf(f, "{\"t_us\":%ld,\"shunt_raw\":%d,\"bus_raw\":%u}\n",
+                                 us, s2.shunt_raw, unsigned(s2.bus_raw));
+                    if (std::abs(static_cast<int>(s2.shunt_raw)) > std::abs(peak)) peak = s2.shunt_raw;
+                    if (s2.bus_v < vmin) vmin = s2.bus_v;
+                    if (s2.pga_clipped) clipped = true;
+                    ++n;
+                    next += std::chrono::microseconds(period_us);
+                    std::this_thread::sleep_until(next);
+                }
+                std::fclose(f);
+                std::printf("%ld samples in %.1f s (%.0f Hz) -> %s\n", n, secs, n / secs, path);
+                std::printf("peak %+d counts = %+.3f A     MIN PACK %.3f V\n",
+                            peak, ina.shunt_to_amps(static_cast<int16_t>(peak)), vmin);
+                // 6.0 V is the HAT's stated input minimum; below it the 5 V rail is on its own.
+                if (vmin < 6.4) std::printf("! PACK SAG %.3f V -- within 0.4 V of the HAT's 6.0 V minimum\n", vmin);
+                if (clipped)    std::printf("! PGA CLIPPED -- the peak is a FLOOR, not a measurement.\n");
+                return vmin < 6.4 ? 3 : 0;
+            }
+            std::fprintf(stderr, "usage: hat_tool ina probe|capture|sag ...\n");
+            return 2;
+        }
+        if (verb == "tof") {
+            const std::string sub = argc > 2 ? argv[2] : "probe";
+            // The mount offset is CALIBRATION DATA (Vl53l0x.hpp), so raw mm is what the
+            // record keeps and the offset rides beside it as metadata.
+            auto open_tof = [&](double offset_mm) {
+                Vl53l0x::Config c; c.mount_offset_mm = offset_mm;
+                auto t = std::make_unique<Vl53l0x>(bus, c);
+                t->init();
+                return t;
+            };
+            auto print_reading = [](const Vl53l0x::Reading& r, double offset_mm) {
+                std::printf("  raw %4u mm   clearance %6.1f mm (%.4f m)   %-8s dev %2u   "
+                            "signal %6.2f  ambient %6.2f Mcps  spads %5.1f%s\n",
+                            unsigned(r.raw_mm), (r.raw_mm - offset_mm), r.distance_m,
+                            Vl53l0x::status_name(r.status), unsigned(r.device_status),
+                            r.signal_mcps, r.ambient_mcps, r.spads,
+                            r.valid ? "" : "   <- INVALID, distance is the far limit");
+            };
+            if (sub == "probe") {
+                const double off = argc > 3 ? std::atof(argv[3]) : 0.0;
+                auto tof = open_tof(off);
+                std::printf("VL53L0X 0x29   model 0x%02X   timing budget %u us   "
+                            "signal limit %.2f Mcps   mount offset %.1f mm\n",
+                            Vl53l0x::MODEL_ID, tof->timing_budget_us(),
+                            double(tof->config().signal_rate_limit_mcps), off);
+                tof->start_continuous();
+                const auto r = tof->read_blocking();
+                print_reading(r, off);
+                tof->stop_continuous();
+                return r.valid ? 0 : 1;
+            }
+            if (sub == "watch") {
+                const double secs = argc > 3 ? std::atof(argv[3]) : 20.0;
+                const double off  = argc > 4 ? std::atof(argv[4]) : 0.0;
+                auto tof = open_tof(off);
+                std::printf("VL53L0X watch %.0f s — move a tape measure under it; raw mm is the sensor,\n"
+                            "clearance is raw minus the %.1f mm mount offset.\n", secs, off);
+                tof->start_continuous();
+                const auto t0 = std::chrono::steady_clock::now();
+                long n = 0, bad = 0;
+                while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < secs) {
+                    Vl53l0x::Reading r;
+                    if (!tof->read_ready(r)) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); continue; }
+                    print_reading(r, off);
+                    std::fflush(stdout);
+                    ++n; if (!r.valid) ++bad;
+                }
+                tof->stop_continuous();
+                std::printf("%ld readings, %ld invalid (%.1f%%)\n", n, bad, n ? 100.0 * bad / n : 0.0);
+                return 0;
+            }
+            if (sub == "log") {
+                if (argc < 5) { std::fprintf(stderr, "usage: hat_tool tof log <sec> <file> [offset_mm]\n"); return 2; }
+                const double secs = std::atof(argv[3]);
+                const char*  path = argv[4];
+                const double off  = argc > 5 ? std::atof(argv[5]) : 0.0;
+                auto tof = open_tof(off);
+                std::FILE* f = std::fopen(path, "w");
+                if (!f) { std::fprintf(stderr, "cannot open %s\n", path); return 2; }
+                std::fprintf(f, "{\"kind\":\"vl53l0x_log\",\"mount_offset_mm\":%.3f,"
+                                "\"timing_budget_us\":%u,\"signal_rate_limit_mcps\":%.3f}\n",
+                             off, tof->timing_budget_us(), double(tof->config().signal_rate_limit_mcps));
+                tof->start_continuous();
+                const auto t0 = std::chrono::steady_clock::now();
+                long n = 0, bad = 0;
+                while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < secs) {
+                    Vl53l0x::Reading r;
+                    if (!tof->read_ready(r)) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); continue; }
+                    const long us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                        std::chrono::steady_clock::now() - t0).count();
+                    // raw_mm, not the derived clearance: a later re-fit of the offset
+                    // re-derives every sample instead of stranding the record.
+                    std::fprintf(f, "{\"t_us\":%ld,\"raw_mm\":%u,\"status\":\"%s\",\"dev\":%u,"
+                                    "\"signal_mcps\":%.3f,\"ambient_mcps\":%.3f,\"spads\":%.2f}\n",
+                                 us, unsigned(r.raw_mm), Vl53l0x::status_name(r.status),
+                                 unsigned(r.device_status), r.signal_mcps, r.ambient_mcps, r.spads);
+                    ++n; if (!r.valid) ++bad;
+                }
+                tof->stop_continuous();
+                std::fclose(f);
+                std::printf("%ld readings in %.1f s (%.0f Hz), %ld invalid -> %s\n",
+                            n, secs, n / secs, bad, path);
+                return 0;
+            }
+            std::fprintf(stderr, "usage: hat_tool tof probe|watch|log ...\n");
             return 2;
         }
         if (verb == "adc") {

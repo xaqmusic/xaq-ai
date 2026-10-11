@@ -36,10 +36,15 @@ public:
     void write(uint8_t addr, const std::vector<uint8_t>& bytes) override;
     uint8_t read_byte(uint8_t addr) override;
     std::vector<uint8_t> read_bytes(uint8_t addr, std::size_t n) override;
+    // Transactions that failed and were RETRIED (each retry sleeps 500 us), per 7-bit
+    // address.  A retry that then succeeds was invisible before: it cost time and counted
+    // nowhere, because bus_errors only counts failures that survive every retry.
+    uint64_t retries(uint8_t addr) const { return retries_[addr & 0x7F]; }
 private:
     void select(uint8_t addr);
     int fd_ = -1;
     int selected_ = -1;
+    uint64_t retries_[128] = {0};
 };
 
 } // namespace ogma::hw

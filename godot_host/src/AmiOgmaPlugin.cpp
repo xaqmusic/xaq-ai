@@ -12,6 +12,9 @@
 #include "OgmaBrain.hpp"
 #include "BenchClient.hpp"
 #include "VideoClient.hpp"
+#include "ImuAttitude.hpp"
+#include "LegKinematics.hpp"
+#include "StrideOdometry.hpp"
 
 using namespace godot;
 
@@ -20,6 +23,12 @@ static void initialize_ami_ogma_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<OgmaBrain>();
     ClassDB::register_class<BenchClient>();
     ClassDB::register_class<VideoClient>();
+    ClassDB::register_class<ImuAttitude>();
+    ClassDB::register_class<LegKinematics>();
+    ClassDB::register_class<ServoLag>();
+    ClassDB::register_class<StrideVNode>();
+    ClassDB::register_class<DistressNode>();
+    ClassDB::register_class<StrideMath>();
 }
 
 static void uninitialize_ami_ogma_module(ModuleInitializationLevel p_level) {

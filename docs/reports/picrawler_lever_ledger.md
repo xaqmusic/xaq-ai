@@ -4782,7 +4782,9 @@ stayed latched off until power-cycled). **A4 battery voltage never saw it**: the
 rescue path start channels one every 100 ms, shortest travel first, at 600 µs/s; the same
 X → rescue recall then lands in 4.2 s with the throttle flags clean. Two instrument notes:
 `vcgencmd pmic_read_adc` takes ~0.7 s per read, useless for rail transients (the INA219 is the
-instrument); and a first arm after boot cannot slew (no known position) — the stagger alone
+instrument) — ⚠ **corrected 2026-09-13: that is the cost of reading the WHOLE ADC set. Naming
+one value, `pmic_read_adc EXT5V_V`, costs 85 ms median (8.2 Hz), and it is the only direct
+view of the 5 V rail that actually fails — see bom §3.8.8.4**; and a first arm after boot cannot slew (no known position) — the stagger alone
 carried that case. Re-use context: the servo-BEC rebuild now has two measured reasons (no
 limp, shared-rail brownout); the INA219 quantifies the inrush margin before deciding.
 
@@ -4832,3 +4834,2095 @@ cap 0.05, but a faster gait raises it by construction; falls and tilt are the ho
 consensus, a place map) — retry there. Cap 0.05: the promotion run. `kalman_q > 0`: its own
 lever, bench-loud, on a body only with the cap. Bench gap: no scenario expressed the churn;
 a rotating-ring scenario (`S6`) goes in before Stage 2's creature A/Bs.
+
+---
+
+### ★★★ 2026-09-11 — THE SIM-HONESTY A/B: the joint oracle was COSTING us, and one input is invisible at 6 000 ticks
+
+**Verdict: `WORKING` (signal) on `honest_joints`; `PARTIAL` (mild cost) on `honest_imu`;
+`NULL` — behaviorally FREE, consumer verified — on `honest_upright`.** Port doc Phase 4
+step (c). The switches ship gain-0 (`c09148f`),
+byte-identical off on a 1 200-tick continuous gate and a 4 999-tick `instant_pause` gate
+carrying 14/15 hard resets. Every arm prints a startup receipt naming its ON/off state,
+and all four were confirmed loaded before any number was read.
+
+**★ 1. THE 2026-08-28 CONSUMER MAP IS WRONG IN TWO PLACES.** Read against the config
+rather than against the audit's own summary:
+
+- **`tilt` is not in `native_measured` at all**, so the tilt half of the attitude
+  substitution has no consumer here (`publish_tilt` also defaults FALSE headless). Inert.
+- **`imu` reaches MotorEPMv2 ONLY.** GainEvolver subscribes, but `handle_imu` discards
+  every value while `travel_topic` is non-empty — and the config sets it to
+  `reality.proprio.stride_v`. **The flow term is therefore ALREADY legal**, which retires
+  the largest single exposure the legality audit recorded (flow accounted for 105 % of the
+  movement in J on `coupling_gain`'s landscape). Of `imu`'s four values MotorEPMv2 reads
+  only `[2]` and `[3]`; `sin/cos yaw` have no consumer in this config.
+
+**★★ 2. `honest_upright` IS INVISIBLE AT THE STANDARD PROTOCOL, and the reason
+generalizes beyond this lever.** All 46 metrics identical to baseline — not approximately,
+exactly. `upright`'s only consumer is GainEvolver, and GainEvolver's first generation was
+**measured at tick 34 020** (`warmup_ticks` 10 000 + `eval_window_ticks` 12 000, then one
+per ~24 000: 34 020 / 58 080 / 82 080 / 106 080 / 130 080). At 6 000 ticks `ge_tilt`,
+`ge_energy` and `ge_unl` all read **exactly 0.0** — the module buffers and scores nothing.
+**A 6 000-tick A/B cannot say anything about any GainEvolver-only input, and a `NULL`
+recorded there would have been a false verdict** (§3.2 checks 2 and 5). Re-use context:
+measure at >= 34 000 ticks, ideally >= 58 000 for two generations. ⚠ The same caveat
+applies retroactively to any claim about a GainEvolver-mediated quantity measured on the
+6 000-tick standard.
+
+**★★★ 3. `honest_joints` IS THE LOUD ONE, AND IT BUYS RHYTHM.** Feeding the Bridge and
+both body-pose EPMs the **servo forward model** instead of achieved hinge angles — the
+only joint signal an encoder-less robot can ever have — produces a markedly more rhythmic,
+more actively stepping gait. n=6 × 6 000, corridor, diff 0.3, Welch t:
+
+| metric | base | honest_joints | t |
+|---|---|---|---|
+| `plv_w` | 0.133 | **0.200** | **+14.2** |
+| `plv` | 0.072 | **0.152** | **+9.7** |
+| `swing_bout` | 5.70 | 7.13 | +8.5 |
+| `contact_duty` | 0.773 | 0.731 | −7.2 |
+| `steps` | 74.2 | **119.3** | **+6.7** |
+| `amp_min` | 0.626 | 0.506 | −6.3 |
+| `hk_value` | 5.52 | 5.04 | −5.8 |
+| `tle_spr` | 0.391 | 0.499 | +5.4 |
+| `step_cv_real` | 0.836 | **0.673** | −5.3 |
+| `td_plv` | 0.319 | 0.246 | −4.4 |
+| `scrub` | 0.094 | 0.115 | +4.0 |
+| `coh` | 0.489 | 0.536 | +3.6 |
+| `fwd_v` | 0.039 | 0.054 | +2.4 |
+| `tilt_sd` | 0.069 | 0.085 | +2.2 |
+| `straight` | 0.786 | 0.743 | −2.1 |
+| `net_z` | 6.01 ± 0.46 | **6.70 ± 0.62** | +2.0 |
+| `falls` | 0 | 0 | — |
+
+**Phase-locking doubles, stepping regularity improves by a third, and it covers ~11 % more
+ground** — while `flat_v` is unmoved (0.079 → 0.076), the **tenth** lever to leave that
+pinned (§5). It is not free: it walks 19 % further in path for 11 % more net displacement,
+with more scrub and tilt. Livelier and less directed, not simply better.
+
+**★ The self-model gets WORSE while the gait gets better** — `motor_tle` 0.229 → 0.263
+(t = +24.3), `tle_spr` +5.4. Worth recording because the naive prediction is the opposite:
+a lag-filtered input is *smoother*, so it should be easier to predict. The reason is in the
+same table — the body is taking 61 % more steps. **The residual rose because the behaviour
+got livelier, not because the signal got noisier**, a distinction `motor_tle` alone cannot
+make and `steps`/`plv` beside it can. ⚠ This is exactly the shape that would read as a
+REGRESSION if the self-model metric were judged on its own.
+
+**Direction check against §5.6:** the second time the hardware-POORER signal has won here,
+for the same structural reason — `feet_y_gravity_cmd` beat its achieved-pose twin because
+load deflection is noise to the consumer. Both cases are *commanded-vs-achieved*, so the
+honest reading is **removing servo deflection helps a consumer that wants intent**, not
+anything broader about impoverished sensing.
+
+**4. `honest_imu` costs little and destabilises slightly.** MotorEPMv2's `fwd_v_` becomes
+`stride_v` forward (~75 % of true scale, one tick lagged, NOT rescaled — prohibition 5)
+and its yaw rate becomes body-frame rather than world-vertical.
+
+| metric | base | honest_imu | t |
+|---|---|---|---|
+| `unstable` | 0.101 | 0.165 | **+2.6** |
+| `turns` | 0.001 ± 0.074 | −0.060 ± 0.021 | −1.8 |
+| `brt_plv` | 0.081 | 0.039 | −1.7 |
+| `net_z` | 6.01 ± 0.46 | 5.47 ± 0.61 | −1.6 |
+| `motor_tle` | 0.2290 | 0.2285 | ~0 |
+| `falls` | 0 | 0 | — |
+
+**No significant distance cost at n=6** and the self-model residual is untouched — but
+`unstable` rises 63 % and the turn bias becomes small, consistent and low-variance, the
+expected signature of a dead-reckoned heading that drifts. The scale-free parts of
+MotorEPMv2 absorbed the 25 % gain change by design (the `fwd_v` resonance divides by its
+own running spread); `coord_fit_accum_` does not, and is where the residual cost most
+plausibly sits.
+
+**★★ 5. `honest_upright` RE-MEASURED AT 60 000 TICKS: behaviorally FREE, and the
+consumer demonstrably fired.** n=4 × 60 000, both arms reaching **generation 2**
+(`ge_gen` 0 → 1 → 2), which is the horizon §2 above says is required.
+
+| | base | honest_upright |
+|---|---|---|
+| `ge_tilt` per seed | 0.0731 / 0.0263 / 0.0338 / 0.0408 | **0.0749 / 0.0290 / 0.0363 / 0.0431** |
+| `ge_acc` (accepts) | 2 / 1 / 1 / 1 | 2 / 1 / 1 / 1 |
+| `ge_vec` (evolved gains) | `[0.1794,1.9569,1.1386]` … | **bit-identical, all 4 seeds** |
+| all 45 seedavg metrics | — | **identical** |
+
+**The criterion sees a different world and takes the same path.** `ge_tilt` — the
+`w_tilt_sd` term, i.e. sd(upright) — is **higher in every seed** (+2.6 / +10.2 / +7.6 /
++5.5 %, mean +5.4 %), which is exactly what §5.4 predicts: the fused estimate carries
+accelerometer contamination the exact basis does not, so its variance is larger. But the
+perturbation never flipped an accept/reject decision, so the evolved gains came out
+bit-identical and behaviour with them.
+
+**This is a NULL that survives §3.2 rather than one that fails it.** Not a tautology (the
+values provably differ), not dead code (`ge_gen` = 2, `ge_acc` = 5 accepts across the four
+seeds), and the consumer was verified by telemetry rather than assumed. **Read it as: the
+attitude gap costs ~5 % of one criterion term and nothing at all of behaviour** — the
+cheapest of the three substitutions, and the one safest to take to hardware.
+
+⚠ **Scoped to the power, and the power here is a discrete-event count, not a seed count.**
+Two generations gave only **5 accept decisions across 4 seeds**; a 5 % perturbation of one
+of five weighted terms flipping none of them is weak evidence that it flips none *ever*.
+Re-use context for re-testing: more generations, a larger `w_tilt_sd`, or terrain where
+body acceleration — and therefore the accelerometer's contamination — is larger than a
+flat corridor's.
+
+**Scope and power.** n=6 × 6 000 fixed-seed is a **signal**, promote-or-kill only — not a
+finding. `honest_joints`'s `net_z` at t = 2.0 is precisely the marginal case §3.3 says to
+confirm rather than excavate; its *loud* claims are `plv_w`, `plv`, `steps` and
+`step_cv_real`, all t > 5. **Not yet observed in the UI** (§3 rule 5) and nothing is
+promoted.
+
+---
+
+### ★★★ 2026-09-13 — THE MEASURED BODY'S CHASSIS LURCH IS A RATCHET, AND `height_k` CANNOT REACH IT
+
+> ⚠ **CORRECTED 2026-10-02 — the ratchet is real code, but on the measured body it was
+> triggered by a sensor bug.** The belly ray the brain read here (`ground_clearance`
+> with the boom off) subtracted `CHASSIS_Y/2` and read **25.5 mm short** on the measured body,
+> so it reported "grounded" while the belly was ~25 mm up, and `height_ground_gain` ratcheted on
+> that. With the ray fixed (n=6, arena, 6000 ticks): `height_k_eff` ends at **0.33** instead of
+> 0.83, peak chassis height is **79 mm** instead of 132, and **falls go from 7 to 0**. The
+> measured body does not "tip over more" once its belly sensor is right. See the
+> 2026-10-02 entry at the end of this ledger.
+
+**Verdict: diagnosis (`WORKING` as a diagnosis) + `PARTIAL` signal on the ablation.**
+Operator observation: the measured body sits higher than cad and tips over more, and the
+real robot has no roll cage. **The observation is right and the proposed lever is the
+wrong one** — which is worth recording, because the lever has no authority over the thing
+being observed (the §412 rule, applied before building rather than after).
+
+**★ 1. THE COMMANDED HEIGHT IS NOT THE DIFFERENCE.** `standing_y` is 0.0820 (cad) vs
+0.0823 (measured) — 0.3 mm. And the *settled* ride height is the same in both bodies
+(0.054–0.064 m). What differs is a **transient**.
+
+**★★ 2. THE MECHANISM IS A ONE-WAY RATCHET IN THE ADAPTIVE SETPOINT.** The height target
+is `height_k_eff × chassis_h_max`, and `height_k_eff` is adapted by `height_ground_gain`:
+
+```
+if (grounded) height_k_eff += gain * (kHeightKMax - height_k_eff);        // fast, toward 0.95
+else          height_k_eff -= gain * 0.05 * (height_k_eff - height_k);    // 20x slower
+```
+
+The asymmetry is deliberate and sound *when grounding is intermittent* — grounding is
+strong evidence the target is too low, not-grounding is weak evidence it is too high. **On
+the measured body the belly is on the floor at spawn** (`gc_raw` 0.000 at tick 60), so the
+ratchet starts immediately and the 20× decay never recovers it. Measured, arena, 3 seeds:
+
+| | `height_k_eff` | `height_bias` | `gc_raw` | **chassis_y PEAK** | settled |
+|---|---|---|---|---|---|
+| cad | **0.300 → 0.300** (never moves) | −0.500 | 33 mm | 0.080 | 0.054 |
+| measured s7 | 0.561 → **0.917** | +0.075 | 2.9 mm | **0.118** | 0.054 |
+| measured s13 | 0.553 → **0.891** | +0.890 | 13.0 mm | **0.122** | 0.064 |
+| measured s21 | 0.565 → **0.909** | **+1.500 (railed)** | 5.3 mm | **0.148** | 0.056 |
+
+**The body lurches to 2.2–2.7× its settled height.** `chassis_h_max` is itself set by that
+lurch — and `picrawler_body.gd:11532` already suspected the shape: *"h_max above is the
+worst: a monotonic max with no decay and no reset, and it sets the height setpoint."* The
+loop closes on itself: a windup excursion records a high ceiling, the high ceiling sustains
+the demand, the demand sustains the windup. cad never enters it because its belly never
+grounds at spawn.
+
+**★★★ 3. `height_k` HAS NO AUTHORITY OVER THIS.** The obvious fix — lower the target — cannot
+work, because `height_k` is only the **floor** of the adapted fraction
+(`clamp(height_k_eff, height_k, kHeightKMax)`). With `height_k_eff` ratcheted to 0.9,
+lowering the floor from 0.30 changes nothing. Ten minutes of reading, and it saves the
+campaign that §412 was written about.
+
+**4. ABLATION — `height_ground_gain = 0` on the measured body**, arena, n=3 × 3000:
+
+| | peak chassis_y | settled | `gc_raw` | tilt mean |
+|---|---|---|---|---|
+| base (gg 0.01) | 0.118 / 0.122 / 0.148 | 0.054–0.064 | 2.9–13.0 mm | 0.083–0.101 |
+| ablated (gg 0) | **0.076 / 0.084 / 0.069** | 0.056–0.066 | **5.0–14.7 mm** | 0.079–0.101 |
+
+**Peak height down 38–53 %, 3/3 seeds, no overlap — and it costs nothing measured**: ride
+height unchanged, belly clearance the same or slightly *better*, tilt unchanged,
+`height_bias` sits near neutral instead of railing.
+
+⚠ **THIS IS NOT A PROMOTION, AND `height_ground_gain` IS NOT REFUTED.** It was measured
+`WORKING` on the **cad-era** body (2026-08-27, corridor n=6, `%<10 mm` 11.4 → 5.3) and its
+re-use context never covered a body whose belly grounds at spawn. Refuted *in a context*
+(§3.1), and ablating it globally would give back what it bought on cad. The candidates
+worth an A/B are (a) per-body gain, (b) **anti-windup**: grounding while `height_k_eff` is
+already high is evidence the target is UNREACHABLE, not that it is too low — only ratchet
+up if raising it actually improved clearance; (c) decay or reset `chassis_h_max`, which the
+code comment already flags as a monotonic ratchet with no reset.
+
+⚠ **THE OUTCOME WAS NOT MEASURED, ONLY THE MECHANISM.** **Zero falls and zero auto-resets
+in every arm** at 3000 ticks — so the tipovers are the operator's UI observation, and the
+link from "lower peak excursion" to "fewer tipovers" is **inference, not measurement**. A
+promote-or-kill run needs an arm long enough to produce falls, and the honest complement
+to peak height is the fall count itself.
+
+### ★★★ 2026-09-13 — THE AS-BUILT BELLY ToF CANNOT SEE THE BELLY, and the anti-windup fixed the wrong thing
+
+> ⚠ **RETRACTED 2026-10-02 — item 2 below is a harness artifact (`TAUTOLOGY`-class: it
+> measured the instrument).** The "belly truth" ray it scored the boom against read **25.5 mm
+> short** on the measured body (`CHASSIS_Y/2` where the belly is 26.0 mm below the origin, not
+> 51.5). The "+25.4 to +25.9 mm over-report" is that offset, and the "missed 21 of 21
+> groundings" were moments the belly was ~25 mm up. Against belly height from chassis geometry
+> the boom reads within **~1 mm**, compensated or not. The boom was telling the truth, and that is
+> why `height_k_eff` stopped climbing when it was switched on. Item 1's `NULL` on
+> `height_windup_guard` stands as measured, but against a baseline driven by the same bug, so
+> it is a `NULL`-against-a-broken-baseline. Re-use context: re-test only if a ratchet recurs on a
+> correctly-read belly.
+
+**Verdicts: `NULL` on `height_windup_guard` (mechanism fired, target unmoved);
+`WORKING` as a hardware finding on the boom ToF model.** Two levers, measured separately,
+both shipping gain-0 and OFF. Follows the ratchet diagnosis above.
+
+**1. `height_windup_guard` — the ratchet stops, and the lurch does not.** Gate: only let
+`height_ground_gain` raise `height_k_eff` while `height_bias` is not already positive
+(grounded-while-already-lifting is evidence the target is UNREACHABLE, not too low).
+Arena, measured body, n=3 × 3000:
+
+| arm | `height_k_eff` end | `height_bias` | **chassis_y peak** | tilt |
+|---|---|---|---|---|
+| base | 0.917 / 0.891 / 0.909 | +0.08 / +0.89 / +1.50 | **0.118 / 0.122 / 0.148** | 0.083–0.101 |
+| guard v1 (hold) | **0.479 / 0.503 / 0.495** | +0.97 / +0.91 / +0.49 | 0.118 / 0.113 / 0.128 | 0.083–0.102 |
+| guard v2 (decay) | **0.405 / 0.420 / 0.410** | +0.95 / +0.07 / +0.42 | 0.118 / 0.113 / 0.116 | 0.089 / **0.174** / **0.178** |
+| `height_ground_gain=0` | 0.300 (flat) | −0.20 / +0.17 / −0.20 | **0.076 / 0.084 / 0.069** | 0.079–0.101 |
+
+**The gate demonstrably fires** — the ratchet is halted in both forms — **and the chassis
+lurch does not move.** v2 also nearly doubles tilt on 2/3 seeds. ★ **WHY: the damage is
+done before the gate can act.** `height_k_eff` is already **0.561 at the first diag
+(t = 60)**, ratcheted from 0.300 during the spawn second while the belly is flat on the
+floor and `height_bias` is still negative — precisely the state the gate is designed to
+*permit*. The runaway to 0.9 is cosmetic; the lurch is set by the first sixty ticks.
+Re-use context: a fix must act on the SPAWN transient (initial pose, or an initial
+setpoint that does not treat "lying on the floor at t=0" as evidence), not on the
+steady-state ratchet.
+
+**2. ★★★ THE BOOM ToF IS BLIND TO BELLY GROUNDING — a hardware finding, not a sim one.**
+The as-built sensor is on a boom **70 mm aft** of centre at **+77 mm** (top of the HAT),
+not under the belly. Modelled faithfully (ray along body-down from the boom tip, with the
+lever arm and the tilt resolved out using the *fused* attitude estimate). Both readings
+computed in the same run, boom vs a belly-centre truth ray:
+
+| | boom reads | belly truth | over-report | corr | belly grounded | **boom missed** |
+|---|---|---|---|---|---|---|
+| boom+comp | 31.6 mm | 5.7 mm | **+25.9 mm** | +0.80 | 21/50 samples | **21 of 21 (100 %)** |
+| boom raw | 32.1 mm | 7.0 mm | **+25.0 mm** | +0.78 | 20/50 samples | **20 of 20 (100 %)** |
+
+**It tracks well (r ≈ 0.8) and is offset high by ~26 mm, and it missed every single
+belly-grounding event.** ⚠ **And that is why it appeared to "fix" the ratchet**: with the
+boom model on, `height_k_eff` stays at 0.32–0.35 instead of climbing to 0.92 and the peak
+drops to 0.071–0.084 — **not because the loop got healthier but because the sensor stopped
+reporting the grounding that drives it.** A channel that removes a pathology by not
+observing it is the worst possible pass.
+
+⚠ **Tilt compensation cannot fix this, and it is important to say why.** The correction
+resolves the sensor's own height change out of the reading — but the boom is measuring a
+*different patch of ground*, 70 mm behind the belly centre, and under pitch the belly's
+LEADING edge is what strikes while the boom is furthest from it. The residual is
+geometric, not trigonometric. Re-use context for the hardware: either the offset is
+characterised and subtracted as calibration (it is stable — r ≈ 0.8), or belly contact
+needs an observation that is actually at the belly.
+
+**Both ship gain-0 and OFF**: `height_windup_guard` (MotorEPMv2 param) and
+`tof_boom` / `tof_tilt_comp` (body exports, with a `tof[...]` startup receipt). Byte
+identity re-verified after every step. `gc_belly` is published as a diagnostic whenever
+the boom model is on, and is `-1` otherwise so "not modelled" cannot be read as zero.
+
+⚠ **Still not measured: tipovers.** At difficulty 0.8 over 8000 ticks the arena produced
+**3 auto-resets on one seed of three** — roughly one event per 8000 ticks. The outcome the
+operator cares about is too rare here to A/B at reasonable cost, so every number above is
+a MECHANISM measurement and the link to tipping remains inference.
+
+**★★★ ADDENDUM 2026-09-13 — every number above was taken on a GHOST CHASSIS, and the
+default is now solid.** `chassis_collides` defaulted **false**, `native_measured` declares
+an empty `body_env`, and **`seedavg.py` does not set it either** — so for a body that
+cannot touch the ground with its belly, "belly grounding" meant the belly
+**interpenetrating the floor**. That is a different physics, not a conservative
+approximation, and it sits underneath the one channel the promoted height homeostat rides.
+Other configs carry a prose warning about exactly this; the benchmark did not.
+
+**The boom-blindness result was re-measured with a solid belly and is UNCHANGED:**
+
+| | boom | belly truth | over-report | r | missed |
+|---|---|---|---|---|---|
+| ghost chassis | 30.7 mm | 5.2 mm | +25.5 mm | +0.836 | 22/22 (100 %) |
+| **solid chassis** | 30.7 mm | 5.2 mm | **+25.4 mm** | +0.790 | **23/23 (100 %)** |
+
+So the finding stands on its own and did not depend on the ghost body.
+
+**What the solid chassis does change** (arena, measured body, belly-centre sensor, n=3):
+peak chassis height falls (0.090 / 0.127 / 0.107 against a ghost 0.148 — the belly can no
+longer sink through the floor), and **tilt becomes erratic rather than worse**: 0.213 /
+0.102 / 0.071 against a ghost 0.092, with the single auto-reset of the whole comparison on
+the same seed that hit 0.213. n=3 and one event: a hint that the solid belly adds variance,
+nothing more.
+
+⚠ **CONSEQUENCE FOR THE RECORD:** figures taken before 2026-09-13 are not directly
+comparable to figures after it unless the arm set `OGMA_PICRAWLER_CHASSIS_COLLIDE`
+explicitly. Reproducing a historical number now requires setting it to **0** and saying so.
+The startup receipt prints the state unconditionally — ON or off, default or override — so
+no run is ambiguous about it again.
+
+### ★★★ 2026-09-13 — THE SIM HAS BEEN WALKING AT A SERVO SPEED THE ROBOT'S CURRENT BUDGET FORBIDS
+
+**Verdict: sim2real gap (`WORKING` as a diagnosis).** Asked to study slew limiting and
+round-robin as brownout mitigations. **Round-robin needs no study — it is already
+refuted on hardware**, and the slew question turned out to be a live gap rather than an
+open design choice.
+
+**★ 1. CONCURRENCY WAS NEVER THE BINDING CONSTRAINT.** BOM §3.6 swept K = 1…12 servos per
+tick at slew 40: **all twelve at once is 2.19–2.57 A**, with **zero throttle events in 28
+trials**, against a ≤ 3.5 A working budget. §3.8.2 states it outright: *"the duty budget is
+a slew cap, not a concurrency cap; §3.6's concurrency sweep found no boundary because it
+held the variable that matters fixed."* §3.6.1 adds that the deployed 100 ms stagger is
+**defeated by its own gentleness** — travel time (1567 ms) exceeds the launch window
+(1200 ms), so every channel ends up moving together anyway; a true K=3 would need a
+~520 ms stagger. **A priority round-robin would be regulating a quantity that has already
+been measured not to be the limit.**
+
+**★★★ 2. THE SIM RUNS AT ~76 µs/tick EQUIVALENT, WHICH IS THE "AT THE EDGE" ROW.**
+`MAX_SERVO_SPEED = 6.0 rad/s`; at the standard hobby-servo scale (500–2500 µs = 180°,
+636.6 µs/rad) that is **76 µs/tick** at the 50 Hz tick. Against §3.8.2's measured budget:
+
+| slew | peak battery A | verdict | rad/s |
+|---|---|---|---|
+| ≤ 50 µs/tick | ≤ 1.90 | ✅ the budget | 3.93 |
+| **76 µs/tick** | — | **⚠ the sim sits here** | **6.00** |
+| 80 µs/tick | 2.61 | ⚠ at the edge | 6.28 |
+| ≥ 200 µs/tick | ~3.00 | ❌ over the 5 V rail's 3 A rating | 15.7 |
+
+**The deployed `ServoDriver` default is 40 µs/tick = 3.14 rad/s — half the sim's speed.**
+
+**★★ 3. THE SCALE WAS MEASURED ON THE BENCH, and the standard was 14 % wrong.**
+`us_per_rad` = **545.2**, not the 636.6 the datasheet default implies — so the servo
+sweeps more angle per microsecond than assumed. Method: command a known µs step, mark the
+toe on paper, measure the swept chord against the known tibia radius `L3` = 76.5 mm
+(`angle = 2·asin(chord / 2L3)`). Seven marks at 100 µs steps.
+
+Three checks agree: the six-gap average gives **549.0** and the single 700→1300 chord gives
+**545.2** (0.7 % apart, different error structure); chord/arc = 0.958 against a predicted
+0.950, confirming the marks lie on a true 76.5 mm arc; and — the convincing one, because
+nobody measured it for this — at 545 µs/rad the *already-calibrated* knee envelope
+600–2300 µs spans **178.6°**, a hobby servo's full mechanical travel. At 636.6 it would
+have been 153°, leaving 27° unexplained.
+
+⚠ **A DEADMAN NEARLY CORRUPTED IT — and "limp" is the wrong word for what it does.**
+`ServoDriver`'s own 25-tick watchdog writes pulse 0, **which this HAT ignores**: the V4
+cannot de-energise a servo from software at all (measured 2026-08-29 — pulse 0/1/ARR
+ignored, stopped timer ignored, MCU held in reset 30 s and the servo still powered). The
+real safe action is one layer up: **benchd's deadman (`DEADMAN_MS` = 1000) commands the
+saved `rescue` POSE**, and `benchd::limp_all()` is literally `rescue(why)`. Nothing goes
+slack; the robot *moves to rescue*.
+
+**That is what makes it dangerous to a measurement.** A rescue excursion of 100–200 µs is
+a centimetre or two at the toe and reads as nothing happening — which is exactly why the
+first marks looked fine. It only announced itself at 900 µs, where the excursion was
+~31 mm and the operator saw the leg go and come back. Every mark used was re-taken with a
+**5 Hz keepalive** holding the client fresh (benchd then re-commands every armed channel
+each tick, so the driver watchdog never fires either). The `600→700` gap was dropped for
+the same reason — it starts from a position the deadman had already pulled to rescue — and
+it was the clear outlier at 449 µs/rad against 509–588.
+
+★ **The arc check is what licenses trusting the rest.** If the femur had wandered between
+marks the toe positions could not lie on a clean 76.5 mm arc, and they do (chord/arc 0.958
+against a predicted 0.950). A geometric consistency check earned more here than any amount
+of care at the bench could have.
+
+**★★ 4. WHAT THE BUDGET COSTS THE GAIT** — corridor, measured body, n=3 × 6000, with the
+sim's speed cap set to each *measured-scale* hardware slew:
+
+| `MAX_SERVO_SPEED` | = slew | net_z | fwd_v | steps | tilt_sd | contact |
+|---|---|---|---|---|---|---|
+| 6.00 rad/s | 65 µs/tick (**sim today, over budget**) | **6.31 ± 0.66** | 0.110 | 34 | 0.0565 | 0.779 |
+| **4.59 rad/s** | **50 µs/tick (budget ceiling, ≤ 1.90 A)** | **4.63 ± 0.19** | 0.083 | **35** | **0.0440** | 0.835 |
+| 3.67 rad/s | 40 µs/tick (**deployed default**) | 3.69 ± 0.46 | 0.066 | **13** | 0.0523 | 0.855 |
+| 1.83 rad/s | 20 µs/tick | 0.68 ± 0.18 | 0.028 | **0** | 0.1035 | 0.897 |
+
+**★★★ THE BUDGET CEILING IS NOT A COMPROMISE — IT IS THE BEST-BEHAVED POINT MEASURED.**
+At 50 µs/tick the gait keeps **all** its stepping (35 against the over-budget 34), runs at
+the **lowest tilt_sd of the whole set** (0.0440), and has by far the **tightest seed
+spread** (± 0.19 against ± 0.66). It costs 27 % of distance against a setting that is
+outside the current budget anyway. The deployed 40 µs/tick is materially worse than 50 on
+every axis: distance −20 %, stepping **13 against 35**, tilt worse, variance worse.
+
+**RECOMMENDATION FOR FIRST POWER-ON: raise `ServoDriver::slew_us_per_tick` from 40 to 50.**
+It is inside §3.8.2's measured ≤ 1.90 A budget, it is the most stable setting measured, and
+it recovers the stepping that 40 loses. The safest available setting and the best-behaving
+one are the same setting, which is not the trade-off this study expected to find.
+
+⚠ **Slower is still not safer.** At 20 µs/tick the gait collapses — zero steps and tilt_sd
+doubles. Below ~2 rad/s the body cannot keep up with its own postural demands.
+
+⚠ **Scope.** n=3 is a signal, not a finding; falls were not captured; the scale is one
+channel (RL knee), and part-to-part variation is unchecked. §3.8.2's current figures are
+vinyl-measured and flagged optimistic — grip converts free motion into work, and the same
+move cost 1.90 A on vinyl against 2.62 A on leather — so **re-verify 50 µs/tick on the
+actual test surface before relying on it.**
+
+**Shipped:** `MAX_SERVO_SPEED` is `const` → `var` with an `OGMA_PICRAWLER_MAX_SERVO_SPEED`
+override and a startup receipt naming the µs/tick equivalent and the budget. Default
+unchanged, gain-0 verified against a stashed baseline (1200 ticks × seeds 7/13, identical).
+
+### ★★ 2026-09-12 — THE ROBOT AND THE SIM DID NOT AGREE, AND ONE FLAG FIXED IT
+
+**Verdict: defect + fix (`WORKING`), measured on the robot.** Recorded because it touches
+`cpp_core`, and because it **corrects a conclusion already in this project's record.**
+
+The shared `ogma::body` helpers exist so sim and robot produce the same NUMBERS. They did
+not. Built the three parity checkers on the Pi and replayed the x86-generated oracles:
+
+| build | `leg_kinematics` | `imu_attitude` | `stride_odometry` |
+|---|---|---|---|
+| default | **400/400 mismatch** (worst 3.1e-07) | **796/800 mismatch** (worst 6.3e-07) | **900/900 mismatch** |
+| `-ffp-contract=off` | 400/400 **exact** | 800/800 **exact** | 900/900 **exact** |
+
+aarch64 GCC fuses `a*b+c` into FMA by default; baseline x86-64 has none and cannot.
+
+**★ This corrects the 2026-08-30 reading that "no compiler flag buys cross-arch
+bit-parity: golden replays are per-architecture."** That was measured on
+`RunTumbleNavV2` — 4 000 stochastic steps of DOUBLE precision leaning on `libm` — where
+per-arch `libm` genuinely does survive contraction being disabled. The body helpers are
+float32 and their trig agreed across the pair the moment FMA was off, so **for
+`ogma::body` contraction was the whole difference.** The earlier verdict stands for what
+it measured; it was the generalization that was wrong. Ledger §3.1: a refutation is about
+a mechanism IN A CONTEXT.
+
+**★ The diagnosis came free from an instrument the checker already had.**
+`imu_attitude_parity_check` counts `up_accel` — sqrt and divide, **no trig** —
+separately: 14/800 mismatched against 796/800 overall. Arithmetic-only paths nearly
+clean, trig-bearing ones not, which points at contraction rather than at the maths.
+**Distinguishing "rounding" from "a bug" is the difference between a flag and a rewrite**,
+and a bare pass/fail could not have done it.
+
+**Why 3e-7 was not "small enough to ignore."** On metre-scale links that is 0.3 µm, far
+below any physical error. But `stride_v` **accumulates** — `est`/`bias`/`slip` carry
+forward every tick into MotorEPMv2 and GainEvolver — and an accumulating estimator does
+not get to ignore 1 ULP per step.
+
+**Safe on the sim, verified rather than assumed:** GCC emits no FMA on baseline x86-64,
+so the flag is a no-op there; the 1200-tick byte-identity gate was re-run after adding it
+to `cpp_core`, `pi_host` AND `godot_host` and stayed IDENTICAL on both seeds.
+
+⚠ **Live consequence:** the robot's `Icm20948` already holds a shared
+`ogma::body::ImuAttitude`, so until its build carries the flag it runs the same filter as
+the sim and produces different bits. Re-use context: any future `ogma::body` helper is
+covered by the flag, but a NEW cross-arch claim needs its own oracle replay — this one is
+evidence about float32 arithmetic, not about `libm` in general.
+
+
+### ★★★ 2026-10-02 — THE BELLY "TRUTH" RAY READ 25.5 mm SHORT ON THE MEASURED BODY: the lurch, the tipping and P-d's boom-blindness were one sensor bug
+
+**Verdict: harness defect, fixed; it retracts the 2026-09-13 boom finding and re-reads the
+ratchet entry.** Arena, difficulty 0.3, n=6 × 6000 ticks, measured body. The arms differ only
+in the belly ray.
+
+**The bug.** `_compute_ground_clearance_centre` subtracted `CHASSIS_Y/2 + 0.02` as the
+sensor-to-belly offset. That is right only for a single box centred on the origin (cad). The
+measured body's origin is not its centre: the belly is **26.0 mm** below it (`_chassis_bottom_local`),
+not 51.5. Every reading was 25.5 mm short and floored at 0 while the belly was still ~25 mm up.
+The boom function's own comment already said "NOT CHASSIS_Y/2"; the centre ray was never fixed
+to match. **Found by checking `gc_belly` against chassis `y`**: it tracked the `CHASSIS_Y/2`
+formula to ~3 mm, while the boom tracked `y − 26 mm` to ~1 mm.
+
+**What it reached.** With the boom off, this ray IS the brain's `ground_clearance`, so the
+promoted height homeostat on every measured-body config (`native_measured`, P-c honest joints)
+saw a belly ~25 mm lower than it was. With the boom on, it was the `gc_belly` truth proxy.
+
+| `native_measured`, measured body | legacy ray | **fixed ray** |
+|---|---|---|
+| falls | **1.17 ± 1.07** (7 in 6 seeds) | **0** |
+| tilt_sd | 0.277 ± 0.26 | 0.063 ± 0.010 |
+| straight | 0.60 ± 0.28 | 0.81 ± 0.06 |
+| net_disp | 5.70 ± 2.59 | 6.86 ± 1.38 |
+| `height_k_eff` at end | 0.83 | 0.33 |
+| peak chassis y | 132 mm | 79 mm |
+| steps / step_bal | 20 / 0.15 | 23 / 0.10 |
+
+**Gates.** The fixed form equals the old one exactly on cad (`bottom = −CHASSIS_Y/2`): a
+1500-tick cad run is identical in every diag field. On P-e (boom on) only `gc_belly` moves, by
+exactly +25.5 mm. `OGMA_PICRAWLER_BELLY_RAY_LEGACY=1` restores the old ray and reproduces the
+pre-fix `native_measured` run in every field. The body prints `belly_ray[...]` at startup.
+
+**Re-read of earlier entries.** 2026-09-13's boom-blindness finding is retracted (banner
+there). The ratchet mechanism is real, but on the measured body it was fed false "grounded"
+readings (banner there). ⚠ **Every measured-body number taken with the boom off before this date
+ran on the short ray**, and it was the brain's input, so those runs measured a different
+closed loop. That includes the `native_measured` benchmark and P-c. Re-measure before building
+on them.
+
+**A second confound, in the UI only: `body_env` leaked between launcher selections.** The
+launcher applies a config's `body_env` into the process when the config is *selected*, and
+"a pre-existing env var wins". It counted its own leftovers as the operator's, so selecting
+P-d and then P-e ran P-e with tilt compensation ON. Selecting `native_measured` after any boom
+config ran it **with the boom ToF and solid chassis switched on**. The launcher auto-selects its
+remembered config at startup, so this fired with no visible cause. Fixed: the launcher records
+what it set, overwrites only that, and unsets keys the new config does not declare. A
+command-line export still wins. Tested by driving the real selection handler
+P-d → P-e → `native_measured` → P-e, on the old code (leaks in both directions) and the new.
+Headless harnesses never applied `body_env` at all, so seed-averaged numbers are unaffected.
+**Any UI observation of a boom/non-boom config made after selecting the other kind may have shown
+the wrong arm.**
+
+### ★★★ 2026-10-01/02 — THE FSR LEG, THE RAW BOOM, AND THE ROBOT'S SERVO SPEED: at its real speed the robot does not lift its feet
+
+**Verdicts: FSR leg `WORKING` (signal); raw boom ties-or-beats the compensated one on flat
+ground (signal); the robot's servo speed is a `REGRESSION` to a shuffle (signal, loud).**
+Arena, difficulty 0.3, n=6 × 6000 ticks, `native_measured__tofboom` gains, same build and
+seeds throughout. Body and env passed explicitly per arm, and every log carries the receipt.
+
+**1. The FSR toe modules lengthen the lower leg to 87 mm (knee axis to toe tip, operator).**
+`body/measured_fsr.json`: L3 76.5 → 87 mm, `standing_y` 82.3 → 92.7 mm (`coxa_z_drop + L3·sin 80°`),
++2 g per foot. `stand_m` is deliberately unchanged, because it must match the robot. Against the
+76.5 mm leg (compensated boom): net_disp 6.37 ± 0.94 → 7.84 ± 1.63 (edge-censored), straight and
+tilt tie, 0 falls in both, belly ~+5 mm higher. The gait survives the leg with no retuning.
+
+**2. The robot publishes the UNCOMPENSATED boom** (`ogma_host`: raw − 64.8 mm; the compensated
+arm exists only in benchd telemetry). On the FSR leg, uncompensated vs compensated: net_disp
+8.61 ± 0.57 vs 7.84 ± 1.63, straight 0.87 vs 0.82, tilt_sd 0.066 vs 0.083, 0 falls. The raw boom
+reads within −1.1 ± 1.0 mm of belly height from chassis geometry. On flat ground pitch does not
+swamp it. Not a terrain result: on a slope the compensated arm is the wrong one (BOM §9.10.3).
+
+**3. ★ At the robot's servo speed the gait stops lifting its feet.** The operator kept the robot
+at its deployed 40 µs/tick, which is **3.668 rad/s at the MEASURED 545.2 µs/rad** (not the
+3.14 that the 636.6 hobby-servo standard gives). The sim's 6.0 rad/s default had never been
+matched to it.
+
+| P-e (FSR leg, raw boom) | 6.0 rad/s (sim default) | **3.668 rad/s (robot)** |
+|---|---|---|
+| steps | 28.2 ± 9.9 | **0 on all 6 seeds** |
+| net_disp | 8.61 ± 0.57 | 4.03 ± 0.32 |
+| straight | 0.87 | 0.81 |
+| tilt_sd | 0.066 | 0.052 |
+| scrub | 0.098 | 0.058 |
+| td_plv | 0.34 | 0.25 |
+| feet_y p99 / max | 50 / 70 mm | **−4 / 24 mm** |
+| falls | 0 | 0 |
+
+**Checked before recording it** (§3.2): the arm loaded (`max_servo_speed = 3.668` receipt, body
+`measured_fsr`, `tof[boom=ON tilt_comp=off]`). `steps` counts swing-detector lifts past a
+fixed `feet_y` threshold, identical in both arms. At 3.668 the toes never reach it, because
+99 % of samples sit below −4 mm. **The body still travels 4 m, so this is a shuffle: toes
+dragged rather than lifted.** That is the degenerate behaviour a distance metric rewards
+(CLAUDE.md §3.3). Same direction as 2026-09-13's sweep (13 steps vs 35 at this speed, on the
+measured body with the short belly ray), and stronger.
+
+**Why, most likely, and NOT verified:** these gains are the `native_measured` operating point,
+which the E3b searcher found at 6.0 rad/s. A body+gains pair is a unit (stage E3), and slowing
+the servos moves the body out from under the gains it was tuned with. Re-use contexts, any of
+which reopens it:
+- a native re-settle of the gains at 3.668 rad/s;
+- the robot at 50 µs/tick (4.59 rad/s), the ledger's best-behaved speed at no measured
+  current cost (BOM §3.8.4/§3.8.6);
+- a run long enough for the GainEvolver to re-adapt (6000 ticks may be too short).
+
+**Shipped:** P-e now declares `OGMA_PICRAWLER_MAX_SERVO_SPEED=3.668` in `body_env`, so it shows
+the robot as it will actually run. The sim's global default stays 6.0 so historical configs
+reproduce. The body's startup receipt and the bench dashboard now convert at the measured
+545.2 µs/rad. At 636.6, the dashboard's mirror of the robot's pose read ~14 % small.
+
+### ★★★ 2026-10-02 — WHY THE GAIT SHUFFLES AT THE ROBOT'S SERVO SPEED: nothing times the swing, four imposed terms jitter at full slew, and the "commanded" swing detector never sees a command
+
+**Verdict: diagnosis (attribution, single seed; not a lever verdict) + two harness defects.**
+P-e (FSR leg, raw boom), arena difficulty 0.3, seed 1, per-tick traces (`OGMA_PICRAWLER_TRACE`),
+ticks 900–3000/4000. Every arm used identical instrument settings.
+
+**1. Nothing sets swing length.** Swing (true contact) is about 6 ticks at both speeds, as
+2026-10-01/02 found, but chatter (<4 ticks) is 20 % of lift-offs at 6.0 rad/s and 51 % at
+3.668. Counting only real swings (≥4 ticks), the median is 7 vs 6 ticks. The difference is
+the count: 323 vs 73 in ~3100 ticks × 4 legs. Front and rear legs behave the same, so the
+rear legs' self-referential descent timer (`rear_land_gain`, half of an EMA of the leg's own
+past swings) is not the main cause.
+
+**2. The joint command reverses every 1–2 ticks, at full slew, at both speeds.** The knee's
+slew-limited target moves at the `MAX_SERVO_SPEED·TAU` cap on 95–97 % of ticks, hip1 on
+77–88 %. It reverses direction on 38–45 % (knee) and 53–55 % (hip2) of moving ticks, and the
+median same-direction run is 1–2 ticks. The achieved joints reverse on 21–39 % of ticks. A
+"swing" is a stretch where this jitter happens to drift one way long enough to unload a foot.
+At 3.668 rad/s the same drift covers about half the distance (knee excursion within a swing
+0.53 → 0.27 rad target, 0.41 → 0.24 achieved), so the toe stops clearing.
+⚠ **On hardware this is servo thrash from the first tick** — reversal at full slew every
+20–40 ms. benchd's 40 µs/tick limit caps speed, not reversals, so it passes it through.
+
+**3. Attribution: all command terms off, then one back at a time** (`SETPARAM_AT` at tick 1,
+16 MotorEPMv2 params; every patch confirmed by effect):
+
+| only this term on | knee rev | knee at cap | hip1 at cap | real swings |
+|---|---|---|---|---|
+| none | 0 % | 0 % | 0 % | 0 |
+| coupling (1.509) | 59 % | **92 %** | 0 % | 91 |
+| stroke (1.2 + heading) | 0 % | 0 % | **88 %** | 0 |
+| `stance_lift` (0.5 / 0.25) | 46 % | **100 %** | 0 % | 0 |
+| explore noise (0.05) | 60 % | **52 %** | 41 % | 0 |
+| postural (1.078) | 86 % | 0 % (small ringing) | 0 % | 0 |
+| learned HK (`motor_gain` 3) | 21 % | 3 % | 0 % | 73 |
+| swing tuck + rear land | 0 % | 0 % | 0 % | 0 |
+| height homeostat | 0 % | 0 % | 0 % | 10 |
+
+**Four imposed terms are each sufficient for full-slew jitter:**
+- **Coupling and stroke** are driven by `L.phase = atan2(15·Δknee, knee − ema)`, computed
+  from a one-tick velocity with no smoothing (`MotorEPMv2.cpp:2707-2733`). It flips ~180°
+  whenever the knee reverses, and the coupling closes the loop on its own input: a relay
+  limit cycle.
+- **`stance_lift`** toggles on a swing detector with no hysteresis (see 4).
+- **Explore noise** is white, fresh every tick, with a step equal to the slew cap.
+
+The **learned HK term is the only smooth one, but alone it does not walk**: its 73 "swings"
+are legs paddling with the belly on the floor (chassis y 24 mm, displacement 0.00 m). The
+imposed terms supply posture and propulsion, and the jitter along with them. Removing any
+single term from the full stack leaves knee reversals at 41–52 %. Learned cooperates,
+imposed fights, now with the mechanism in the trace.
+
+**4. Harness defect: the promoted swing detector never sees a command.**
+`feet_y_gravity_cmd_imu` / `_cmd_acc` are FK of `servo_targets[]`
+(`picrawler_body.gd` ~6940), which is written only in `_cpg_drive_calibrate`, the gang
+drive, and the operator's panels. **Verified live:** in a brain run the knee target swept
+−1.78 → +0.79 rad while `servo_targets` stayed at 0.0000. So the detector reads the
+construction pose rotated by the fused attitude estimate: it is an **attitude detector**, and
+`stance_lift` switches on body rocking. That is a legal signal, but not the one its name
+claims. It also re-reads 2026-07-25's "`feet_y_gravity` beats the oracle", which the oracle
+note already explained as body bounce. The ledger's `fk_cmd_err` is "construction pose vs
+achieved", not "commanded vs achieved". ⚠ A robot port computing a TRUE commanded-FK would
+not behave like the sim.
+
+**5. Harness defect: `SETPARAM_AT` reports "OK" for keys MotorEPMv2 cannot set live.**
+`phase_sym_smooth` is in the config-time `apply_param` set but not in the live `set_param`
+chain. The patch printed `-> OK` and the trace was byte-identical to the baseline. Any
+`SETPARAM_AT` arm must show an effect before it is believed.
+
+**What this means for the operator's plan** (servo speed and gait adapt to the robot's own
+confidence, slow and gentle first): the jitter comes from imposed terms running at full gain
+from tick 0, not from the servo speed. The levers, one at a time:
+- **(b)** smooth the phase that coupling and stroke ride on. ⚠ That family was refuted
+  2026-08-09 (repair plan P1 / P4 arms 1–2: "the phase is a STATE OBSERVATION and every
+  consumer needs it raw"). This is a re-test in a new context: robot servo speed, FSR body,
+  jitter as a hardware cost.
+- **(a)** temporally correlated exploration noise, scaled by learned confidence.
+- **(c)** feed the detector the real command, and give it hysteresis. That is a re-baseline
+  the robot port must match.
+
+### ★★ 2026-10-02 — THREE JITTER LEVERS AT THE ROBOT'S SERVO SPEED: the swing can lengthen, the thrash is reduced but not removed
+
+**Protocol for all three:** P-e (FSR leg, raw boom), arena difficulty 0.3, n=6 × 6000 ticks,
+seeds 1–6, at **3.668 rad/s (robot)** and **6.0 rad/s (sim default)**. Per-seed traces in every
+arm (identical instrument settings). Standard metrics from `arenaavg.parse`; belly from
+chassis y − 26 mm. Jitter metrics from the trace: reversal fraction of the slew-limited target,
+knee ticks at the slew cap, real swings (true contact ≥ 4 ticks) per 1000 leg-ticks, and median
+real-swing length. Controls: 3.668 — net_disp 4.03 ± 0.32, steps 0, knee reversals 43 %,
+knee at cap 97 %, real swings 7.5, swing median 6.2, tilt_sd 0.052, straight 0.81. 6.0 — net_disp
+8.61 ± 0.57, steps 28, knee reversals 41 %, real swings 21.6, swing median 6.7, tilt_sd 0.066,
+straight 0.87. 0 falls in both.
+
+**(b) `phase_sym_smooth` — smooth the per-leg phase that coupling and stroke ride on.**
+A re-test of the family refuted 2026-08-09 (repair plan P1 / P4), in a new context: the robot's
+servo speed, the FSR body, jitter judged as a hardware cost. Config-time (it is not
+live-patchable; see the previous entry). Consumer check: `pretro` 0.61 → 0.86 (the filtered
+readout reads more retrograde, as P1 recorded), so the lever acted.
+
+| | 3.668 s=2 | 3.668 s=5 | 6.0 s=2 |
+|---|---|---|---|
+| net_disp | **5.59 ± 0.58** | 3.29 ± 1.98 | 5.22 ± 0.56 |
+| steps | 8.2 (5/6 seeds) | 23 | 82 |
+| real swings / swing median | 13.0 / **8** | 14.1 / 9 | 27.8 / 7.5 |
+| knee / hip1 reversals | **28 % / 23 %** | 27 % / 26 % | 30 % / 30 % |
+| knee at cap | 96 % | 96 % | 94 % |
+| tilt_sd / straight | 0.082 / 0.78 | 0.317 / 0.45 | **0.153 / 0.56** |
+| td_plv / falls | 0.10 / 0 | 0.12 / **1.7** | 0.19 / 0.17 |
+
+**Verdicts:**
+- **`PARTIAL` at 3.668, s=2.** The first lever to lengthen the swing toward a slower servo
+  (6 → 8 ticks). Real swings nearly double, distance rises 39 %, and reversals drop by a third.
+  It costs wobble (+58 %) and contact locking (td_plv 0.25 → 0.10, P1's prediction).
+- **`REGRESSION` at 6.0** (straight 0.87 → 0.56, distance −39 %, wobble ×2.3). Same direction as
+  the 08-09 refutation.
+- **s=5 is unstable** (2/6 seeds collapse).
+- **It does not remove the thrash:** the knee still sits at the slew cap 96 % of the time.
+
+Not promoted. Re-use context: combined with a lever that removes the `stance_lift` and noise
+jitter, so its contact-locking cost is judged against a smoother command; or wherever wobble is
+cheap.
+
+**(a1) `explore_noise_tau` — exploration noise as a per-joint Ornstein-Uhlenbeck process**
+(same stationary σ). New MotorEPMv2 param, default 0. **Byte-identical at 0, verified:**
+6000/6000 trace lines and 110/110 diag lines matched a pre-build control. Mechanism check
+(noise as the ONLY term, single seed): knee-at-cap 52 % → **15 %**, reversals 60 % → 49 %.
+**`NULL` in the full stack at both speeds**: τ=10 / 25 at 3.668 give net_disp 3.88 / 4.42,
+reversals 43 %, at-cap 97 %; τ=10 at 6.0 gives 8.13 ± 1.66, reversals 39 %. Two reasons, both
+measured:
+- Noise is not the dominant jitter source once coupling, stroke and `stance_lift` are on.
+- **⚠ A first-order OU is a weakened slice of "smooth noise" (§3.2 #6).** It shrinks each tick's
+  step, but its VELOCITY is still white, so it still reverses on ~half the ticks.
+
+Kept, default off. Re-use context: a second-order (cascaded) filter, so the noise is
+differentiable; and its confidence-scaled form (a2), once noise is a material share of the
+remaining jitter. a2 was **not built**, because it would scale a term that is not the thrash.
+
+**(c) `cmd_fk_source=1` — the promoted swing detector runs FK on the slew-limited targets.**
+It no longer reads `servo_targets`, which stays 0 in brain mode (previous entry). New body
+export / `OGMA_PICRAWLER_CMD_FK_SOURCE`, default 0. **Byte-identical at 0, verified** (6000/6000
+trace, 110/110 diag). Consumer check: `fk_cmd_err` moved (6.0: 18.6 → 14.1 mm).
+
+| | 3.668 | 6.0 |
+|---|---|---|
+| steps | **0 → 13.3** (6/6 seeds lift) | 28 → **143** |
+| real swings / swing median | 7.5 → 14.7 / 6.2 → **8.5** | 21.6 → 28.6 / 6.7 → **9.8** |
+| knee reversals | 43 % → **27 %** | 41 % → **22 %** |
+| net_disp | 4.03 → **5.14** | 8.61 → 7.02 |
+| tilt_sd / straight | 0.052 → **0.105** / 0.81 → 0.77 | 0.066 → **0.120** / 0.87 → **0.68** |
+| knee at cap / falls | 97 % / 0 | 95 % / 0 |
+
+**`PARTIAL`, a re-baseline candidate.** Stepping is the loud signal (CLAUDE.md §3.3
+"proto-gait steps"): feet lift on every seed at the robot's speed, 5× the steps at 6.0, longer
+swings, and fewer reversals. The costs are wobble (~2×) and straightness, with distance −18 % at
+6.0. The current gains were tuned against the attitude-driven detector, so this is the body
+without its matching gains. That is a reason to watch it and re-settle, not to judge it final.
+It is the same shape as P-c honest joints ("more rhythm, less straight"). Registered in the
+launcher as **P-e·c** for observation. A robot port must match whichever source is promoted.
+
+**Across all three:** the knee runs at the slew cap 94–97 % of ticks in every arm. The thrash is
+reduced (reversals 43 % → 27 % at best) but not removed, because coupling, stroke and
+`stance_lift` all still command far past what the servo can reach every tick. Next candidates:
+- `swing_hyst_frac` on the corrected detector. The 08-09 P2 deadband `NULL` was measured on the
+  attitude detector, so its context has changed.
+- b + c stacked.
+- An amplitude change: the command's distance from the slewed target, which is what puts the
+  knee at the cap.
+
+### ★★★ 2026-10-02 — THE FSR-LEG BODY LIFTS ITSELF UNTIL IT TIPS: the height ratchet is fed false "grounded" readings by the raw boom (and lever c's "0 falls" was a 6000-tick blind spot)
+
+> ⚠ **CORRECTED SAME DAY — the "false grounding" mechanism below is WRONG; the ablation
+> result stands.** The claim rested on comparing the boom's MINIMUM reading with the belly's
+> MEAN height, which shows nothing about the moment the boom reads zero. Checked properly
+> against the correct belly-centre ray (`gc_belly`, post-`2072f56`), on the same P-e logs:
+> - The boom reads < 3 mm on 1.9 % of samples, and at those moments the true belly-centre is
+>   **median 7 mm** (p10 0.8, p90 16).
+> - Across all samples the boom minus the true belly is **median −2.8 mm** (p05 −12, p95 +4).
+> - In P-e·c, most boom-zero samples come AFTER a tip (tilt median 1.5 rad), as a consequence.
+>
+> **The uncorrected boom, with its fitted offset, tracks the belly to a few millimetres, as
+> the operator said it should.** What stands: the height homeostat lifts the body until it
+> tips, and `height_ground_gain`=0 removes the tipping (0/8 seeds). WHY the controller over-lifts
+> on this configuration is open. A one-factor-at-a-time test (servo speed, FSR leg, tilt
+> compensation, each against P-e at 24 000 ticks) is running.
+>
+> **The proposed "grounding confirmed by foot load" lever is REJECTED by the operator, for
+> reasons that hold:**
+> - On terrain (the pyramid case) the belly can rest on an obstacle while the feet stay loaded.
+> - In splayed poses foot load redistributes without any belly contact.
+>
+> Total foot load is not a belly-contact observation. Re-use context: none proposed.
+
+**Verdict: diagnosis, confirmed by ablation (signal, n=4 × 24 000 ticks, every seed agrees).**
+Operator observation in the UI: *the robot elevates its body too far off the ground and tips
+over.* P-e and P-e·c, 3.668 rad/s, arena difficulty 0.3, seeds 1–4, 24 000 ticks (~8 min).
+Traces off, identically in every arm.
+
+| | P-e | P-e, `height_ground_gain`=0 | P-e·c | P-e·c, `height_ground_gain`=0 |
+|---|---|---|---|---|
+| resets (seeds tipped) | 2 (1/4) | **0 (0/4)** | **10 (3/4)** | **0 (0/4)** |
+| `height_k_eff` max | 0.69 | 0.30 | 0.83 (0.95 on 2) | 0.30 |
+| `height_bias` max | 1.21 | 0.52 | **1.50 (railed) on 4/4** | 0.10 |
+| tilt max, t ≥ 12 000 (rad) | 1.00 | 0.41 | 2.04 | 0.51 |
+| belly mean (y − 26 mm) | 37 mm | 24 mm | 37 mm | 25 mm |
+| peak belly before a tip | 89–109 mm | — | 102–121 mm | — |
+| displacement | 10.1 m | **10.3 m** | 6.4 m | 5.2 m |
+
+**Mechanism** (MotorEPMv2 ~2603–2660; constants in the header):
+- The target is `height_k_eff × chassis_h_max`.
+- **`chassis_h_max` is a never-decaying record, and it reads 1.00 (the 60 mm clamp) in every
+  window of every seed.** The FSR leg spawns the belly at 66.7 mm, above `stand_m` = 60 mm, and
+  the raw boom spikes high whenever the nose pitches down. This is the `stand_m` problem
+  `picrawler_foot_fsr_mod.md` §5.3 predicted, now with a consequence.
+- **"Grounded" is a raw reading below 0.05 (3 mm).** The UNCORRECTED boom reads **0 mm**
+  routinely while belly height from chassis geometry averages 25–45 mm: a nose-up pitch swings
+  the aft boom toward the floor.
+- Each false "grounded" raises `height_k_eff` by 1 % of its gap to 0.95. It decays 20× more
+  slowly. So the target climbs from 18 mm toward 51 mm, `height_bias` rails at +1.5, the chassis
+  lifts past 100 mm, and the body tips.
+- It is the 2026-09-13 ratchet again, with a different source of false grounding (the belly-ray
+  bug then, the boom's pitch error now).
+- P-e·c is worse because `stance_lift` now engages on genuinely planted legs, adding knee lift
+  to the same climb.
+- The GainEvolver is not the cause: its first mutation cannot land before ~t = 22 000, and the
+  climb starts earlier.
+
+**⚠ Correction to the lever-c entry above:** its "0 falls" was measured at 6000 ticks, and
+every tip here comes after t ≈ 12 000. Over a long horizon lever c raises tipping (3/4 seeds
+vs 1/4) through this ratchet. The stepping gain stands; the safety reading does not. **Any
+safety claim needs runs longer than the slowest integrator. 6000 ticks is shorter than this
+one's climb.**
+
+**This is not a refutation of `height_ground_gain`.** It is promoted `WORKING` (line 136: it
+made the setpoint discovered rather than asserted, and fixed belly grounding on the cad body).
+The ablation is a causal TEST. The lever is sound; its evidence is false. Two levers follow,
+one at a time:
+- **Grounding from an observation that sees it.** When the belly truly grounds, weight leaves
+  the feet. The foot-load channel (FSRs on the robot, contact normal force in the sim) measures
+  exactly that. Require low clearance **and** low total foot load, relative to its own running
+  level and not a fitted constant, before the ratchet climbs. The confound rides in the channel.
+- **An adaptive ceiling:** `chassis_h_max` / `stand_m` must not be pinned by the spawn pose.
+
+`height_windup_guard` (`NULL` on 2026-09-13, against a broken baseline) is a third candidate;
+its recorded re-use condition ("a ratchet recurs") is now met.
+
+**For the hardware:** P-e IS the robot's configuration (raw boom, this homeostat). As shipped,
+it should be expected to do this after several minutes. Fix before the first hardware run.
+
+### ★★ 2026-10-02 — WHAT MAKES THE FSR-LEG BODY TIP: one factor at a time, and the operator's two observations
+
+**Verdict: the tipping the operator saw is lever c (P-e·c). P-e is operator-approved for its
+behaviour: "looks good, the robot is moving conservatively and there are no dangerous falls."**
+Supersedes the open question in the corrected entry above.
+
+**One factor at a time against P-e** (3.668 rad/s, FSR leg, raw boom), 4 seeds × 24 000 ticks,
+arena difficulty 0.3. Every arm's receipt was checked (servo speed, body, `tof[...]`).
+
+| arm | resets (seeds) | `height_bias` max | ticks railed (>1.4) | boom − true belly | tilt max |
+|---|---|---|---|---|---|
+| P-e | 2 (1/4) | 1.21 | 1.2 % | −2.8 mm | 1.14 |
+| servo 6.0 rad/s | 0 (0/4) | 0.61 | 0 % | −2.2 mm | 0.75 |
+| old 76.5 mm leg | 0 (0/4) | 0.73 | 0 % | −2.8 mm | 0.30 |
+| tilt compensation ON | 4 (2/4) | 0.75 | 0 % | +0.4 mm | 1.60 |
+| `height_ground_gain`=0 | 0 (0/4) | 0.52 | 0 % | −2.5 mm | 0.48 |
+| *P-e·c (lever c)* | *10 (3/4)* | *1.50* | *every seed* | *−2.3 mm* | *2.04* |
+
+**Findings:**
+- **The ToF is not the cause.** The raw boom reads within ~3 mm of the true belly in every arm.
+  Tilt compensation makes it more accurate (+0.4 mm) and does not reduce tipping.
+- **The mechanism is integrator windup in the height homeostat.**
+  - `height_k_eff` ratchets 0.3 → ~0.6 in every ratchet-on arm, on GENUINE near-grounding
+    (belly-centre median 7 mm when the boom reads < 3 mm).
+  - `chassis_h_max` sits at its 60 mm clamp, so the target is ≈ 36 mm.
+  - When the body cannot hold that, `height_bias` winds toward +1.5, the legs over-lift, and the
+    body tips.
+  - Railing is the readable precursor: every P-e·c seed, briefly in P-e, never elsewhere.
+- **Lever c is the operator-observed cause.** Its knee tuck now engages on genuinely planted
+  legs and stacks with the height bias. Stays NOT PROMOTED. Re-use context: with an anti-windup
+  on the height integrator, or with `stance_lift` re-tuned against the corrected detector.
+- **P-e at 3.668 with the FSR leg winds up occasionally** (1 seed). One tip-over across 4 seeds
+  cannot rank the arms against each other (a rare discrete count, as GainEvolver's own `w_falls`
+  note says), so the factor ranking is a lead, not a finding.
+
+**Operator UI observation of P-e** (rule 5): conservative movement, no dangerous falls, judged
+good. This sits beside the measurements, which still stand:
+- 0 lifts past the fixed `feet_y` step threshold.
+- True-contact swings at a quarter of the 6.0 rate.
+- 1 tip-over in 4 × 24 000 ticks.
+
+The conservative, slow gait at the robot's servo speed is what the operator wants first on
+hardware (servo safety before speed). This is the first configuration both measured and watched
+as the robot will run it.
+
+Open, in order:
+- (a) anti-windup on the height integrator (`height_windup_guard` re-test, judged on railing and
+  tilt at n ≥ 8, long runs);
+- (b) the adaptive height ceiling (`stand_m` / `chassis_h_max` pinned by the spawn pose);
+- (c) the remaining full-slew command jitter.
+
+### ★★★ 2026-10-02 — P-e IS NOT PORTABLE AS-IS: legacy reward events reset the motor state on ≥39 % of ticks, plus a windup-guard NULL
+
+> ⚠ **CORRECTED SAME DAY — the events fire in the UI ONLY, not in headless runs.**
+> `stability_gain` and `height_penalty_gain` default to 0 in the body. P-e's 0.05 is metadata,
+> which `ExperimentConfig.resolve_picrawler_stab_gain()` honours only when `launched` (the UI);
+> headless falls through to the env var, then the 0 default.
+> - **Every headless P-e number in this ledger ran with NO shaping events**: the shuffle, the
+>   jitter levers, the tipping, the windup tests.
+> - **The operator's UI observation of P-e ran WITH them**: two controllers under one config
+>   name.
+> - The "≥ 39 %" below is how often the firing CONDITION holds in the headless traces, i.e.
+>   what the UI would emit.
+>
+> The body printed no receipt for these gains, which is how this went unseen. That is the same
+> UI/headless parity class as `metadata.body` (2026-08-28) and the 2026-08-05 joint backend.
+> **The operator's decision (2026-10-02): turn the events off in the robot-faithful arm.**
+> Headless P-e already matches that; the UI must be made to match, and the operator must watch
+> the events-off version.
+
+**1. `height_windup_guard` = 1 on P-e — `NULL`, leaning `REGRESSION` (n=8 × 24 000 ticks,
+3.668 rad/s, arena difficulty 0.3).**
+
+| | control | guard |
+|---|---|---|
+| resets (seeds) | 2 (1/8) | 3 (2/8) |
+| bias railed | 0.6 % | 4.7 % |
+| `height_k_eff` max | 0.70 | 0.65 |
+| tilt mean | 0.11 | 0.22 |
+| displacement | 10.2 ± 0.3 | 9.4 ± 3.6 (one seed collapsed, 0.61 m) |
+
+The guard lowers the ratchet slightly, but the integrator still rails, more often than the
+control. It does not address windup on this body. Re-use context: an anti-windup on the
+integrator itself (`height_bias`), not on the setpoint ratchet. P-e's own tip rate is ~1 in
+8 seeds per 24 000 ticks.
+
+**2. ★ Hidden dependency: legacy reward-shaping events drive MotorEPMv2's reset mask.**
+- P-e's metadata sets `stability_gain` 0.05 (also `height_penalty_gain` 0.05,
+  `target_height` 0.085).
+- With `stability_gain` > 0 the body publishes `events.miss` on **every tick** where
+  `chassis_y / STANDING_CHASSIS_Y > 0.5` and world 3-D speed > 0.05 m/s
+  (`picrawler_body.gd` ~8045).
+- MotorEPMv2 treats ANY `miss` or `reset` as a respawn (`MotorEPMv2.cpp:1206-1218`). It zeroes
+  `heading_bearing_` (the gain-7.0 bearing hold), `fwd_progress_ema_` (commit, and the height
+  fade), commit, flow, the stuck state, and every per-leg step clock.
+- Measured lower bound from the traces (forward speed only, which understates 3-D speed):
+  **≥ 39 % of ticks at 3.668 rad/s, ≥ 69 % at 6.0. The median gap between resets is 0 ticks.**
+- So in the sim those states almost never accumulate while the body walks.
+- It is an RL-era reward event (CLAUDE.md §5.1 prohibits reward shaping), computed from world
+  height and world speed. **The robot cannot emit it.** On hardware the heading hold, commit
+  and height fade would accumulate freely: a different controller than the one validated.
+- The same reset path also takes the height-miss and fall-miss events (world height, exact
+  tilt).
+
+**3. Other sim-truth inputs in P-e** (full per-topic contract in the port doc, "Brain input
+contract"):
+- `joints` = achieved hinge angles (`honest_joints` off).
+- `imu` = world yaw, world forward velocity and world yaw rate (`honest_imu` off).
+  MotorEPMv2's commit (0.030 m/s) and height fade (0.025 m/s) thresholds are on the
+  true-velocity scale.
+- `upright` = exact basis (`honest_upright` off).
+- `joint_torque` = a PD model of achieved angle and velocity.
+- `distress` = world XZ displacement × exact tilt.
+- `foot_contact` = whole-shank physics contact.
+- `foot_load` = physics normal impulse.
+- Also: `tilt` is published by `ogma_host` but not by the P-e sim, and MotorEPMv2 subscribes
+  by DEFAULT, so on the robot it would switch on a coord-fitness wobble penalty the sim never
+  had.
+
+**Consequence:** the configuration the operator approved in the UI has been validated only
+with inputs the robot cannot produce. The gate before hardware is a sim arm in which every
+input is one the robot can actually publish ("P-e honest"), A/B'd against P-e and watched in
+the UI. The decisions it needs are listed in the port doc.
+
+### ★★★★ 2026-10-02 — ON THE INPUTS THE ROBOT CAN PUBLISH, P-e FLIPS OVER — and one input does it: joints from the servo forward model
+
+**Verdict: the hardware gate FAILED, and the cause is isolated (signal, every seed agrees).**
+3.668 rad/s, FSR leg, raw boom, arena difficulty 0.3, shaping events off (headless).
+Every arm's receipt was checked.
+
+**P-e·h — all robot-faithful inputs together** (`honest_joints`, `honest_imu`, `honest_upright`,
+`honest_distress`, `joint_torque_zero`, `tilt_topic` ""), n=8 × 24 000:
+
+| | P-e | P-e·h |
+|---|---|---|
+| resets (seeds tipped) | 2 (1/8) | **64 (8/8)** |
+| tilt max | 0.78 rad | **3.03 rad, inverted** |
+| height bias railed | 0.6 % | **54 %** |
+| `height_k_eff` max | 0.70 | 0.94 |
+| straight | 0.59 | 0.18 |
+| steps | 22 | 100 |
+
+**Each change added alone to P-e**, n=4 × 12 000, against P-e's first 12 000 ticks (0/8
+tipped, railed 0 %):
+
+| added alone | tipped | resets | railed | `height_k_eff` | displacement |
+|---|---|---|---|---|---|
+| **`honest_joints`** | **3/4** | **10** | **53 %** | **0.95** | **1.4 m** |
+| `honest_imu` | 0/4 | 0 | 0 % | 0.53 | 7.9 m |
+| `honest_upright` | 0/4 | 0 | 0 % | 0.61 | 7.3 m |
+| `honest_distress` | 1/4 | 1 | 0.5 % | 0.61 | 7.2 m |
+| `joint_torque_zero` / `tilt_topic` "" | 0/4 | 0 | 0 % | 0.61 | 7.3 m |
+
+Torque, tilt and upright reproduce the control exactly. Their consumers do not act inside
+12 000 ticks (GainEvolver's first mutation lands at ~22 000), or the sim never published the
+signal. They are inert here; that is not a claim about longer runs.
+
+**So the approved P-e behaviour depends on ACHIEVED joint angles,** which hobby servos cannot
+report. The brain needs a joint sense the robot does not have.
+
+**Mechanism — inferred, NOT verified:** with `joints` = the forward model of its own command,
+the brain cannot see its legs give under load. MotorEPMv2's postural term (−1.078·(x − rest))
+and the HK loop then act on the command they issued, a self-referential loop with no
+information about sag. The body settles lower than intended, the height homeostat sees the
+belly low, `height_bias` winds to its rail, the legs over-extend, and the body flips.
+
+**Re-reads P-c** (2026-09-11 "honest joints: WORKING, more rhythm, less straight"). That was
+n=6 × 6000 in the corridor on the 76.5 mm leg at 6.0 rad/s, boom off, so on the short belly ray
+(2026-10-02). On the robot's body and speed, over a long horizon, the same input is a
+**REGRESSION to repeated inversion**. Same lever, different context: §3.1.
+
+**Re-use contexts / what would fix it** (CLAUDE.md §1 rule 2: when the needed signal is not
+in the channel, the fix is a sensor, not a smarter policy):
+- (a) A real joint-angle observation: tap each servo's internal potentiometer into an
+  external ADC (the HAT's ADC is taken by the FSRs and the battery).
+- (b) An observation of the deflection the forward model misses. Body height and attitude
+  (ToF, IMU) and foot load (FSRs) constrain it; a learned correction graded by its own error.
+- (c) Re-settle the gains on the forward-model joints (the E3b searcher), with anti-windup on
+  `height_bias` itself.
+
+**The robot must not run P-e·h.**
+
+### ★★★ 2026-10-02 — OPTION C, STEP 1: on the robot's real inputs, the height RATCHET is what flips the body
+
+**Verdict: diagnosis by intervention (signal, n=4 × 12 000 per arm).** Base is P-e·h: every
+input is one the robot can publish, shaping events off, 3.668 rad/s, arena difficulty 0.3.
+The operator's goal (2026-10-02): *see what is possible with the robot's current hardware*,
+i.e. joints from the servo forward model, with no encoders.
+
+| P-e·h + one change | tipped | bias railed | tilt mean | belly | displacement | straight |
+|---|---|---|---|---|---|---|
+| none | 8/8 (8 seeds) | 54 % | 0.56 | 28 mm | 3.9 m | 0.18 |
+| **A `height_ground_gain` 0** (ratchet off) | **1/4** (1 reset) | **0 %** | 0.18 | 21 mm | 8.3 m | 0.62 |
+| B `height_unwind_free` 1 | 4/4 | 38 % | 0.42 | 25 mm | 5.0 m | 0.38 |
+| C `homeo_leak_cycles` 4 | 3/4 | 11 % | 0.38 | 25 mm | 4.5 m | 0.34 |
+| D `homeo_upright_gate` 0.8 | 4/4 | 49 % | 0.44 | 27 mm | 4.4 m | 0.34 |
+| **E `height_homeo_gain` 0** (homeostat off, a lesion TEST) | **0/4** | — | 0.14 | 23 mm | **10.3 m** | **0.78** |
+
+**Reading:**
+- The windup is the ratchet. With `height_k_eff` pinned at `height_k` (0.30), the homeostat
+  defends a fixed fraction of its ceiling and the body stops flipping.
+- Treating the integrator alone (B, C, D: faster unwinding, finite memory, freeze-when-tipped)
+  does not stop it. The setpoint keeps climbing past what the body can hold.
+- With the homeostat off entirely the body is steadiest and moves farthest. The belly still
+  rides 21–23 mm off the floor in every arm.
+- C and D re-test refuted members of the 2026-07-26 plasticity family. Refuted again here, in
+  the robot-faithful context.
+
+**Next (option c, step 2, running):** a GainEvolver re-settle from A, with
+`height_homeo_gain` added to the evolver's keys (range 0–0.15). The search, not a designer,
+then decides how much height control this body wants, from off to twice today's value,
+alongside `amp_target`, `coupling_gain` and `postural_gain`. Frozen-evolver control. 4 seeds
+× 200 000 ticks per arm.
+
+### ★★ 2026-10-02 — OPTION C, STEP 2: the live gain search does not beat frozen gains on the robot's inputs (truncated run)
+
+> ⚠ **CORRECTED SAME DAY by the completed confirmation (entry below): the tips are NOT confined
+> to the first 40k ticks.** The 4-seed truncated read below was too short and too small to see it.
+
+**Protocol:** P-e·h + `height_ground_gain` 0. Search arm: GainEvolver live, with
+`height_homeo_gain` added to its keys (seed 0.077, range 0–0.15). Control arm: same, evolver
+frozen (`mutation_sigma` 0). 4 seeds each. All 4 searched gains confirmed landing
+(`ga_app` 4, `ga_rej` 0).
+
+⚠ **HARNESS DEFECT: every seed was cut at 87–95k of the planned 200k ticks.** The runner's
+per-seed timeout (1500 s) was sized for short runs. Fixed (timeout now scales with steps).
+The data to ~90k is valid; the protocol is half-run. Also, per-segment displacement after the
+first 20k is the arena edge, not the gait.
+
+| | frozen gains | evolver searching |
+|---|---|---|
+| resets 0–40k ticks | 2 (both seed 2) | 2 |
+| resets 40–90k ticks | **0** | **6** (seeds 1, 2) |
+| tilt mean over time | 0.163 → 0.099 (settling) | 0.16–0.21 |
+| `height_bias` railed | ~0 % | 0–1.8 % |
+
+**Endpoints scatter:** [0.15, 1.85, 1.40, 0.06], [0.15, 1.20, 1.22, 0.10],
+[0.32, 1.50, 1.50, 0.03], [0.27, 0.70, 0.26, 0.12] (amp_target, coupling, postural,
+height_homeo_gain). 1–2 accepts per seed, so not converged, and "home is a region" again
+(2026-08-27).
+
+**Verdicts:**
+- **Frozen P-e·hr is the current-hardware candidate.** Its tips fall in the first ~40k ticks,
+  while the brain is still learning, and stop afterwards. Tilt keeps settling through online
+  learning alone.
+- **The live search is `NULL` leaning `REGRESSION` within 90k.** Every candidate window runs
+  an untested gain set on the body, and some tip it.
+
+**For hardware:** running the evolver live on the robot means exploring gains on a real body,
+and in the sim that costs falls. The early-learning tips are the operator's stated concern:
+slow and gentle while the brain knows little.
+
+Registered as **P-e·hr** in the launcher. Confirmation running: frozen, n=8 × 100 000,
+completed runs this time.
+
+### ★★ 2026-10-02 — P-e·hr CONFIRMATION (n=8 × 100 000, completed): ~1 tip per 80k ticks, spread through the run
+
+**Verdict: `PARTIAL` — a ~27× lower tip rate than P-e·h, not yet safe enough to call cleared.**
+P-e·hr, gains frozen, 3.668 rad/s, arena difficulty 0.3. Every seed ran all 100 000 ticks.
+Receipts checked.
+- **Resets: 10 on 5/8 seeds** (0, 2, 0, 0, 1, 5, 1, 1), at ticks 540, 8 580, 27 540, 29 580,
+  41 040, 41 400, 52 740, 64 860, 71 580, 93 960. **Spread through the run.** That retracts
+  step 2's "only early" read.
+- **Rate:** ≈ 1 per 80k ticks (~27 min of robot time at 50 Hz). P-e·h: 64 per 192k (1 per 3k).
+  P-e headless: 2 per 192k (1 per 96k). Same order as the configuration the operator approved,
+  but P-e has not been run to 100k, so that comparison is a lead, not a finding.
+- **3/8 seeds clean throughout,** tilt mean settling to ~0.09.
+- **Seed 6 ends tipped and STUCK:** over the last 20k ticks tilt mean 1.47 rad, `height_bias`
+  railed 70 %, `height_k_eff` still 0.30. The INTEGRATOR winds up on a body that cannot reach
+  its target, even with the ratchet off. Anti-windup on `height_bias` itself is still open;
+  B, C and D did not do it.
+- **Belly** median 22 mm (p05 3.8 mm); 3.5 % of samples under 3 mm.
+
+**Next candidate:** P-e·h + `height_homeo_gain` 0 (homeostat off). It tipped 0/4 at 12 000
+ticks, but has never had a long run.
+
+### ★★★★ 2026-10-02 — OVER 100k TICKS THE HEIGHT HOMEOSTAT IS WHAT TIPS THIS BODY — including in P-e itself; off, the robot-faithful brain is the safest config measured
+
+**Verdict: signal, n=8 × 100 000 per arm (every seed completed), gains frozen, 3.668 rad/s,
+arena difficulty 0.3.** Receipts checked (P-e: `honest[...]` off; the others on).
+
+| | resets (seeds) | per 100k | bias railed | stuck tipped | tilt mean | belly median | belly < 3 mm |
+|---|---|---|---|---|---|---|---|
+| **P-e** (sim-only inputs) | **67 (7/8)** | **8.4** | 13.7 % | 2 | 0.40 | 32 mm | 0.7 % |
+| P-e·hr (robot inputs, ratchet off) | 10 (5/8) | 1.25 | 2.4 % | 1 | 0.22 | 22 mm | 3.5 % |
+| **P-e·h0** (robot inputs, homeostat off) | **2 (2/8)** | **0.25** | 0 % | 0 | 0.16 | 26 mm | 0.5 % |
+
+**Findings:**
+- **P-e is not safe over a long horizon.** The 24 000-tick runs (1/8 tipped) were shorter than
+  the windup, and so was the operator's UI watch, which also ran a different controller (the
+  UI-only shaping events, entry above). A safety claim needs a run longer than the slowest integrator: 100k ticks shows
+  what 24k could not.
+- **On the robot's real inputs, switching the height homeostat off gives the lowest tip rate
+  measured:** 33× below P-e, 5× below P-e·hr. No seed got stuck. The belly rides HIGHER (26 mm)
+  with fewer near-ground samples than with the homeostat on.
+- **So the height homeostat, with or without its ratchet, is the destabiliser on this body
+  over long runs.** Its promotion (2026-08-27, `WORKING` signal) was cad body, corridor, 6000
+  ticks. Refuted in THIS context: FSR leg, robot servo speed, robot-faithful inputs, 100k ticks,
+  arena difficulty 0.3.
+- **Re-use context:** terrain. The homeostat exists to get the body over the hump (CLAUDE.md
+  §1, the belly ToF), and no terrain run has been made here. Also re-test it with an
+  anti-windup on `height_bias` itself.
+
+**Registered as P-e·h0.** Not promoted and not cleared for hardware. It needs the operator's
+watch, a terrain test, and the remaining safety items (servo jitter, the robot-side input port
+and the actuation path).
+
+### ★★ 2026-10-03 — OPERATOR UI OBSERVATION: P-e·h0 is the better configuration; P-e·hr binds up on terrain
+
+The operator watched P-e·h0 and P-e·hr in the UI (rule 5): **"P-e·h0 is the better
+configuration. hr causes the robot to get bound up on terrain in some cases."** This sits
+beside the 100k-tick measurement (P-e·h0 0.25 tips per 100k vs P-e·hr 1.25) and points the
+same way. It is also the first observation on terrain, the height homeostat's stated re-use
+context. With the homeostat on (P-e·hr), the body binds on terrain; with it off (P-e·h0), it
+does not, in what the operator saw. A measured terrain A/B follows.
+
+### ★★ 2026-10-03 — TERRAIN A/B: dropping the height homeostat costs no hump traversal (P-e·h0 vs P-e·hr)
+
+**Verdict: P-e·h0 TIES P-e·hr on terrain and clears the hump farther (signal, n=6).** FSR leg,
+robot-faithful inputs, shaping events off, 3.668 rad/s, difficulty 0.3. Receipts checked.
+This answers the open re-use context from the 100k entry: the homeostat exists to get the body
+over the hump, and on this body it is not needed for that.
+
+| | P-e·h0 (homeostat off) | P-e·hr (ratchet off) |
+|---|---|---|
+| hump gate (`humpavg`, teleport onto the crest): cleared | **6/6** | 6/6 |
+| hump: final_z / gain past the crest | **6.29 / 3.68 ± 0.60** | 5.70 / 3.09 ± 0.33 |
+| hump: falls | 1/6 | 1/6 |
+| corridor 24 000 ticks: net_z | 7.09 ± 2.51 | 7.44 ± 2.33 |
+| corridor: straight | 0.38 | 0.44 |
+| corridor: unstable | **0.13** | 0.24 |
+| corridor: falls | 7 (4 on seed 2) | 3 |
+
+⚠ **Corridor falls are confounded by the gym edge.** The harness flagged 3/6 (h0) and 2/6 (hr)
+seeds past z = 8.5, where falls and chassis_y are not trustworthy. h0 seed 2 reached
+z = 10.05 and left the world (chassis_y −21.9 m). On the seeds that stayed inside, falls
+tie (h0 2, hr 3).
+
+**Together with the operator's UI read ("hr gets bound up on terrain in some cases") and the
+100k safety run** (h0 0.25 tips per 100k vs hr 1.25), P-e·h0 is the operator's configuration
+on every axis measured. The height homeostat's re-use context stays OPEN for steeper terrain
+than difficulty 0.3.
+
+### ★ 2026-10-03 — FIRST BRAIN-DRIVEN RUN ON THE ROBOT: the path works; the thrash the sim predicted is visible and real
+
+**What ran.** P-e·h0 on the Pi (`ogma_host --imu --brain-inputs --actuate`), benchd in `dev`,
+30 s of brain control, robot loose in its safety box on a smooth floor, battery. Started from
+the rescue pose. Ended with STOP, then `bench` → deadman → rescue pose. Off-board telemetry
+record: `tele_20261003_124358_brainrun2.jsonl` (laptop).
+
+**Path verdict: `WORKING` (signal, n=1).**
+- 1495 commands applied in 30 s, 0 overruns, 0 bad frames, 4 sequence gaps.
+- STOP froze all 12 channels, and `ogma_host` paused the graph for 367 ticks (held, not reset).
+- The deadman sent the rescue pose after leaving `dev`.
+- Servo-branch current: mean 0.80 A, peak 2.49 A (10 Hz samples). A4 minimum 7.10 V; battery 7.78 V at rest.
+
+**The first attempt reset the Pi** the moment the brain took the servos. The robot was on the
+bench supply, which the operator says is only good for desk builds. The cause is NOT measured:
+benchd's record of that run is 0 bytes, because the page cache was lost in the reset. The retry
+on battery, with the off-board recorder running, did not reset. Re-use context: any power source
+change, and the soft-engage question below.
+
+**The thrash (operator: "faster than our sim, with rather jerky movements").** In the 10 Hz record:
+- knee and hip1 channels sit at full slew in 20–35 % of 100 ms windows;
+- every channel reverses 3–5 times a second (an undercount at 10 Hz).
+
+This is the 2026-10-02 finding arriving on hardware: in the sim the slew-limited knee target sits
+at the cap on 97 % of ticks and reverses on 43 %. The sim's joint follows it through PD, a 30 ms
+torque lag and inertia, so the achieved joints reverse less (21–39 %). The hobby servo tracks the
+50 Hz staircase almost at once, so the robot shows the raw command. Lowering the slew caps speed,
+not reversals, and in the sim 1.83 rad/s (20 µs/tick) stopped stepping (0 steps, tilt_sd doubled;
+2026-09-13 table).
+
+**Two instrument failures, both found after the run:**
+1. **My tilt guard was blind.** benchd failed its IMU probe at start (WHO_AM_I 0x00), so the frame
+   carried `imu: null`, and the logger's fallback read "upright" on every sample. The robot stayed
+   upright, but the guard proved nothing. The next run's guard must refuse to start without
+   attitude.
+2. **`ogma_host`'s attitude filter ended diverged.** Exit summary: disagree 116.7°, upright −0.45,
+   with the robot resting upright in the rescue pose and |a| 1.003 g. The brain's upright and
+   distress inputs may have been wrong for part of the run. When it diverged is unknown: inputs
+   were not dumped. The next run needs `--dump-inputs`. The held-pose shadow run ended at upright
+   0.9994, so this is new with motion.
+
+### ★★ 2026-10-03 — SERVO OUTPUT LAG α 0.2 ON THE ROBOT: the thrash on the line drops ~4×, current halves (`WORKING`, hardware signal)
+
+**Lever.** `benchd --servo-lag-alpha 0.2` puts a first-order lag between the slewed command and
+the HAT, in brain modes only (gain-0: alpha 0 is byte-identical). Rationale: in the sim the joint
+follows the slew-limited target through PD, torque lag and inertia. Unloaded it fits α 0.22–0.28
+per tick (P-e·h0 trace; stance is load-dominated and fits no lag). The hobby servo has almost
+none of that lag, so it passed the brain's raw thrash straight to the legs. α 0.2 is also the
+brain's own servo forward model, so its joints input becomes the pulse the servo actually receives.
+
+**Protocol.** Robot loose in the safety box, battery, ABBA (A = off, B = 0.2), 30 s each from the
+rescue pose, fresh brain each run (P-e·h0). Measured on benchd's 50 Hz state feed (`out` = pulse on
+the line), 5 Hz telemetry, and ogma_host input dumps every 10 ticks.
+
+| arm | reversals/s on the line | ticks at full slew | line speed (rad/s) | command speed | jerk (µs/tick²) | servo I mean / max (A) | A4 min (V) | tilt max |
+|---|---|---|---|---|---|---|---|---|
+| A1 (off) | 17.8 | 0.80 | 3.16 | 3.16 | 27.9 | 0.79 / 2.91 | 6.92 | 28° |
+| B1 (0.2) | 12.7 | 0.01 | 0.94 | 3.26 | 6.9 | 0.37 / 1.06 | 7.37 | 26° |
+| B2 (0.2) | 8.8 | 0.02 | 1.15 | 3.17 | 6.3 | 0.44 / 1.64 | 7.16 | 24° |
+| A2 (off) | 21.7 | 0.82 | 3.21 | 3.21 | 34.3 | 0.64 / 1.84 | 7.13 | 33° |
+
+- **Thrash.** Jerk on the line is ~4.5× lower, full-slew ticks fall from ~80 % to ~1–2 %, and
+  reversals roughly halve.
+- **Load.** Servo current about halves, and so does its peak.
+- **Brain.** The brain's own command is unchanged (3.2 rad/s, reversals as before): the lever
+  filters the plant, not the policy.
+- **Operator, watching:** "the lag/smoothing run looked good. definitely reduces the jitter."
+
+⚠ **Slightly MORE damped than the sim.** The robot passes 0.30–0.36 of command speed to the line;
+the sim's achieved joints move at 0.40–0.56 of their target (hip1 0.46, hip2 0.40, knee 0.56). α
+0.25–0.3 would match better. Not tested. Also n=2 per arm at 30 s with no distance sensor, so
+behavioural effects are unmeasured: a signal for the hardware cost, not a gait finding.
+
+### ★★ 2026-10-03 — ogma_host's IMU on a 225 Hz thread: the attitude divergence is gone (`WORKING`, signal)
+
+On the first brain-driven run, ogma_host's attitude filter ended 117° from the accelerometer with
+the robot resting upright. It sampled the IMU once per 50 Hz tick, and the servos step at exactly
+that rate; benchd's header already warns that a slow sample rate aliases motion. Moved to its own
+225 Hz thread; the tick takes the newest attitude and the mean gyro since the last tick. In all
+four ABBA runs, including the two no-lag arms that reproduce the earlier motion, the filter ended
+within 0.35° of the accelerometer (upright 0.9999), with 0 read errors and ~12 860 samples per
+run. Mid-run upright minimum 0.81–0.91, consistent with the 24–33° tilts benchd's own IMU saw.
+Not proven causal (the old path was not re-run), but the motion that diverged it no longer does.
+
+### ★ 2026-10-03 — LOWER SLEW (30 µs/tick = 2.751 rad/s) for the robot's jerk: `REGRESSION` in the sim, not run on hardware
+
+**Why it was tested.** The operator saw jerky, faster-than-sim motion on the first brain-driven
+run and suggested dialling in the slew. Run in the sim first, because the brain was tuned at
+3.668 rad/s.
+
+**Protocol.** P-e·h0 (robot-faithful inputs, homeostat off), arena difficulty 0.3, n=6 × 12000
+ticks, seeds 1–6, gains frozen, identical instruments (`score.py`). Speed is the only difference.
+
+| | 3.668 rad/s (40 µs/tick, control) | 2.751 rad/s (30 µs/tick) |
+|---|---|---|
+| net_disp | 9.99 ± 0.83 | 5.17 ± 0.87 |
+| steps | 13.8 ± 4.5 | 4.2 ± 5.7 (3/6 seeds: 0) |
+| real swings / 1000 leg-ticks | 11.3 ± 0.6 | 6.1 ± 1.4 |
+| belly (mm) | 23.7 ± 2.0 | **15.9 ± 1.6** |
+| tilt_sd | 0.090 | 0.080 |
+| falls | 0.17 (1 in 6) | 0 |
+| knee reversal fraction | 0.34 | 0.37 |
+| knee ticks at the slew cap | 0.97 | 0.98 |
+
+**Verdict: `REGRESSION` (signal, n=6).** It halves the gait (distance, swings) and lowers the belly
+by 8 mm. It does **not** touch the thrash: reversals and cap time are unchanged, because the slew
+caps speed, not reversals (the 2026-10-02 finding again). The only gain is one fewer fall in six,
+inside noise. It was NOT run on the robot. The servo output lag (above) already addresses what
+the operator saw, at the plant instead of the speed cap.
+
+**Re-use context:** a brain retuned at the lower speed (frozen gains were settled at 3.668), or the
+operator's confidence-gated speed (slow while the brain knows little, rising with confidence),
+which is a different mechanism from a fixed lower cap.
+
+### ★★ 2026-10-03 — 60 s BRAIN RUN ON THE ROBOT (lag 0.2): the belly comes up briefly, then settles on the floor; the sim never does
+
+**Run.** P-e·h0, `--servo-lag-alpha 0.2`, fresh brain, 60 s, safety box, battery, started from the
+**rescue pose**. Belly from the boom ToF at 50 Hz (100 % valid). Clean run: the IMU ended within
+0.28° of the accelerometer, 4196 commands sent, servo current 0.37 A mean / 2.06 A peak, A4 ≥ 7.12 V.
+
+| window | belly median (mm) | p90 | >10 mm | foot_load sum | contact | hip2 on the line (rad) |
+|---|---|---|---|---|---|---|
+| 0–10 s | 14.2 | 30.2 | 62 % | 1.76 | — | (from rescue, −1.8) |
+| 10–20 s | 5.2 | 20.2 | 32 % | 0.35 | — | |
+| 20–40 s | 3.2 | ~7 | 1–3 % | 0.05–0.08 | 0.4 / 4 | −0.67 |
+| 40–60 s | ~3 | 7–13 | 5–18 % | 0.16–0.94 | 1.2 / 4 | −0.70 |
+
+**The sim, same config, its first 60 s (6 seeds):** belly median 14–26 mm in EVERY 10 s window, hip2
+target +0.04 / achieved −0.08 rad, knee −0.71, foot_load sum 0.96, contact 3.5 / 4.
+
+**Where the robot departs:** the knees match the sim (−0.68 vs −0.71 rad); **hip2 does not**. The
+robot holds hip2 near −0.65 rad (legs pitched up, feet mostly off the floor, belly down) where the
+sim sits near 0. Nothing was at the envelope (0 % at min/max on every joint type in the last 40 s),
+so this is the brain's command, not a clamp.
+
+**Leading hypothesis — the start state, not the plant.** The sim spawns STANDING (belly ~26 mm,
+hip2 ≈ 0) and auto-resets to standing after a fall, so this brain has never had to raise its belly
+from the floor. The robot started in the rescue pose (hip2 −1.8 rad, folded). The brain brought hip2
+two-thirds of the way back and settled there. **Decisive test:** the same run started from the
+`stand` pose. If it holds the belly up from stand, the gap is stand-up-from-floor (a capability
+the sim never trained). If it sinks from stand too, it is a sim-to-real gap in holding posture.
+`IN_FLIGHT`.
+
+Note: `feet_y` reads a constant −0.093 m on the robot, as designed — with `cmd_fk_source = 0` it is
+the zero-pose foot height rotated by tilt, not the commanded FK (see the feet_y oracle doc).
+
+### ★★ 2026-10-03 — START POSE IS THE ROBOT'S hip2 CENTRE: from `stand` the belly stays up (24–51 mm) — then it tips sideways at 34 s
+
+**Run.** Identical to the 60 s rescue-start run (P-e·h0, lag 0.2, fresh brain, same 12 s bench
+pre-roll) except the start pose: the operator's `stand` (hip2 at centre, first frame hip2 −0.02…+0.01
+rad, belly 63 mm).
+
+| window | belly median (mm) | >10 mm | hip2 median (rad) | knee median | tilt max | contact |
+|---|---|---|---|---|---|---|
+| 0–5 s | 48 | 96 % | −0.13 | −0.39 | 29° | 4.0 |
+| 5–10 s | 51 | 88 % | +0.06 | −0.65 | 17° | 4.0 |
+| 10–20 s | 24–36 | 83–98 % | +0.02 | −0.70…−0.78 | 15–17° | 2.6–2.8 |
+| 20–30 s | 29–51 | 99–100 % | +0.03…+0.05 | −0.66…−0.73 | 14–34° | 2.8–3.0 |
+| 30–34.7 s | 32 | 100 % | +0.03 | −0.77 | **73° → tilt guard STOP** | 3.0 |
+
+- **Hypothesis confirmed (n=1 against n=1).** hip2 held at +0.02…+0.06 rad from `stand`, against
+  −0.65…−0.74 from rescue: the brain keeps hip2 near where the body starts. The sim's centre is
+  +0.04. The belly stayed off the floor 83–100 % of the time.
+- **New failure: it rolled.** At 34 s the body rolled toward +x (up.x 0.87) and the tilt guard
+  froze it at up.y 0.30 — the guard's first real trigger, and it worked. P-e·h0 tips about 0.25
+  times per 100k ticks in the sim; this tipped at ~1700 ticks.
+- **The robot stands TALLER than the sim at the same joint angles.** The belly sat at 24–51 mm, the
+  sim's at 14–26 mm, with matching hip2 (≈ 0) and knee (−0.7) commands. The sim's stance joints
+  sit off target under load (soft PD; its commanded-FK foot error is ~27 mm). Stiff hobby servos
+  do not sag, so the same command stands the robot ~15–25 mm higher, and its centre of mass is
+  higher. A plausible contributor to the roll; not measured.
+
+Open: is the roll repeatable (n=1)? Is the sim's stance compliance what the brain's posture was
+tuned on? The 12 s bench pre-roll (the brain ticks while its commands are not applied) is still in
+every run's protocol.
+
+### ★★★ 2026-10-03 — 60 s FROM `stand`, TILT GUARD AT 80°: THE BELLY STAYS UP THE WHOLE RUN, AND THE POSTURE STEADIES (`WORKING`, hardware signal)
+
+**Run.** The previous stand-start run repeated unchanged, except the harness's tilt guard moved from
+60° to 80° (operator: "the robot was not in danger of flipping over"). Full 60 s; the guard never
+tripped.
+
+| window | belly median (mm) | p10 | p90 | >10 mm | hip2 (rad) | knee | tilt median | tilt max | contact | servo I (A) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0–10 s | 37 | 6 | 84 | 88 % | +0.00 | −0.75 | 10.8° | 30.0° | 3.8 | 1.24 |
+| 10–20 s | 28 | 15 | 47 | 97 % | +0.02 | −0.74 | 7.0° | 21.9° | 2.6 | 1.57 |
+| 20–30 s | 28 | 19 | 53 | 100 % | +0.02 | −0.69 | 5.1° | 19.0° | 2.9 | 1.42 |
+| 30–40 s | 29 | 20 | 43 | 99 % | +0.03 | −0.75 | 4.8° | 14.1° | 3.2 | 1.44 |
+| 40–50 s | 30 | 21 | 41 | 100 % | +0.03 | −0.73 | 4.3° | 12.1° | 2.9 | 1.45 |
+| 50–60 s | 37 | 26 | 54 | 100 % | +0.04 | −0.65 | 6.7° | 20.8° | 2.9 | 1.52 |
+
+- **Belly up:** median 31 mm over the run, above 10 mm 97 % of the time and above 20 mm 88 %. The sim
+  holds 14–26 mm.
+- **Adaptation within the run:** the floor of the belly distribution (p10) rises 6 → 26 mm, and
+  median tilt falls from 10.8° to 4–5°. Per CLAUDE.md §3.3, regulation that tightens with experience
+  is the kind of result that reads as real; it is still n=1 at 60 s.
+- **The previous stand-start run's 73° roll did not repeat** (1 of 2 stand starts rolled).
+- **Cost:** holding the belly up draws 1.2–1.6 A mean on the servo branch, against ~0.4 A belly-down.
+  A4 dipped to 6.58 V at peaks, from 7.39 V at rest after ~11 runs on one charge: close to the
+  6.4 V limp line. The battery is the next run's limit.
+- IMU ended 0.28° from the accelerometer; 4198 commands, 0 dropped.
+
+### ★★★ 2026-10-03 — SERVO CURRENT ABOVE ~2.4 A RESETS THE HAT's MCU, AND THE DRIVER THEN DROVE THE SERVOS TO THEIR END STOPS (fixed in software; the power ceiling is open)
+
+**What the operator saw.** The first dash-launched run (P-e·h0, lag 0.2, from `stand`) went into a
+"bad pose" that STOP could only freeze. Later, after the run was ended, "something is throwing the
+hip1 joints to their rightmost extremes"; the operator cut HAT power.
+
+**What the record shows** (benchd_20261003_214658.jsonl):
+- **+234.6 s, 4 s after resume:** servo current jumped from ~1.3 A to 2.4–2.9 A during large, fast
+  moves. The battery channel read 8.23 / 8.91 V, ADC garbage, the post-reset signature: the HAT's
+  microcontroller had rebooted. There were no I²C errors.
+- **+513.9 s:** a 3.02 A spike, INA bus voltage reading 9.39 V (garbage), then I²C NACKs. benchd's
+  recovery reset the MCU every 20 bus errors, about 20 times in 4 s.
+- **Mechanism:** a HAT MCU reset unprograms its servo timers. `ServoDriver` programmed a timer only
+  when a channel was first ARMED, so every still-armed channel kept getting its pulse written into
+  an unprogrammed timer. Garbage PWM drove the servos to their stops. The brain ran on that body
+  from +234 s, the "bad pose".
+
+**Fixed (6f7254b):** timers are re-programmed before any pulse whenever not ready (a test proves the
+old driver failed this); a detected HAT reset disarms every channel (nothing written: the servos go
+unpowered instead of being driven) and latches STOP in brain modes; benchd's MCU reset is limited
+to one per 5 s; the dash announces it.
+
+**Open, and not a software problem:** the brain's moves, from `stand` with the belly up, draw
+2.4–3.0 A peaks, against the ~1.9 A budget measured 2026-09-13 for the HAT's 5 V / 3 A regulator.
+The earlier 60 s belly-up run drew 1.2–1.6 A mean without a reset, so the margin is small and
+depends on what the brain does. Options are hardware (a servo supply that is not the HAT's
+regulator), a current-aware reflex in benchd (a safety envelope like the low-battery limp, not a
+behaviour), or both.
+
+### ★★★★ 2026-10-04 — MILESTONE: THE SIM-TRAINED BRAIN WALKS THE REAL PICRAWLER (operator: "we have validated sim2real")
+
+**What runs.** P-e·h0, frozen gains, unchanged from the sim, on the Pi
+(`ogma_host --imu --brain-inputs --actuate`). It is fed only what the robot can publish:
+- joints from the servo forward model of the commanded pulse;
+- heading, stride and distress from the IMU and odometry;
+- foot contact and load from the FSRs;
+- belly clearance from the boom ToF.
+
+It drives 12 servos through benchd with the servo output lag at 0.2, and it is launched from
+`picrawler-dash`.
+
+**Operator verdict (2026-10-04, after watching P-e·h0 runs):** "P-e·h0 is working well … the gait is
+working well with our FSRs and looks very much like the sim. Overall this is a big milestone and
+we have validated sim2real." Earlier: "the lag/smoothing run looked good"; the 60 s stand-start run
+kept the belly up the whole time.
+
+**Measured parity (each a hardware signal, n=1–4 short runs; there is no distance sensor on the
+robot, so gait distance and straightness are not measured):**
+
+| quantity | sim (P-e·h0) | robot | entry |
+|---|---|---|---|
+| belly clearance, median | 14–26 mm | 31 mm (60 s, 97 % > 10 mm) | 2026-10-03 "60 s FROM stand" |
+| hip2 centre | +0.04 rad | +0.02…+0.04 rad (from `stand`) | "START POSE IS THE ROBOT'S hip2 CENTRE" |
+| knee centre | −0.71 rad | −0.65…−0.78 rad | same |
+| joint speed vs command | 0.40–0.56 | 0.30–0.36 at lag 0.2 | "SERVO OUTPUT LAG α 0.2" |
+| attitude filter | — | within 0.35° of accel after every run (225 Hz) | "ogma_host's IMU on a 225 Hz thread" |
+| posture over a run | steady | tilt median 10.8° → 4–5° within 60 s | "60 s FROM stand" |
+
+**Known gaps, each with its entry:**
+- the robot stands 15–25 mm taller than the sim at the same angles (stiff servos against the sim's
+  soft stance PD);
+- it cannot yet stand up from the floor: from the rescue pose hip2 parks at −0.7 rad, because the
+  sim always spawns standing;
+- the brain sometimes pins a hip1 at its limit, and the robot circles.
+
+**The blocker for agility is power, not the brain.** Agile moves draw 2.4–3.0 A peaks on the servo
+branch, against a ~1.9 A budget on the HAT's 5 V / 3 A regulator, and the HAT's MCU resets: about 1
+every 10–40 s in the runs of 2026-10-03. That is now fail-safe and recovered:
+- servos disarm instead of being driven to their stops;
+- they re-arm one at a time and ramp to the start pose;
+- the brain resumes with its learning intact, in about 3 s.
+
+But every reset is a 3 s interruption. Options:
+- (1) a dedicated servo supply, which removes the cause;
+- (2) a current envelope in benchd, a safety limit with A/B;
+- (3) servo current as an interoceptive brain input — the doctrine's "reflex plus a learned layer
+  that keeps it quiet", a real lever for later.
+
+**Scale of the claim.** "Sim2real validated" here is the operator's direct observation of behaviour
+plus the parity table — a strong signal at this stage, not a seed-averaged finding. The finding-level
+version needs a distance/heading measure on the robot and n ≥ 20 runs, which power currently caps.
+
+### ★★ 2026-10-04 — POWER BUDGET S0: SERVO CURRENT FOLLOWS LOAD, NOT MOTION (instrument built; analysis of the 2026-10-03 runs)
+
+**Built (instrument only, consumed by nothing):** benchd puts servo-branch current (`i_a`, INA219,
+~68 ms average) on its 50 Hz state feed; ogma_host publishes it as `sense.servo_current` and dumps
+it with the brain inputs. It is under sense.*, not reality.proprio.*, because NeurochemState and
+WhiskerAversionReflex subscribe to that whole prefix.
+
+**Analysis** (`brainrun/current_analysis.py`, `current_by_foot.py`; 7116 brain-driven 10 Hz frames,
+12 benchd records, a mix of configs and lag settings):
+
+| correlate of current | r |
+|---|---|
+| feet in contact (FSR > 200) | **+0.40** |
+| FSR sum | **+0.39** |
+| per foot: phys FR / RL / FL / RR | +0.38 / +0.33 / +0.25 / +0.03 |
+| channels moving ≥ 60 µs per frame | +0.12 |
+| total slew | +0.09 |
+| commanded past the range limit | +0.07 |
+| "stalled" (at limit, not moving) | −0.07 |
+
+| feet loaded | current mean | p95 |
+|---|---|---|
+| 0–1 (belly down) | 0.61–0.67 A | 1.4–1.9 A |
+| **2–3** | **1.44–1.48 A** | **2.87–2.88 A** |
+| 4 | 1.24 A | 2.37 A |
+
+**Reading.** The brownout-zone current is servos HOLDING THE BODY on two or three legs, a stall
+against the ground, not legs moving fast or pressing past their calibrated range. Four feet
+sharing the load draw less. Per-leg attribution is available without per-servo current: the FSRs
+say which feet carry the weight. Consequences for the plan:
+- (S1) the sim's current model should be torque/load-driven, and the table above is its parity
+  target;
+- (S2) a reflex that reverses motion would not touch load-driven current. What lowers it is more
+  feet sharing the load or a lower stance;
+- (S3) "one leg at a time" keeps three feet loaded, which this table puts in the high band, so the
+  budget prior should be allowed to find load sharing (four-foot support, lower stance), not one
+  particular gait.
+
+**Caveats:**
+- 10 Hz frames with a 68 ms current average: reversal thrash at 50 Hz is invisible here;
+- correlations are modest (load explains ~16 % of variance);
+- the RR FSR reads a high, near-constant count (creep), which flattens its correlation;
+- runs mixed configs and lag on/off.
+
+The 50 Hz feed fixes the first caveat for new runs.
+
+**Also found:** the ICM-20948 IMU stopped answering on SPI (WHO_AM_I and PWR_MGMT_1 read 0x00 in
+both SPI modes, even after a reset command). It answered at the 13:39 boot and intermittently
+failed restarts on 2026-10-03, so a loose connector or cable on the HAT's 7-pin SPI header is the
+lead. benchd now retries the probe 4 times; that does not help a silent chip. Without the IMU,
+dash runs are refused (tilt guard blind) and ogma_host cannot run brain inputs.
+
+### ★ 2026-10-04 — STALL PROBE #1 (FR leg, on the stand): CURRENT SEPARATES A STALL CLEANLY; AUDIO DOES NOT, YET
+
+> **⚠ CORRECTED the same day — the audio half of this entry measured the analysis, not the robot.**
+> Its alignment came from one broadband onset (+85 ms, 1 of 9 moves). That put the labels of short
+> moves AFTER the moves (a 100 µs move lasts ~50 ms), so "free_motion" was largely mislabelled.
+> The corrected numbers are in the entry below. The current half stands.
+
+**Probe:** `stall_probe.py --leg FR`: 27 free single-joint moves (100/200/400 µs) and 6 pushes into
+the operator's block (≤ 1 s), 124 s of audio on the same clock as benchd's 50 Hz feed. Analysis:
+`brainrun/stall_audio_analysis.py`, whose audio features are an exact twin of FrozenSTFTEncoder
+over the 1024-sample windows ogma_host hands the EPM.
+
+| class | level | servo current mean / peak | energy <1k / 1–4k / 4–8k kHz |
+|---|---|---|---|
+| silence | −45.6 dBFS | 0.27 / 1.24 A | 0.76 / 0.15 / 0.08 |
+| free hold | −41.9 | 0.10 / 0.16 | 0.51 / 0.25 / 0.22 |
+| free motion | −37.2 | 0.10 / 0.18 | 0.43 / 0.14 / **0.40** |
+| blocked push | −42.3 | **0.68 / 1.30** | 0.62 / 0.22 / 0.15 |
+
+- **Current is the clean stall witness:** a blocked push draws 7× the free-motion mean.
+- **Audio, as the operator predicted:** a moving servo whines in 4–8 kHz, and a stalled one is
+  quieter (hip1/hip2 motion −35 dB, blocked −41/−45 dB). But the knee's free motion was nearly
+  inaudible (−49 dB).
+- **Through the brain's encoder the classes barely separate:** free-motion vs blocked centroid
+  cosine 0.971; nearest-centroid recall 0.35 / 0.18 (chance 0.25), whole events held out.
+
+**Why this is not a verdict on audio (§3.1):**
+- the moves were 50–200 ms single-joint taps on an unloaded leg, unlike the brain's continuous
+  12-servo motion under load (operator: "the short movements may not be sufficient for the type
+  of movements caused by the brain");
+- only one move passed the onset detector, so the +85 ms alignment is weak;
+- the "silence" class picked up handling noise around the blocked trials (its 1.24 A peak);
+- mic placement and capture gain were not set.
+
+Re-use context: audio recorded during real brain motion.
+
+
+### ★★ 2026-10-04 — STALL PROBE #1 RE-ANALYSED: A MOVING SERVO WHINES IN 4–8 kHz, A STALLED ONE SOUNDS LIKE SILENCE
+
+**Alignment, measured properly:** a moving servo raises the 4–8 kHz band from −76 dB (the room) to
+about −35 dB, ~40 dB, for exactly the move's duration. Onset +20 ms after the commanded start
+(IQR 20–30 ms), from the 18 moves that start from quiet.
+
+| class | level | 4–8 kHz share | current mean / peak |
+|---|---|---|---|
+| silence | −44.2 dBFS | 0.24 | 0.27 / 1.24 A |
+| free hold | −43.3 | 0.07 | 0.10 / 0.16 |
+| free motion | −36.0 | **0.46** | 0.10 / 0.18 |
+| blocked push | −42.9 | **0.08** | **0.68 / 1.30** |
+
+- **The operator's prediction holds for hip1 and hip2.** Moving: −33 / −35 dB with the whine.
+  Blocked: −42 / −46 dB without it.
+- **The knee breaks it:** −48.5 dB moving, near the floor, so a quiet knee is not a stalled knee.
+  Its mechanical noise barely reaches the mic.
+- **Through the brain's encoder:** a blocked push is most often classified as SILENCE (190 / 318).
+  On audio alone a stall is indistinguishable from rest; only the motor intent separates them. Given
+  a commanded move, moving vs stalled scores 0.66 per window (blocked 0.86, free motion 0.48: the
+  quiet knee and move tails). At event level with window means it is chance (31/60).
+
+**So:** audio is a real but partial stall witness. It works where the joint is audible, it needs the
+intent (the sensorimotor contingency, as proposed), and it is weakest exactly where current is
+also weakest (the knee: 0.27 A blocked). Current remains the clean witness.
+
+**Open:**
+- these were single-joint taps on the stand; run recordings now capture brain motion;
+- mic placement relative to the knees;
+- the silence class still includes handling noise around the blocked trials.
+
+### ★★ 2026-10-04 — TWO RECORDED BRAIN RUNS: IN REAL GAIT THE SERVOS NEVER GO QUIET, SO "STALLED = SILENT" HAS NOTHING TO CONTRAST WITH
+
+**Runs:** P-e·h0 from picrawler-dash, battery, 317 s and 321 s of brain control, audio and the 50 Hz
+feed recorded (`brainrun/run_audio_analysis.py`).
+
+**Alignment works because it was measured.** arecord's first sample lands ~383 ms after the request,
+which an assumed latency would have missed by ~0.4 s. The six sync taps rise a median 26–30 dB in
+4–8 kHz at +20 ms.
+
+**Audio in gait:**
+- commanded motion is non-zero in 99.98 % of brain-driven frames (mean ~170 µs per 20 ms frame
+  across the 12 channels: the brain's command thrash);
+- the 4–8 kHz whine sits at −31…−34 dB the whole time, against −76 dB in the quiet room (probe #1);
+- commanded motion predicts it at r = +0.04…+0.06 (best lag +90…+130 ms), with no joint type
+  standing out (|r| ≤ 0.06);
+- the whine barely changes between "some" and "a lot" of commanded motion (−32.8 vs −31.8 dB).
+
+A stalled servo among eleven whining ones cannot be heard as silence. The single-servo probe cue
+does not survive brain gait in this form. This is a statement about THIS gait, which moves almost
+every servo almost every frame; a calmer gait (smaller, fewer simultaneous moves, which the power
+budget wants anyway) would restore contrast. Untested: per-servo pitch differences within the
+128-band spectrum.
+
+**Current vs feet loaded at 50 Hz confirms the 10 Hz table:**
+
+| feet loaded | run 1 mean / p95 | run 2 mean / p95 |
+|---|---|---|
+| 0 | 0.52 / 1.23 A | 0.40 / 0.71 A |
+| 1 | 0.93 / 2.37 | 1.00 / 2.24 |
+| 2 | **1.56 / 2.88** | **1.72 / 2.98** |
+| 3 | 1.53 / 2.82 | 1.64 / 2.82 |
+| 4 | 1.33 / 2.37 | 1.45 / 2.58 |
+
+**Events:**
+- three HAT resets, each auto-recovered to `stand` in 2.2–2.5 s. The second before each: current
+  peak 2.4–3.0 A, 2.1–3.4 feet loaded, 155–180 µs/frame of commanded motion;
+- run 1's roll past 80° (the tilt guard read 141°) followed the most vigorous second of either run:
+  current mean 2.07 A (peak 3.04), 2.2 feet loaded, 203 µs/frame.
+
+**Reading:** the brain's continuous all-servo motion is one root behind three of today's problems:
+- it drives the 2–3-feet-loaded current peaks;
+- it drowns the audio stall cue;
+- the roll came after its most vigorous second.
+
+The power-budget prior (S3) and the jitter levers (2026-10-02) target the same thing from two sides.
+
+### ★★★ 2026-10-05 — FAST CURRENT DURING A 19-MIN RUN: THE HAT RESETS ARE NOT TRIGGERED BY CURRENT — AND SOME MAY NOT BE RESETS
+
+> **⚠ CORRECTED the same day (next entry):** the "garbage" battery reads were the HAT's 3.3 V rail
+> drooping, not corrupted transactions. The resets are real brownouts. The current finding stands:
+> battery-side current does not predict them. The "some may not be resets" reading does not.
+
+**Run:** P-e·h0 from picrawler-dash, 1154 s of brain control, including the operator's textured
+mat. The sag capture (current + pack voltage, ~940 Hz) covered the first 900 s; the cap is now an
+hour. 8 HAT resets in the record, 4 inside the capture. Lifted periods excluded by belly ToF
+> 100 mm (4.3 % of frames). Analysis: `brainrun/fast_current_analysis.py`.
+
+**Current is not the trigger at ~1 kHz:**
+- in the 500 ms before each captured reset the current peaked at 3.03 / 1.65 / 3.34 / 3.36 A;
+  before #2 it never passed 1.65 A, and before #1 it fell to 0.7–1 A for the last 100 ms;
+- in 806 s of gait away from resets: 939 excursions above 3 A (70 per minute, median 40 ms, max
+  380 ms) with no reset; the current never reached 4 A (max 3.58);
+- the pack never sagged: 10 ms minimum 6.84 V (p0.1 6.89);
+- the operator's "catch-up" after each recovery, servos slewing at the cap toward the brain's
+  targets, peaked at 3.04–3.45 A and spent up to 415 ms above 3 A without a reset.
+
+**The capture did not break at the resets.** The INA219 kept sampling through all four, so whatever
+reset (or seemed to reset) the HAT's MCU did not take the INA219 down. Around #3 and #4 the INA219's
+bus-voltage readings went IMPLAUSIBLE (8.7–9.5 V from a ~7.1 V pack) for 80–420 ms. That is
+two different chips on the same I²C bus returning garbage at the same time.
+
+**What triggered each "reset":**
+- 5 of 8 (#1, #2, #3, #6, #8): a single implausible battery read (ADC "garbage", 9.07–11.19 V). For
+  #1, #2 and #6 there was no I²C error anywhere in the 2 s before.
+- 3 of 8 (#4, #5, #7): benchd's OWN MCU reset after bus errors. ⚠ That rule fired at every 20th
+  CUMULATIVE bus error (rate-limited to 1 per 5 s). The run accumulated ~600 NACKs, so sporadic,
+  survivable errors added up to deliberate resets. That is self-inflicted.
+
+**Reading:** the evidence points at I²C read corruption (electrical noise or a shared
+supply/ground disturbance during servo activity), with benchd's detector and its recovery turning
+glitches into 3 s interruptions. It does not point at current overload. It is not proven that no
+real MCU reset happened today; on 2026-10-03 real ones drove servos to their stops. The
+discriminating fixes:
+- confirm a "reset" before disarming (garbage persisting across reads);
+- reset the MCU only on a burst of errors with no successful transaction;
+
+then A/B resets per minute.
+
+**For servo speed:** this run does not rule out a faster slew on power grounds (no current-related
+reset; catch-up at the slew cap was fine). The sim-first rule and the earlier speed table
+(2026-09-13: 4.59 rad/s was the best-behaved setting on an older config) still apply.
+
+
+### ★★★ 2026-10-05 (evening) — THE HAT's 3.3 V RAIL IS BROWNING OUT; BATTERY-SIDE CURRENT IS CAPPED, SO IT CANNOT SEE WHY
+
+**Run:** P-e·h0, 418 s of brain control, with reset confirmation and the burst-only MCU reset
+deployed (0d452653), the fast capture covering the whole run. **9 resets (1.15 / min, against 0.4 / min
+in the 19-min run)**: 6 confirmed by re-reads, 3 by benchd's burst rule (57–64 errors in 1 s, nothing
+through for ≥ 500 ms). 4 garbage reads were unconfirmed and logged as `hat_glitch`; before the fix,
+each would have cost a ~3 s recovery.
+
+**The "garbage" is a measurement.** The HAT's ADC measures the battery divider against its own 3.3 V
+rail. The garbage values climb smoothly as that reference falls, rather than scattering:
+- confirmed resets: first read 9.59, re-reads 9.07 / 9.11 / 9.22; first read 9.10, re-reads
+  9.00 / 9.13 / 9.31;
+- pinned at the top of the range: 11.19 ×3;
+- no answer at all: None ×3;
+- unconfirmed glitches: 8.2–9.5 V recovering to 7.7.
+
+A true pack of ~7.4 V read as 9.2 V implies a 3.3 V rail near 2.65 V, where an MCU browns out. In two
+resets (#5, #7) the INA219, powered from the same rail, read 0 V: it died too. The 10 Hz telemetry
+estimate of the rail (3.3 × INA pack V ÷ A4 reading) sits at 3.31 V median, with p1 3.12 and p0.1
+2.79. It droops, briefly, mostly too fast for 10 Hz, and benchd's frame replaces any reading above
+9 V with the last good one, so the deepest dips are filtered out of that record.
+
+**Why battery current cannot see it.** Battery-side current hits a hard ceiling in every run:
+- maximum 3.53–3.58 A, never above 4 A;
+- above 3 A 70–75 times a minute (median 40 ms, up to 1.4 s) with no reset;
+- before resets, a peak of only 2.6–3.5 A.
+
+A flat ceiling is what a current-limited supply produces, so this looks like the HAT's 5 V regulator
+at its limit. Demand above it shows up as 5 V rail sag, not as more input current, and a deep enough
+sag drops the 3.3 V rail out. Hypothesis, consistent with every number so far.
+
+**Consequences:**
+- no battery-side current threshold can predict a reset;
+- the 3.3 V rail itself is the precursor worth instrumenting (added the same day, next entry);
+- faster servos would likely add demand above the limit (hold);
+- the real fix is to move the servo load off the HAT regulator. The PCB cannot be modified, so the
+  proposal is a servo power-injection harness: an extension per servo with its V+ cut on the HAT
+  side and fed from a separate high-current BEC, ground common, signal untouched.
+
+### ★★★ 2026-10-05 (night) — THE 3.3 V RAIL IS THE GRADED PRECURSOR: 444 DIPS, 15 BELOW 3.0 V, ONE FATAL AT 2.51 V
+
+**Run:** P-e·h0, 599 s of brain control, with the rail estimate (3.3 × INA pack V ÷ A4) in the fast
+capture at 232 Hz. **1 HAT reset (0.1 / min, against 1.15 / min the run before and 0.4 / min the run
+before that)**, 1 hat_glitch; ended by the tilt guard at 85°. The reset rate varies by an order of
+magnitude between runs; nothing here says why (battery, surface or brain behaviour), so treat it as
+a property of the run, not of the build.
+
+**The rail, in gait:** median 3.31 V, p1 3.23, p0.1 3.05; below 3.0 V 0.06 % of 126 628 samples.
+
+| dip minimum | count in 10 min | outcome |
+|---|---|---|
+| < 3.15 V | 444 | all recovered |
+| < 3.0 V | 15 | all recovered |
+| < 2.8 V | 6 | 5 recovered (to 2.65–2.68 V, 22–91 ms); 1 = the hat_glitch (2.65 V, 85 ms) |
+| **2.51 V**, 68 ms | 1 | **RESET** |
+
+- **The cliff is fast:** before the reset, the rail sat at 3.28–3.30 V until ~60 ms before benchd
+  detected it, then went 3.24 → 3.18 → 2.72 → 2.58 V (20 ms minima). Dips last 20–90 ms.
+- **The MCU survives ~2.65 V and dies by ~2.5 V.**
+- **Every deep dip came with battery current at its ceiling** (3.04–3.42 A within ±50 ms). That
+  supports the regulator-limit reading: being at the current cap is necessary for a dip, the depth
+  is what varies, and the INA219 cannot see the depth. The rail can.
+
+**Why this matters:**
+- **For the brain (S3):** the rail's dip depth is a GRADED, egocentric signal that rises toward the
+  fatal event: 444 small dips for every fatal one, the gradient the memory "fatal events have no
+  gradient" asks for. It is a better power-budget term than current, which saturates at the cap.
+- **For a reflex (S2):** a dip below ~2.9 V is a candidate trigger to unload briefly, but the window
+  is 20–60 ms against a 20 ms tick. Untested.
+- **For the injection harness:** a clean before/after. With the servo load off the HAT regulator, the
+  dips should vanish.
+
+### ★★ 2026-10-05 (night) — SURFACE A/B: CONCRETE DRIVES THE RAIL DEEPER AND RESETS THE HAT ~13× MORE OFTEN THAN CARPET
+
+**Runs:** the same build and brain (P-e·h0, autonomous, lag 0.2), on smooth carpet (599 s) and on
+concrete (283 s). Fast capture with the rail estimate in both. n = 1 per surface: a signal.
+
+| | carpet | concrete |
+|---|---|---|
+| HAT resets | 1 (0.10 / min) | 6 (1.27 / min) |
+| battery current above 3 A | 87 / min | 150 / min |
+| 10 ms peak current, p50 / p90 | 1.56 / 2.76 A | 1.79 / 3.00 A |
+| rail dips < 3.0 V | 1.5 / min | 6.1 / min |
+| rail dips < 2.8 V | 0.6 / min | 4.5 / min |
+| rail p0.1 in gait | 3.05 V | 2.88 V |
+| current ceiling (max) | 3.46 A | 3.50 A |
+
+- **Operator's reading:** concrete "seemed to increase inertial stress on servos holding position".
+  The data agree. On a hard, unyielding surface the same gait spends nearly twice as long at the
+  current ceiling, and the rail dips deeper and far more often. Carpet's compliance absorbs what the
+  servos otherwise have to fight.
+- **The reset mechanism is unchanged:** every concrete reset follows the same cliff, flat at ~3.28 V,
+  then down to 2.45–2.61 V within 20–60 ms. The deepest "dips" (2.0 V for ~1.2 s) are the outages
+  themselves. One reset (#5) was preceded by survivable dips to 2.56 / 2.51 / 2.88 V in the 200 ms
+  before, the only sign of a run-up in any reset so far.
+- **The reset rate is a function of surface.** That explains most of the earlier spread (0.10–1.27 / min).
+  The 1.15 / min run of the same evening was not labelled; if it was on a hard floor, it fits.
+
+**Consequences:**
+- any hardware A/B of resets per minute must hold the surface fixed;
+- concrete is the stress test for the injection harness;
+- a brain-side power term could learn to stand and step more softly on hard ground: the rail dips
+  give it the gradient.
+
+### ★★ 2026-10-05 (night) — SIM POWER MODEL S1, FIRST PASS: the sim servo has a 9.6 N m ceiling; an honest datasheet cap breaks the gait, and the robot steps like the strong servo
+
+> **⚠ CONTEXT CORRECTION (2026-10-06): every sim run in this entry ran on the DEFAULT body, not
+> P-e·h0's.** `arenaavg.py` (and the direct launches) never applied the config's `metadata.body_env`;
+> only the launcher did. So these runs had servo speed 6.0 (not 3.668), a ghost chassis, and raw
+> joints, IMU, upright and distress. The arms are consistent with each other, so the comparisons stand
+> as comparisons, but on a different body. Re-measured on the faithful body: entry "BODY_ENV
+> CONFOUND" below.
+
+**Instrument (`WORKING`, byte-identical).** `scripts/servo_power_model.gd` recovers each servo's
+motor torque from Newton-Euler on the segments beyond it: angular-momentum change about the moving
+anchor, minus gravity, contacts on every leg segment and body damping, projected on the joint axis.
+Godot Physics 3D does not expose a joint motor's impulse, so this is the only route.
+`OGMA_PICRAWLER_POWER_LOG=<csv>` writes it at 240 Hz. A 3000-tick trace is byte-identical with the
+instrument on and off. Static stand reads hip2 0.12–0.15 N m and knee 0.07 N m, which matches
+statics (body weight ÷ 4 × the horizontal lever).
+
+**Finding: the "0.15 N m" servo has really had a 9.6 N m ceiling.** Godot 4.6's
+`GodotHingeJoint3D::solve()` clamps the motor impulse on every solver iteration and keeps no
+accumulated total, and the space runs `solver_iterations` = 64 (read back from the server). The
+instrument confirms it: P-e·h0 stance hip2 carries 0.18 N m on average, joints sit past an MG90S's
+datasheet stall (0.18 N m) ~25 % of the time, and the tail runs smoothly to 2 N m with no ceiling.
+
+**Lever: `OGMA_PICRAWLER_HONEST_TORQUE_CAP=<N m>`.** It divides the per-call impulse by the iteration
+count, so one physics step can never exceed the cap (hinge backend; gain-0 verified byte-identical).
+P-e·h0, arena 0.3, n=6 × 12000, seeds 1–6, `arenaavg.py`:
+
+| cap | net_disp | steps | contact duty | belly (mm) | belly min | tilt_sd | falls |
+|---|---|---|---|---|---|---|---|
+| legacy (9.6) | 10.42 ± 1.07 | 84.5 ± 24.4 | 0.80 | 39.2 | 14.5 | 0.091 | 0 |
+| 0.35 | 10.02 ± 2.01 | 32.3 ± 21.3 | 0.81 | 35.8 | 10.6 | 0.108 | 0.17 |
+| 0.25 | 10.21 ± 1.66 | 12.0 ± 6.5 | 0.85 | 32.9 | 2.8 | 0.067 | 0 |
+| 0.18 (MG90S datasheet) | 8.20 ± 2.03 | 6.8 ± 8.4 | 0.92 | 27.8 | 3.1 | 0.072 | 0 |
+
+**Verdict: `REGRESSION` (signal, n=6), monotonic in the cap.** A weaker servo plants its feet
+(duty 0.80 → 0.92), stops stepping, and slides with the belly scraping (min 3 mm). It still drifts
+8 m. The context matters: the brain's frozen gains were settled on the 9.6 N m body.
+
+**The robot says the strong servo is closer to the truth.** From its FSRs (> 200, brain-driven, on
+the floor), the robot runs at contact duty 0.70, 200–270 swings ≥ 4 ticks per minute, and swing
+median 10–13 ticks. The legacy sim runs at 0.80, ~270 per minute and 6 ticks. The robot steps at
+least as much as the uncapped sim, and every cap moves the sim away from it.
+
+**Current model (`pi_host/tools/brainrun/power_calib.py`).** Per servo, I = idle + running +
+min(I_stall, K · g · |τ|). g is 1 when the servo does work and H_HOLD when holding or back-driven
+(gear friction carries part of the load). τ comes from the instrument. With datasheet K
+(0.75 A ÷ 0.18 N m) and any H, the sim predicts 2.3–2.9 A battery-side against the robot's 1.55
+(carpet). Fitting K alone to the robot's mean gives 2.1–2.5 A/N m. At the stall-probe current
+(0.75 A), that is an effective stall torque of ~0.3–0.36 N m. The cap dose curve independently
+needs > 0.35 N m to step. **Two estimates agree that the robot's servos act about twice as strong as
+the MG90S datasheet, or that its stance loads are about half the sim's.** The robot stands taller
+than the sim, which would point at the second.
+
+**What does not fit yet: the shape.** With the mean matched, the sim's 10 ms peaks are too narrow:
+
+| | p90 | p99 | above 3 A |
+|---|---|---|---|
+| sim | 2.0 A | 2.4 A | ~0 / min |
+| robot | 2.76 A | 3.26 A | 87 / min |
+
+So the sim never reaches the regulator limit, and the rail model cannot be fit. The robot's extra
+variance is at gait timescale: 85 % of its current spectrum is below 5 Hz, and there is no 50 Hz
+line, so a synchronized servo drive pulse is refuted as the cause. Two ideas remain:
+- the robot's longer swings concentrate the load on fewer legs;
+- a hobby servo's deadband: near-free inside it, a stall current once a load pushes it out.
+
+**Also reverted the same session:** mirroring the robot's servo output lag (α 0.2) into the sim.
+That lag was chosen to give the robot the plant lag the sim ALREADY has (entry "SERVO OUTPUT LAG
+α 0.2 ON THE ROBOT"), so adding it to the sim would have lagged it twice.
+
+**Re-use context for the cap:**
+- a MEASURED stall torque: one MG90S at 5 V with a weight on a known arm (operator bench test);
+- geometry and stand-height parity first, if the loads are what differ;
+- a brain retuned on a capped body.
+
+The cap stays default-off. The power model's next step is the shape, not the rail.
+
+### ★★ 2026-10-05 (late) — SCALE PROBE: an MG90S holds a load almost for free, drives into one at ~1 A, and cuts its own drive after ~3.3 s
+
+**Probe:** `scale_probe.py --leg FL` (ch 4), robot on its stand, operator poses `toes_up` →
+`torque_check` (leg straight, knee ~2 mm above a kitchen scale). hip2 pushes in 40 µs steps past
+that point; each push is held ~7 s, then the leg rests 2 s. Current is benchd's 50 Hz INA219 (whole
+HAT, battery side, base ~0.10 A). Operator: the scale reading **peaked, then settled**, and the
+SETTLED value was entered. Separately, back-driving a held servo by hand took ~1.2 kg on the same
+arm (~0.63 N m).
+
+| push past contact | settled reading | settled torque (53.6 mm arm) | current while driving (0.25–3.3 s) | current settled (4.5–7 s) |
+|---|---|---|---|---|
+| 40 µs | 130 g | 0.07 N m | 0.11 A (= base) | 0.11 A |
+| 80 µs | 228 g | 0.12 N m | 0.10 A (= base) | 0.10 A |
+| 120 µs | 320 g | 0.17 N m | 0.83–0.93 A | 0.21 A |
+| 160 µs | 387 g | 0.20 N m | 0.79–0.88 A | 0.21 A |
+| 200 µs | 475 g | 0.25 N m | 0.95–1.08 A | 0.21 A |
+| 240–440 µs | 475–480 g | 0.25 N m | 0.73–0.84 A | 0.20–0.21 A |
+
+The commanded pulse was constant through every hold (benchd's `out` = target, all other channels
+unchanged), so everything below happened inside the servo.
+
+- **Holding is nearly free.** At 40–80 µs the leg reached its target (stand and scale compliance
+  absorbed the few mm) and held 0.07–0.12 N m with no current above base. After the drive phase, it
+  held 0.25 N m at 0.11 A. Gear friction carries a static load: the back-drive force is ~0.63 N m.
+- **Driving into a load is a step to ~0.7–1.0 A** (battery side, one servo) once the target is out of
+  reach. That level barely depends on how far out of reach (120–440 µs): the servo saturates.
+- **The servo cuts its own drive after ~3.3 s.** At every push from 120 µs on, the current falls from
+  ~0.8–1.0 A to 0.21 A between 3.3 and 4.5 s, on the same timing every time, with the pulse
+  unchanged. A thermal fold-back would not reset in the 2 s rest, so this looks like the servo IC's
+  stall protection. The scale's "peak then settle" is the force following that current.
+- **Not measured: the drive torque.** The peak force during the drive phase was not entered, so
+  amps per N m while driving is still open. The settled 475 g plateau over 200–440 µs may be a
+  holding limit, or the robot lifting on its stand; which one is unknown.
+
+**What it changes:**
+- **The sim's current model (S1).** A linear current-per-torque model is the wrong shape. A real
+  servo is close to bimodal: ~0 A while holding, even at 0.25 N m, and ~1 A while driving against a
+  load. That is exactly why the robot's current swings at gait timescale and its mean sits below
+  the linear model's: the sim's stance torques are mostly holding. The next model is two-state
+  (holding at H_HOLD ≈ 0, driving at a saturated level), with the 3.3 s stall cut-off as a third.
+- **The honest torque cap.** A symmetric 0.18 N m cap is wrong in both directions. The real servo
+  resists back-driving up to ~0.63 N m and drives at ≥ 0.25 N m. A cap that gives way at 0.18 under a
+  stance load models a servo that does not exist, which explains part of the dose-curve `REGRESSION`.
+  The faithful cap is asymmetric: drive ≥ 0.25 N m, hold ~0.6 N m.
+- **The robot's stuck leg.** A snagged leg draws stall current for ~3.3 s and then limits itself.
+  Rail dips from a stall are bounded in time by the servo itself.
+
+**Re-use / next:**
+- re-run with the scale display FILMED, aligned on the 12 pushes, for the peak (drive) torque per step;
+- one more servo, to see whether the 3.3 s cut-off is this unit or the model;
+- note whether the robot rises off its stand at the plateau.
+
+**Cross-check against SunFounder's published sibling servos (2026-10-05).** No datasheet exists for the
+PiCrawler's own servo (servodatabase lists "PiCrawel", A0000284, with empty fields). The closest
+published siblings are the same 13.5 g SunFounder micro servo. Their specs match the scale probe:
+
+| | SF006PRO (AI Lab kit doc) | SF006FM (PiDog) | scale probe (FL hip2) |
+|---|---|---|---|
+| drive / dynamic load | ≥ 2.2 kgf·cm (0.22 N m) at 5 V | ≥ 1.3–1.4 kgf·cm max | 475 g plateau = 0.25 N m |
+| static stall (holding) | ≥ 5 kgf·cm (0.49 N m) | — | back-drive ~1.2 kg = ~0.63 N m |
+| stall current | ≤ 1.2 A at 5 V | ≤ 0.85 A (4.8 V) / 1.0 A (6 V) | ~0.9 A battery side ≈ 1.1–1.2 A at 5 V |
+| stall cut-off | drops to ≤ 250 mA after 5 s | "power failure protection after 5 s" | drops to ~0.1 A after 3.3 s |
+| deadband | ≤ 6 µs | ≤ 3 µs | — |
+| no-load speed | ≤ 0.17 s/60° (6.2 rad/s) | ≤ 0.18 s/60° | — |
+| clutch | — | slips under external force | operator saw the servo "shifting against its own hinge" |
+
+So the sim's servo should drive at ~0.22–0.25 N m and hold to ~0.5–0.6 N m, draw ~1.2 A at 5 V when
+driving into a load, and limit itself to ≤ 0.25 A after a few seconds of stall.
+
+### ★ 2026-10-05 (late) — ASYMMETRIC TORQUE CAP (drive 0.25 / hold 0.6 N m): ties legacy on distance, still a quarter of the steps (`PARTIAL`, signal n=6)
+
+> **⚠ CONTEXT CORRECTION (2026-10-06): every sim run in this entry ran on the DEFAULT body, not
+> P-e·h0's.** `arenaavg.py` (and the direct launches) never applied the config's `metadata.body_env`;
+> only the launcher did. So these runs had servo speed 6.0 (not 3.668), a ghost chassis, and raw
+> joints, IMU, upright and distress. The arms are consistent with each other, so the comparisons stand
+> as comparisons, but on a different body. Re-measured on the faithful body: entry "BODY_ENV
+> CONFOUND" below.
+
+**Lever:** `OGMA_PICRAWLER_HONEST_HOLD_CAP=<N m>`, on top of `HONEST_TORQUE_CAP`. Gear friction is modelled
+as a passive brake. Every physics step, a joint pushed back against its command (or told to hold
+still) gets target velocity 0 at the hold cap. A braked joint drives again only when the torque it
+is holding against, in the commanded direction (read from the power instrument), is below the
+drive cap. Values from the scale probe and SunFounder's SF006PRO (dynamic ≥ 0.22, static
+≥ 0.49 N m). Gain-0: legacy and the symmetric cap are both byte-identical with it at 0. The brake
+engaged on 13.5–14.1 % of joint-steps in every seed.
+
+**First build: `REGRESSION`, a faithfulness bug, not a verdict.** It released the brake every step.
+Under a stance load between the caps, each drive step slipped, and the brake stopped the joint but
+never recovered the lost ground. The stance crept down: belly 19.8 mm, net_disp 8.61. Real static
+friction holds without creep, which is why the release now needs the load test.
+
+P-e·h0, arena 0.3, n=6 × 12000, seeds 1–6, `arenaavg.py`:
+
+| | legacy (9.6 N m) | symmetric 0.25 | **asymmetric 0.25 / 0.6** | symmetric 0.18 |
+|---|---|---|---|---|
+| net_disp | 10.42 ± 1.07 | 10.21 ± 1.66 | **9.94 ± 0.07** | 8.20 ± 2.03 |
+| straight | 0.69 | 0.67 | 0.69 | 0.71 |
+| steps | 84.5 ± 24.4 | 12.0 ± 6.5 | **20.7 ± 13.3** | 6.8 ± 8.4 |
+| step_bal | 0.22 | 0.00 | 0.13 | 0.04 |
+| contact duty | 0.80 | 0.85 | 0.87 | 0.92 |
+| belly (mm) | 39.2 | 32.9 | 33.0 | 27.8 |
+| belly min (mm) | 14.5 | 2.8 | 4.2 | 3.1 |
+| tilt_sd | 0.091 | 0.067 | 0.078 | 0.072 |
+| falls | 0 | 0 | 0 | 0 |
+
+**Verdict: `PARTIAL` (signal, n=6).**
+- **Against legacy:** distance and heading tie (9.94 vs 10.42, straight 0.69 both), with no falls.
+  But steps fall by three quarters and the belly drops 6 mm: the measured servo still plants its
+  feet more than the 9.6 N m one.
+- **Against the symmetric 0.25 cap:** the hold side adds little in this context. Belly is equal, the
+  steps difference is inside noise (21 ± 13 vs 12 ± 6), and net_disp is much tighter across seeds
+  (± 0.07 vs ± 1.66).
+- **Context:** the brain's gains were frozen on the 9.6 N m body.
+
+**The robot still steps more than any capped sim** (FSR duty 0.70, swings 10–13 ticks). So either the
+drive cap is low, or the robot's stance loads are lower than the sim's. On the cap: 0.25 N m is the
+SETTLED scale reading; the operator saw a higher peak that was not recorded, and the SF006PRO's
+2.2 kgf·cm is a minimum. On the loads: the robot stands taller.
+
+**Re-use / next:**
+- the drive cap from the recorded PEAK (film the scale), then re-run this arm;
+- stance-height parity, if the loads differ;
+- this body for the S1 current fit (its torques are the faithful ones).
+
+Default off.
+
+### ★★ 2026-10-06 — BODY_ENV CONFOUND: the headless harness never loaded P-e·h0's body; re-measured, the asymmetric cap is a `REGRESSION` on the faithful body
+
+**The confound (§3.2 #7, "did the arm you think you ran actually load?").** P-e·h0 declares its
+robot-faithful body in `metadata.body_env`: solid chassis, honest joints / IMU / upright / distress,
+the boom ToF, 3.668 rad/s, joint_torque_zero. Only `launcher.gd` applied it. `arenaavg.py`,
+`seedavg.py` and direct `OGMA_PICRAWLER_CONFIG` launches did not. Every sim run of 2026-10-05
+(power instrument, cap dose curve, asymmetric cap, the power fit) therefore ran on the default body:
+6.0 rad/s, ghost chassis, raw joints. The run logs said so (`max_servo_speed = 6.000`), and nothing
+read them. **Fixed:** both harnesses now apply `body_env` as the launcher does (an exported variable
+or a `K=V` argument still wins), and `arenaavg.py` prints a body_env receipt per arm. **Worth
+checking:** any earlier seedavg/arenaavg result for a config that declares `body_env`.
+
+**Re-measured on the faithful body** (P-e·h0, arena 0.3, n=6 × 12000, seeds 1–6, receipt
+printed on both arms):
+
+| | legacy servo (9.6 N m) | asymmetric 0.25 / 0.6 N m |
+|---|---|---|
+| net_disp | 9.40 ± 0.91 | 7.38 ± 1.98 |
+| straight | 0.74 | 0.59 ± 0.22 |
+| steps | 26.3 ± 14.0 | 21.8 ± 17.2 |
+| contact duty | 0.83 | 0.88 |
+| belly (mm) | 29.9 | 22.4 |
+| belly min (mm) | 3.9 | 0.2 |
+| tilt_sd | 0.082 | 0.141 |
+| falls | 0 | 0.33 |
+
+**Verdict: `REGRESSION` (signal, n=6), on the faithful body.** The faithful body already steps far
+less than the default one (26 vs 84.5), so the cap's step loss is small here (inside noise). What it
+costs instead is posture and stability: the belly drops 8 mm and scrapes (min 0.2 mm), tilt nearly
+doubles, straightness falls, and falls appear (0.33). Context: the brain's gains were settled on the
+9.6 N m servo. **Re-use:** the drive cap from the recorded PEAK torque (the 0.25 used here is the
+settled reading); a brain whose gains are settled on the capped body; stance-height parity.
+
+**Power model refit on this body** (`power_calib.py`, the same constants in the sim): K 2.39 → 2.49
+A/N m (the default-body fit transferred within 4 %). Carpet mean 1.55 A matched; shape still narrow
+(p90 2.22 vs 2.76 A, p99 2.81 vs 3.26, > 3 A 8 vs 87 per minute). The sim port reproduces the Python
+model to 1.4e-4 A over 9602 steps (`power_parity.py`). The rail fold-back branch is not exercised by
+that check, because the model never reached the regulator limit.
+
+**HUD:** windowed sim runs now show a POWER panel (bottom right; `[T]` hides it). It holds the bench
+dashboard's `current_graph.gd` fed at the INA219's 10 Hz with its 68 ms averaging, the
+picrawler-dash power and slow lines, the modelled pack and 3.3 V rail, and a joint line speed (10 Hz,
+mean |Δangle|/s over 12 joints). picrawler-dash gained the same line speed (from benchd's 50 Hz
+`out` pulses, over exact 100 ms spans) and the rail estimate. **Launch through the launcher**, so
+P-e·h0's body_env applies; a direct scene launch gets the default body.
+
+### ★★ 2026-10-10 — SIM vs ROBOT, SAME NUMBERS: the legs move at the same speed; current matches on the mean and is too calm in the sim; the robot steps more
+
+**Runs:** the robot, P-e·h0 from picrawler-dash (autonomous, lag 0.2, carpet), 384 s brain-driven on
+the floor, 1 HAT reset. The sim: the same config on its faithful body (body_env applied), arena 0.3,
+3 seeds × 12000 per arm, with the capped servo (0.25 / 0.6 N m, what the operator watched) and the
+legacy servo. `brainrun/sim_robot_compare.py` measures both sides the same way (robot: the pulse on
+the line; sim: the joint itself; 100 ms spans).
+
+| | robot | sim, capped | sim, legacy servo |
+|---|---|---|---|
+| joint line speed, mean (rad/s) | 1.12 | 1.31 | 1.25 |
+| … p90 | 2.75 | 3.12 | 3.08 |
+| … hip1 / hip2 / knee | 1.25 / **0.47** / 1.63 | 1.26 / 0.87 / 1.80 | 1.36 / 0.68 / 1.72 |
+| current mean (A) | 1.55 | 1.58 | 1.59 |
+| 10 ms peaks p90 / p99 (A) | 2.81 / 3.26 | 2.22 / 2.79 | 2.30 / 2.93 |
+| above 3 A per minute | 67 | 8 | 15 |
+| rail dips < 3.0 V per minute | 2.35 | 0 | 0 |
+| contact duty | 0.67 | 0.89 | 0.85 |
+| swings ≥ 4 ticks per minute | 231 | 129 | 156 |
+
+- **Speed: the robot is no longer faster than the sim.** With the servo lag on, its legs move ~10–15 %
+  SLOWER than the sim's on average (hip1 and knee within 10 %). The robot number is the pulse on the
+  line, so its real joints can only be slower still. The earlier "faster than the sim" was the
+  pre-lag robot (2026-10-03).
+- **hip2 is the exception: the robot moves it about half as much** (0.47 vs 0.68–0.87). This is the
+  brain's command, not the servo, so it is the brain behaving differently on the real body, and hip2
+  is the joint that carries the stance.
+- **Current: the mean holds on a run the model never saw** (1.55 robot vs 1.58–1.59 sim; K was
+  fitted on 2026-10-05's carpet run). The shape does not: the robot's peaks are higher and it crosses
+  3 A 4–8× as often. The sim never reaches the regulator limit, so its rail never dips.
+- **Stepping: the robot lifts its feet far more** (duty 0.67 vs 0.85–0.89, swings 231 vs 129–156 per
+  minute). FSR thresholds and creep make the robot side noisier, but the gap is large.
+
+**Reading:** the sim matches the robot on how fast the legs move and on average power. It differs in
+what the legs do: the robot steps more and works hip2 less. Its current spikes are bigger, which may
+be the same fact (more lift-offs mean more moments with fewer feet carrying the load). The current
+model's missing variance probably sits in the stepping gap, not in the servo model.
+
+### ★ 2026-10-10 — P-e·h0 AT 4.59 AND 6.0 rad/s (sim): the gait steps 3× and 6× as often and the belly rises; heading and current pay (`PARTIAL`, signal n=6)
+
+**Lever:** servo speed only (`OGMA_PICRAWLER_MAX_SERVO_SPEED`), same brain and gains. New configs
+`…__nohomeo__spd459` (4.585 rad/s = 50 µs/tick on the robot) and `…__nohomeo__spd600` (6.0 = 65 µs/tick),
+now in the pruned launcher/dash menu beside P-e·h0. On the robot, `dash_run` sets benchd's brain slew
+from the config's declared speed for the run and restores it after. Arena 0.3, n=6 × 12000, seeds
+1–6, faithful body (receipts: `max_servo_speed` 3.668 / 4.585 / 6.000 on every seed).
+
+| | 3.668 (P-e·h0) | 4.585 | 6.0 |
+|---|---|---|---|
+| steps | 26.3 ± 14.0 | 75.3 ± 10.9 | 159.7 ± 14.9 |
+| contact duty | 0.83 | 0.79 | 0.74 |
+| belly (mm) | 29.9 | 33.6 | 37.9 |
+| net_disp | 9.40 ± 0.91 | 9.97 ± 0.40 | 10.67 ± 0.92 |
+| path_len | 12.6 | 14.8 | 19.3 |
+| straight | 0.74 | 0.67 | 0.56 |
+| scrub | 0.075 | 0.093 | 0.115 |
+| tilt_sd | 0.082 | 0.080 | 0.100 |
+| falls | 0 | 0.17 (1 / 6) | 0.17 (1 / 6) |
+| modelled current, mean (A) | 1.62 | 1.66 | 1.82 |
+| modelled 10 ms peaks above 3 A per min | 15 | 33 | 91 |
+
+(Current: the S1 electrical model, 2 seeds per arm. It under-reads the robot's peaks ~4× at
+3.668 — robot 67 / min — so read the column as a ratio: ~2× and ~6× the time near the ceiling.)
+
+**Verdict: `PARTIAL` (signal, n=6).** Faster servos give the gait what 3.668 lost (2026-10-01): it
+steps 3× and 6× as often, lifts the belly 4 and 8 mm, and moves its contact duty toward the robot's
+(0.67 measured on carpet, 2026-10-10). It costs heading (straight 0.74 → 0.56: more path for the same
+displacement), scrub, and one fall in six at each faster speed (12000-tick horizon only; see the
+slowest-loop rule before calling either safe). The current model puts ~2× (4.59) and ~6× (6.0) as
+much time near the HAT's current ceiling, which is where the rail dips and the resets come from.
+**Operator's call:** try it on smooth floor / carpet. 4.59 is the smaller step; watch the dash's rail
+line and the reset count against P-e·h0's 0.10–0.15 per minute on carpet.

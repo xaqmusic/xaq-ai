@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "ogma/ThreadCpuTime.hpp"
+
 namespace ogma {
 namespace {
 constexpr double kPi = 3.14159265358979323846;
@@ -31,10 +33,7 @@ std::string get_s(ParamMap const& p, const char* k, const char* dflt = "") {
 
 std::string_view CloudMap::type_name() const { return "CloudMap"; }
 
-double CloudMap::prof_now() {
-    timespec ts; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
-    return double(ts.tv_sec) * 1e6 + double(ts.tv_nsec) * 1e-3;
-}
+double CloudMap::prof_now() { return thread_cpu_us(); }
 CloudMap::~CloudMap() {
     if (!prof_ || prof_n_ == 0) return;
     static const char* const names[kStages] = {"add_cast", "new_frac", "things (cluster)", "movers", "target_tall", "profile", "rest"};

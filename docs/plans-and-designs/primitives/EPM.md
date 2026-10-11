@@ -69,7 +69,7 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 | `epsilon_n` | double | HotMutable | 0.003 | (0, 1] | Neighbour learning rate. |
 | `alpha` | double | HotMutable | 0.5 | (0, 1] | Error halving on insertion. |
 | `beta` | double | HotMutable | 0.0005 | (0, 1] | Global error decay per step. |
-| `max_nodes` | int64 | HotMutable | 2000 | [50, 50000] | GNG capacity. |
+| `max_nodes` | int64 | HotMutable | 2000 | [50, 50000] | GNG capacity. (Declared hot but refused live until the retention change; now applied live.) |
 | `tle_alpha` | double | HotMutable | 0.7 | [0, 1] | Weight of `quant_error` in dual TLE. |
 | `transition_surprise_kind` | string | HotMutable | `displacement` | `displacement`/`logprob` | **Stage 3 restoration** ([charter](../epm_kalman_lessons_plan.md)). `displacement` = `‖proto_t − proto_{t−1}‖`, the C++ port's stand-in, byte-identical. `logprob` = the Python reference's surprise: `−log P(cur|prev)` from the EPM's own transition counts as they stood before the step, Laplace-smoothed, normalised by `log N` to [0, 1], conditioned on a move (a stay scores 0, a first arrival 1). The bench's S4 showed the displacement cannot separate an expected transition from a teleport (ratio 1.03). |
 | `tle_beta` | double | HotMutable | 0.3 | [0, 1] | Weight of `transition_surprise`. (`tle_alpha + tle_beta` need not sum to 1 — they are independent gains.) |
@@ -82,6 +82,16 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 | `health_base_decay` | double | HotMutable | 0.997 | [0.9, 1.0) | Per-tick health decay multiplicand. |
 | `stale_prune_enabled` | bool | HotMutable | true | — | — |
 | `stale_window_factor` | double | HotMutable | 12000.0 | [100, 1e6] | Steps before a non-revisited node is prune-eligible. |
+| `learning_enabled` | bool | HotMutable | true | — | **Inference-only mode.** `false` makes each GNG step a pure nearest-node query: winners, TLE and novelty keep flowing, but nothing learned changes (prototypes, edges, visits, baking, insertion, pruning, health, transition counts). For evaluating a vocabulary on held-out input without the evaluation changing it. A param, not snapshot state. |
+| `health_death_spares_baked` | bool | HotMutable | false | — | Exempt baked nodes from health death. Now serialised, so a restored EPM keeps it (it was silently reset to `false` on every restore). |
+| `health_boost` | double | HotMutable | 0.5 | [0, 100] | Health gained per visit. See "Retention" below. |
+| `health_base_decay` | double | HotMutable | 0.995 | [0.5, 1] | Per-step decay factor at health 0 (half-life ~138 steps at the default). `1.0` = no decay. |
+| `health_resilience_k` | double | HotMutable | 0.08 | [0, 10] | Decay exponent is `1 / (1 + health · k)`: how fast use turns into resistance to forgetting. |
+| `health_death_threshold` | double | HotMutable | 0.01 | [0, 100] | Health below which a node is culled. |
+| `health_death_min_nodes` | int64 | HotMutable | 16 | [0, 1e6] | No health deaths at or below this vocabulary size. |
+| `death_cooldown_steps` | int64 | HotMutable | 25 | [0, 1e8] | Minimum steps between two health deaths. |
+| `max_deaths_per_tick` | int64 | HotMutable | 1 | [0, 1000] | Health deaths allowed per step. |
+| `near_baked_fraction` | double | HotMutable | 0.6 | [0, 1] | Fraction of `baking_threshold` above which a node decays at half speed and is immune to isolation and stale pruning. |
 | `subtract_descending_prediction` | bool | HotMutable | true | — | If true and `prediction.<modality>` is present, subtract before GNG. |
 | `master_seed` | int64 | ConstructionOnly | 0 | — | Seeds the JL random matrix and any GNG stochastic operations. Forwarded via `_rng.derive_rng(seed, "epm.<id>")`. |
 | `dim_autocal_ticks` | int64 | ConstructionOnly | 0 (off) | [0, ∞) | **Commissioning window**, in input frames. Measure the per-dim input ranges instead of being told them; see "Commissioning" below. RBF only (throws otherwise). Mutually exclusive with `dim_min`/`dim_max` (throws). |
@@ -211,6 +221,31 @@ was not enough, and baked fraction moved 40 % → 43 %, i.e. not at all. See the
 ledger for both verdicts and their re-use contexts.
 
 ---
+
+## Retention (the health model)
+
+How long an unvisited node is remembered is a property of the **world's** timescale, not of
+the clusterer (doctrine §4: persistence should equal the world's own autocorrelation time).
+The health model encodes it: each visit adds `health_boost`; every step multiplies health by
+`health_base_decay^(1 / (1 + health · health_resilience_k))`, so a young node is volatile
+and a well-used one resists; a node under `health_death_threshold` is culled, one at a time
+(`max_deaths_per_tick`, `death_cooldown_steps`), never below `health_death_min_nodes`.
+
+The defaults were tuned for short-term memory: a robot's motor and regime vocabularies, where
+a node unvisited for a few seconds is usually stale. They forget fast. At 0.995, a node won
+by a single 15-step event is gone in about 30 s unless it is won again. That suits a body, but
+not a vocabulary of **rare events**, where a class may recur minutes apart and never reach
+`baking_threshold` before it decays, nor any **long-term memory**. So these are parameters,
+not constants, and all are hot. The defaults remain the historical constants and are
+byte-identical: a default GNG serialises exactly as before, and the settings are written to a
+snapshot only when one differs.
+
+Measured on a sparse-event audio stream (22 minutes, labelled, replayed offline, scored on
+held-out time blocks): every removed node died by health decay (~820 in a run; none by
+isolation or stale-prune), and nodes of the sparsest class decayed before baking.
+`health_death_spares_baked` plus a lower `baking_threshold` raised held-out precision by about
+ten points on both time-blocked folds. The remaining losses are young nodes, which these
+parameters now let an application address.
 
 ## Invariants (per tick)
 

@@ -19,7 +19,7 @@ HAT pinout from [SunFounder's hardware introduction](https://docs.sunfounder.com
 | ADC | **A0–A3** user, 3-pin P2.54, **12-bit, 3.3 V reference**; A4 = battery via 20K/10K | 4 × FSR |
 | Servo PWM | **12 channels P0–P11**, 3-pin P2.54, **5 V rail** | the 12 MG90S (existing) |
 | Digital | D0→GPIO17, D1→GPIO4, D2→GPIO27, D3→GPIO22 | **ultrasonic trig = D2, echo = D3** — ✅ **MEASURED 2026-08-30** (§7); **D0/D1 are the free pair**, not D2/D3 |
-| Power in | 6.0–8.4 V, XH2.54 3-pin | the INA219 goes **here** (§3) |
+| Power in | 6.0–8.4 V, XH2.54 3-pin — **`−` / mid tap / `+`**, ✅ MEASURED 2026-09-05 (§3.2) | the INA219 goes **here**, in the `+` leg only (§3) |
 
 ⚠ **Almost every GPIO is consumed by the HAT.** Only GPIO7 (CE1) and GPIO20 (NC) are unlisted,
 and neither is broken out. **Everything added must go through the existing I²C / SPI / ADC
@@ -30,9 +30,9 @@ connectors** — which, as it happens, it all does.
 | addr | device | bus |
 |---|---|---|
 | `0x14` | HAT MCU — servos + ADC | I²C |
-| `0x29` | VL53L0X belly ToF | I²C |
+| `0x29` | VL53L0X belly ToF | I²C — ✅ **PRESENT 2026-09-07**, model ID `0xEE` (§9) |
 | `0x40` | INA219 | I²C |
-| — | ICM-20948 | **SPI CE0** (off the I²C bus by design) |
+| — | ICM-20948 | **SPI CE0** (off the I²C bus by design) — ✅ **PRESENT 2026-09-10**, `WHO_AM_I` `0xEA` (§4.0) |
 
 ---
 
@@ -45,15 +45,15 @@ connectors** — which, as it happens, it all does.
 | 1 | **ICM-20948** breakout | 1 | must expose **CS / SCK / SDI / SDO** for SPI | ✅ **CONFIRMED 2026-08-30** — the received board breaks out `NCS` and `ADO`, so SPI is available (§4) |
 | 2 | **INA219** breakout | 1 | I²C `0x40`, 26 V bus max ✓ | **shunt must be changed — see #3** |
 | 3 | **0.01 Ω shunt resistor** | 1 | 2512, ≥ 1 W, 1 % | replaces the stock 0.1 Ω (§3) |
-| 4 | **VL53L0X / VL53L1X** ToF | 1 | I²C `0x29` | belly clearance |
-| 5 | **Circular FSR, 20 g – 2 kg** | 4 | active dia ~14–20 mm | feet |
+| 4 | **VL53L0X / VL53L1X** ToF | 1 | I²C `0x29` | belly clearance — ✅ **FITTED AND CALIBRATED 2026-09-07 (§9)** |
+| 5 | **Circular FSR** | 4 | **FITTED PART: Ø10.0 disc, 20 g – 6 kg, 0.40 thick** — measured 2026-09-27 | fits the Ø11.00 sensor face with 0.5 mm margin. Range is wider than the specced 20 g – 2 kg, which the measured `R_g` absorbs (§5) — [`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §3 |
 
 ### Passives and conditioning
 
 | # | item | qty | note |
 |---|---|---|---|
-| 6 | FSR divider resistor `R_g` | 4 | **value is set by measurement, not chosen** — §5. Buy an assortment (1 kΩ–100 kΩ, 1 % metal film) and fit after measuring |
-| 7 | 0.1 µF ceramic | 4 | one across each ADC input to ground, anti-alias / noise |
+| 6 | FSR divider resistor `R_g` | 4 | ✅ **MEASURED 11 kΩ** (2026-09-28, §5.6) — lands the calibration point at exact mid-scale. 10 k or 12 k if 11 k is not in the assortment; 1 % metal film |
+| 7 | **ADC input cap `C`** | 4 | ✅ **1.5 µF** at the 50 Hz tick (2026-09-28, §5.6), X7R or better, across each ADC input to ground at the connector. ⚠ **1.0 µF does not filter** — 28.9 Hz against a 25 Hz Nyquist. 6.8 µF if the read ever stays at 10 Hz |
 
 ### Connectors and cable
 
@@ -69,11 +69,16 @@ connectors** — which, as it happens, it all does.
 
 ### Mechanical — the foot stack (§5)
 
+> ⚠ **SUPERSEDED 2026-09-27 by the printed foot/toe assembly** —
+> [`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md). Items 14–16 were the loose-parts
+> plan; the printed pair does all three jobs as moulded features, so **do not buy them**.
+
 | # | item | qty | note |
 |---|---|---|---|
-| 14 | Rigid puck disc | 4 | **slightly SMALLER than the FSR active area.** 3D-print or Delrin. This is the toe cap |
-| 15 | PTFE shim / low-friction slip layer | 4 | **shear isolation — the main failure mode** |
-| 16 | Compliant backing pad | 4 | spreads point contact across the puck |
+| 14 | ~~Rigid puck disc~~ | — | **superseded** — the toe's integral Ø5.01 × 0.50 bump is the puck |
+| 15 | ~~PTFE shim / low-friction slip layer~~ | — | **superseded** — the Ø11.00 boss in the Ø11.51 bore takes shear on a resin bearing, 0.25 mm of float before it bites |
+| 16 | ~~Compliant backing pad~~ | — | **superseded** — the sensor backs onto the upper foot's 0.50 mm socket floor (deflects ~1.6 µm at 148 g, so it is a backing, not a spring) |
+| 16b | **Wire, for the toe tie** | 4 | through the 2.00 × 2.00 channel in each part. **Its tension sets the zero offset** — tie, then calibrate |
 
 ### Bench / calibration
 
@@ -89,25 +94,51 @@ connectors** — which, as it happens, it all does.
 
 **Decision (2026-08-27): the INA219 goes inline on the battery input, not on the servo rail.**
 
+> ### ⚠ RE-PLUMBED 2026-09-25 — the Pi is now UPSTREAM of the shunt
+> After Mod A (§3.8.8.1) the Pi has its own BEC, and its `+` tap was moved **above** the
+> shunt. **The INA219 therefore measures the HAT branch alone — twelve servos, the HAT MCU
+> and the 5 V regulator's losses — not the whole robot.**
+>
+> ⚠⚠ **NO INA219 CURRENT READING FROM BEFORE 2026-09-25 IS COMPARABLE TO ONE AFTER IT.**
+> Different quantity, not a different calibration. `i_a`, `i_ema`, `i_peak`, `i_max`,
+> `charge_as` and `energy_j` all changed basis on that date; every §3.5–§3.8 figure predates
+> it and includes the Pi. §3.8.3 is what an unrecorded mid-sweep change costs, so this is
+> stamped here rather than discovered later.
+>
+> **`vbat` is unaffected** — it is the **A4** divider (`adc[4]`), never the INA219, so pack
+> voltage still means what it always did and remains the independent brownout check.
+
 The 5 V servo rail is **internal to the HAT** — the regulator feeds P0–P11 directly and there is
 no exposed break point. The alternatives were cutting the regulator's output trace (permanent
 board modification) or feeding the servos from an external BEC (a rebuild). Neither is worth it,
 because the ledger's own argument for this sensor was **bus total, not per-joint** — *"which for
 an energy term is the more honest quantity anyway."*
 
+**The 3-pin connector is a 2S centre tap, not a paralleled pair — ✅ MEASURED 2026-09-05 (§3.2).**
+Only the `+` leg is broken by the shunt; `−` and the mid tap pass straight through.
+
 ```
-  2S LiPo                INA219                        Robot HAT V4
-  6.0–8.4 V           (0.01 Ω shunt)
-     ┌───┐   XH2.54    ┌──────────┐      XH2.54       ┌──────────────┐
-     │ + ├────────────►│ Vin+     │──────────────────►│ PWR IN  +    │
-     │   │             │      Vin−│                   │              │
-     │ − ├─────────────┴──────────┴──────────────────►│ PWR IN  −    │
-     └───┘                   │                        │              │
-                             │ I²C 0x40               │              │
-                             └───────────────────────►│ QWIIC / I²C  │
-                                                      └──────────────┘
-  measures: Pi 5 + 5 V regulator + all 12 servos (whole-robot current)
+  2S pack (6.0-8.4 V)       INA219 -- 0.01 ohm, in the `+` leg      Robot HAT V4
+  ---------------------------------------------------------------------------------
+   +   8.4 V --22AWG--+-------> Vin+ --[shunt]-- Vin- --22AWG-------> PWR IN  +
+   mid 4.2 V --26AWG--|--------------  straight through  -----------> PWR IN  mid
+   -   0.0 V --22AWG--|--+-----------  straight through  -----------> PWR IN  -
+                      |  |
+                      |  |            I2C 0x40 + 3V3 + GND  --------> QWIIC / I2C
+                      |  |
+                      +--+-----> Pi BEC --> 5 V --> Pi GPIO pins 2 + 4   (Mod A)
+
+  INA219 measures THE HAT BRANCH ONLY: 12 servos + HAT MCU + the regulator's own losses.
+  The Pi's draw bypasses the shunt entirely.
+  Ground is common -- the shunt is in `+`, never the return, which is what makes an
+  upstream tap a two-wire change with no ground offset between the Pi and the HAT.
 ```
+
+⚠ **The shunt goes in the `+` leg, never the return.** A shunt in `−` lifts the HAT's ground
+above the Pi's I²C ground by the drop across it.
+
+⚠ **The mid tap touches nothing on the INA219** — not `Vin+`, not `Vin−`, not `GND`. It carries
+no load current. The breakout's `VCC` comes from the HAT's **3.3 V**, never from the pack.
 
 ⚠ **Change the shunt to 0.01 Ω before installing.** A stock breakout ships **0.1 Ω**, which
 drops **300 mV at 3 A**. The pack already sags toward the HAT's **6.0 V minimum** under servo
@@ -116,8 +147,17 @@ transients, and adding 300 mV of series drop right before that threshold is a br
 
 - **A4 stays on battery voltage.** It is the independent brownout check and the
   one-servo-at-a-time stall detector during calibration (~100 mV sag ≈ 40 counts).
-- **The Pi's own draw is common-mode**, roughly constant across a gait. Subtract an idle
-  baseline before the energy term consumes it.
+- ⚠ **The Pi's draw used to be common-mode in this channel, and the instruction here was to
+  subtract an idle baseline. That is obsolete — the rewire removes it in hardware.** Better
+  than subtracting: a baseline is an estimate that drifts with CPU load, wifi bursts and
+  sensor activity, none of which are limb effort. **What is left is a signal about the body**,
+  which is the point — a small directional signal riding on a large common-mode is exactly
+  what an EPM's insertion gate collapses to one node.
+- **Recovering whole-robot total, if something needs it:** `servo + Pi`, where the Pi's share
+  is near-constant and is measurable once as `idle_before − idle_after` across the rewire.
+  ⚠ **Not yet measured** — the robot was off the network when this was written. Run it: idle
+  `i_ema` should fall by the Pi's share (~0.3–0.4 A at the pack, from a ~0.6 A pre-rewire
+  idle). **If idle current does NOT drop, the tap is still below the shunt.**
 
 ### 3.1 Building the inline module non-destructively
 
@@ -127,24 +167,119 @@ pitch, 3-pin.** The HAT carries the male header (pins); the battery ends in a fe
 toward the pack**. The cheapest correct part is a **JST XH 2.54 3-pin male-to-female extension
 cable cut in half** — both halves are then guaranteed to mate.
 
-⚠ **JST XH contacts are rated 3 A each, and that is almost certainly why a 2-wire battery gets
-a 3-pin connector: the pins are paralleled to share current.** Steady draw is ~2.3 A with
-transients plausibly 4–7 A, at or past a single contact. **Two consequences.** The pin order is
-load-bearing — **meter it, never assume it**: with the pack unplugged, identify `+`/`−` on the
-battery's own connector and check which pins are commoned, and check continuity between pins on
-the HAT side. Reverse polarity destroys the HAT, and mis-reading the paralleling quietly puts
-the full current through one 3 A contact. And the module carries **three** conductors, not two:
-the paralleled polarity passes straight through, and only the single sensed leg goes through
-`Vin+`/`Vin−`.
+⚠ **Wire gauge, and the contact that carries everything.** The third pin does **not** share the
+load (§3.2), so the whole draw — ~2.3 A steady, plausibly 4–7 A on servo transients — goes
+through **one 3 A-rated XH contact**, at or past its rating on the peaks.
 
-⚠ **Wire gauge.** Stock XH extension cables are usually 26 AWG, marginal at 2–3 A continuous and
-poor on the transients. XH crimp terminals accept 22–28 AWG — **use 22 AWG silicone**, the
-thickest the terminal takes. The INA219 breakout's own screw terminals and traces are in this
-path too (§2 #2): check their rating before they become the weakest link.
+> ⚠ **The 2026-09-25 rewire does NOT relieve this, and it is easy to assume it did.** Moving
+> the Pi's tap above the shunt reduces the current through the **INA219 module** (its screw
+> terminals and traces) by the Pi's share. It changes nothing for any connector **upstream of
+> the tap** — if the tap is at the pack connector, that contact still carries servos *and* Pi,
+> exactly as before. Only a tap made directly at the cells would move that load off it. Nothing in the module
+can fix that, but two things stop it getting worse: stock XH extension cable is usually 26 AWG,
+marginal at 2–3 A continuous and poor on transients, so **crimp 22 AWG silicone** on `+` and `−`
+(XH terminals accept 22–28 AWG; the mid tap carries only balance current, so stock 26 AWG is
+fine there). And the INA219 breakout's own screw terminals and traces are in this path too
+(§2 #2) — check their rating before they become the weakest link. **Watch the connector for
+heating during the first full-servo load test.**
+
+### 3.2 The battery connector — ✅ MEASURED 2026-09-05
+
+The 3-pin XH is the pack's **2S centre tap**, the standard `B− / cell1+ / pack+` balance
+layout — *not* two paralleled `+` pins sharing current, which is what this section previously
+assumed. Pack unplugged, DC volts:
+
+| pair | reading | reads as |
+|---|---|---|
+| `−` → `+` | **8.4 V** | full pack |
+| `−` → middle | **~4.2 V** | cell 1 |
+| middle → `+` | **4.2 V** | cell 2 — this is the one that settles it |
+
+Two paralleled `+` pins would both read 8.4 V and 0 V between them. Half the pack voltage on the
+middle wire can only be a cell junction.
+
+**The HAT side**, everything unplugged, on ohms:
+
+| pair | reading | reads as |
+|---|---|---|
+| middle → `+`, middle → `−` | **0.5 MΩ** both | floating pin, read through board leakage — 8 µA at 4.2 V |
+| `+` → `−` | **45 kΩ** | bleed / divider path (the A4 sense divider is 20K/10K = 30K), **not a short** |
+
+So the mid tap can pass straight through: the HAT does nothing with it, and it is not commoned
+to either rail.
+
+⚠ **This was the hazard worth metering.** Had the HAT's middle pin been commoned to `+` or `−`,
+plugging in a centre-tapped pack would short one cell through two 3 A contacts. **Meter the HAT
+side before mating a new pack**, and match the plug by its housing key, never by wire colour —
+with a mid tap present, a reversed plug lands +8.4 V on the HAT's `−` pin.
+
+### 3.3 Calibrating for the 0.01 Ω shunt
+
+**The driver already does this — `ogma::hw::Ina219` (`pi_host/src/Ina219.cpp`).** What matters
+on the bench is the two things it cannot know:
+
+**`r_shunt` is calibration data, not 0.010.** At 10 mΩ, trace and solder resistance are a large
+fraction of the part, and a multimeter cannot measure it — probe leads alone are ~200 mΩ. Fit it
+against a known current and store it in the calib JSON. The authoritative current is derived
+host-side from raw shunt microvolts precisely so a later re-fit re-derives every recorded
+sample; the chip's own `CURRENT` register is programmed as a cross-check only.
+
+**PGA stays at /8 (±320 mV).** The tempting move is to narrow it to /2 for "more resolution" —
+there is none to gain. `SHUNT_V`'s LSB is **10 µV on every range**; the PGA sets full scale
+alone. At 0.01 Ω that is **1 mA per count** regardless, 0.04 % of the ~2.3 A steady draw. What
+narrowing does buy is a clipped inrush that looks like a real number. `hat_tool` flags it
+(`! PGA CLIPPED`) rather than letting it pass, but the right default is not to clip.
+
+| setting | value | why |
+|---|---|---|
+| bus range | 16 V | pack maxes at 8.4 V |
+| PGA | **/8, ±320 mV** | resolution is fixed at 10 µV; width is free, clipping is not |
+| BADC/SADC (telemetry) | 128-sample avg, ~68 ms | averages servo PWM ripple out of a human-read number |
+| SADC (inrush capture) | 12-bit single, 532 µs | ~1.9 kHz; bus channel dropped — pack voltage is not what browns out |
+
+**Cross-check before trusting a reading:** `hat_tool ina probe` compares the INA219's bus voltage
+against **A4** and exits non-zero if they disagree by more than 150 mV — two independent paths to
+one number. Then verify current against the inline DC meter (§2 #17–19).
+
+### 3.4 Bring-up — ✅ MEASURED 2026-09-05
+
+Module built per §3, I²C on `SDA`/`SCL` + 3V3 + GND to the HAT. `i2cdetect -y 1` shows `0x14`
+and `0x40`. First `hat_tool ina probe`, servos undriven:
+
+```
+INA219 0x40   r_shunt 0.01000 ohm   I_lsb 1000.0 uA   cal 4096
+  bus     7.968 V     shunt +4.690 mV (raw +469)
+  current +0.469 A    (chip reg +0.469 A, power 3.70 W)
+  A4      7.891 V     delta +0.077 V  -> AGREE (BOM 6.2 pass)
+```
+
+| check | result |
+|---|---|
+| shunt sign | **positive** — `Vin+`/`Vin−` orientation correct |
+| INA219 bus ⟷ A4 | **+77 mV**, inside the 150 mV gate — ~1 % on the 20K/10K divider, ordinary tolerance |
+| PGA clip / OVF | neither |
+| series drop from the R010 | **4.69 mV** at idle, vs ~47 mV the stock 0.1 Ω would have cost at this current |
+| idle draw | **0.469 A / 3.70 W** — Pi 5 + HAT regulator, servos undriven. This is the common-mode baseline to subtract before the energy term consumes it |
+| stability | 5 samples over 5 s: **463–471 raw** (±4 mA on 467 mA, < 1 %), bus flat at 7.964 V |
+
+**Still open:** `r_shunt` remains the 0.010 placeholder — the bench fit against a known current
+has not been done, so absolute current is uncalibrated (the *relative* record is already sound,
+since current is derived host-side from raw microvolts and a later re-fit re-derives every
+recorded sample). And the inrush capture the driver was written for — `hat_tool ina capture`
+across a pose recall — has not been run.
+
+⚠ **Unresolved: pack sag.** Open-circuit the pack read **8.4 V** (§3.2); under a 0.47 A load it
+reads **7.964 V**. If the pack is simply partly discharged that is nothing — 3.98 V/cell is a
+normal resting point. If it is genuinely 436 mV of sag at 0.47 A, that is ~0.9 Ω of source
+impedance, which at a 4 A transient would be 3.6 V and straight through the HAT's 6.0 V minimum.
+**RESOLVED same day:** the 8.4 V reading was taken *while the charger was connected* — the
+charger holding its CV endpoint, not an open-circuit pack. Unloaded resting voltage is ~7.96 V
+(`benchd` logged `vbat 8.32 V` charging at 18:29, `7.98 V` off charge at 20:27). There is no
+anomalous sag and no source-impedance problem.
 
 ---
 
-## 4. IMU — ICM-20948 on SPI
+## 4. IMU — ICM-20948 on SPI — ✅ FITTED AND CALIBRATED 2026-09-10
 
 **Decision (2026-08-27): SPI, not I²C.** The HAT shares its I²C bus with all 12 servo writes,
 and host-side jitter integrates directly into dead-reckoned yaw. SPI removes that at the source
@@ -183,38 +318,398 @@ The 400 kHz setting still matters — the INA219 and ToF remain on I²C alongsid
 (`0x7F`) — unlike the flat MPU-6050/9150 map · **FIFO reads regardless of bus** · **never enable
 the internal I²C master**, which keeps the AK09916 magnetometer dark · **do not use the DMP.**
 
+### 4.0 Bring-up — ✅ MEASURED 2026-09-10
+
+`WHO_AM_I` = **`0xEA`** on **CE0** (`spidev0.0`); `spidev0.1` is empty. On first contact
+`PWR_MGMT_1` read `0x41` — the reset default with the sleep bit set, i.e. nothing had
+configured the part.
+
+**Clock integrity, 2000 `WHO_AM_I` reads per step: 0 bad at 1, 4, 7 and 10 MHz.** Run it at
+**≤ 7 MHz** regardless — that is the datasheet's register limit, and passing at 10 on a
+bench-quiet robot is not a licence to exceed it.
+
+Working configuration for everything below: **±4 g** (8192 LSB/g), **±500 dps** (65.5 LSB/dps),
+DLPF cfg 1 on both, ODR 225 Hz, and `USER_CTRL = 0x10` (`I2C_IF_DIS`) to lock SPI mode.
+Nothing else on the machine opens `spidev`; `ogma_host` and `ogma_benchd` never touch it.
+
+---
+
+### 4.1 Mounting and the body-frame axis map — ✅ MEASURED 2026-09-10
+
+**As built:** flat on the chassis below the Pi, component-side up, on standoffs. Flat is the
+one orientation that was constrained, and for a specific reason: a mount tilt is a *permanent*
+attitude bias, and `_up_est_body` (`picrawler_body.gd:5801`) is what rotates the FK inside
+`feet_y_gravity_cmd_imu` — the promoted swing-gate input. A tilted mount also rectifies
+pitch/roll into apparent yaw whenever the two are out of phase, which is what a gait produces,
+and that error exists *only while walking* — so the quasi-static-gated bias estimator is
+structurally blind to it.
+
+| concern | as built | why |
+|---|---|---|
+| board plane | parallel to the bottom plate | see above; residual tilt is calibrated in §4.2, not assumed away |
+| in-plane rotation | a multiple of 90° | keeps the remap an exact signed permutation instead of a fitted rotation matrix |
+| location | near chassis centre, on standoffs | the accelerometer measures proper acceleration *at its own location*: a lever arm `r` adds `ω×(ω×r) + α×r`, and at 30 mm a footfall's angular impulse is ~0.1 g of spurious lateral accel — arriving exactly when the trust gate is already closing |
+| rigidity | standoffs, no tape | the ToF boom is the precedent (§9.1: mount contributed no measurable noise). A compliant mount converts servo vibration into accel noise |
+| thermal | air gap, off the Pi and off the 5 V regulator | gyro ZRO moves with temperature and dead-reckoned yaw integrates it. **Measured: die 34 °C against the SoC's 39.7 °C**, so the placement is clear of the Pi's heat |
+| magnetic hygiene | **not a constraint here** | the decision not to enable the internal I²C master (§4) leaves the AK09916 dark. The usual dominant IMU placement constraint is void — route past servo leads and the battery run freely |
+
+#### The axis map
+
+| chip axis | body direction | sim axis |
+|---|---|---|
+| **+X** | **left** | `+X_sim` |
+| **+Y** | **backward (aft)** | `−Z_sim` |
+| **+Z** | **up** | `+Y_sim` |
+
+Handedness checks: right(−X) × forward(−Y) = +Z = up. The chip sits **180° in-plane** from a
+nose-along-+Y mounting, so the remap is a pure sign flip on two axes.
+
+```
+v_sim = ( +v_x , +v_z , −v_y )        # from chip (x, y, z)
+yaw rate = ω_sim.y = +gz_chip         # no sign flip
+```
+
+⚠ **The same matrix applies to accel and gyro — but only because its determinant is +1.**
+Angular velocity is a pseudovector: had the two frames differed by a reflection, the gyro would
+need an extra global sign flip the accelerometer does not, and getting that wrong yields a
+heading controller that steers confidently backwards. It is a proper rotation here. The check
+is recorded because the failure is silent.
+
+⚠ **In the sim body frame `+X` is LEFT, not right.** Forward is `+Z`, up is `+Y`, and the LEG
+NAMING MIRROR note (`picrawler_body.gd:325`, operator-diagnosed 2026-08-11) states it
+explicitly. Two sites contradict it — `_stridev_est`'s comment at `:1631` and the published
+`stride_v` topic description at `:2945` both say "right". **The geometry agrees with the mirror
+note, not with those labels.**
+
+#### How it was established
+
+Tilt the body, watch which axis moves. An accelerometer reads positive on whichever axis points
+skyward, so lifting the front sends the nose skyward and the forward axis goes **positive**;
+`ay` went negative, hence forward = **−Y**. Same argument on the left side for `+X`.
+
+| lift | Δax | Δay | tilt |
+|---|---|---|---|
+| front, run 1 | +0.032 | **−0.406** | 23.5° |
+| front, run 2 | +0.018 | **−0.336** | 22.0° |
+| left, run 1 | **+0.349** | +0.055 | 18.4° |
+| left, run 2 | **+0.293** | −0.051 | 15.3° |
+
+Cross-talk is 5–17% and **flips sign between the two left-lifts**, which is what hand-lift
+contamination looks like — random, not a real coupling. Two independent repeats, unambiguous.
+
+⚠ **Precise angles are irrelevant to a sign decode**, and commanding the legs to produce them
+would be worse, not better: it puts leg compliance between the chassis and the floor, and §9.3
+already measured the `stand` pose recalling to 52.1 / 48.7 / 50.8 mm. Hand lifts are the right
+instrument for this measurement.
+
+---
+
+### 4.2 The level reference — ✅ FITTED 2026-09-10
+
+⚠ **This constant is calibration data and belongs in `pi_host/calib/`.** §9.2 and §3.3 already
+flag `--tof-offset 64.8` and `r_shunt` as fitted constants stranded on the systemd unit's
+`ExecStart`, and say both should move. Do not add a third to the same wrong place.
+
+**Method: belly flat on the floor, rotated 180°, repeated.** The belly is the anchor for the
+same reason it anchors `mount_offset_mm` (§9.2) — it is the pose whose truth you can state
+rather than estimate. With the bottom plate on the floor there are **no legs in the chain**, so
+the chassis attitude *is* the floor's attitude. Rotating 180° then splits what is fixed in the
+body from what is fixed in the world:
+
+```
+r_A = M + S        M = (r_A + r_B)/2     mount tilt + accel bias   (fixed in the body)
+r_B = M - S        S = (r_A - r_B)/2     floor slope               (fixed in the world)
+```
+
+Five independent placements alternating between two headings, four rotations verified by
+integrating the gyro (bias removed using the bracketing plateaus' own means):
+**−176.8, −181.2, +175.9, +182.5 degrees** — all within ±4° of 180.
+
+| | ax | ay | |
+|---|---|---|---|
+| heading A, 3 placements | −0.03440 / −0.03436 / −0.03235 | +0.00279 / +0.00280 / +0.00289 | spread **0.05°** |
+| heading B, 2 placements | −0.03539 / −0.03694 | −0.01375 / −0.01425 | spread **0.05°** |
+| **body-fixed** `M` | **−0.03494** | **−0.00558** | → **2.03°** |
+| world-fixed `S` | +0.00123 | +0.00841 | → 0.49° (the floor) |
+
+```
+u0_chip = ( -0.03493, -0.00558, +0.99937 )      normalised body-up, body level
+```
+
+In sim frame that is `(−0.0349, +0.9998, +0.0056)` against an ideal `(0, 1, 0)` — leaning
+**2.00° toward body right, 0.32° toward body forward**. Store the 3-vector, not Euler angles;
+the correction is the rotation taking `u0` onto vertical, and the vector form has no ordering
+ambiguity. `|a|` at rest across all placements: **1.0004 g**.
+
+**Belly-flat repeats seven times better than standing** — 0.05° against 0.34° — and the same
+measurement taken standing gave a body-fixed term of **3.69°**. The 1.66° difference is the
+standing pose's own resting attitude, which is exactly the term the belly anchor removes.
+
+#### Stability — ✅ MEASURED 2026-09-10
+
+The operational question is *store it or re-estimate it at startup*, and that is answered by
+measuring whether it moves, not by decomposing it.
+
+| test | horizontal reference |
+|---|---|
+| 7 × `DEVICE_RESET`, robot untouched | holds to **0.071°** |
+| across a full reboot | shifts **0.016°** |
+| across all of the above plus the 5-placement run (~45 min) | holds to **0.07°** |
+
+**Control: belly clearance read 1.2 mm before and 1.2 mm after the reboot**, so the robot
+demonstrably did not move and the comparison is valid.
+
+**Verdict: store it.** It is stable well inside a tenth of a degree across re-initialisation.
+
+#### Gyro bias
+
+| | at die 34 °C |
+|---|---|
+| `gx` / `gy` / `gz` | +0.4 / −2.4 / **−0.17** dps |
+| `gz` spread within a session | 0.02–0.036 dps |
+| noise sd, all axes | ~0.15 dps |
+
+All three are far inside the ±5 dps untrimmed ZRO spec, and `gz` — the axis dead-reckoned yaw
+integrates — is the smallest. **Re-estimate the bias at every startup and never store it**
+(prohibition §5: adapt from the system's own dynamics rather than tuning a constant).
+
+⚠ At **28.8 °C** on the same day `gz` read **−0.020 dps**, against −0.17 at 34 °C. That is
+0.15 dps across 5.2 °C, far more than the 0.03 dps it moves across resets and a reboot at
+constant temperature — so **temperature, not turn-on, is the better-supported explanation**.
+Two points do not make a coefficient; see §4.3.
+
+#### Mount rigidity — ✅ MEASURED 2026-09-10
+
+Does the mount transmit servo vibration into the accelerometer? Compared with the body **at
+rest in every arm**, so any increase in accel variance is vibration through the mount rather
+than real body acceleration. Poses commanded with `pose.set` at its **default slew** — 12
+µs/tick, 600 µs/s, 100 ms stagger — which never leaves §3.8.2's budget.
+
+| arm | sd x / y / z (g) | ‖sd‖ | vs unarmed | peak A | min pack |
+|---|---|---|---|---|---|
+| unarmed, body at rest | 0.00323 / 0.00318 / 0.00319 | 0.00554 | — | 0.67 | 7.66 V |
+| **armed, holding `rescue`** | 0.00343 / 0.00333 / 0.00331 | 0.00581 | **×1.05** | 0.62 | 7.68 V |
+| **armed, holding `stand`** | 0.00331 / 0.00325 / 0.00366 | 0.00591 | **×1.07** | 0.78 | 7.61 V |
+
+**Energising twelve servos raises the accel noise floor by 5–7%.** Peak gyro was 3.1–3.3 dps
+in all three arms, indistinguishable. The standoff mount is not a buzz path, and the ToF boom
+precedent (§9.1) holds for this mount too.
+
+Peak current never exceeded **0.78 A** against the ≤ 1.90 A budget, and the pack stayed above
+7.6 V — nowhere near the 6.4 V limp threshold. Run on **vinyl** (§9.8.2).
+
+⚠ **This measures servos HOLDING, not working.** A holding servo contributes PWM dither and
+gear lash; a walking one adds load, reaction torque and real body acceleration. The dynamic
+case is still open (§4.3).
+
+⚠ **Ending the runner releases the deadman on purpose.** `benchd` then commands `rescue` once
+and disarms — the designed exit, and it is what `watchdog_trips` counts. Two trips on this date
+are the two run-endings, not faults.
+
+---
+
+### 4.3 What this does NOT establish
+
+1. **Mount tilt and accelerometer bias are still lumped** in the 2.03°. No rotation about
+   vertical can separate them — both are fixed in the chip frame. The X component is −35 mg,
+   inside this part class's own zero-g offset spec, so **the mount may be very nearly true and
+   most of that 2° may be the chip**. Splitting them needs a second attitude whose gravity
+   direction in the chassis frame is *known*; inversion is the clean case and **is not available
+   on this robot — the HAT and its wiring are on top, so it cannot rest on its back.**
+   ⚠ Pushups do not substitute. Over any maneuver starting and ending at rest,
+   `∫a_vert dt = 0`, so the mean measured `az` is `k + b` — precisely the degenerate
+   combination the static reading already gives. The maneuver adds no information and the mount
+   tilt never enters it.
+2. **Z bias and scale are unmeasured**, for the same reason. This is **operationally moot**:
+   the filter normalises the accel vector for direction, and the one place magnitude matters
+   alone is the trust gate at `:5845`, whose `IMU_ACC_GATE_FRAC = 0.5` means trust falls to
+   zero only at a 50% deviation from g. The measured 1.0004 g is 0.08% of the gate width.
+3. **Temperature is untested for the accel reference.** Every belly-flat number here was taken
+   at 34 °C ± 0.3. The gyro's behaviour across 5 °C (above) is the reason to expect the accel
+   reference to move too. **The cheap check is a cold start**: leave the robot belly-flat, come
+   back with the machine at room temperature, and re-read one heading — nothing moved, so the
+   floor term is unchanged and any shift is the constant itself.
+4. **The reboot was soft.** Die temperature was unchanged across it, so the chip's 3V3 almost
+   certainly never dropped. A true power cycle is untested.
+5. **Mount rigidity is measured for servos HOLDING, not working** (§4.2). Static hold costs
+   5–7% on the noise floor, i.e. nothing. What remains untested is the **dynamic** case — a
+   gait or pushups, where load, reaction torque and real body acceleration all arrive together
+   and the accel trust gate is already closing. ⚠ Run that on **vinyl, not rubber** — §9.8.2,
+   where a foot caught on rubber, stalled, and took the machine down. §9.3's pushups on vinyl
+   drew 0.73–0.77 A with no stall and are the known-good comparison.
+
 ---
 
 ## 5. FSRs — foot wiring
 
-Full conditioning, mounting and calibration spec is in the port doc
-(`## SPEC — foot FSRs`). The wiring half:
+Full conditioning and calibration spec is in the port doc (`## SPEC — foot FSRs`); the
+**mounting** half moved to [`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) when the
+foot was designed. The wiring half:
+
+> ⚠ **The drawing that used to be here was wrong and it cost a build.** Its left-hand rail ran
+> unbroken from `3V3` down to `GND` — a short, as drawn — and it put `R_g` and `C` on separate
+> stubs at different heights, which reads as a series chain. The operator built `3V3 → FSR → C
+> → GND` with `R_g` from `GND` to `SIG`; see §5.7.5. **`R_g` and `C` go between the SAME two
+> points.**
 
 ```
-        3.3 V  ◄── ⚠ see hazard note below
-          │
-        [ FSR ]        (in the foot)
-          │
-          ├──────────────► A_n  signal   (ADC, 12-bit, 3.3 V ref)
-          │
-        [ R_g ]  ── measured, not chosen
-          │
-         GND
-                        ┌── 0.1 µF ──┐
-              A_n ──────┴────────────┴────── GND
+   HAT ADC                                                     in the foot
+   connector                                              ┌───────────────┐
+              ┌────────────────────────────────────────┬──┤      FSR      │
+   VCC ●──────┘                                        │  └───────────────┘
+   (3V3)                                               │
+                                                       │
+                                                    ── ● ──  NODE
+                                                       │     three things meet here,
+   SIG ●───────────────────────────────────────────────┤     and only here
+   (A_n)                                               │
+                                          ┌────────────┴────────────┐
+                                          │                         │
+                                       ┌──┴──┐                   ┌──┴──┐
+                                       │ R_g │ 15 k              │  C  │ 1 µF
+                                       └──┬──┘                   └──┬──┘
+                                          │                         │
+   GND ●──────────────────────────────────┴─────────────────────────┘
+
+   FSR  : 3V3  → NODE        R_g : NODE → GND        C : NODE → GND
+   `R_g` and `C` are BOTH across NODE→GND, so they are in parallel with each other and
+   NOTHING is ever in series with the signal.  `R_g` is measured (§5.6); `C` follows it (§5.2).
 ```
+
+![divider schematic](../plans-and-designs/CAD/Picrawler/picrawler_fsr_divider.svg)
 
 ⚠ **Confirm the 3-pin connector's pin ORDER and its VCC rail against the board silkscreen before
 powering anything.** Two hazards:
 
 1. **Pin order is not documented** in the vendor hardware page — do not assume signal/VCC/GND.
-2. **If the ADC connector's VCC pin is 5 V, do NOT use it as the divider's top rail.** The
-   divider would present up to 5 V to a **3.3 V-referenced** ADC input. Take 3.3 V from the SPI
-   header or an I²C connector instead.
+2. ~~**If the ADC connector's VCC pin is 5 V, do NOT use it as the divider's top rail.**~~
+   ✅ **RESOLVED 2026-09-27 — the ADC connector's VCC is 3.3 V, labelled on the PCB.** So the
+   divider's top rail comes straight off the ADC connector; no jumper to the SPI header, and
+   the 5 V-into-a-3.3 V-input hazard does not exist on this connector. ⚠ Pin *order* within
+   the 3-pin connector is the other half of hazard 1 — confirm signal/VCC/GND off the same
+   silkscreen before plugging a foot in.
 
 **`R_g` is set by measurement:** assemble one foot completely, rest **175 g** on it (the
 mid-stance operating point), measure `R_fsr` in place, set `R_g` to that value, and use the same
 value on all four channels so per-foot variation shows up in calibration rather than in hardware.
+
+**This is why the substituted 20 g – 6 kg part costs less than it looks.** The divider is
+re-centred on whatever sensor is fitted, so the range change moves resolution within the
+gait's 148–197 g band, not the operating point. Read the counts-per-gram across 50 → 300 g off
+the fitted curve rather than arguing it in advance.
+
+### 5.1 Where each part goes, and why
+
+**`R_g` lives at the board, not at the foot.** The divider node's impedance is `R_fsr ∥ R_g`
+either way, so placement buys nothing electrically — it is decided by conductor count. With
+`R_g` at the board the leg carries **two** conductors (3V3 up, sensor return down); with `R_g`
+at the foot it carries three, plus a resistor to mount and strain-relieve at the end of a limb
+whose mass budget is 2 g.
+
+**`C` sits at the ADC connector**, across the input pin to ground, as close to the header as it
+will go. It is the reservoir the MCU's sample-and-hold draws from, so it wants to be on the
+chip's side of the wire, not the foot's.
+
+**Take 3V3 from any HAT 3V3 pin — they are one net, and that should make the channel
+ratiometric.** The divider's output is `3.3 · R_g/(R_g + R_fsr)`; if the MCU's ADC references
+its own supply, a wobble on the rail moves numerator and reference together and cancels to
+first order. That cancellation is free, and it is the second reason not to feed the divider
+from a 5 V pin — but it is a **prediction, not a datum**: an MCU with an internal bandgap
+reference would not cancel at all. ⚠ **E2 tests it in one step** — hold a fixed divider on A0,
+load the 3V3 rail, and watch whether the counts move.
+
+**Power is not a constraint.** At the operating point the divider draws `3.3/(2·R_g)` — 165 µA
+per foot at `R_g` = 10 kΩ, 0.66 mA for all four. Nothing here trades against the servo rail.
+
+### 5.2 ⚠ The cap cannot be chosen until `R_g` is known
+
+BOM item 7 says "0.1 µF, anti-alias / noise". **That is a value with no number behind it**, and
+it is right only for one decade of `R_g`.
+
+The RC corner is set by the *source* impedance, which is the divider itself:
+
+```
+Z_src = R_fsr ∥ R_g          f_c = 1 / (2π · Z_src · C)
+```
+
+At the calibration point `R_fsr` = `R_g`, so `Z_src` = `R_g`/2:
+
+| if `R_g` lands at | `Z_src` | `C` for f_c ≈ 22 Hz | what 0.1 µF would actually give |
+|---|---|---|---|
+| 1 kΩ | 500 Ω | 14 µF | 3.2 kHz — no filtering at all |
+| 10 kΩ | 5 kΩ | **1.5 µF** | 320 Hz — ~15× too fast |
+| 100 kΩ | 50 kΩ | **0.15 µF** | 32 Hz — about right |
+| 1 MΩ | 500 kΩ | 15 nF | 3.2 Hz — over-filtered |
+
+**So buy a range of caps the way §2 item 6 buys a range of resistors** (0.1 / 0.47 / 1.0 / 2.2 /
+10 µF, X7R or better) and fit after `R_g` is measured. A ceramic's capacitance falls with DC
+bias, so at 1.65 V on a 16 V-rated part expect the fitted corner to sit a little above the
+table; measure it rather than trusting the marking.
+
+**Why ≈22 Hz — and ⚠ it depends on a rate that is not 50 Hz today.** This RC is **the only
+anti-alias filter in the chain.** The HAT MCU samples the pin and we read the result over I²C;
+nothing between the foot and the published channel band-limits anything, so servo PWM edges,
+brush noise and the 5 V regulator all fold down into the band unless they are removed *before*
+the sampler. The rule is `f_c ≈ 0.45 · f_sample`, and
+
+> ⚠ **the ADC is read at 10 Hz right now, not 50.** `benchd.cpp:525` reads all five channels
+> inside the telemetry frame builder, which runs at 10 Hz — see §5.4 step **E0**. At 10 Hz the
+> right corner is **4.5 Hz**, which needs caps about 5× larger than the table below. **Settle
+> the sample rate before buying the capacitor**, because the two are the same decision.
+
+### ⚠ 5.2.1 Unfiltered servo pickup would look like creep, not like noise
+
+The HAT's servo frame is **49.95 Hz** (PROTOCOL.md) and the tick samples at **50 Hz**. Anything
+coupled in at the frame rate therefore folds to **|50 − 49.95| = 0.05 Hz — a wander with a
+~20 second period.**
+
+That is the same shape, the same timescale and the same sign as **FSR creep**, which is the
+quantity the graded `unloaded` criterion term (weight 1.0) is built on and which §8 item 5 has
+been waiting to measure. **So an unfiltered divider would not present as a noisy channel. It
+would present as a sensor that creeps, and it would be believed** — a confound wearing the
+costume of the signal.
+
+Two things follow. The RC is not a polish item; it is what stops a servo artifact from being
+read as sensor physics. And **the creep test has to be run with the servos powered and the
+filter fitted**, because a creep number taken on a quiet bench measures a different robot.
+
+`adc_fast_report.py` separates the two on purpose: `sigma` is the raw spread, `white` is
+`stdev(diff)/√2` — the part that behaves like white noise — and `wander` is the spread of 1 s
+block means. A beat shows up as `wander` many times what white noise alone would give, while
+`white` stays flat. `--fft` names the frequency.
+
+Three consequences worth carrying:
+
+1. **The filter is load-dependent.** Unloaded, `R_fsr` → MΩ and `Z_src` → `R_g`, so **f_c halves
+   when the foot is in the air** and rises again as it loads. The channel's bandwidth is a
+   function of the thing it is measuring.
+2. **It is slowest near the stance threshold**, which is exactly where the promoted
+   `foot_load ≥ ~0.2` gate lives: at that load `R_fsr` is still ~1.5–2× `R_g`, so `Z_src` is
+   ~0.6·`R_g` against 0.5·`R_g` at calibration — about 25 % slower than the table implies.
+3. **Budget the delay.** At f_c = 22 Hz, τ ≈ 7.2 ms ≈ **0.38 of a 52 Hz tick**. Touchdown
+   *timing* is the accelerometer's job (ledger 2026-08-24 ★3), so a smear of that size on the
+   load channel is affordable — but it is not zero, and the stance gate rides it.
+
+The sample-and-hold's own requirement is easy by comparison: any `C` from 10 nF up is thousands
+of times the MCU's sampling capacitor, so settling is satisfied by every value in the table.
+
+### 5.3 ⚠ A broken FSR reads exactly like a lifted foot
+
+With `R_g` to ground, an open sensor — snapped tail, failed bond, unplugged foot — leaves the
+node pulled to 0 V. **That is the same reading as a swing leg**, on the channel the stance gate
+and `stride_v` depend on.
+
+| fault | the channel reads | tells itself apart from |
+|---|---|---|
+| FSR open, tail broken, bad bond | **0 counts** | nothing — identical to swing |
+| `R_g` missing or open | high, near full scale | loaded foot, but never falls |
+| FSR shorted | full scale, constant | — |
+| connector unplugged at the header | floating; **measure this first** (the example frame in `pi_host/PROTOCOL.md` shows A0–A3 at 3209–3575 counts with nothing fitted, so probably high) | — |
+
+A pull-up would separate the first case, and would also destroy the ratiometric divider, so
+**do it in software instead**: a foot that never crosses the stance threshold across a window
+of walking is broken, not light. Free, needs no hardware, and it is the same discipline as
+publishing the states that invalidate a reading.
 
 | foot | ADC | leg (⚠ **by anatomy, not by sim name** — see the port doc's leg-naming mirror) |
 |---|---|---|
@@ -222,6 +717,1019 @@ value on all four channels so per-foot variation shows up in calibration rather 
 | front-right | A1 | drives sim `fl_*` |
 | rear-left | A2 | drives sim `rr_*` |
 | rear-right | A3 | drives sim `rl_*` |
+
+### 5.4 The bench order — and what can be done before the feet exist
+
+The ADC path is already built and live: `RobotHat::adc_raw()` (`pi_host/src/RobotHat.cpp:50`)
+selects a channel with `(7−ch)|0x10` and reads two bytes, and **all five channels already ship
+in the `bench` telemetry frame**. So steps E1–E3 need no new hardware and no foot — E0 is a daemon change, and E1 needs only a meter.
+
+| # | step | needs | pass condition |
+|---|---|---|---|
+| **E0** ✅✅ | **BUILT + VERIFIED ON THE ROBOT (§5.7.9).** — `adc.rate` (PROTOCOL.md).** `frame()` reads A0–A4 at 10 Hz, which cannot characterise a tick-rate channel; the verb adds an **opt-in** sampler in `tick_thread` writing `adc_fast` records at up to 50 Hz. **Off by default** (`ms` = 0), so an un-called daemon runs the old path. ⚠ **Scripts must not poll the ADC themselves** — `rail_separation_test.py`'s own header records what two owners of one resource cost: six pose cycles reported as a clean PASS off a single sample | — | ⚠ **still to run on the robot:** `tick_hz` unmoved and `bus_errors` flat with `adc.rate ms=20`, i.e. 4× today's I²C load in the tick. Each record carries its own `us`, so the read cost is measured rather than assumed |
+| **E1** ✅ | **Meter the ADC connector** | a meter | ✅ **DONE 2026-09-27 — VCC is 3.3 V, labelled on the PCB**, so the divider's top rail is the connector itself. Pin order still to be read off the same silkscreen |
+| **E2** | **Characterise the ADC into known impedance.** Fixed 1 % divider at ≈ half scale on A0; sweep `Z_src` ≈ 0.5 k / 5 k / 50 k / 500 k holding the ratio; record counts vs a DMM at the node, and σ over ≥1000 reads at three activity levels: servos limp, servos holding a pose, and a gait running | resistors | a **maximum usable `Z_src`** — the impedance past which counts droop from the DMM value or σ climbs. This is the number that bounds `R_g` from above |
+| **E2b** | **Cap sweep at the worst impedance from E2**: none / 0.1 / 1.0 µF, servos active | caps | `wander×` back to ~1 and `--fft` showing no line — **not just a smaller σ** (§5.2.1: the artifact to kill is slow, so σ alone will not see it). Plus the read cost from each record's `us` |
+| ~~E3~~ | ~~bare-sensor bench estimate~~ | — | **skipped — overtaken by E4**, which the operator ran directly on the real assembly (§5.6). Better measurement, so the decade step was never needed |
+| **E6** | **The robot probes its own feet** — `foot_cal_sweep.py`, poses `<foot>_down`, knee stepped up and back down | the poses, benchd | a closing hysteresis loop on every foot, and four comparable curves. ⚠ **counts, not grams** (§5.7.8), and it does not reach below ~175 g |
+| **E4** ✅ | `R_g` = `R_fsr`(175 g) **in the assembled foot** | a finished foot, masses, scale, DMM | ✅ **DONE 2026-09-28 (§5.6): 11 kΩ → `C` = 1.5 µF.** One foot. ⚠ **Repeat on the other three** — `R_g` is one value for all four channels, so it comes from their median (§5.5) |
+| **E5** ✅ | Wire one foot, then the rest | — | ✅ **ALL FOUR LIVE** (§5.7.14): every channel reads, and only the loaded foot reads — 1–2 counts on the idle three across every segment of every sweep |
+| **E6** ✅ | The robot probes its own feet — `foot_cal_sweep.py` | the poses | ✅ run; it answered the linkage question rather than the calibration one (§5.7.9–11) |
+| **E7** ✅ | **The touchdown decision, run many times** — `foot_tap_test.py` | the poses | ✅ **PASS, four feet, 128 taps, 1 miss** (§5.7.13–14). This is the step that actually gates using the sensors |
+
+#### The poses are part of the apparatus, and they are committed
+
+`foot_cal_sweep.py` and `foot_tap_test.py` both require **five poses, now in
+`pi_host/calib/poses.json`** — they are measurement apparatus, not scratch state, and the only
+copy lived on the robot until 2026-10-01.
+
+| pose | what it is |
+|---|---|
+| `toes_up` | all four hip1 at 2500, all four hip2 at **500**, knees 1385 / 1500 / 1310 / 1275. Belly down, every toe clear |
+| `front_left_down` | `toes_up` with FL's three channels (3, 4, 5) moved to prop that corner |
+| `rear_left_down` | ditto, channels 0, 1, 2 |
+| `rear_right_down` | ditto, channels 6, 7, 8 |
+| `front_right_down` | ⚠ **four channels, not three** — 9, 10, 11 *and* RR's knee (ch 6) nudged 2500 → 2355 |
+
+⚠ **`front_right_down`'s fourth channel is deliberate.** The operator found the chassis
+unbalanced entering that pose and trimmed the rear-right knee to sit it flat. It is a
+stabiliser, not a stray edit; regenerating these poses mechanically from a template would lose
+it and reintroduce the rock.
+
+⚠ **`toes_up` parks every hip2 at 500 µs — the end stop.** §5.7.13 records what that cost: a
+contact search starting there had no room in the direction that lowers the toe, and 700 µs the
+other way never reached the ground. Both tools now work *down* from a `<foot>_down` pose
+instead.
+
+**Reading the records:** `pi_host/tools/adc_fast_report.py` (newest log by default, `--fft`
+for spectral peaks, `--csv` to dump samples). Label the arms as you go — the physical ones
+leave no other trace:
+
+```sh
+python3 pi_host/tools/bench_verb.py mark text="Zsrc=5k cap=none servos=hold"
+```
+
+### 5.5 Ohmmeter or ADC? — two measurements, two answers
+
+**The counts → grams curve is the ADC's, always.** Its input is counts, and it has to carry
+every offset, gain error and quantization the real channel has. A curve fitted from ohmmeter
+readings and converted analytically would be a calibration of a different instrument — and
+would throw away the one thing calibration is for.
+
+**Sizing `R_g` is the ohmmeter's, once, and only to find the decade.** That is E3: bare sensor,
+flat puck proxy, mass series, one reading each. It needs to be right to a factor of two, and
+the meter is the fastest way there.
+
+**After that the ADC is a better ohmmeter than the ohmmeter**, because the divider inverts:
+
+```
+R_fsr = R_g · (4095/counts − 1)
+```
+
+Fit any trial `R_g` from the assortment in roughly the right decade, run the mass series, and
+every reading gives `R_fsr` **through the real circuit, at the real excitation, with the real
+mechanics, logged over time so the creep transient is visible**. An ohmmeter hands you one
+settled number and hides that transient, which matters on a part whose creep is ~10 % and is
+the thing §8 item 5 is waiting to measure. One pass therefore yields both the `R_g` decision
+and a first look at the curve's shape.
+
+**And `R_g` barely needs to be right.** The divider's sensitivity `dV/d(ln R_fsr)` peaks at
+`R_fsr` = `R_g` and the peak is flat:
+
+| `R_fsr` / `R_g` | counts at that point | sensitivity kept |
+|---|---|---|
+| 1 (the target) | 2048 | 100 % |
+| 2 or ½ | 1365 | **89 %** |
+| 4 or ¼ | 819 | 64 % |
+| 10 or ⅒ | 372 | 33 % |
+
+So being a factor of two out costs 11 %. **Do not agonise over the assortment** — pick the
+nearest value and spend the effort on the curve instead.
+
+⚠ **One `R_g` for all four channels** (§5), so it is chosen from all four feet — the median of
+their `R_fsr`(175 g), never foot #1's number.
+
+**Practical, for the meter half:**
+
+- **Unloaded reads OL.** An FSR above its force floor is megohms; that is the part working,
+  not a fault.
+- **Pin the range.** Autoranging while the reading drifts under creep returns whichever range
+  it happened to settle on.
+- **Load through the real actuator geometry.** A different puck is a different resistance, which
+  is exactly why E3's number is explicitly not the final one.
+- **Measure at the board end.** With the 3-pin lead unplugged, the two conductors are the FSR's
+  terminals, so an assembled foot can be read without disturbing the toe or the wire tension.
+- **⚠ If the load is set with magnets, prove the scale is not reading them.** Most scale
+  platforms are steel. Move a magnet without changing the geometry: if the reading shifts, the
+  scale is measuring attraction as well as weight. And keep magnets away from the ICM-20948 —
+  its magnetometer is unused today, which is precisely how a stray field becomes a silent
+  confound the day someone switches it on.
+
+### 5.6 ✅ MEASURED 2026-09-28 — `R_g` = 11 kΩ, `C` = 1.5 µF
+
+**Method (operator): the real assembly, not a bench proxy.** Foot/toe **glued to the real
+leg**, robot on the short stand, servos unpowered, leg angled so the foot presses down onto a
+digital scale, load set by adding magnets to the leg until the scale read the target. ✅ The
+magnets were checked against the scale and do not affect it.
+
+The scale reads the force the foot actually applies, through the real load path and the real
+actuator, so this is the in-situ measurement §5 asks for.
+
+| mass | `R_fsr` | counts @ `R_g` = 11 k | local `n` | counts/g |
+|---|---|---|---|---|
+| 30 g | 25.0 k | 1251 | — | — |
+| 50 g | 17.0 k | 1609 | 0.75 | 17.9 |
+| 100 g | 14.0 k | 1802 | 0.28 | 3.9 |
+| **175 g** | **11.0 k** | **2048** | 0.43 | 3.3 |
+| 300 g | 8.6 k | 2298 | 0.46 | 2.0 |
+| 500 g | 6.0 k | 2650 | 0.70 | 1.8 |
+
+`n` is the local power-law exponent `R ∝ F⁻ⁿ`; overall it is **0.51**.
+
+**The components this settles:**
+
+| | value | why |
+|---|---|---|
+| **`R_g`** | **11 kΩ** | = `R_fsr`(175 g), which lands the calibration point at **2048 counts — exact mid-scale**. 10 k or 12 k cost nothing if 11 k is not in the assortment (§5.5) |
+| **`C`** | **1.5 µF** | `Z_src` = 5.5 kΩ loaded → f_c 19.3 Hz, τ 8.2 ms ≈ 0.43 tick. **1.0 µF gives 28.9 Hz, which is above the 25 Hz Nyquist and does not filter**; 2.2 µF works but costs 0.63 tick |
+| if the read stays at 10 Hz | 6.8 µF | f_c 4.5 Hz |
+
+**Where the published channel lands.** Points between measured masses are interpolated on
+log-log between their bracketing pair; only 590 g and the clamp extrapolate the top segment.
+⚠ An earlier version of this table extrapolated the top segment *downwards* and put the stance
+threshold at 1632 counts — wrong by 240 counts on a figure that gates a promoted lever.
+
+| state | `foot_load` | counts |
+|---|---|---|
+| swing leg (`R_fsr` ~ MΩ) | 0 | **45** |
+| stance threshold (118 g) | 0.20 | **1874** |
+| four feet down (148 g) | 0.25 | 1974 |
+| calibration point (175 g) | 0.30 | 2048 |
+| single-leg support (590 g) | 1.00 | 2757 |
+| software clamp (1180 g) | 2.00 | 3155 |
+
+**Swing to stance is 45 → 1874 counts, a factor of 42.** The promoted `foot_load ≥ ~0.2` gate
+has no resolution problem whatever the noise floor turns out to be.
+
+### 5.6.1 ✅ The flat bump fixed the curve — but two things changed at once
+
+Against the spherical-bump run of 2026-09-27 (§5.6.2), on the same masses:
+
+| segment | spherical `n` | **flat `n`** |
+|---|---|---|
+| 50 → 100 g | **−0.14** (non-monotone) | 0.28 |
+| 100 → 175 g | 1.51 | 0.43 |
+| 175 → 300 g | 0.47 | 0.46 |
+| 300 → 500 g | **0.09** (collapsed) | **0.70** |
+
+**Both faults are gone.** The curve is monotone, and the top-end collapse that made 300 → 500 g
+worth 47 counts is replaced by a segment that holds sensitivity to the end of the range —
+1.8 counts/g at 500 g against 0.23 before.
+
+⚠ **Two variables changed together: the bump was flattened AND the foot was glued to the leg.**
+By the one-lever rule this does not attribute the improvement, and it should not be written up
+as the flat bump having been proven. What it does do is make the flat bump the shipping choice
+on evidence plus the §3.2 argument, rather than on the argument alone.
+
+**What the pairing does settle, by elimination:** §5.6.2 item 3 proposed that the old top-end
+collapse was the **unpowered leg sagging** as hip2 torque passed an MG90S's holding limit. The
+torques are unchanged here — same masses, same unpowered servos, same pose — and the collapse
+is gone. **So sag was not the cause.** That leaves the bump's contact saturation and a foot
+slipping on an unglued leg joint, both of which this build has fixed.
+
+⚠ **Still open, and unaffected by any of this: the axial-vs-vertical gap.** The bump presses
+along the foot's axis and tangential load bypasses the film through the boss/bore bearing, so
+the FSR sees `F·cos θ` while the scale reads `F`. The sim's `foot_load` is a contact normal
+force. 1.5 % at the standing pose, 13 % at a 30° sweep, on a channel whose graded term carries
+weight 1.0. θ is computable from the servo commands via `LegKinematics`, so publish the factor
+beside the reading rather than let a consumer assume the two are the same quantity. **Record
+the leg angle this calibration was taken at.**
+
+⚠ **And FSR creep is still unmeasured.** The drift seen on 2026-09-27 was mechanical settling,
+not the sensor — so §8 item 5 has not been answered, it has merely been cleared of a confound.
+Hold 175 g on the glued assembly for 60 s and record the drift.
+
+**A correction to what this file predicted.** §5.6.1 of 2026-09-27 said flattening the bump
+would spread contact over ~19.6 mm² instead of a sub-millimetre patch and would therefore move
+`R_fsr` at 175 g "well below" 14.2 kΩ. It moved to 11.0 kΩ — the right direction, a fifth of
+the size the area argument implied. FSR conductance does not simply follow contact area:
+spreading the load lowers the pressure, and the two effects substantially cancel. The practical
+consequence is the reassuring one — **actuator geometry moves the operating resistance far less
+than it moves the linearity**, so `R_g` is not fragile to a bump respin.
+
+### ✅ 5.7 THE FOOT CHANNEL — outcome first, then the evidence
+
+> **The FSR channel as built is good enough to drive the brain.** Four feet, 128 taps, one
+> miss. The brain's consumers are all thresholds — a ghost touch reads 0–5 counts against a
+> 1536-count line, a 148 g stance reads 2290 — and the channel is at its most repeatable
+> exactly where the decision lives: **20 σ to 90 σ of margin**, with relative spread falling
+> from 10–22 % at a few grams to 0.4–2 % above 40 g.
+>
+> **Still open, and none of it blocking:** the toe/FSR interface is irreproducible by hundreds
+> of counts at high load (§5.7.11); `rear_left_down` and `front_left_down` barely load their
+> feet; FSR creep has never been measured; and the counts→grams curve is instrumentation, not
+> a consumer requirement.
+
+⚠ **§5.7.1–14 below are in REVERSE chronological order, newest first.** Read by question:
+
+| question | answer | where |
+|---|---|---|
+| What is the circuit, and what are the parts? | 15 kΩ / 1 µF, f_c 25.1 Hz | **§5.7** (below), §5 |
+| How do I verify a channel I just built? | V1–V6, and the three readings that name their own pins | **§5.7.1**, **§5.7.4** |
+| Why does an unconnected ADC pin read ~3500? | the HAT's mux carries charge between channels | §5.7.2 |
+| A0 reads 0 and ignores a press — why? | the cap was in series, and this document caused it | §5.7.3, **§5.7.5** |
+| Does the finished channel work? | 0–4 counts unloaded, 3300 on a firm press | §5.7.6 |
+| Why run the mass series on every foot? | it is a **linkage test** — 6.6× spread across four feet | **★§5.7.7** |
+| Can the robot measure its own feet? | yes — `foot_cal_sweep.py` | ★§5.7.8 |
+| Is the irreproducibility the floor slipping? | no — a rubber mat did not help | ★§5.7.9, ★§5.7.10 |
+| Where is it, then? | the toe/FSR interface, proven with no model in it | **★★§5.7.11** |
+| Does the brain need force magnitude? | **no** — every consumer is a threshold | **★★★§5.7.12** |
+| Does it hold at the thresholds? | yes, on all four feet | **★★★§5.7.13**, **★★★§5.7.14** |
+
+### 5.7 ⚠ AS BUILT: `R_g` = 15 kΩ, `C` = 1.0 µF — and why that is fine
+
+The parts on hand are 15 kΩ and 1.0 µF, not §5.6's 11 kΩ / 1.5 µF. **The two substitutions
+partly cancel**, because a larger `R_g` raises the source impedance the cap works against:
+
+| build | `Z_src` loaded | f_c | τ | servo-frame line (49.95 Hz) kept |
+|---|---|---|---|---|
+| 11 k + 1.5 µF (ideal) | 5.50 k | 19.3 Hz | 0.43 tick | 36 % |
+| **15 k + 1.0 µF (as built)** | **6.35 k** | **25.1 Hz** | **0.33 tick** | **45 %** |
+| 11 k + 1.0 µF | 5.50 k | 28.9 Hz | 0.29 tick | 50 % |
+
+**`R_g` = 15 kΩ costs 2.4 % of peak sensitivity** at the 175 g operating point — §5.5's flat
+peak, exactly as advertised. And f_c lands at **25.1 Hz, essentially on the 25 Hz Nyquist**,
+against 28.9 Hz for the nominal `R_g` with the same cap.
+
+What the substitution does cost is anti-alias margin: the servo-frame line survives at 45 %
+rather than 36 %. **Whether that matters is measurable, not arguable** — it is precisely what
+V6 below reads. Fit what is on hand, measure, and buy capacitance only if the 0.05 Hz beat
+shows (§5.2.1). Two 1 µF in parallel would give f_c 12.5 Hz if it does.
+
+**Predicted counts on A0, `R_g` = 15 kΩ**, from the same assembly's DMM curve (§5.6):
+
+| mass | `R_fsr` (DMM) | **predicted counts** |
+|---|---|---|
+| in the air | ≫ 1 MΩ | **0–60** — see §5.7.3; a genuinely open FSR reads 0–2 |
+| 30 g | 25.0 k | 1536 |
+| 50 g | 17.0 k | 1920 |
+| 100 g | 14.0 k | 2118 |
+| 175 g | 11.0 k | 2362 |
+| 300 g | 8.6 k | 2603 |
+| 500 g | 6.0 k | 2925 |
+
+### 5.7.1 Verifying the built channel — V1 to V6
+
+**The decisive comparison is not counts against a table. It is `R_fsr` against the meter**:
+
+```
+R_fsr = R_g · (4095/counts − 1)
+```
+
+The DMM curve in §5.6 was taken on **this same assembly**, so inverting the ADC's counts and
+comparing puts two independent instruments on one physical thing. Agreement validates the whole
+path at once — divider, rail, reference, gain — and disagreement says *where*:
+
+| what the inverted `R_fsr` does | what it means |
+|---|---|
+| matches the DMM curve within a few % | ✅ the channel is right |
+| off by the **same factor at every load** | `R_g` is not 15 kΩ — measure the fitted part |
+| too low, and **counts clip at 4095** under load | the divider's top rail is 5 V, not 3.3 V |
+| **falls** as load rises | FSR and `R_g` are swapped — sensor must be on the high side |
+| jumps or drifts with leg position | tail flexing at the sensor, or a marginal connector |
+
+| # | step | power | expected |
+|---|---|---|---|
+| **V1** | **Three ohm readings at the foot's own 3-pin connector**, power off and unplugged — see §5.7.4. This is the whole build as one unit | off | the table in §5.7.4, and the three readings **identify the pinout by themselves** |
+| **V2** | Plug in. Foot **in the air**, read A0 | on | **≲ 60 counts.** ⚠ Proves nothing on its own — §5.3: an open FSR reads the same. Anywhere from ~0 to ~100 is acceptable; what matters is low and *stable* |
+| **V3** ✅ | **Press the toe with a finger, release** | on | ✅ **PASS 2026-09-30** (§5.7.6): 0–4 unloaded, ~1000 on a light touch, 3300 on a firm press |
+| **V4** | The mass series against the table above, one reading per mass at a **fixed dwell** | on | inverted `R_fsr` within a few % of the DMM curve |
+| **V5** | DMM on the ADC input pin while a steady load sits on the foot | on | `V_dmm` = counts × 3.3/4095 within ~1 %. **Separates "the divider made the wrong voltage" from "the ADC read it wrong"** — and it is the ratiometric check §5.1 owed |
+| **V6** | `adc.rate ms=20`, then `mark` + 60 s each of: unloaded/servos limp · 175 g/limp · 175 g/servos holding. Then `adc_fast_report.py --fft` | on | **`wander×` near 1 and no 0.05 Hz line.** This is E2/E2b run on the real channel instead of a resistor dummy, and it is what decides whether 1.0 µF is enough |
+
+⚠ **A1–A3 are unconnected and will read floating garbage.** Expected, not a fault — and useful:
+they sit in the same log as A0, so anything that appears on all four at once is the ADC or the
+rail, not the foot.
+
+⚠ **`R_g` is one value for all four channels** (§5), so the other three feet get **this** 15 kΩ
+regardless of what their own `R_fsr` turns out to be. Per-foot variation is what the per-foot
+calibration curve is for — which is the design, not a compromise: the operator's decision not to
+re-run the curve on all four feet only defers the *curves*, not this resistor.
+
+### ★★★ 5.7.14 ALL FOUR FEET 2026-10-01 — repeatability improves with load, which is the shape the requirement needs
+
+128 taps, 8 per level, four levels, four feet. **One miss** (RL at release−40, one tap read
+22 counts). Converted through FL's DMM curve, so the gram column is indicative across feet:
+
+| foot | over | mean ct | → g | sd ct | **sd / mean** |
+|---|---|---|---|---|---|
+| **FL** | +5 / +10 / +20 / +40 | 480 / 863 / 1017 / 1560 | 4 / 10 / 14 / 31 | 80 / 142 / 116 / 574 | 17 % / 17 % / 11 % / **37 %** |
+| **FR** | +5 / +10 / +20 / +40 | 1232 / 1436 / 1577 / 1910 | 19 / 26 / 32 / 49 | 146 / 141 / 599 / **8** | 12 % / 10 % / 38 % / **0.4 %** |
+| **RL** | +5 / +10 / +20 / +40 | 605 / 608 / 683 / 500 | 6 / 6 / 7 / 4 | 136 / 46 / 62 / 238 | 22 % / 8 % / 9 % / 48 % |
+| **RR** | +5 / +10 / +20 / +40 | 1719 / 1958 / 2824 / 3106 | 38 / 57 / **423** / **691** | 243 / 42 / **38** / **18** | 14 % / 2.1 % / **1.3 %** / **0.6 %** |
+
+**Relative spread collapses as load rises: 10–22 % at a few grams, 0.4–2 % above 40 g.** RR
+reached stance-level load (423 g) at 1.3 % and 691 g at 0.6 %.
+
+**That is the shape the requirement wants.** The decision separates "carries nothing" from
+"carries the body", and the channel is at its most repeatable exactly where the second lives.
+
+| | |
+|---|---|
+| ghost touch | 0–5 counts |
+| **threshold, 29.5 g** | **1536 counts** |
+| four feet down, 148 g | 2290 counts — margin **+754** |
+| RR's sd at 423 g | 38 counts → **20 σ** |
+| FR's sd at 49 g | 8 counts → **90 σ** |
+| FL's sd at stance load (§5.7.11 returns) | 159 counts → **4.7 σ** |
+
+⚠ **The large sds are all at marginal levels, right at the contact edge** — FL +40 (37 %),
+FR +20 (38 %), RL +40 (48 %) — where a few µs of hip2 decides whether the toe is really
+bearing. A touchdown landing exactly on the line is ambiguous by definition, and the criterion
+scores a ratio over ≥ 3 touchdowns.
+
+⚠ **Two poses do not load their foot much.** `rear_left_down` tops out at 683 counts (~7 g) and
+`front_left_down` at 1560 (~31 g), so neither foot was tested at stance load by this protocol;
+their margins come from §5.7.11's reference returns instead. Worth re-posing both if the
+light-load numbers are ever wanted again.
+
+**Verdict unchanged and now on four feet: the FSR channel as built is good enough to drive the
+brain.**
+
+#### ⚠ A harness bug that cost a whole run, and nearly a false verdict
+
+The first FR run reported **1–3 counts on every tap** and read as a foot that never touched.
+The samples were there; the extraction took them 12 ticks too early. **The mark is written
+before `pose.set`, and `pose.set` staggers channels 100 ms apart**, so `max(vals[:12])` — the
+first 240 ms after the mark — can land entirely before the leg has moved. GainEvolver's horizon
+starts at **touchdown**, not at the command. Fixed by finding the first sample above a contact
+floor and taking the max of the next 12, and the corrected extraction recovered FR's run from
+the log already on disk, with no further robot time.
+
+**It also nearly produced a verdict on the robot.** The reading was "FR's foot does not reach
+the ground" — mechanical, specific, and wrong. What the tool measured was its own window.
+
+### ★★★ 5.7.13 MEASURED AT THE THRESHOLD 2026-10-01 — the requirement is met
+
+§5.7.12's open item was repeatability **at the light loads the decisions actually live at**.
+Measured, with the operator's protocol: from `<foot>_down`, lift hip2 until the belly is flat,
+then come back down until the toe touches, and tap repeatedly from there.
+
+**Why that protocol and not the first two attempts.** `toes_up` parks FL's hip2 at **500 µs —
+its end stop** — so the direction that would lower the toe had no room, and 700 µs the other
+way (74°) never reached the ground. Searching for *release* from the loaded pose then failed
+too, because the direction was picked from a 46-count difference on a channel §5.7.11 measured
+as irreproducible by 265–805 counts: it chose the way that **loads** the foot and drove 42° the
+wrong way. **Direction is now taken from body tilt** (sd 0.03° against degrees of travel).
+
+**FL, 8 taps per level**, peaks over 12 ticks from the daemon's 50 Hz record, converted through
+FL's own DMM curve:
+
+| over | mean counts | → g | spread, counts | → g |
+|---|---|---|---|---|
+| release−5 µs | 480 | **4.1** | 304–548 | 2.1 – 5.0 |
+| release−10 µs | 863 | **10.3** | 552–1040 | 5.0 – 14.2 |
+| release−20 µs | 1017 | **13.6** | 798–1239 | 9.0 – 19.5 |
+| release−40 µs | 1560 | **31.0** | 874–2243 | 10.5 – 132.9 |
+
+**The taps span 2–130 g — the region that had never been measured — and the irreproducibility
+there is large in relative terms**, a factor of 2 at the lightest level and 12 at the heaviest.
+
+#### ✅ And it does not matter, because the decision is not made there
+
+**`load_thresh` exists to catch GHOST TOUCHES** — GainEvolver's own words, *"femur-lifted
+landings that earn no load"*. It separates a real stance from a landing that carries nothing,
+and **those two populations are nowhere near each other**:
+
+| | counts | |
+|---|---|---|
+| ghost touch, no load | **0–5** | measured: idle channels read 1–2 across every segment of every sweep |
+| **`load_thresh` 0.05 = 29.5 g** | **1536** | the decision line |
+| stance gate 0.2 = 118 g | 2191 | margin **+655** |
+| four feet down, 148 g | 2290 | margin **+754** |
+| three feet down, 197 g | 2416 | margin **+881** |
+
+Against the irreproducibility measured **at stance-level load** (§5.7.11's reference returns,
+sd 74–214 counts):
+
+| foot | sd | margin / sd |
+|---|---|---|
+| FL | 159 | **4.7 σ** |
+| FR | 214 | **3.5 σ** |
+| RR | 74 | **10.2 σ** |
+
+**A real stance cannot be misread as a ghost touch, and a ghost touch reads 0–5 counts against
+a 1536-count line.** The threshold sits in a wide empty gap, which is what it was designed to
+do. ⚠ A touchdown landing genuinely *at* 29.5 g is ambiguous — the release−40 level straddles
+it — but that is true of any threshold, and the criterion scores a **ratio over ≥ 3
+touchdowns**, not a single reading.
+
+**Verdict: the FSR channel as built is good enough to drive the brain.** The toe geometry
+question (§5.7.11) and the counts→grams curve are instrumentation work, not blockers.
+
+#### Two smaller results from the same run
+
+**The knee does not move.** `knee 1260 µs` constant through every step of both phases, target
+equal to current. Only hip2 is ever commanded; what is visible is the knee *joint* translating
+through space as hip2 swings the whole leg. Geometric, not a servo, and not back-drive.
+
+**Contact resolution is 2 µs.** Phase B went from **2 counts to 192 counts in one 2 µs step**,
+so the series compliance is stiff enough that first contact is found to within ~0.2° of hip2 —
+the concern that a single µs might span the whole light-load range was real but not fatal: 5 to
+40 µs of overtravel spans 4 to 31 g, which is usable resolution.
+
+### ★★★ 5.7.12 SCOPE CHECK — nothing in the brain consumes the MAGNITUDE
+
+> **Operator, 2026-10-01:** *before we get too lost in the weeds with our toes, do we already
+> have enough sensitivity for the foot-contact requirement? In sim is foot contact binary or is
+> force part of the solution?*
+
+**Read from the deployed config and `GainEvolver.cpp`, not from memory.**
+
+**`foot_contact` is binary and it is not derived from `foot_load`.** `picrawler_body.gd:7059`
+publishes `1.0 if not _lowers[i].get_colliding_bodies().is_empty() else 0.0` — a physics
+collision test. `foot_load` is the separate graded channel (`:7352`, GRF EMA / body weight,
+clamped ±2.0).
+
+**Every consumer is a threshold. None reads the magnitude.**
+
+| consumer | channel | how it is used | threshold |
+|---|---|---|---|
+| **MotorEPMv2** | `foot_contact` | ⚠ **`contact_instrument_only = 1`** — it subscribes and nothing rides it | — |
+| **GainEvolver** `unloaded`, weight **1.0** | `foot_contact` + `foot_load` | touchdown from contact; `max(foot_load)` over the next **12 ticks** tested once against `load_thresh`; the term is a **ratio of touchdown counts** | **0.05** = **29.5 g** |
+| **GainEvolver** `loaded_min` (the G2 per-leg guard) | same | per-leg minimum of that same ratio | same |
+| **StrideOdometry** stance gate | `foot_load` | binary stance test, "gated on published `foot_load`" | **~0.2** = **118 g** |
+
+`w_unloaded = 1.0` weights a **rate**, not a force:
+`unl = unloaded[leg] / touchdowns[leg]`. The magnitude never enters `J`.
+
+#### ✅ So: do we already have the sensitivity?
+
+| | |
+|---|---|
+| unloaded | **0–4 counts** — and 1–2 counts on every idle channel across all 28 segments of a sweep |
+| 29.5 g (the `load_thresh` decision) | **≈ 1300–1500 counts** |
+| 118 g (the stance gate) | ≈ 2200 counts |
+| **separation, contact vs no contact** | **300–500×** |
+
+**The binary requirement is met with enormous margin, and the magnitude requirement does not
+exist.** The counts→grams calibration curve is **not on the critical path** — it is wanted for
+instrumentation and for the sim-honesty model, not by any consumer.
+
+#### ⚠ The one thing still unmeasured, and it is not a toe respin
+
+All the repeatability data in §5.7.9–11 was taken at **150–500 g**, where the curve is flat
+(~2 counts/g). **The decisions live at 29.5 g and 118 g, where it is steep (~19 counts/g)** — so
+the same mechanical slack costs far fewer grams there, and we have never measured it there.
+
+**The measurement that matters is the reference-return spread at a LIGHT load, near the
+thresholds.** That is a pose change, not a print.
+
+Two things make the requirement more forgiving still: the criterion term is a **ratio over
+≥ 3 touchdowns** (`min_touchdowns = 3`), so a misclassified touchdown moves a rate rather than
+a reading; and touchdown *timing* was already assigned to the accelerometer, not the FSR
+(ledger 2026-08-24 ★3).
+
+**Verdict: the toe geometry question (§5.7.11) is real but it is not blocking.** Park it behind
+the light-load repeatability check, and behind getting a loop closed on hardware at all.
+
+### ★★ 5.7.11 LOCALISED 2026-10-01c — it is the toe/FSR interface, and the proof has no model in it
+
+Every comparison up to here compared readings taken at **different** poses, which needs tilt as
+a stand-in for load and an interpolation to line them up. That is a lot of machinery to hang a
+verdict on. **So the sweep now returns to one fixed knee offset after every step and reads it
+again** — same commanded pose, same foot, minutes apart, nothing modelled.
+
+| foot | returns | mean | **spread** | sd | **tilt sd** | |
+|---|---|---|---|---|---|---|
+| FL | 11 | 2456 | **591** | 159 | **0.03°** | ✅ |
+| FR | 11 | 1917 | **805** | 214 | **0.06°** | ✅ |
+| RR | 11 | 3257 | **265** | 74 | **0.03°** | ✅ |
+| RL | 11 | 1340 | 574 | 194 | **3.14°** | ⚠ body was disturbed — not a measurement |
+
+**Against a per-hold electrical sd of 1–46 counts.** Three feet with the body returning to
+within **0.03–0.06°** of the same attitude, and the sensor reading **265–805 counts** apart.
+
+**That localises it, by elimination and without a model:**
+
+| | |
+|---|---|
+| not the pose, the servos or the floor | body attitude repeats to 0.03° |
+| not the divider or the ADC | per-hold sd is 1–46 counts, and §5.7.9 validated the path to 1.3 % |
+| not load sharing | only the foot under test ever reads, every other channel at 1–2 counts |
+| **⇒ the toe-to-FSR interface** | the only link left between a repeatable body pose and an irreproducible number |
+
+**§5.7.7's question is answered: it is slack, not a repeatable nonlinearity.** A per-foot
+calibration curve cannot be fitted through this, because the curve is a function of load alone
+and this is not.
+
+#### ⚠ Two operator corrections folded in
+
+**The script was ending on `limp`**, which commands the saved **rescue** pose — whose toes sweep
+far enough out to catch the wall of the safety box. The operator had to lift the robot clear
+several times. **It now parks on the transit pose (`toes_up`) instead**, and the keepalive is
+held until after the park move lands. ⚠ An *interrupted* run still ends in rescue: benchd's
+deadman fires ~1 s after the keepalive stops, which no change to the script can cover. Let runs
+finish rather than shortening the timeout — the log shows 8 watchdog trips across this
+session's aborted runs.
+
+**RL's row is the one that is contaminated**, and its own `tilt sd` says so: 3.14° against
+0.03° for the others. The disturbances happened at those rescue excursions, between legs; the
+three clean feet were not moved during their own returns.
+
+#### The bump-vs-cylinder question is now live, and it is measurable
+
+The operator chose the **spherical bump** partly for this reason: a small, nearly-rolling
+contact drags less film than a flat face pressed over Ø5. That is a real effect pulling the
+opposite way from §3.2's argument, which was about where the load *lands* (a 0.25 mm float is
+most of a 0.3 mm patch, but only 5 % of a Ø5 face). **Both arguments are sound and they point
+in opposite directions, so the question is empirical** — and the reference-return spread is
+exactly the number that settles it, because it needs no calibration and no geometry.
+
+**The A/B: fit one spherical-bump toe, re-run the returns on that foot, compare the spread.**
+One lever, assumption-free metric, ~4 minutes.
+
+### ★ 5.7.10 RUN 2026-10-01b — rubber mat: the floor was NOT the cause
+
+§5.7.9's separating experiment, run: robot moved onto a **rubber mat** so the resting edge
+cannot creep, and the sweep now passes through **`toes_up`** before each `<foot>_down` so the
+long travel between stances happens with the toes unloaded (operator — going corner to corner
+drags a *loaded* toe, which on a high-friction surface strains the glued joint and the wire
+tie, and leaves the foot somewhere its own sweep did not put it).
+
+**The residual did not fall.**
+
+| foot | hard floor rms | rubber rms | change |
+|---|---|---|---|
+| FL | 481 | **676** | **+41 %** |
+| FR | 268 | — | ⚠ foot unloaded, see below |
+| RL | 405 | **402** | −1 % |
+| RR | 457 | **677** | **+48 %** |
+
+**If belly stick-slip were the dominant mechanism, removing it should have cut the residual
+substantially. It did not** — two feet got worse and one was unchanged. ⚠ **Two variables moved
+together** (surface *and* the transit pose) and the tilt spans shrank with them (4.0 → 2.9°,
+5.6 → 4.2°, 2.8 → 2.4°), so this is a signal rather than a finding. The direction is clear
+enough to act on.
+
+**The load path was re-confirmed:** only the foot under test reads anything, every other
+channel at 1–2 counts through all 28 segments. No sharing, no crosstalk.
+
+#### ⚠ FR's pose no longer loads its foot
+
+A1 reads 1808 and 1905 at the first two steps and then **1 count for the rest of the sweep**,
+while its tilt keeps climbing — so the foot left the ground and the belly took the load. **Not
+a sensor fault and not a measurement**; `front_right_down` needs re-posing on the mat before
+anything about FR means anything.
+
+#### The hypothesis this promotes
+
+**The toe's own float under shear.** §2 records that the toe floats **0.25 mm radially** before
+the boss bears on the bore, so the bump slides up to that far across the film on every change
+of load — and a high-friction surface *increases* the shear the toe is dragged through, which
+is the direction FL and RR moved. The boss/bore joint keeps shear off the film in the sense
+that the film carries no tangential *force*; it does not stop the contact point from moving.
+
+**The next test is cheap and it is a dose-response:** re-run with much smaller steps (±40 µs
+rather than ±150) so the foot drags a fraction as far, and compare residual against the count
+span it was earned over. **If the residual scales with how far the foot travels, it is shear at
+the toe.** If it does not, the mechanism is elsewhere and the float is exonerated.
+
+### ★ 5.7.9 RUN 2026-10-01 — the mechanics are not repeatable, and it is not the sensors
+
+All four feet swept, knee stepped ±150 µs about each `<foot>_down` pose, up and back down.
+
+**✅ What the run establishes.**
+
+| | |
+|---|---|
+| the electrical side is clean | **only the loaded foot reads anything** — the other three sit at 0–2 counts through every segment of every sweep. No crosstalk, no load sharing |
+| the geometry is determinate | that same fact confirms the two-support beam the method assumes: belly edge plus one foot, nothing else touching |
+| the lever works | body tilt climbs monotonically on all four, **19.5° → 25.3°**, and repeats to ~0.1° between the up and down halves |
+| each hold is quiet | within-hold sd is **1–46 counts** |
+
+**⚠ CORRECTION, recorded because it nearly produced a false verdict.** The first reading of
+this run was "tilt is monotone but counts are not, so the sensors are at fault." That is wrong.
+`F = W·a/b`, and tipping about the edge changes **both** `a` and `b` — **the force is not
+required to be monotone in the step at all.** Monotone tilt proves the lever moved. It proves
+nothing about the shape of the load.
+
+**The test that does not need force to be monotone.** Whatever `F(tilt)` is, it is a *fixed
+function* of the pose geometry: the robot's mass and shape do not change between the up and
+down halves of one sweep, seconds apart. **So counts must be the same function of tilt in both
+directions.** Interpolating the down sweep onto the up sweep's tilt values:
+
+| foot | residual at equal tilt | within-hold sd |
+|---|---|---|
+| FL | **rms 481**, worst 891 | 1–46 |
+| FR | **rms 268**, worst 371 | 1–13 |
+| RL | **rms 405**, worst 546 | 1–16 |
+| RR | **rms 457**, worst 801 | 1–32 |
+
+**10–50× the measurement noise, on every foot.** Needs no FK, no `L3`, no CoG — which is why
+it is the test worth having.
+
+**⚠ What it does NOT localize.** Two mechanisms produce this signature and the run cannot
+separate them:
+
+1. **Slack in the toe-to-foot linkage** — §5.7.7's hypothesis.
+2. **The belly stick-slipping on the floor.** Tilt alone does not pin the pivot: if the contact
+   edge creeps, then at the same tilt `a` and `b` differ, and so does the real force. The
+   sensor would be reporting correctly.
+
+Both are "the mechanics are not repeatable". Only the first is a sensor fault, and **a per-foot
+calibration curve is unfittable under either** until it is fixed.
+
+**The experiment that separates them, and it is cheap:** ⚠ **constrain the chassis so the pivot
+cannot move** — clamp or wedge the resting edge — and re-run. Residual collapses to the sd
+column ⇒ it was the floor contact, and the toes are fine. Residual persists ⇒ the linkage.
+
+**Also measured, closing E0's open item.** With a proper control: **0 new overruns in 20 s with
+`adc.rate` off, 1 in 20 s with it at 50 Hz**; `tick_hz` 50.0 either way, `bus_errors` flat. The
+four-channel read costs **1175 µs mean, 1211 µs p95, 2081 µs worst — 5.9 % of the 20 ms tick
+budget.** benchd's own comment estimated 1–2 ms; it is 1.18. **So moving the ADC read into the
+tick permanently is affordable**, which settles §5.2's open question in favour of the 50 Hz
+assumption and therefore of **`C` = 1.0 µF at f_c 25.1 Hz**, not the 10 Hz fallback.
+
+### ★ 5.7.8 The robot probes its own feet — `foot_cal_sweep.py`
+
+> **Operator, 2026-09-30:** weights and a scale are cumbersome and error-prone; use the
+> robot's own body weight. Poses (`front_left_down`, `rear_right_down`, …) prop one corner up
+> off a belly-down rest, with the opposite side of the chassis flat on the ground as the lever.
+
+**This is the better instrument, and the reason is not convenience.** §5.6.1 lists what the
+scale method puts into its own numbers — a hand-posed leg, so `cos θ` differs between feet; a
+pose that sags under unpowered servos; a dwell set by whatever the operator's hands did that
+time. **Every one of those is a variable the robot removes by loading its own feet**: its own
+mass, its own load path, the pose regime it actually operates in, and identical treatment on
+all four. It is also repeatable on command, which matters more than any accuracy argument —
+§5 requires a re-check after every foot re-assembly, and a procedure that takes an afternoon
+does not get run.
+
+**The statics.** Belly tipped onto one edge plus one foot is a determinate two-support beam,
+so moments about the contact line give
+
+```
+F_foot = W · a / b            W = 590 g,  a = edge→CoG,  b = edge→foot contact  (horizontal)
+```
+
+⚠ **The body must actually tip onto an edge.** A belly lying flat is a distributed contact and
+the split is indeterminate — the foot then carries an unknown share, not a computable one.
+
+#### ⚠ What the tool does NOT do, and why
+
+`foot_cal_sweep.py` reports **counts against a pose step**, per foot, up and back down. **It
+does not convert to grams**, for two reasons that are both worth fixing before it does:
+
+1. **`b` needs FK, and FK must not be duplicated.** `ogma::body::fk_leg` is header-only and
+   reachable, but it needs per-leg world anchors benchd does not build — and `cpp_core`'s own
+   CMakeLists records the rule: a second copy of that maths in Python *is* how sim and host
+   drift apart. **Expose the contact point from benchd, or do not compute force.**
+2. **It would inherit a known-wrong constant.** The printed foot added ~16.9 mm to `L3` and the
+   geometry has not been re-baselined, so `b` is out by up to 17 mm — **a 15–25 % force error
+   before anything else goes in.**
+
+**What needs no geometry at all is the comparison, and the comparison is the blocking
+question.** §5.7.7 could not say whether A2's and A3's stalls were repeatable nonlinearity (a
+curve absorbs it) or slack (no curve can). `us_per_rad` is a property of the part rather than
+the channel, so **equal microsecond steps are equal angle steps on every leg** — stepping each
+leg through the same offsets from its own mirrored pose puts all four under the same geometry,
+and the up-and-down sweep answers repeatability directly. Both without a single length constant.
+
+| the sweep reads | the verdict |
+|---|---|
+| loop closes — worst up-minus-down comparable to the per-point sd | repeatable nonlinearity; **calibrate and move on** |
+| loop does not close | **slack in the toe-to-foot linkage**; fix it, because the reading depends on how the load was reached and a curve is a function of load alone |
+
+#### ⚠ It cannot reach the light end
+
+Order of magnitude, with the fulcrum at the far belly edge and the CoG near chassis centre
+(`a` ≈ 45 mm), `b` sweeping from about 60 mm to full reach: **F ≈ 175–440 g**. That brackets
+the gait band (148–197 g) and nothing below it.
+
+**§5.7.7's stalls are at 30–100 g**, and the stance threshold is 118 g. So this sweep decides
+the repeatability question and gives the working-range curve; **the light end still needs the
+scale, or a pose family where two feet share the load.** Do not read a clean sweep as clearance
+of a fault that lives below its reach.
+
+⚠⚠ **The keepalive is not optional.** benchd's deadman commands the saved rescue pose when no
+client command is fresh, and this HAT cannot limp a servo — "safe" is a pose, not slack.
+`calib/sensors.json` records what that cost the servo-scale fit: a 100–200 µs rescue excursion
+looks like nothing happening while it silently replaces the commanded angle. The tool runs a
+ping thread throughout, and anything else driving this robot must too.
+
+### ★ 5.7.7 RUN THE MASS SERIES ON EVERY FOOT — it is a LINKAGE test, not just a calibration
+
+> **Operator, 2026-09-30, and it is the rule:** ⚠ **check each leg with the mass series before
+> proceeding.** It is the only thing that verifies the toe-to-foot linkage, and a fault there is
+> invisible from any other measurement — the sensor ohms out fine, the divider verifies fine,
+> and the channel still misreports force by a factor of several.
+
+**Measured 2026-09-30, all four feet, `R_g` = 15 kΩ, counts:**
+
+| mass | A0 front-left | A1 front-right | A2 rear-left | A3 rear-right | predicted |
+|---|---|---|---|---|---|
+| 30 g | 1336 | ~600 ⚠ unreliable | 770 | 1300 | 1536 |
+| 50 g | 1732 | 1160 | 1170 | 2250 | 1920 |
+| 100 g | 2170 | 1840 | 1270 | 2370 | 2118 |
+| 175 g | **2350** | **2140** | **1950** | **2740** | 2362 |
+| 300 g | 2513 | 2717 | 2340 | 3100 | 2603 |
+| 500 g | 2800 | 2830 | 2700 | 3670 | 2925 |
+
+**All four are monotone**, so every linkage transmits *something*. That is where the good news
+stops.
+
+#### ✅ First, what A0 proves about the electronics
+
+Inverted through `R_fsr = R_g·(4095/counts − 1)`, A0 reads **11.14 kΩ** at 175 g against the
+**11.0 kΩ** the meter measured on that same foot — **1.3 % agreement**. Two independent
+instruments on one physical thing. **The divider, the rail, the reference and the ADC gain are
+validated end to end**, and V5's ratiometric check is effectively answered by it.
+
+Everything below is therefore mechanical. None of it is the circuit.
+
+#### ⚠ The spread is far too large to be the harness
+
+Same 175 g on the scale, each foot's resistance read back through A0's own curve:
+
+| foot | `R_fsr` at 175 g | reads as |
+|---|---|---|
+| A0 front-left | 11.14 kΩ | **170 g** |
+| A1 front-right | 13.70 kΩ | **105 g** |
+| A2 rear-left | 16.50 kΩ | **56 g** |
+| A3 rear-right | 7.42 kΩ | **370 g** |
+
+**A factor of 6.6 between the extremes.** The method's own variation — leg angle (`cos θ`),
+pose sag, magnet placement — is bounded at roughly 2× even at an implausible 60° of tilt.
+**A factor of 6.6 is the linkage, not the bench.**
+
+#### ⚠ Two feet stall in the 50 → 100 g band
+
+Sensitivity across that band, where the gait's stance threshold sits:
+
+| foot | 30→50 g | **50→100 g** | 100→175 g |
+|---|---|---|---|
+| A0 front-left | 19.8 | **8.8** | 2.4 |
+| A1 front-right | 28.0 | **13.6** | 4.0 |
+| A2 rear-left | 20.0 | **2.0** ⚠ | 9.1 |
+| A3 rear-right | 47.5 | **2.4** ⚠ | 4.9 |
+
+*(counts per gram)*
+
+**A2 and A3 nearly stop responding between 50 g and 100 g, then catch up.** Their local
+exponent drops to 0.17 across that band and jumps back to 1.26 and 0.69 after it. That is the
+signature of **slack being taken up** — the toe moving before the bump loads the film. A1 shows
+the same thing lower down: nothing reliable below 50 g, and a 30 g tap giving ~600 counts.
+
+**A0, the foot that was built and characterised first, is the only one with a smooth curve.**
+
+#### What a per-foot calibration can and cannot absorb
+
+| | |
+|---|---|
+| ✅ **the level difference** | each foot gets its own curve; a foot reading 1950 at 175 g simply maps 1950 → 175 g |
+| ⚠ **lost resolution** | 2.0 counts/g against A0's 8.8 means a few counts of noise is several grams, right where the `foot_load ≥ 0.2` stance gate lives |
+| ❌ **hysteresis** | if the stall is slack, the reading depends on *how the load was reached*. A curve is a function of load alone and cannot represent that |
+
+⚠ **The shape alone does not condemn a foot — repeatability does.** A repeatable bilinear
+response is a nonlinearity a curve absorbs. **Run each series up AND back down.** If the loading
+and unloading curves land on each other, calibrate and move on; if they separate, the linkage
+has slack and must be fixed before any curve is fitted.
+
+#### Per-foot checks, when a curve looks wrong
+
+1. **The shoulder-to-rim gap** should be ~0.90 mm and visible on every foot (§1.3). A foot with
+   a noticeably smaller gap has its wire over-tensioned or its parts bottoming.
+2. **Wire tension** sets the zero offset (§2). Compare unloaded counts across feet — A0 reads
+   0–4; a foot reading much higher is preloaded.
+3. **Bump concentricity** — §3.3's budget is 0.8 mm worst case on a Ø5 puck over a Ø7 active
+   area. Past that the puck edge lands on the inactive border ring, which is exactly a response
+   that is low and badly shaped.
+4. **Epoxy in the bore or on the sensor face**, which changes the load path.
+5. **The leg angle used for each foot** — record it. It does not explain 6.6×, but it is a real
+   `cos θ` term (§5.6.1) and it should not be left as an unknown on top of a mechanical one.
+
+#### ⚠ A3 has little headroom
+
+At 500 g it already reads 3670 of 4095. Extrapolating its own top segment puts single-leg
+support (590 g) near 3780 and the 1180 g software clamp around 4010 — **inside the ADC's range,
+but barely.** Watch A3 for clipping once the robot stands on one leg.
+
+### 5.7.6 ✅ V1–V3 PASS 2026-09-30 — the channel is live on A0
+
+Rewired per §5.7.5 (`R_g`'s upper leg moved to NODE, `SIG` run to NODE). Observed on A0:
+
+| state | counts | implied `R_fsr` | implied load | `foot_load` |
+|---|---|---|---|---|
+| unloaded | **0–4** | ≥ **15 MΩ** | 0 g | 0.00 |
+| light touch | ~1000 | 46.4 kΩ | ~13 g | 0.02 |
+| firm press | up to **3300** | 3.61 kΩ | ~1030 g | 1.74 |
+
+**Monotone, correct polarity, and the whole span is in range.** Three things this settles:
+
+1. **The wire tie is not preloading the sensor.** §2 flagged wire tension as the zero offset,
+   and it reads **0–4 counts** — essentially nil. The 0.90 mm shoulder gap is real and the toe
+   hangs free.
+2. **No dead zone at first contact.** A light touch resolves at ~13 g, below the part's own
+   20 g floor, so the toe takes up no meaningful slack before the bump loads the film. Swing to
+   stance stays the 45 → 1874 separation of §5.6.
+3. **The port spec's claim is now measured: software discards the range before the sensor
+   does.** The 1180 g clamp sits at 3361 counts against a 4095 full scale, so **19 % of the ADC
+   range is still unused above the point the channel stops caring.** A firm thumb already
+   reaches `foot_load` 1.74 without clipping.
+
+**Next is V4** — the mass series against §5.7's predicted counts. It is the quantitative
+verification *and* the calibration data in one pass, so run it with a fixed dwell at each mass
+and keep the readings.
+
+### 5.7.5 ✅ FOUND 2026-09-29 — the cap was built in series, and the doc caused it
+
+**The three V1 readings identified it uniquely:**
+
+| pair | measured | the correct circuit would give |
+|---|---|---|
+| VCC ↔ SIG | **OL, no change on a press** | ~10–30 kΩ pressed |
+| SIG ↔ GND | **15 kΩ steady** | 15 kΩ steady ✓ |
+| VCC ↔ GND | **OL** | ~25–45 kΩ pressed |
+
+**As built:** `3V3 → FSR → node → C → GND`, with `R_g` from `GND` to `SIG`. That is `R_g` and
+`C` having swapped places. Every observation follows from it:
+
+- **VCC↔SIG is OL** — the only route is through `C`, which blocks DC.
+- **VCC↔GND is OL** — same cap, same block.
+- **SIG↔GND is 15 kΩ** — `R_g`, and nothing else.
+- **A0 reads 0 and never moves** — `SIG` is tied to ground through `R_g` and connects to nothing
+  else at all.
+
+⚠ **It is not a high-pass, it is an open**, and the distinction is the confirming evidence: a
+series cap in the signal path would still pass a *transient* on each press. The operator saw
+**no effect whatever**, because `SIG` never touches the sensor branch — the FSR and `C` form
+their own loop from `3V3` to `GND` that the ADC pin is not part of.
+
+**The fix is two joints.** `C` is already in the right place (NODE → GND):
+
+1. Move `R_g`'s upper leg from `SIG` to **NODE** — beside the cap, not in place of it.
+2. Run `SIG` to **NODE** — i.e. to the FSR's lower terminal.
+
+**The one sentence that prevents it:** ⚠ **`SIG` lands on the FSR's lower terminal, and both
+`R_g` and `C` hang from that same point down to `GND`.**
+
+**Root cause is the schematic in §5, not the reading of it.** That drawing shorted `3V3` to
+`GND` down its left-hand rail and hung `R_g` and `C` from stubs at different heights, which
+reads as a chain. It has been redrawn, and an SVG added beside it. Recorded here because a
+documentation defect that survives into a built circuit is a finding, not an embarrassment:
+the next person reads the same page.
+
+### 5.7.4 V1 in full — three readings at the foot connector
+
+**Measure at the foot's own 3-pin connector, at its free end, power off and unplugged.** That
+single position has the entire build behind it — sensor, tail, both solder joints, `R_g`, the
+cap and the connector — so it answers "is my circuit correct" as one question. ⚠ Confirming the
+**FSR alone** does not cover the tail, the joints or the connector, which is where a working
+sensor still produces a dead channel.
+
+Only three pairs exist, and each one isolates a different part of the build:
+
+| pair | reads, unloaded | under a firm finger press | what it proves |
+|---|---|---|---|
+| **VCC ↔ SIG** | OL / ≫ MΩ | **~10–30 kΩ** | the sensor **and** its tail, joints and connector pin |
+| **SIG ↔ GND** | **15 kΩ** (steady; let the cap finish charging, τ ≈ 15 ms) | 15 kΩ, unchanged | `R_g` is fitted, and the cap is across it rather than in series |
+| **VCC ↔ GND** | OL / ≫ MΩ | **the sum of the other two** | the two halves are actually in series on a common node — the topology, not just the parts |
+
+**The third reading is the one people skip and it is the one that catches a miswire.** Parts
+one and two can both be right while the node is not common.
+
+#### The readings name the pins, so your wiring notes do not have to
+
+- the pin in **both** the press-sensitive pair and the 15 kΩ pair is **SIG**
+- of the other two, the one in the press-sensitive pair is **VCC**, the one in the 15 kΩ pair
+  is **GND**
+
+#### Failure signatures
+
+| reading | means |
+|---|---|
+| VCC↔SIG never leaves OL under a press | open tail, a dry joint, or a bad crimp — **the sensor may still be fine** |
+| SIG↔GND reads OL | `R_g` not connected, or the cap is in **series** instead of parallel |
+| SIG↔GND reads ~0 | `R_g` shorted, or a shorted cap |
+| VCC↔GND ≠ the sum | the node is not common: a bridge, or `R_g` tied to the wrong pin |
+
+#### Then the orientation, which is the remaining candidate
+
+With the connector's own pinout known, compare it to the header: **VCC and GND meter honestly
+(3.30 V, 0 V) because both are driven**, and SIG is the third — confirmed by driving it and
+watching A0 (§5.7.3), never by metering it.
+
+⚠ **Every orientation of this connector is electrically safe**, so the empirical test is
+legitimate: nothing on either side exceeds 3.3 V, and every path through the foot is
+current-limited by `R_g` (220 µA) or by the FSR (megohms). **Plug it in, note A0, unplug, rotate
+180°, plug in, note A0.** A reversed lead swaps SIG and GND, which is candidate **a** in §5.7.3
+and reads exactly the 0-counts-no-response being chased.
+
+### 5.7.2 ✅ Characterised 2026-09-29 — the HAT's ADC carries charge between channels
+
+Observed with the foot on A0 and A1–A3 unconnected:
+
+| | A0 | A1 | A2 | A3 | A4 (battery) |
+|---|---|---|---|---|---|
+| foot connected | **0–2** | 98 | 345 | 506 | 3260 |
+| foot unplugged | ~3500 | ~3500 | ~3500 | ~3500 | 3260 |
+
+**A1–A3's low, monotonically climbing values are sample-and-hold charge carryover, not a
+fault and not pull-ups.** `benchd.cpp:525` reads the channels in order A0 → A4; A0 is driven
+hard to 0, and a floating pin cannot recharge the sampling capacitor within the aperture, so
+the reading climbs back over successive channels — 0.08 V → 0.28 V → 0.41 V — until A4's
+low-impedance battery divider drives it properly again. A pull-up would hold the floating
+channels at a fixed value **regardless of A0**; these track A0, so it is carryover.
+
+⚠ **Floating ADC inputs on this HAT sit near 2.82 V (~3500 counts)** and are meaningless. Read
+nothing into A1–A3 until they have feet on them.
+
+**This is direct evidence that the 1 µF is doing real work.** It is roughly five orders larger
+than the MCU's sampling capacitor, so A0 cannot inherit charge from A4's 2.63 V the way A1–A3
+inherit from A0 — the external cap supplies the sample and the mux's history is swamped. The
+cap was sized in §5.2 as an anti-alias filter; this is a second, independent reason it has to
+be there.
+
+### 5.7.3 ⚠ DIAGNOSIS 2026-09-29 — A0 reads 0 and does not respond to a press
+
+**What the observation already proves, before any meter comes out:**
+
+| | |
+|---|---|
+| ✅ **the ADC and the signal path to A0 are good** | unplugging the foot lets A0 float to ~3500 with the others; plugging it in pulls it to 0. The ADC is reading that pin and the lead's signal conductor reaches it |
+| ✅ **0–2 counts is not itself wrong** | at `R_g` = 15 kΩ that implies `R_fsr` ≥ **30 MΩ**, which an unloaded FSR genuinely is. §5.7's "≲ 60 counts" assumed 1 MΩ and underestimated the part |
+| ❌ **the fault is that pressing does nothing** | that, and only that |
+
+**Ruled out by the same observation:** signal and VCC swapped (A0 would read *high*, not 0), a
+shorted FSR (4095), and any break in the signal wiring or the ADC itself (the float test).
+
+**Three candidates remain, and all three produce exactly this signature:**
+
+| # | candidate | why it reads 0 and ignores a press |
+|---|---|---|
+| **a** | **the lead's signal and GND are swapped** | the divider node lands on the HAT's GND pin, grounding it, while `R_g`'s bottom lands on the signal pin — so A0 sees 15 kΩ to ground. The FSR then sits between VCC and GND, where it changes nothing visible. ⚠ **§8 item 1's pin order has never been read**; only the VCC *voltage* was confirmed |
+| **b** | **3.3 V is not reaching the FSR's top** | no current source, so the node sits at 0 through `R_g` whatever the sensor does |
+| **c** | **the FSR or its tail is open** | same node behaviour, and the press cannot reach a broken sensor |
+
+**Separating them is V1, which was skipped — two minutes, power off, lead unplugged:**
+
+| # | measure, at the lead's free end | reads |
+|---|---|---|
+| **D1** | across the two conductors that run to the sensor, **while pressing the toe** | **changes** (MΩ → tens of kΩ) ⇒ sensor and tail are fine, so the fault is **a** or **b**. **No change** ⇒ candidate **c**, and nothing else matters until it is fixed |
+| **D2** | node conductor → GND conductor | `R_g` = 15 kΩ (let the cap finish charging) |
+| **D3** | VCC conductor → GND conductor | `R_fsr` + `R_g`; ≫ MΩ unloaded, falls under a press |
+
+D1–D3 together also *map* the lead, which is what settles candidate **a**.
+
+**Then identify the HAT's header pins — ⚠ but NOT by metering the signal pin.**
+
+> ⚠ **CORRECTION 2026-09-29. An earlier version of this section said the signal pin would meter
+> ~2.82 V and that the three pins could therefore be told apart by voltage alone. That is
+> wrong, and it is wrong in a way worth keeping.** A floating ADC pin has no source worth the
+> name — §5.7.2's ~3500 counts is residual charge on the mux, replenished only by leakage — so
+> **a 10 MΩ voltmeter is a heavier load than the thing it is measuring** and reads whatever the
+> leakage can hold against it, not the value the ADC sees. The instrument and the meter are
+> looking at different quantities.
+>
+> Measured in practice: **SIG to GND = 1.0 V**, which is ~100 nA into 10 MΩ, i.e. an effective
+> **~23 MΩ** to the 3.3 V rail. That is consistent, uninformative about the pinout, and
+> **irrelevant to the divider** — in parallel with `R_fsr` it shifts the operating point by
+> **0.02 %**. (Unloaded it does move 2 counts to ~5; the unloaded reading is leakage either way.)
+
+**VCC and GND still meter honestly** (3.30 V and 0 V) because both are driven. For the third
+pin, **drive it and watch the instrument** — the ADC is what *defines* the signal pin:
+
+| with the lead unplugged and power on | A0 in the dash |
+|---|---|
+| 10 kΩ from the suspected SIG pin to **GND** | → ~0 |
+| 10 kΩ from the same pin to **VCC** | → near 4095 |
+
+Both move ⇒ that is the signal pin **and** the ADC path works. Neither moves ⇒ wrong pin.
+
+### 5.6.2 The spherical-bump run (2026-09-27), kept as the comparison
+
+Same method, same masses, the toe's original **spherical** bump, foot **not** glued to the leg.
+`R_fsr`(175 g) was 14.2 kΩ → `R_g` would have been 15 kΩ.
+
+| mass | `R_fsr` | local `n` | counts/g @ 15 k |
+|---|---|---|---|
+| 20 g | 75 k → 92.5 k (rose, then steady) | — | — |
+| 50 g | 30.0 k | 1.23 | 26.5 |
+| 100 g | 35 k → 33.0 k | **−0.14** | **−1.7** |
+| 175 g | 14.2 k steady | 1.51 | 11.0 |
+| 300 g | 13.5 k → 11.0 k | 0.47 | 2.1 |
+| 500 g | 10.5 k | **0.09** | **0.23** |
+
+Two faults, both since explained. The **non-monotone 50 → 100 g** and the **drift within single
+readings** were the foot settling on an unglued leg joint, not FSR creep — which is why they
+disappeared when it was glued. The **top-end collapse** is discussed in §5.6.1.
+
+⚠ **The contingency E2 and E3 exist to catch:** if `R_fsr` at 175 g lands well above E2's
+maximum usable `Z_src`, the node is too high-impedance for this ADC on a wire that runs the
+length of a moving leg, and the fix is a unity-gain buffer at the board — not a smaller `R_g`,
+which would throw away the divider's sensitivity at the operating point. **Find that out on the
+bench, not after four feet are glued.**
 
 ---
 
@@ -233,9 +1741,9 @@ value on all four channels so per-foot variation shows up in calibration rather 
 |---|---|---|
 | 1 | Baseline, nothing added | `i2cdetect -y 1` shows **`0x14`** only — ✅ **PASS 2026-08-28** (needs `i2c-dev` in `/etc/modules` besides the overlay) |
 | 2 | INA219 inline on the battery | `0x40` appears; idle current is plausible; its bus voltage **agrees with A4's** reading |
-| 3 | ICM-20948 on SPI | `ls /dev/spidev*` shows `spidev0.0`; `WHO_AM_I` = **`0xEA`**; at rest one accel axis reads ≈ 1 g and the other two ≈ 0 |
-| 4 | VL53L0X on I²C | `0x29` appears; distance tracks a tape measure |
-| 5 | FSRs, **one foot at a time** | counts rise monotonically with the known-mass series; fit and store per foot |
+| 3 | ICM-20948 on SPI | `ls /dev/spidev*` shows `spidev0.0`; `WHO_AM_I` = **`0xEA`**; at rest one accel axis reads ≈ 1 g and the other two ≈ 0 — ✅ **PASS 2026-09-10** (§4.0): `0xEA` on CE0, 0 bad reads in 2000 at each of 1/4/7/10 MHz, `az` = +0.9967 g with `ax`/`ay` at −0.035/+0.001. Mounting, axis map and level reference in §4.1–4.2 |
+| 4 | VL53L0X on I²C | `0x29` appears; distance tracks a tape measure — ✅ **PASS 2026-09-07** (§9): `0x29` present with model ID `0xEE`; 259 readings at a bench target measured 121.9 mm ± 1.51 mm, 0 invalid; then validated on the robot at two points, belly-down and standing (§9.3) |
+| 5 | FSRs, **one foot at a time** | counts rise monotonically with the known-mass series; fit and store per foot. ★ **The series is a LINKAGE test on every foot, not only a calibration — §5.7.7.** Monotone is not sufficient: compare the four curves against each other, and re-run each one loading *and* unloading. ⚠ **Tie the toe wire BEFORE calibrating** — its tension is the zero offset ([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §2), so a re-tension invalidates that foot's curve |
 
 **After all four FSRs:** command the standing pose on a flat floor. The four `foot_load` values
 should sum to ≈ 1.0 (one body weight) and be roughly equal. **If they sum well below 1.0 the
@@ -294,8 +1802,10 @@ reduces — and only after the authority check.
 
 ## 8. Open — must be resolved at the bench, not from documentation
 
-1. **3-pin connector pin order and VCC rail voltage** (ADC / digital / servo) — not in the vendor
-   hardware page. Read the silkscreen. §5 hazard 2 depends on this.
+1. **3-pin connector pin order** (ADC / digital / servo) — not in the vendor hardware page.
+   ✅ **The ADC connector's VCC half is closed: 3.3 V, labelled on the PCB (2026-09-27)**, so
+   §5's hazard 2 is gone for the ADC. Pin order within the connector, and the rails on the
+   digital and servo headers, are still unread.
 2. **5 V regulator current rating** — undocumented. Relevant only if the servo rail is ever
    revisited; the battery-input placement sidesteps it.
 3. **Actual gait current draw** — measure with the inline meter (#18) before trusting the 0.01 Ω
@@ -303,11 +1813,2240 @@ reduces — and only after the authority check.
    but the brownout margin argues against it either way.
 4. ~~**Whether the chosen ICM-20948 breakout exposes SPI**~~ — ✅ **RESOLVED 2026-08-30**: the
    received board exposes `NCS` and `ADO`, so SPI is available. Pin map in §4.
-5. **FSR creep** — hold 175 g for 60 s and record the drift **before** the graded `unloaded`
-   criterion term is trusted. If it is large, that term wants the threshold, not the magnitude.
+5. **FSR creep** — hold 175 g for 60 s and record the drift. ⚠ **DOWNGRADED 2026-10-01:** this
+   was written when the `unloaded` term was thought to read a magnitude. §5.7.12 established it
+   does not — it tests `max(foot_load)` once against a threshold and scores a *ratio of
+   touchdown counts* — so creep has to move a reading across 1536 counts to matter at all.
+   Still worth measuring as instrumentation; no longer gates anything. Measure it on the
+   **assembled** foot (§2).
+   ⚠ Measure it on the **assembled** foot: the wire preload and the unbacked socket floor are
+   both in the path ([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §2).
 6. **Ultrasonic mounting height and pitch** — the role is settled (forward, obstacle avoidance),
    but height and downward pitch set what it can see of the floor ahead. Record both.
 7. ~~**Whether the ultrasonic module's echo is already level-shifted**~~ — ⚠ **partially resolved
    2026-08-30**: the module drives GPIO22 (D3) directly and thousands of pings have been read
    without incident, so the HAT handles it. The high level was never metered with a scope;
    treat as "works", not as "characterised".
+8. **TODO — `bad_frac` has never been exercised.** The ToF's invalid-rate metric (§9.4) is the
+   channel's own honesty meter, and **every surface tried so far returned 0 invalid readings**
+   (§9.8): vinyl, black cloth, a desk, and a bench target. So the metric is shipped, plumbed to
+   both dashboards, and gating the "ToF plausible" self-check — on no evidence that it moves
+   when it should. **A metric that has only ever read zero is untested, not validated.**
+   Candidate surfaces, in order of likelihood: gloss at a slight tilt (specular return steered
+   away from the receiver — the case most likely to produce genuine invalids), deep carpet, and
+   anything actually low-reflectance at 940 nm rather than merely dark to the eye. Deferred
+   2026-09-08 by the operator; not blocking, because the channel is instrument-only and nothing
+   consumes it yet. **It blocks trusting `bad_frac` as a gate**, which is exactly what the
+   self-check currently does with it.
+9. **TODO — two fitted constants live in command-line flags.** `--r-shunt` (§3.3) and
+   `--tof-offset` (§9.2) are calibration data sitting on `ExecStart` in the systemd unit, where
+   this file cannot see them and a reinstall loses them. §3.3 already said `r_shunt` belongs in
+   calib JSON. **Move both to `pi_host/calib/` together**, since they have the identical
+   contract: a fitted number the record must carry so a later re-fit re-derives every sample.
+
+### 3.5 Inrush across a pose recall — ✅ MEASURED 2026-09-05
+
+The measurement the driver was written for (ledger 2026-08-29: a pose recall browns the Pi out
+on the shared 5 V/3 A rail, and A4 is blind to the transient). `hat_tool ina capture 12` at
+**1880 Hz**, trigger at t = 2.0 s: `pose.set` → `stand`. **Robot on the floor, carrying its own
+weight.** `ogma_host` is senses-only and `benchd` never touches the INA219, so the capture tool
+owned the part; the pose went through `benchd`, so there was only ever one writer to the servos.
+
+### ⚠ 3.5.1 First, the trap: `benchd`'s deadman truncates any unattended pose move
+
+**`DEADMAN_MS = 1000`, refreshed by *any* verb** (`benchd.cpp:37`, `:371`). While a channel is
+armed, a client that falls silent for one second triggers a `rescue` — a slew back to the
+`rescue` pose. **A script that fires `pose.set` and then waits is not measuring a pose recall.**
+It measures ~1 s of the move, then the rescue moving the other way, superimposed.
+
+This produced two invalid captures before it was caught. The tell was in `benchd`'s own log:
+
+```
+1197228 pose.set     {"us":[1455,...]}      <- the trigger
+1198248 deadman      {"trips":35}           <- 1.02 s later
+1198248 rescue       {"pose":"rescue","why":"deadman"}
+1201128 pose.landed                          <- the RESCUE landed, not `stand`
+```
+
+35 `deadman` / 35 `rescue` / 35 `pose.landed` against **2** `pose.set`. The trap is that the
+truncated capture looks perfectly plausible — a smooth hump, no clipping, a sane peak.
+
+**Two rules follow.** Keep the deadman fresh — ping at ≤ 200 ms for the whole move. And
+**verify the landing**: read `servos[].current_us` back and compare it to the target. Both
+captures were disproved by that one check.
+
+### 3.5.2 The measurement
+
+Keepalive at 200 ms; `current_us` verified equal to the target on all 12 channels; no new
+`watchdog_trips`.
+
+| | value |
+|---|---|
+| baseline (rescue pose, on the floor) | **0.654 A** (0.615–0.959) |
+| **peak** | **2.481 A at +1.305 s** after the trigger |
+| peak as fraction of PGA /8 range | **2481 of 32000 counts — 7.8 %** |
+| move complete | ~+1.75 s |
+| **holding `stand`** | **0.625 A** — at or below baseline |
+| cost of standing up | **0.726 A·s** above baseline ≈ 5.7 J at 7.8 V |
+| `vcgencmd get_throttled` | **`0x0`** — no undervoltage, not even the sticky bits |
+
+**The stagger works, and this shows how.** The peak is not a spike at t = 0 but a rise cresting
+at **+1.305 s** — the end of the 100 ms × 12 launch window, where every channel is slewing at
+once. The mitigation was written blind ("staggered + gentle: protects the Pi's rail"); this is
+the first evidence of what it does.
+
+**Holding costs nothing.** A standing quadruped rests on its gearboxes: with no position error
+the servos draw no more than idle. Holding (0.625 A) is *below* the splayed rescue pose
+(0.654 A), where legs sit near their limits. **The energy term lives in the transitions, not in
+the postures** — worth knowing before an energy cost is wired to anything.
+
+**PGA /8 is confirmed free.** The worst loaded transient reached 7.8 % of full scale. Narrowing
+the range would have bought no resolution (§3.3: 10 µV LSB on every range) and risked clipping.
+
+⚠ **Two limits on this number.** The **5 V rail is the constrained one and this measures the
+battery side** — 2.481 A at ~7.8 V is what the pack delivers, not what the 3 A regulator sees,
+and the INA219 cannot separate the Pi's share from the servos'. And the capture loop polls I²C
+at 1.9 kHz, raising the Pi's own draw ~120 mA: **compare capture-to-capture, never against
+§3.4's 0.469 A telemetry baseline.**
+
+**Not yet measured:** the same recall *unloaded* on a stand, for a load-vs-no-load comparison.
+The stand attempt on 2026-09-05 was one of the two deadman-truncated captures and was discarded.
+
+---
+
+## 3.6 Servo duty budget — concurrency sweep, ✅ MEASURED 2026-09-05
+
+**Question:** the 2026-08-29 brownout happened when all 12 servos moved at once. Where is the
+boundary, so a duty budget can be set?
+
+**Design.** Lever = **K**, the number of servos commanded inside one 20 ms tick, issued as K
+back-to-back `servo.set` verbs (which arm channels independently and bypass the pose stagger
+entirely; measured send spread 0.3–3.6 ms, so they start on the same tick or the next). Held
+constant: +400 µs travel, the driver's default 40 µs/tick slew, the rescue pose as home
+(splayed and low — the robot cannot topple as K climbs), direction, and channel order.
+**Channel order is knees first, one per leg** (`0,3,6,9` → hip2 `1,4,7,10` → hip1 `2,5,8,11`),
+so every added servo is a different leg. **4 repeats per K, interleaved round-robin**, so
+battery drain spreads across every K instead of aliasing onto the trend.
+
+**Metrics.** Baseline, raw peak, p99, and the peak of a **10 ms moving average**. The last is
+the one to read: a rail sags on sustained draw, and a single 532 µs sample is not that. A first
+attempt reporting raw peak from **one** trial per K was discarded — its repeated K=4 control
+came back 1.064 A against 1.419 A, a spread as large as the whole K=1→K=10 trend.
+
+**Tripwire:** `vcgencmd get_throttled` after every trial, aborting on the first non-zero.
+
+| K | peak A (mean ± sd) | **10 ms A (mean ± sd)** | over baseline | throttled |
+|---|---|---|---|---|
+| 1 | 0.844 ± 0.052 | **0.773 ± 0.039** | +0.170 | `0x0` |
+| 2 | 0.894 ± 0.032 | **0.823 ± 0.020** | +0.218 | `0x0` |
+| 4 | 1.082 ± 0.092 | **1.017 ± 0.079** | +0.412 | `0x0` |
+| 6 | 1.289 ± 0.075 | **1.247 ± 0.064** | +0.650 | `0x0` |
+| 8 | 1.630 ± 0.078 | **1.565 ± 0.068** | +0.974 | `0x0` |
+| 10 | 2.024 ± 0.056 | **1.947 ± 0.046** | +1.356 | `0x0` |
+| 12 | 2.272 ± 0.141 | **2.191 ± 0.138** | +1.601 | `0x0` |
+
+Baseline ~0.60 A throughout; pack 7.63–7.80 V, n=28 trials.
+
+**≈ 0.135 A per concurrent servo** (least-squares over K=1–12). The relation is mildly convex —
+marginal cost per added servo rises from ~0.05 A at K=2 to ~0.19 A at K=10 — so a linear budget
+is slightly optimistic at the top end.
+
+### 3.6.1 The stagger is defeated by its own gentleness
+
+The deployed pose move is **not** one leg at a time. Concurrency during a staggered move is
+
+```
+  K_concurrent  ≈  min(12,  travel_time_ms / stagger_ms)
+  travel_time_ms = (travel_us / slew_us_per_tick) × 20 ms
+```
+
+With the pose defaults (`slew 12 us/tick`, `stagger 100 ms`), the `rescue`→`stand` recall
+travels up to 940 µs on a channel = **1567 ms**, against a launch window of 12 × 100 ms =
+**1200 ms**. The first channel is still moving when the last one starts: **every channel ends up
+in motion together.** The stagger delays full concurrency, it does not prevent it.
+
+This is corroborated by the two independent measurements agreeing: the loaded `stand` recall
+peaked at **2.481 A** (§3.5), and this sweep puts **K=12 at 2.19–2.27 A** unloaded. Same regime.
+The recall's peak at **+1.305 s** is exactly where the launch window closes and all 12 overlap.
+
+**The knob is the ratio, not the stagger alone.** To hold a real one-leg-at-a-time K=3 at the
+current pose slew, the stagger would need to be ~520 ms, not 100 ms.
+
+### 3.6.2 What this does NOT establish
+
+⚠ **The boundary was not reached.** K=12 produced no throttle event — not one non-zero
+`get_throttled` in 28 trials. The 2026-08-29 brownout involved something harsher than a 400 µs
+step from a splayed pose: more travel, real body load, or a stall. **A duty budget cannot be set
+from this alone**; what the sweep gives is the *slope*, not the limit.
+
+⚠ **This measures the battery side; the brownout is on the HAT's 5 V rail.** The INA219 cannot
+see that rail and cannot separate the Pi's share from the servos'. `get_throttled` remains the
+only direct evidence of the rail failing, and it is binary and sticky.
+
+⚠ **Slew is the unmeasured second axis**, and it cuts both ways: a faster slew raises per-servo
+current but shortens the overlap window. This sweep held slew fixed at 40 µs/tick. The budget is
+two-dimensional and only one dimension has been measured.
+
+**To actually find the boundary,** in increasing order of cost: sweep travel and slew upward at
+K=12 until `get_throttled` moves; or put a sense wire on the 5 V rail and stop inferring it.
+
+---
+
+## 3.7 Where the cliff is — source impedance, ✅ MEASURED 2026-09-05
+
+The 2026-08-29 event was a **hard Pi shutdown**, not a throttle. That rules out
+`get_throttled` as the instrument: an unclean shutdown takes the reading with it, and the
+approach risks the SD card. **Pack sag is the leading indicator** — the HAT's regulator drops
+out below 6.0 V in — so `hat_tool ina sag` was added (shunt AND bus, both 12-bit, ~940 Hz).
+
+Fitting pack volts against current across a K=12 transient (a load already run 4× safely):
+
+```
+n=4700 samples   I 0.598-2.568 A   V 7.012-7.792 V
+fit:  V = 8.025 - 0.3943 * I        R_source = 394 mohm
+```
+
+| | value |
+|---|---|
+| open-circuit intercept `V0` | **8.025 V** (~4.01 V/cell, roughly half charge) |
+| **source impedance** | **394 mΩ** — pack + wiring + XH contacts + shunt |
+| sag already present at the K=12 peak | **1.01 V** (2.568 A → 7.012 V) |
+| **current at which the pack reaches 6.0 V** | **≈ 5.13 A** |
+| headroom from the K=12 peak | **2.57 A** |
+
+The fit predicts the observed minimum to 1 mV (8.025 − 0.394 × 2.568 = 7.013 vs 7.012 measured).
+
+**394 mΩ is high, and that is the real finding.** Cells account for maybe 100–160 mΩ of it
+(2S 18650 at 50–80 mΩ each). **The remaining ~250 mΩ is wiring, connector and contacts** — the
+single 3 A XH contact and cable gauge flagged in §3.1. Every milliohm removed there is bought
+back directly as brownout headroom, and it is the cheapest fix available.
+
+⚠ **Scope of the 5.13 A figure.** It is a **2× extrapolation** from 2.57 A; Li-ion series
+resistance is near-constant over this range, so it is defensible, but it is not measured. It is
+also **state-of-charge specific** — at a lower SoC `V0` falls and `R` rises, so the cliff moves
+closer. And 6.0 V is the HAT's *stated* input minimum; the actual regulator dropout may sit
+either side of it.
+
+### 3.7.1 The budget this implies — and the lever it is NOT
+
+**At the driver's default 40 µs/tick slew, concurrency is not the constraint.** §3.6 measured
+all 12 servos at once as 2.19–2.57 A, which is **half** the 5.13 A cliff. The historical
+brownout happened at **full speed**, and the slew limiter is exactly what "full speed" bypasses:
+40 µs/tick caps a servo at 2000 µs/s, well under an MG90S's own maximum velocity.
+
+**So the duty budget is a slew cap, not a concurrency cap.** §3.6's concurrency sweep found no
+boundary because it held the variable that matters fixed.
+
+A first cut, to be replaced by measurement:
+
+| quantity | value |
+|---|---|
+| hard limit (pack → 6.0 V, at this SoC) | 5.13 A |
+| working budget with margin | **≤ 3.5 A peak** (pack ≥ 6.65 V) |
+| cost per concurrent servo at slew 40 | ~0.135 A (§3.6) |
+| measured worst case so far, K=12 at slew 40 | 2.57 A ✅ inside budget |
+
+**Not yet measured: current vs slew rate.** That curve can be mapped entirely *below* the cliff
+— escalate slew at fixed K=12 and stop at 3.5 A — which yields the budget without reproducing
+the shutdown. **A stall hypothesis was raised and withdrawn:** the X pose's out-of-range 2500 µs
+entries are UI slider artifacts, and the servo map clamps to a calibrated in-range limit, so
+nothing drives into a mechanical stop.
+
+---
+
+## 3.8 Slew is the lever — and the 5 V rail is the real cliff, ✅ MEASURED 2026-09-05
+
+Sweeping **pose slew** at fixed motion (`rescue`↔`X`, `--pose-stagger-ms 0` so all 12 channels
+start on the same tick), 3 reps each, `hat_tool ina sag` at 940 Hz.
+
+| slew µs/tick | peak A (mean of 3) | min pack V | note |
+|---|---|---|---|
+| 12 | *1.64* | *7.37* | ⚠ **invalid** — 2000 µs at 12 µs/tick takes 3.3 s, longer than the 2.0 s window, so the servos reversed mid-flight |
+| 20 | 1.16 | 7.55 | |
+| 32 | 1.38 | 7.47 | |
+| 50 | **1.90** | 7.24 | |
+| 80 | 2.61 | 6.88 | |
+| 125 | 2.76 | 6.89 | |
+| 200 | 2.90 | 6.86 | **saturated** (vinyl) |
+| 320 | 2.86 | 6.84 | |
+| 500 | 2.96 | 6.81 | |
+| 800 | 2.93 | 6.83 | ⚠ **leather couch** from here |
+| 1300 | 3.04 | 6.70 | ⚠ leather couch |
+| 2000 | — | — | ⚠ leather couch · **💀 hard Pi shutdown, unclean reboot** |
+
+Within-point repeatability was excellent (e.g. 1.639 / 1.642 / 1.652 A), far tighter than §3.6.
+
+**Current saturates near 3.0 A above ~200 µs/tick.** Past that the limiter stops limiting: the
+servos are already at their own maximum velocity, and raising the slew number changes nothing.
+So "full speed" is reached at slew ≈ 200, not at 2000.
+
+### 3.8.1 The cliff is the 5 V regulator's current limit, not pack sag
+
+§3.7 extrapolated a pack-sag cliff at **5.13 A** (pack → 6.0 V). **The collapse happened at a
+pack voltage never observed below 6.70 V**, and at a measured current of ~3.0 A. The pack-sag
+model does not explain it — it was answering the wrong question, exactly as §3.7's own caveat
+warned.
+
+The arithmetic that does fit (**inference, not measurement** — the 5 V rail is not instrumented):
+
+```
+  slew 1300:  3.04 A x ~6.8 V  =  20.7 W drawn from the pack
+  less Pi + regulator idle     =  -4.6 W
+  servo share                  =  ~16 W  ->  3.2 A at 5 V even at 100% efficiency
+  plus the Pi's own 5 V draw   ->  ~3.4 A on a rail rated 3 A
+```
+
+**We were over the HAT's 3 A rating from slew ≈ 200 onward** and got away with it until a
+single-tick full-scale step on all 12 channels at once. That also explains 2026-08-29: the
+failure is a **regulator current limit**, which trips fast and hard, rather than a voltage sag,
+which would have shown as a droop first.
+
+### 3.8.2 The duty budget
+
+| slew µs/tick | peak battery A | verdict |
+|---|---|---|
+| ≤ 50 | ≤ 1.90 | ✅ **the budget** |
+| 80 | 2.61 | ⚠ at the edge |
+| ≥ 200 | ~3.0 | ❌ over the 5 V rail's rating |
+
+**The deployed defaults are already inside it** — pose slew 12, `NORMAL_SLEW_US` 40. The danger
+is any path that bypasses slew limiting entirely. **The budget is a slew cap; concurrency (§3.6,
+2.19–2.57 A for all 12 at slew 40) never was the binding constraint.**
+
+⚠ **Every number in that budget was measured on low-friction vinyl (§3.8.3) and is therefore
+optimistic.** Re-verify slew 50 and 80 on a high-friction surface before relying on them.
+
+### 3.8.4 Slew 40 vs 50 at the NORMAL slew — ✅ MEASURED 2026-09-13
+
+§3.8 swept **pose** slew over `rescue`↔`X` (up to 2000 µs of travel, twelve channels).
+The sim study recommends raising `ServoDriver::slew_us_per_tick` — the **normal** slew the
+brain's commands ride — from 40 to 50, so the question is what that costs *in the regime
+the brain actually uses*: small per-tick corrections, not pose slams.
+
+One channel (ch0 RL knee, 700→1300 = 600 µs travel, the range verified clear), `ina sag`
+at ~940 Hz, **ABBA-interleaved 3 reps** because hardware A/B has no seed and pack decay
+confounds arm order exactly like a lever effect (Phase 5).
+
+| slew µs/tick | n | baseline A | peak A | **10 ms-avg A** | servo's own share | min pack V |
+|---|---|---|---|---|---|---|
+| 40 | 6 | 0.566 | 0.752 | **0.677 ± 0.017** | 0.111 | 7.67 |
+| 50 | 6 | 0.572 | 0.740 | **0.672 ± 0.018** | 0.100 | 7.67 |
+
+**40 → 50 costs nothing: −0.005 A, −0.7 %, inside the ±0.018 spread.** The servo's own
+share over baseline is if anything slightly lower at 50. That is consistent with §3.8's
+saturation finding read the other way round — both 40 and 50 are far below the servo's own
+maximum velocity (saturation is ~200 µs/tick), so raising the cap mostly *shortens the
+move* rather than raising the draw.
+
+**The measured per-servo share, 0.10–0.11 A, brackets §3.6's 0.135 A** and is a little
+lower, as an unloaded leg on a stand should be.
+
+⚠ **WHAT THIS DOES NOT COVER, and the extrapolation that must not be trusted.** Scaling
+the per-servo share linearly gives 0.57 + 12 × 0.111 = **1.90 A** at slew 40 — but §3.6
+*measured* K=12 at slew 40 as **2.19–2.57 A**. The linear form understates by 15–25 %,
+exactly as §3.6 warned (the relation is "mildly convex", so a linear budget is "slightly
+optimistic at the top end"). **Where a direct measurement and an extrapolation disagree,
+the measurement wins** — this one is evidence about the *marginal cost of the slew change*,
+not about the twelve-channel aggregate.
+
+Still unmeasured for this change: twelve concurrent channels, **legs under real body
+load** (§3.8.3: grip converts free motion into work, and the same move cost 1.90 A on
+vinyl against 2.62 A on leather), and large travel. The recommendation to raise 40 → 50
+rests on the marginal cost being ~zero in the brain's regime, not on a twelve-channel
+re-verification.
+
+### 3.8.5 Twelve channels, loaded, on vinyl — ✅ MEASURED 2026-09-13
+
+`rescue → stand → stand_tall → stand → rescue`, 3 cycles, robot standing on vinyl,
+`vcgencmd get_throttled` as the tripwire (§3.6's method — the only direct evidence of the
+rail failing, and it is binary and sticky).
+
+| pose | i_a range (A) | vbat under load |
+|---|---|---|
+| rescue | 0.65 – 1.13 | 7.57 – 7.63 |
+| stand | 1.10 – 1.36 | 7.43 – 7.61 |
+| **stand_tall** | **1.43 – 1.75** | **7.40** |
+
+**Worst 1.746 A against a 3.0 A rail rating and a 3.5 A working budget — 58 % and 50 %.
+`0x0` throttled throughout.** `stand_tall` is the costliest, as more work against gravity
+should be. Lower than §3.5's 2.481 A loaded `stand` recall, which started from a different
+pose and therefore travelled further.
+
+⚠ **The averaging understates a transient.** `ina_i` is a 128-sample average on the part
+(~68 ms) read at 10 Hz, and the failure is a regulator current limit that trips fast. §3.6
+found raw peak only ~4 % above its 10 ms average at K=12, so the understatement is
+probably small — but **`get_throttled` staying `0x0` is the load-bearing evidence here,
+not the current figure.**
+
+⚠ **THIS IS THE POSE PATH, NOT THE BRAIN PATH.** `pose.set` uses `g_pose_slew_us` with a
+100 ms stagger; the brain commands every joint every tick at the *normal* slew. So this
+does not exercise the 40 → 50 recommendation. A `--normal-slew` flag now exists for
+exactly that test (it was a compile-time constant), and the brain-like A/B —
+all 12 channels driven via `servo.set`, `stand ↔ stand_tall`, ABBA at 40 and 50 — **was
+attempted and aborted on its own `vbat < 7.0` guard** at 6.83–6.93 V under load. Resting
+voltage recovered to 7.49 V, so the pack was sagging rather than flat, but §3.7 is the
+reason not to push it: at lower SoC `V0` falls and `R` rises, so **the cliff moves closer**
+— a nearly-drained pack is the worst time to run the one test that deliberately approaches
+it. **Re-run on a charged pack.**
+
+### 3.8.6 The BRAIN path at slew 40 vs 50 — ✅ MEASURED 2026-09-13
+
+All twelve channels commanded continuously via `servo.set` (the **normal** slew path, not
+`pose.set`'s staggered pose slew), body standing on vinyl, alternating
+`stand ↔ stand_tall`, **ABBA-interleaved** with `--normal-slew` set per arm.
+
+| arm order | slew | `i_max` (A) | throttled |
+|---|---|---|---|
+| 1 | 40 | 2.130 | `0x0` |
+| 2 | 50 | 1.917 | `0x0` |
+| 3 | 50 | 1.729 | `0x0` |
+| 4 | 40 | 1.635 | `0x0` |
+
+**★ The raw sequence declines monotonically — 2.130 → 1.917 → 1.729 → 1.635 — which is
+session drift, not a slew effect, and is exactly what ABBA exists to expose.** A reading
+of arms 1 and 2 alone would have said "slew 50 draws 10 % less"; a reading of arms 2 and 4
+would have said "slew 50 draws 17 % more". Both would have been reading the battery.
+
+ABBA puts A at positions 1 and 4 and B at 2 and 3, the same mean position, so a linear
+drift cancels: **slew 50 is −0.059 A (−3.2 %) against slew 40 — no penalty**, consistent
+with §3.8.4's per-servo result and with the saturation argument. **No throttle event in
+any arm.**
+
+⚠ **THE REAL FINDING IS NOT THE SLEW, IT IS THE SAG.** Three of the four arms **aborted on
+the `vbat < 7.0` guard**, at 6.82–6.96 V, around the fourth cycle. Between cycles the pack
+reads 7.7–7.9 V, so this is **~0.9 V of transient sag under sustained twelve-channel
+driving** — and it recovers, so the pack is not flat.
+
+That matters more for first power-on than either slew number. Pose moves are staggered and
+intermittent; **the brain drives every joint every tick, which is a heavier duty cycle than
+anything measured before today.** Against the HAT's 6.0 V input minimum, a pack resting at
+7.8 V has roughly 0.9 V of margin under that load — and a pack resting at 7.0 V would sag
+to about 6.1 V, which is at the edge. **The usable battery window for continuous brain
+operation is therefore much narrower than the pack's nominal 6.0–8.4 V range**, and the
+limit is sag under load, not capacity.
+
+**Re-use context:** the low-battery auto-safe trips at `VBAT_LIMP_V` = 6.4 V, which under
+continuous brain driving would be reached at a resting voltage around 7.3 V — i.e. the
+robot will rescue-pose itself while the pack still looks half full. That is the right
+behaviour and worth knowing before it surprises someone mid-run.
+
+### ★★★ 3.8.7 THE 6.4 V AUTO-SAFE CANNOT PROTECT THE PI — measured 2026-09-13
+
+An endurance run (continuous twelve-channel driving, `stand ↔ stand_tall`, default slew 40)
+was intended to find how long the robot lasts before the low-battery auto-safe trips.
+**It never tripped. The Pi hard-reset instead**, and the numbers at the moment of death are
+the finding:
+
+| last telemetry before the reset | |
+|---|---|
+| `vbat` | **7.66 V** (auto-safe is 6.4 V) |
+| `i_a` | **0.92 A** (rail rating 3.0 A) |
+| `i_max` over the whole run | 2.249 A |
+| `vbat` minimum over the whole run | 6.86 V |
+| `pi_throttled` | `0x50000`, sticky, **set 303 s earlier** |
+
+**Neither monitored quantity predicted the failure.** The pack was healthy at 7.66 V, and
+the current was 0.92 A — *below* the 2.25 A the same run had already survived. Read either
+instrument alone and nothing was wrong.
+
+**★ This extends §3.8.1 rather than merely confirming it.** That section established the
+cliff is the 5 V regulator's current limit, not pack sag. What today adds is that **the
+INA219 cannot see it either** — it sits on the *battery* side of that regulator, so it
+measures the input to the thing that is failing, not the failing rail. Two independent
+electrical instruments, both blind to the actual fault.
+
+**★★ `vcgencmd get_throttled` bit 16 IS the early warning, and it gave 5 minutes.** It
+went non-zero at `t_mono = 1299818` — with `vbat` at 7.77 V and only 0.82 A flowing, an
+entirely unremarkable moment — and the Pi ran another **303 seconds** before dying. That
+bit monitors the Pi's own 5 V supply, which is exactly the rail that fails.
+
+⚠ **`benchd` polls `pi_throttled` at 1 Hz, publishes it, and acts on nothing.** The
+low-battery auto-safe watches `vbat`, which this run shows is the wrong quantity. The
+robot had five minutes of warning on an instrument it was already reading.
+
+⚠ **The LIVE bits are useless at 1 Hz.** Across the whole run not one poll caught bits 0–3
+(`under-voltage NOW`, `currently throttled`) set — the events are shorter than the poll
+interval. Only the sticky history bits (16, 18) were ever observed. So a guard must watch
+for **new sticky bits appearing** against a baseline captured at start, not for a live bit.
+A reboot clears them (confirmed: `0x0` after the reset), which is what makes a start-time
+baseline meaningful.
+
+**Consequence for first power-on.** There is currently no protection against the failure
+mode that has now taken the robot down three times (2026-08-29, the network drop earlier
+today, and this). The endurance question as posed — "how long until the auto-safe trips" —
+**has no answer, because the Pi dies first.** The real endurance limit is thermal/electrical
+on the 5 V rail, not battery capacity.
+
+### ★★★ 3.8.8 THE POWER MODS — giving the Pi its own rail, and instrumenting the one it leaves
+
+> **Status: SPECIFIED, NOT BUILT.** Written after §3.8.7, which is the measurement that
+> makes them worth the effort. All three are reversible and none requires cutting the pack.
+> ⚠ **Mod A was re-specified 2026-09-14** around the operator's topology, which is better
+> than the original on every axis; the superseded version is kept at the end of §3.8.8.1
+> because the reason it was wrong is worth carrying.
+
+**The problem in one line:** the HAT's single **5 V / 3 A DC-DC feeds the Pi and all twelve
+servos**, so a servo transient pulls the rail the Pi lives on — and §3.8.7 measured the Pi
+dying from that at `vbat` 7.66 V with 0.92 A of bus current, with *both* electrical
+instruments blind because they sit on the battery side of that regulator.
+
+**The fix in one line:** **move the Pi, not the servos.** Lift the two header pins that feed
+5 V from the HAT to the Pi, and give the Pi its own regulator off the pack.
+
+---
+
+#### 3.8.8.1 Mod A — take the Pi OFF the HAT's rail ★ ✅ BUILT AND VALIDATED 2026-09-25
+
+> **✅ FITTED by the operator 2026-09-25** — separate BEC feeding the Pi, HAT 5 V pins lifted.
+> **Validated: at 2.07 A of servo current the Pi's own rail does not move.** §3.8.7 measured
+> the Pi *dying* at 0.92 A of bus current when the rail was shared. Evidence in §3.8.8.6.
+
+**The topology.** The pack feeds the INA219 as it does today. After the shunt the line
+branches: one branch to the HAT (which keeps its 5 V / 3 A DC-DC and keeps feeding all
+twelve servos), one branch to a new BEC that feeds **only the Pi**. The HAT's 5 V is then
+disconnected from the Pi by lifting the two header pins that carry it.
+
+```
+        ┌── HAT ── 5 V/3 A DC-DC ── 12 servos        (pins 2+4 to the Pi: LIFTED)
+pack ──[INA219]──┤
+        └── new BEC ── 5 V ── Pi (GPIO 2/4)          ── grounds stay bonded
+```
+
+**Why this way round.** The earlier specification moved the *servos* to the new BEC. This is
+better on four counts, and every one of them matters more than the effort saved:
+
+1. **The cut moves from a PCB trace to a connector.** Isolating the HAT's servo-rail feed
+   meant cutting copper on a shared net. Lifting two header pins modifies neither board.
+2. **The servos GAIN headroom.** They stop sharing the 3 A DC-DC with the Pi and get all of
+   it, instead of being migrated to an unproven supply.
+3. **The new supply carries the QUIET load.** The Pi's draw is near-constant; the servos are
+   the transient source. Putting the well-understood load on the new part is the lower-risk
+   assignment, and it leaves the known-sagging regulator feeding what it was sized for.
+4. **The Pi comes off the regulator that is the documented failure point** (§3.8.1, §3.8.7).
+
+| item | spec that matters | note |
+|---|---|---|
+| Step-down BEC / UBEC | **5 V out, ≥ 3 A**, 2S input (6.0–8.4 V) | the Pi alone; 3 A is ample, and 5 A buys margin for USB peripherals |
+| **Transient response** | ⚠ **must hold ≥ 4.8 V under load steps** | below that the Pi reports under-voltage and the original problem is rebuilt with extra steps |
+| Input pigtail | JST XH 2.54, 22 AWG on `+`/`−` | ⚠ **taps the pack `+` UPSTREAM of the shunt (as rewired 2026-09-25)**, so the INA219 sees the servos alone. Ground is common regardless — the shunt is in `+`, never the return |
+| Inline fuse | **2–3 A on the BEC input** | a GPIO 5 V feed bypasses the Pi's own input protection — the fuse is yours to provide |
+| Output | to the Pi's **GPIO pins 2 and 4** (5 V) | standard practice for HATs and UPS boards |
+| Common ground | **mandatory — every GPIO ground stays bonded** | the servo PWM lines reference the Pi's ground; lift those and the signals have nothing to swing against |
+
+**Lift pins 2 and 4 only, and do it reversibly.** In order of preference:
+
+| method | reversible? | note |
+|---|---|---|
+| **Pass-through / stacking header with positions 2 and 4 omitted** ★ | ✅ fully | neither board is modified; this is the one to use |
+| Kapton over the HAT's socket contacts for 2 and 4 | ⚠ mostly | crude; tape can shift and make intermittent contact — the worst failure kind |
+| Clipping the pins on the Pi's own header | ❌ never | destroys the Pi's header for any future HAT |
+
+⚠ **Meter before committing.** Confirm that pins 2 and 4 are in fact both driven by the HAT,
+and that the HAT is not back-feeding 3.3 V on pin 1 or 17. It almost certainly is not — the
+Pi generates 3.3 V — but *"almost certainly"* on a rail topology is exactly how the
+superseded version of this mod got written.
+
+**Three measured reasons this mod exists, accumulated independently:**
+1. **No limp is possible** on this HAT (2026-08-29) — a separate Pi rail means the servo
+   rail can have its own switch without taking the computer down with it.
+2. **Shared-rail brownout** (2026-08-29 pose recall).
+3. **§3.8.7** — the Pi dying with a healthy pack and unremarkable bus current, which no
+   battery-side budgeting can prevent.
+
+**A consequence worth more than the reliability fix.** Today a brownout kills the Pi, and a
+fatal event has no gradient — it destroys the learner rather than teaching it. After this
+mod the same brownout stops being fatal: the servos sag, and the Pi is alive to notice.
+**It moves the failure from outside the Markov blanket to inside it**, from an event that
+ends the run to a sensation the brain can have. That is the argument for doing it before
+first brain-on, not after.
+
+⚠ **Expect the failure to change species, not to disappear.** Servo-rail sag will start
+resetting the **HAT MCU** instead of the Pi. The driver already handles that — `forget_timers()`
+re-programs every channel after an MCU reset, and `benchd` runs SunFounder's own recovery
+every 20th bus error — but that path has never been deliberately exercised, and it should be
+once the mod is in.
+
+⚠ **It does not remove the need for the software guard** (§3.8.9), and it *does* take away
+the guard's best signal — see §3.8.8.5, which is not optional if this mod is built.
+
+<details><summary>⚠ <b>SUPERSEDED 2026-09-13 — the original Mod A, and why it was worse</b></summary>
+
+The first specification moved the **servos** to a new ≥ 6 A BEC and left the Pi on the HAT.
+It carried this warning, which is still true and is what makes it the wrong choice:
+
+> ⚠ The HAT's servo 5 V and the Pi's 5 V are the same net on the board, so this mod is not
+> a plug-in — it requires physically isolating the HAT's servo-rail feed.
+
+Both versions fix the shared rail. The superseded one pays for it with a board modification
+on a shared net, migrates the *transient* load onto the unproven part, and leaves the Pi
+alone on a 3 A supply it does not need — while the servos, which do need it, are the ones
+moved. **The error was framing the problem as "the servos need their own supply" when it was
+always "the Pi needs to stop sharing one."** Same separation, opposite and much cheaper cut.
+
+</details>
+
+---
+
+#### 3.8.8.2 Mod B — bulk capacitance at the Pi's 5 V input ⚠️ DOWNGRADED TO *SKIP IT* 2026-09-25
+
+> ⚠ **This said "cheap, partial, do it anyway" and that advice was written when the Pi's rail
+> was the thing at risk. It is not any more.** §3.8.8.6 measured the Pi's rail moving **4 mV**
+> at 2.07 A of servo current. There is no transient left for a capacitor to absorb, and Mod B
+> carries a real hazard of its own (inrush — see below). **Do not fit it** unless `EXT5V` is
+> observed actually dipping. The rest of this subsection is kept for that case, and for the
+> record of why the recommendation changed.
+>
+> **The one cheap thing that IS still worth doing:** the BEC sits at ~5.06 V with an idle
+> minimum of 5.0009 V, leaving ~0.2 V to the Pi's ~4.8 V undervolt threshold where the HAT
+> gave ~0.45 V. If the BEC has a trimpot, **~5.15 V buys that margin back for free.**
+
+A brownout is a *transient*. Local energy storage rides it out.
+
+| item | spec that matters | note |
+|---|---|---|
+| Electrolytic | **1000–2200 µF, ≥ 10 V, low-ESR**, 105 °C | ESR is the spec that matters — a high-ESR can cannot deliver current fast enough to be useful |
+| Placement | **as close to the Pi's 5 V input as the wiring allows** | the point is to be inside the inductance of the run; a cap at the far end helps much less |
+| Optional | 0.1 µF ceramic in parallel | the electrolytic is poor at high frequency |
+
+⚠ **Inrush is the hazard this mod introduces.** A discharged 2200 µF across the rail at
+power-on is briefly a short, which can trip the regulator or weld a connector — the
+failure being traded for is not free. If it misbehaves at switch-on, an inrush limiter
+(NTC thermistor in series, or a soft-start) is the fix, not a smaller cap.
+
+**What it will and will not do.** It buys milliseconds — enough for a servo inrush spike,
+**not** enough for a sustained twelve-channel overload. §3.8.6 measured ~0.9 V of sag
+under *continuous* driving; no practical capacitor holds that up. Mod B is for the sharp
+edge, Mod A is for the sustained load, and they address different halves of the problem.
+
+⚠ **With Mod A built, this cap belongs on the NEW rail** — at the Pi's end of the BEC run,
+not at the HAT. It is then guarding the BEC's transient response, which is the spec most
+likely to disappoint on a cheap part.
+
+---
+
+#### 3.8.8.3 What NOT to do
+
+⚠ **Do not power the Pi over USB-C while the HAT is connected.** The standing rule
+(§Power) is one supply path at a time. A second source backfeeding the HAT's regulator is
+a worse failure than the one being fixed.
+
+⚠ **Mod A does not repeal that rule — it changes what it points at.** Once pins 2 and 4 are
+lifted, USB-C no longer back-feeds the *HAT*; it collides with the **BEC** instead, and the
+two 5 V sources fight across the Pi's input. The rule stays "one source for the Pi", and the
+source is now the BEC. **Put that on a label on the robot**, not only in this document — the
+person most likely to plug in a USB-C cable for a quick bench session is the one who has
+stopped thinking about the power topology.
+
+⚠ **Do not raise `PSU_MAX_CURRENT` hoping for headroom.** It tells the firmware what the
+supply can deliver — mainly to budget USB — and does not change brownout behaviour.
+Claiming 5 A from a 3 A DC-DC removes a conservatism without adding a watt. Checked on
+this robot: the EEPROM sets only `BOOT_UART` and `BOOT_ORDER`, and the firmware exposes no
+brownout-tolerance key at all (`POWER_OFF_ON_HALT`, `PSU_MAX_CURRENT`, `WAKE_ON_GPIO` are
+the power-related ones).
+
+⚠ **The Pi 5 already throttles rather than dying, and it is not enough.** §3.8.7 shows it
+ran **303 s** with under-voltage and throttling flags set before the reset. The graceful
+degradation people reach for on a Pi 4 is present and was already doing its job; the kill
+is the PMIC refusing a deeper collapse, and there is no knob for that.
+
+---
+
+#### 3.8.8.4 The instrument that was there all along — `EXT5V_V`
+
+Both mods are aimed at a rail **neither electrical instrument can see** (§3.8.7): `vbat` and
+the INA219 sit on the battery side of the HAT's DC-DC, and the thing that fails is its
+output. `vcgencmd get_throttled` sees it, but only as sticky flags — a bit, not a volt.
+
+There is a third view, and it was dismissed too early. **`vcgencmd pmic_read_adc EXT5V_V` is
+the Pi's own measurement of the 5 V input the HAT feeds it** — a direct reading of the
+failing rail.
+
+⚠ **The earlier note that `pmic_read_adc` is "~0.7 s per read and useless for transients" was
+wrong, and the error was in what was being timed.** ~0.7 s is the cost of reading the
+*entire* ADC set. Naming one value is far cheaper.
+
+⚠⚠ **And the first correction of it, written earlier the same day, was also wrong — in the
+same way.** It said one value costs "85 ms median, 8.2 Hz", taken from the spacing of
+samples in the operator's `~/ext5v.log`. **That is the cadence of the logging script, not
+the cost of the call.** Timed directly on this Pi, n=50:
+
+| call | median | p95 | max |
+|---|---|---|---|
+| `vcgencmd get_throttled` (via `popen`, as `benchd` does it) | **1.5 ms** | 1.7 | 2.4 |
+| `vcgencmd pmic_read_adc EXT5V_V` (via `popen`) | **2.9 ms** | 3.1 | 4.5 |
+| *(for contrast)* spacing of samples in `~/ext5v.log` | 85 ms | 292 | — |
+
+So `EXT5V_V` would run at ~340 Hz and `get_throttled` at ~650 Hz. **Twice now the sampling
+rate of whatever was doing the reading has been recorded as a property of the part being
+read** — first the whole-ADC-set cost, then a shell script's loop. The lesson is the same
+both times: time the call, do not infer it from a log.
+
+**It is published as instrument-only.** `benchd` reports `ext5v` with an age in its status,
+and **no threshold is taken from it** — per the project's sensor-admission rule, a new
+channel proves itself as an instrument before anything is allowed to act on it. The
+software guard (`ogma::hw::RailGuard`) still triggers on `get_throttled` alone. What
+`EXT5V_V` buys right now is the ability to say what the rail was doing *before* the next
+reset, rather than inferring it from a flag that only records that something already went
+wrong.
+
+
+---
+
+#### 3.8.8.5 Mod C — an INA219 on the SERVO rail ★ required if Mod A is built
+
+**Is it necessary? Yes — and it is a better instrument than the one it replaces.**
+
+**What the split costs us.** `get_throttled` only works as a servo-load warning *by accident*:
+the servos and the Pi share a rail, so servo trouble shows up in the Pi's own supply flags.
+Mod A breaks that coupling deliberately. Afterwards the servo rail can sag as far as it
+likes and **the Pi's flags stay clean** — the guard in §3.8.9 will correctly go quiet and
+stop being a load signal at all. Building Mod A without Mod C trades a fatal failure for an
+*invisible* one.
+
+**Where it goes: a voltage tap on the servo 5 V rail.**
+
+| | |
+|---|---|
+| what it measures | **the HAT's 5 V DC-DC output** — the rail that has never had an instrument on it |
+| where to tap | the `+` and `−` pins of any **spare servo header** |
+| wiring | ⚠ **tie `Vin+` and `Vin−` together** to the 5 V rail — bus-voltage mode, no series element, no insertion loss |
+| ⚠ VCC | **from the Pi's clean side**, so the instrument survives the event it is measuring |
+| address | `0x40` is taken by the pack sensor; **strap `A0` for `0x41`**. `Ina219(bus, r_shunt, addr)` already takes the address |
+| rate | single-shot 12-bit is **532 µs (~1.9 kHz)** — see the §3.10 table |
+
+⚠ **Do not put the shunt in series with the servo rail.** That rail is internal to the HAT
+and distributed to the headers; inserting a series element means cutting into it, which is
+exactly the board modification Mod A was chosen to avoid. **Voltage is the missing signal
+anyway** — per-branch current is largely recoverable from the existing INA219, since the
+Pi's draw is near-constant and total − Pi ≈ servos.
+
+⚠ **Do NOT use the HAT's ADC for this.** Two independent reasons, the second fatal:
+1. `A0`–`A3` are committed to the FSRs (§5), and `A4` is the pack divider.
+2. **The ADC lives on the HAT MCU at `0x14`, which is powered by the servo rail.** An
+   instrument that browns out with the thing it is measuring reports nothing at the only
+   moment it matters. **This is the same error as the present INA219 sitting on the battery
+   side of the regulator that fails** (§3.8.7) — made once already, and the whole reason
+   this section exists.
+
+**Why it is an upgrade, not a patch.** Everything that has ever watched a failing rail here
+has been too slow or on the wrong side of it: `vbat` and the pack INA219 are upstream of the
+DC-DC, `get_throttled` is a sticky bit rather than a volt, and `EXT5V_V` polls at 100 ms
+(§3.8.9.1). At ~1.9 kHz on the rail that actually sags, **this would be the first instrument
+on the robot capable of resolving the 50 ms dip** that §3.5 measured and nothing has since
+been able to see directly.
+
+⚠ **Admit it instrument-only first.** Publish it, watch it under load, prove it separates
+the states it claims to — *then* let something act on it. Every sensor here is under that
+rule, and this one arrives with a strong prior about what it will show, which is precisely
+when the rule earns its keep.
+
+#### ★★★ 3.8.8.6 WHAT MOD A BOUGHT — ✅ MEASURED 2026-09-25
+
+> ⚠ **BASIS: every current figure below was taken BEFORE the 2026-09-25 rewire, so `i_peak`
+> includes the Pi's draw.** Subtract its near-constant share (~0.3–0.4 A at the pack) to
+> compare with anything measured after. The `EXT5V` and failure-signature results are
+> unaffected — they never depended on the shunt.
+
+**Conditions, because they bound every number here.** Robot **on the floor on its belly** —
+the servos are *not* bearing the chassis. Pack **7.1–7.5 V**, not full. **Mod C is NOT
+fitted**, so there is still no instrument on the servo rail. Treat every figure as a
+**floor** for a standing robot on a charged pack, not as the limit (§3.8.3 is what happens
+when a sweep's conditions go unrecorded).
+
+**(1) The separation holds at brownout-scale current.** Three `rescue ↔ stand` cycles:
+
+| | idle | under load |
+|---|---|---|
+| `EXT5V` mean | 5.0365 V | 5.0377 V |
+| `EXT5V` min | 5.0009 V | **5.0049 V** |
+| n | 35 | 148 over 16.1 s |
+
+**Worst-case movement of the Pi's rail: −0.004 V — the load minimum is 4 mV *higher* than
+the idle minimum, i.e. noise.** Meanwhile `i_peak` reached **2.068 A** and the pack sagged
+7.49 → 7.35 V, so the load was real. `throttled` `0x0`, 0 bus errors, 0 watchdog trips.
+
+⚠ **Read that against §3.8.7: the Pi died at 0.92 A of bus current on the shared rail.** At
+more than twice that current its rail is now flat. That is the mod working.
+
+**(2) The ceiling moved a long way.** Pose slew swept with the stagger held, then the stagger
+shrunk at the top slew using `X ↔ rescue` — the exact 2026-08-29 case:
+
+| pose slew | stagger | median move | i_peak | vbat min | bus err | verdict |
+|---|---|---|---|---|---|---|
+| 12 *(old default, 600 µs/s)* | 100 ms | 2.89 s | 3.37 A | 7.14 V | 0 | ✅ |
+| 400 | 100 ms | 1.39 s | 3.55 A | 7.32 V | 0 | ✅ |
+| 400 | 60 ms | **0.99 s** | 3.76 A | 7.10 V | 0 | ✅ **new recommended limit** |
+| 400 | 40 ms | 0.77 s | 3.76 A | **6.56 V** | **122** | ❌ cliff |
+
+**`pose_slew` 400 with a 60 ms stagger runs a pose recall in 0.99 s against the old 2.89 s —
+2.9× faster, with no failure signature at any point.** The old limits were set to protect a
+rail the Pi no longer lives on, and they were roughly 3× more conservative than the hardware
+needs.
+
+⚠ **Diminishing returns are structural, not a measurement artifact.** 33× the slew bought
+only 2.03× the speed, because twelve channels at a 100 ms stagger is a 1.2 s floor no slew
+can cross. **Past ~150 the stagger is the limit, not the slew** — which is why ladder 2 is
+where the cliff appeared.
+
+**(3) The failure changed species, exactly as predicted — and that is the real prize.** The
+cliff produced **122 I²C bus errors and nothing else**: no reset, no throttle flag, no
+watchdog trip, `rail_events` 0, `EXT5V` min 4.982 V. The Pi stayed up (36 min uptime), kept
+ticking at 50.0 Hz, and **kept the log that recorded its own failure**. Before the mod this
+same class of event took the computer down and the telemetry with it.
+
+⚠ **The stagger-40 cliff is CONFOUNDED with pack sag and is not cleanly a rail limit.** `vbat`
+fell to **6.56 V**, against the 6.4 V auto-safe — 0.54 V below the previous point. §3.7 already
+established source impedance as the governing term, so on a charged pack this cliff will sit
+further out. Do not quote "stagger 40 fails" as a hardware property.
+
+⚠ **`i_peak` here is a ~68 ms average, so the true peaks are higher than 3.76 A.** The INA219's
+telemetry config is 128-sample averaging (§3 table); the 532 µs single-shot config is what
+§3.8's figures used. By power balance 3.76 A at 7.1 V is roughly **4 A on the servo 5 V rail —
+above the HAT DC-DC's 3 A rating**, which is the likely mechanism for the MCU struggling. ⚠
+**Inferred, not measured: that is precisely the number Mod C would give directly.**
+
+#### ★★★ 3.8.8.8 THE CHARGED-PACK SWEEP — the pose path ran out before the robot did, ✅ 2026-09-26
+
+**Conditions.** Pi **upstream of the shunt**, so every current here is **servo-only**. Pack
+**7.96 → 7.91 V** (charged). Robot on the floor, operator-reported; `stand` measured to roughly
+double holding current over `rescue`, so it bears some weight.
+
+**The reference currents, now that the Pi is out of the channel:**
+
+| state | servo current |
+|---|---|
+| idle, holding `rescue` | **0.059 A** |
+| holding `rescue` (later sample) | 0.10–0.15 A |
+| holding `stand` | **0.213 A** |
+| peak during any pose move | **1.77 A** |
+
+⚠ **The Pi was ~0.50–0.55 A at the pack — most of the pre-rewire idle current.** Servo effort
+used to be a modulation on a 0.55 A offset and is now essentially the whole signal: about a
+**10× gain in usable dynamic range** for an effort percept, which is the real reason the rewire
+was worth doing.
+
+**The result: there is no cliff inside the adjustable range.**
+
+| pose slew | stagger | median move | i_peak | vbat min | failures |
+|---|---|---|---|---|---|
+| 12 *(old default)* | 100 ms | 2.87 s | 1.45 A | 7.85 V | none |
+| 400 | 100 ms | 1.43 s | 1.60 A | 7.88 V | none |
+| 400 | 20 ms | 0.55 s | 1.61 A | 7.84 V | none |
+| **400** | **0 ms** | **0.33 s** | 1.71 A | 7.88 V | **none** |
+
+**`pose_slew` 400 with zero stagger is the complete 2026-08-29 condition** — twelve channels
+starting together at high slew, the thing that took the Pi down in 0.5 s — and it lands a pose
+recall in **0.33 s against the old 2.87 s, 8.7× faster**, with no bus errors, no watchdog trip,
+no throttle flag and 0.05 V of pack sag.
+
+⚠⚠ **This did NOT find the ceiling. The ladder ran out.** `pose_slew` 400 / stagger 0 is the most
+aggressive move the pose path can express, so the honest claim is bounded: *the pose path's
+limits are no longer the binding constraint on a charged pack.* Finding the actual cliff needs a
+harder load than pose-to-pose motion — continuous driving, or the §3.6 concurrency path.
+
+#### ⚠ 3.8.8.9 The two sweeps are NOT comparable, and that is my error
+
+At the identical commanded point (`pose_slew` 400, stagger 100) the 2026-09-25 sweep peaked at
+**3.55 A** and this one at **1.70 A**. Removing the Pi explains only ~0.5 A of that.
+
+**Three variables changed between the runs at once:**
+1. the Pi left the measurement (−~0.5 A),
+2. the pack went from 7.1–7.5 V to 7.96 V,
+3. posture may differ — the earlier run's posture came from a **hardcoded string** and was
+   never checked (§3.8.8.7's sibling defect, fixed by making it a required argument).
+
+**So the 1.85 A difference is unattributable, and CLAUDE.md §3 rule 1 — one lever at a time —
+was broken.** Neither sweep is wrong; they are answers to different questions and must not be
+read as a before/after pair.
+
+**What the pair does jointly establish, and it is the useful part:** the earlier sweep found a
+real cliff (122 I²C bus errors) with `vbat` at **6.56 V**; this one found none with `vbat` never
+below **7.84 V**. **The cliff moves with pack voltage** — which §3.7 already predicted, source
+impedance being the governing term.
+
+⚠ **Therefore do not replace the old constant with a new one.** A fixed slew/stagger limit is
+the wrong *shape* of answer: whatever value is safe at 7.9 V is not safe at 7.1 V, and the
+2026-09-25 run is the evidence. Per CLAUDE.md §5 — *don't tune a constant to a signal's scale,
+adapt it from the system's own running dynamics* — the limit should be **scheduled on pack
+voltage, or better, closed on observed sag**. Mod C (§3.8.8.5) is what makes the closed-loop
+version possible, since it is the only way to see the rail the sag happens on.
+
+⚠ **Open, found while checking posture: the belly ToF returned three different clearances for
+two poses** — `rescue` 0.0952 m, `stand` 0.0522 m, `rescue` again 0.0042 m — every sample marked
+valid, n=29 each. Only the 0.0042 m figure is consistent with a belly-down chassis. Unresolved;
+it has the shape of a confident valid reading of the wrong thing, so treat clearance as
+unreliable until §9 is re-checked. It was not used for any number above.
+
+#### ⚠⚠ 3.8.8.7 The harness measured a stationary robot four times
+
+Recorded because the failure mode is general and it nearly put four fabricated results into
+this document.
+
+`pose.set` takes `us` as an array of 12. The test harness called `pose.set name=<pose>`, which
+returns `{"ok":false,"error":"us must be an array of 12"}` — **and the harness discarded every
+reply.** The robot therefore stood still through a Mod A acceptance test and three ceiling
+sweeps, each of which reported clean results: "the Pi's rail moves 5.4 mV under load", "no
+failure from slew 40 to 2000", "stagger 0 is safe". All of it was a robot at rest.
+
+**Four signals said so and each was explained away instead of investigated:**
+
+| signal | what it meant |
+|---|---|
+| identical current across a 50× slew range | nothing was changing |
+| identical 12.1 s point duration | that was the harness's own 3 s timeout, ×4 moves |
+| **0.02 V of pack sag across an entire ladder** | §3.8.6 sees ~0.9 V under real driving — **the loudest signal, and the one ignored longest** |
+| no `pose.set` / `pose.landed` records in the JSONL at all | the verb never succeeded |
+
+**Three fixes, in order of how much they generalize:**
+1. **The harness raises on `ok:false`.** A test that ignores error replies cannot detect that
+   it is doing nothing. This single property is what let all four measurements pass.
+2. **Timing comes from the daemon's own records** (`pose.set` → `pose.landed`), never from
+   polling. Polling reported the harness's timeout as the robot's move duration.
+3. **The sweep proves its own lever moved** before it may claim a ceiling — it compares median
+   move time across the slew range and refuses the table if nothing changed. It must fail
+   *loudly* when it cannot evaluate that; an earlier version skipped the check silently, which
+   is the exact condition it exists to catch.
+
+⚠ The same bug also voided §3.8.9.1(b) from 2026-09-13, which is marked withdrawn rather than
+deleted.
+
+#### 📋 3.8.8.10 Mod D — servo power through a distribution board, downstream of the INA219 — PLANNED 2026-10-05 (operator: parts being sourced)
+
+**Why, in one line:** since Mod A, the HAT's 5 V regulator current limit (§3.8.1, inferred
+2026-09-05) no longer browns out the Pi. It browns out the **HAT's own 3.3 V rail**, and with it
+the servo MCU, during brain gait. Ledger 2026-10-05 has the measurements:
+- **a rail estimate** (3.3 × INA pack V ÷ A4: the HAT's ADC measures the battery divider against
+  that rail) dips below 3.0 V 1.5 times a minute on carpet and 6 times a minute on concrete. The MCU
+  survives ~2.65 V and dies by ~2.5 V, at 0.1 resets per minute on carpet and 1.3 per minute on
+  concrete;
+- **battery-side current is capped** at ~3.5 A in every run (the regulator in limit), so the INA219
+  cannot see how far demand goes over it;
+- **the surface sets the rate:** grip converts motion into work, as §3.9 found for the transitions.
+
+The fix is to take the servo load off the HAT's regulator entirely. The PCB cannot be modified, so
+the servos' V+ comes from an external BEC through a distribution board, and the HAT keeps only its
+logic and the PWM signals.
+
+```
+ 2S pack +──[XT30]──┬──────────────────────────────► Pi BEC (Mod A, unchanged, upstream of the shunt)
+                    │
+                    └─[0.01 Ω shunt, heavy leads]──┬──[fuse 10 A]──[switch]──► UBEC 5.0 V, >= 8-10 A ──┬─► distribution board V+ (12 servos)
+                       (INA219 breakout: sense      │                                                 └── 1000-2200 uF low-ESR bulk cap
+                        lines only)                 └──────────────────────────────► HAT PWR IN (logic + MCU)
+ 2S pack −── star ground ──┬── HAT GND
+                           ├── UBEC GND ── distribution board GND (heavy)
+                           └── Pi BEC GND
+ per servo: HAT header PWM signal + GND ──► distribution board ──► servo; servo V+ from the board, NOT the HAT
+```
+
+**Parts:**
+- servo power distribution board with an external power input (signal and ground pass through, V+
+  from the input);
+- adjustable switching UBEC, **≥ 8–10 A continuous**, set to **5.0 V**. 12 × MG90S stall ≈ 0.7–0.9 A
+  each, and the true gait demand is unmeasured because the regulator has capped it;
+- a 1000–2200 µF low-ESR bulk capacitor (≥ 10 V) at the board's input;
+- an inline fuse (10 A) and a switch on the UBEC input;
+- XT30 and 18–20 AWG for the new high-current path.
+
+**Rules:**
+1. **No servo V+ may still reach the HAT's servo rail:** the UBEC would back-feed the HAT's regulator
+   output. Meter every channel before power-up.
+2. **The INA219 stays in the servo path** (operator's choice: downstream of the shunt, off the pack
+   connector), so it keeps measuring servo current, now uncapped: the first look at the true demand,
+   and the S1 calibration target. The breakout's screw terminals and traces are not rated for 8–10 A.
+   Carry the current on heavy leads soldered across the shunt and use the breakout only for its sense
+   lines. The XH pack contact (3 A, §3) must not carry the new path.
+3. **Common ground; servo return current on its own heavy path** to the star point, not through the
+   HAT's ground traces. Ground bounce through the HAT is a possible contributor to the resets, so
+   this matters.
+4. **5.0 V first:** the voltage the servos run at today, so the only change is a supply that does not
+   collapse. 6.0 V (more torque and speed, a hotter MG90S) is a separate later lever.
+5. **The UBEC is switched,** so "pause → power off → move → power on → SPACE" still cuts servo power.
+   benchd's staggered re-arm prevents a jump on power-up.
+
+**Pass criteria (one run on CONCRETE, the stress case, rail estimate and fast capture on):**
+- rail dips below 3.0 V: ~6 per minute → ~0;
+- HAT resets: ~1.3 per minute → ~0;
+- battery-side current exceeds the old ~3.5 A ceiling for the first time;
+- the HAT's reset detector and rail sensor stay in place as the regression check.
+
+### ★★★ 3.8.9 THE SOFTWARE GUARD — ✅ BUILT AND DRILLED 2026-09-13
+
+The mods in §3.8.8 are unbuilt. This is what protects the robot until they are, and it is
+the *only* thing that acts on the failing rail today.
+
+**What it watches.** `ogma::hw::RailGuard` takes `vcgencmd get_throttled` at 1 Hz and fires
+on a bit that was **not set at startup** appearing.
+
+⚠ **The sticky bits, not the live ones — and that is a measurement, not a preference.**
+Across the entire §3.8.7 run that ended in a hard reset, **no 1 Hz poll ever caught a live
+bit set**: the dips are shorter than the interval. A guard written against bits 0–3 would
+never fire and would look correct while doing nothing. Only the sticky history bits (16
+"has occurred", 18 "throttling has occurred") were ever observed.
+
+⚠ **The baseline is what makes a sticky bit usable.** Sticky bits do not clear without a
+reboot, so their presence says only "sometime since boot". What is actionable is a bit
+*appearing*. A reboot clears them — confirmed `0x0` after the reset — which is what makes a
+start-time baseline a real reference.
+
+**What it does.** On a fresh bit: command the `rescue` pose (the servos *are* the load),
+count the event, and **refuse `servo.set` / `pose.set` / `cal.begin` for 5 s**. Without
+that refusal the guard drops to rescue and the very next command re-loads the rail it just
+backed off.
+
+| published | means |
+|---|---|
+| `rail_events` | how many fresh-bit events since start |
+| `rail_baseline` | the guard's reference — without it, "nothing fired" cannot be told from a broken guard |
+| `rail_guarded` | the 5 s back-off is latched |
+| `rail_inject` | ⚠ **a drill is in progress** — `rail_events` is counting fault injection, not the rail |
+| `ext5v` | instrument only, no threshold taken from it (§3.8.8.4) |
+
+#### The drill — and why unit tests were not enough
+
+The transition logic has five unit tests. None can reach the question that decides whether
+the robot is protected: **is it connected?** A guard whose poll never calls `update()`,
+whose event never reaches `rescue()`, or whose back-off never refuses `servo.set` passes
+every unit test while doing nothing — and waiting for a real dip to find out means waiting
+for the failure that hard-resets the Pi.
+
+So `rail.inject` ORs bits into the polled mask **upstream of the guard**, running the
+identical path a real dip runs. `pi_host/tools/rail_guard_drill.py` checks the seven things
+the unit tests cannot. ✅ **All 17 checks pass on the robot** (`0x10000` injected against a
+clean `0x0` boot):
+
+| checked | measured |
+|---|---|
+| the 1 Hz poll reaches the guard | fired **0.21 s** after injection |
+| `rail_events` moves by exactly 1 | 0 → 1 |
+| the rescue pose is commanded | `rescue_active: true` |
+| `servo.set` / `pose.set` / `cal.begin` refuse | all three, with the rail message |
+| a held bit does not re-fire every poll | still 1 after 3 further polls |
+| the back-off lasts its configured 5 s | **5.0 s**, timed from the event |
+| clearing the injection is not itself an event | `rail_events` unchanged |
+
+⚠ **The re-fire check is not padding.** A guard that fired once a second for the rest of
+the boot would hold the robot in rescue permanently and present downstream as a dead servo
+bus — a failure that looks nothing like its cause.
+
+⚠ **Two drill results were misread before being checked, both in the same direction.** A
+second run reported *"the poll never calls update()"* — the guard was fine; it had absorbed
+the first run's bit, exactly as designed. And the back-off first printed `~1.8 s` against a
+5 s setting — the preceding 3 s hold had already spent the window. **Both times the
+instrument was measuring its own after-effects and reporting them as product defects.**
+
+#### 3.8.9.1 The fast-collapse question — ✅ two thirds answered, one third untestable
+
+The §3.8.7 failure was *slow*: `0x50000` appeared and sat there for **303 s** before the
+reset. The 2026-08-29 failure was *fast*: the Pi was gone **0.5 s** after `pose.set`. A
+guard that needs a second to notice is irrelevant to the second case, so the question is
+how much of that 500 ms the software actually spends.
+
+**(a) Detection latency — ✅ MEASURED, and a real defect fell out of it.** Injecting at
+random poll phase, reading both timestamps from the daemon's own monotonic clock:
+
+| | median | p95 | max |
+|---|---|---|---|
+| detection latency, n=20 | **46 ms** | 101 | **101 ms** |
+
+⚠ **The first attempt measured 80 ms and was wrong, because the instrument was creating
+the result.** The poll was `if (++throttled_poll >= 10)` inside `frame()` — and `frame()`
+is called by the telemetry thread at 10 Hz **and by every `status` RPC**. The drill polls
+status at 50 Hz while waiting, which drove the poll to ~6 Hz. **The guard was faster when
+someone was watching, and an unattended robot got the full 1 Hz** — unattended being
+exactly when the guard is the only thing looking at the rail. Now deadline-based at 100 ms,
+proven by interleaving watched and unwatched trials in one run: medians 52 ms and 34.5 ms,
+both capped at ~100 ms.
+
+**(b) The cost of the guard's own response — ⚠️ WITHDRAWN 2026-09-25, the robot never moved.**
+
+> ⚠⚠ **THE MEASUREMENT BELOW IS VOID AND IS KEPT ONLY TO MARK THE ERROR.** The script drove
+> the robot with `pose.set name=stand`. **`pose.set` takes `us` as an array of 12 and has
+> never accepted a name** — every call returned `{"ok":false,"error":"us must be an array of
+> 12"}`, and the harness discarded the reply. So the robot never left `rescue`: the
+> "holding in stand" figure and the "guard's rescue recall" figure are the same pose, and the
+> 0.92× was noise between two identical states. **Re-measure before quoting any of it.**
+> The harness now raises on `ok:false` rather than ignoring it (§3.8.8.6).
+
+⚠ **`rescue()` does not shed load. It cannot.** There is no limp on this HAT once
+initialized (§3.8.7); the servos are energized and holding whatever happens. `rescue()`
+calls `begin_pose_move()` on twelve channels — *added* current, on a rail that has just
+reported sagging — and a rescue recall is what took the Pi down on 2026-08-29. Measured
+from `stand`, over the full 8.2 s recall:
+
+| | mean | peak |
+|---|---|---|
+| holding in `stand` | 0.649 A | 0.690 A |
+| the guard's rescue recall | 0.604 A | **0.636 A (0.92×)** |
+
+**The recall draws less than standing still does**, and the pack sagged no further. Two
+reasons: the stagger fix (one channel per 100 ms at 600 µs/s, not twelve at 2000 µs/s) and
+`rescue` being a lower-torque pose than `stand`. ⚠ Measured *from `stand`*, which is a
+high-holding-current pose — from a low-torque starting pose the sign could reverse.
+
+**A gap found while measuring it:** `RAIL_GUARD_MS` is 5 s, the recall runs **8.2 s**, and
+`servo.set` checks neither `pose_move_active` nor `rescue_active` — leaving ~3 s in which a
+client could command a channel into a rescue that was still moving. The back-off is now the
+later of the two deadlines (verified: 8.3 s).
+
+**(c) Does the sticky bit get SET before the Pi dies? — ❌ DEFERRED 2026-09-13, not testable by injection.**
+Injection *assumes* the bit appears; it can only measure what happens afterwards. Whether
+the PMIC latches bit 16 before a 500 ms collapse takes the board down is a hardware race,
+and the only instrument that could answer it is a real brownout. **So the guard is proven
+to react in ~100 ms to a bit that appears, and remains unproven against a collapse fast
+enough not to set one.** ⚠ Nothing in (a) or (b) speaks to this, and the 100 ms figure
+should not be quoted as if it did.
+
+**Deferred deliberately, with the conditions to revisit.** The 2026-08-29 collapse is
+reproducible on demand (X → rescue, twelve channels at 2000 µs/s), so the experiment exists
+— it was not run because it ends in the hard reset it is testing, risking the SD card, and
+the guard is worth shipping without it. **Revisit when** any of: Mod A (§3.8.8.1)
+is built, so a brownout no longer takes the Pi with it — note that it also makes this test
+*safe to run*, which is the cheapest way it could be answered; a spare SD card or a read-only
+rootfs makes a reset cheap; or a bench supply can drive the 5 V rail down directly with no
+servos involved, which answers (c) without risking this robot at all — the cleanest form of
+the test, and the one to prefer if the hardware turns up.
+
+⚠ **Until then, do not let (a)'s 100 ms stand in for (c).** The guard is proven against the
+slow mode — which is the one that actually took the robot down on 2026-09-13, with 303 s of
+warning — and unproven against the fast one.
+
+
+### 3.8.3 The surface changed, and it splits the sweep in two
+
+**Slew 20–500 ran on a low-friction vinyl floor; slew 800, 1300 and 2000 ran on a leather
+couch.** The operator moved the robot mid-sweep because the X pose at high slew was slamming the
+chassis into the ground, and reported visibly higher draw afterward.
+
+**Why friction changes the electrical load.** On slippery vinyl the feet slide when a leg pushes:
+the body does not rise, and the servo turns against little torque. On grippy leather the foot
+holds, so the servo must actually lift the chassis. **Grip converts free motion into work**, and
+work is current. The couch was also compliant and slightly taller, which changes leg geometry
+on top of the friction.
+
+**What survives.** The saturation finding rests on slew 200/320/500 (2.90 / 2.86 / 2.96 A), all
+**vinyl** — one surface, so the plateau is real. Curiously the couch points (800: 2.93, 1300:
+3.04) sit right on that same plateau, which suggests the surface effect is small *once the
+servos are velocity-saturated*: at max velocity the current is dominated by acceleration rather
+than by steady load.
+
+⚠ **What does NOT survive: the 1300 → 2000 comparison.** Two things differ between the last
+surviving point and the collapse — a slew-limited ramp becomes a **single-tick full-scale step**
+on all 12 channels at once, **and** the robot is on a grippy compliant surface. Two variables,
+one outcome: **the collapse cannot be attributed to either.** The step is the better suspect (a
+simultaneous full-scale error draws startup current from 12 stalled rotors at the same instant,
+plausibly faster than 940 Hz sampling can even see), but that is a hypothesis, not a result.
+
+**To separate them, without approaching collapse:** re-run slew 320 / 500 / 800 on the grippy
+surface and compare against the vinyl values at the same slews. That isolates friction at
+constant slew and stays on the measured plateau.
+
+⚠ **Mechanical, not electrical:** at high slew the X pose slams the chassis into the ground.
+That is a hardware risk independent of the rail, and a reason to cap slew that has nothing to do
+with current.
+
+⚠ **Still the cheapest headroom:** the ~250 mΩ of wiring and connector impedance (§3.7).
+
+⚠ **Write captures OUTSIDE `/tmp`.** It is tmpfs. The brownout rebooted the Pi and destroyed
+every raw capture in this sweep, leaving only the printed summary — so the surface-change
+confound could not be tested afterward. **A brownout experiment must persist its evidence
+outside the thing it is trying to break.**
+
+---
+
+## 3.9 Friction isolation — the slew cap only works on a slippery floor, ✅ MEASURED 2026-09-05
+
+Same slews, same motion (`rescue`↔`X`, stagger 0 → K=12), same window, 3 reps — **surface as the
+only lever**, vinyl → leather couch.
+
+| slew | vinyl peak A | **couch peak A (mean ± sd)** | Δ | couch min V |
+|---|---|---|---|---|
+| 50 | 1.90 | **2.615 ± 0.113** | **+0.72 (+38 %)** | 6.82 |
+| 80 | 2.61 | **2.667 ± 0.112** | +0.06 (+2 %) | 6.80 |
+| 320 | 2.86 | **2.907 ± 0.090** | +0.05 (+2 %) | 6.73 |
+| 500 | 2.96 | **2.829 ± 0.026** | −0.13 (−4 %) | 6.78 |
+
+Baseline (0.59–0.63 A) and holding current (0.55–0.73 A) are unchanged by surface. **The entire
+effect is in the transition.**
+
+### 3.9.1 What this means: the lever depends on the floor
+
+**On the couch, current is flat at ~2.6–2.9 A from slew 50 all the way to 500.** Slew stops
+being a lever entirely. The mechanism is friction: on vinyl the feet slide, the body never
+rises, and a slow move costs almost nothing — so on that surface current tracks velocity. On
+leather the foot grips, so *any* move must lift the chassis, and load torque sets the current
+regardless of how slowly it is done.
+
+**This overturns §3.8.2's budget.** `slew ≤ 50` was the most surface-optimistic point in the
+whole sweep: 1.90 A on vinyl, **2.62 A on the couch — a 38 % rise, landing it at the same level
+as slew 320.** There is no slew setting that makes the `rescue`↔`X` transition cheap on a grippy
+surface; it costs ~2.9 A and sags the pack to 6.73 V however it is commanded.
+
+**The lever that survives both surfaces is the STAGGER.** Every measurement in §3.8 and §3.9 ran
+at `--pose-stagger-ms 0` — full concurrency. Staggering divides the peak by spreading channel
+starts in time, and unlike slew that works whatever the load per servo is. But §3.6.1 showed the
+deployed stagger is **defeated by its own gentleness**: at pose slew 12, travel time per channel
+(~1.5 s) far exceeds the 1.2 s launch window, so every channel ends up moving together anyway.
+
+| surface | slew cap | stagger |
+|---|---|---|
+| low friction (vinyl) | ✅ effective | ✅ effective |
+| high friction (leather) | ❌ **no effect** | ✅ effective |
+
+**Set the budget on stagger, sized against travel time (§3.6.1), not on slew.**
+
+### 3.9.2 The second shutdown was a STALL, not a budget overrun
+
+Slew 800 on the couch took the Pi down. **The operator observed a leg catching on a seam at the
+moment of the reset.** A snagged servo is a locked rotor: it draws several times its running
+current, indefinitely, and no duty budget prevents it because the trigger is terrain, not a
+command.
+
+⚠ **This is a distinct failure path and it deserves its own mitigation** — stall detection and
+release. The machinery is already present but unused for this: `ServoDriver` tracks
+`time_at_limit_s` per channel, and the INA219 now resolves a current step at 940 Hz (§3.7).
+A stalled channel held against an obstruction is exactly what those two together can see.
+
+⚠ **A stall also re-opens the mechanism §3.5 dismissed.** The earlier stall hypothesis was
+correctly withdrawn — the servo map clamps to in-range limits, so commands never drive into a
+stop. **Terrain does what commands cannot.**
+
+⚠ **`fsync` or lose it.** Captures were moved out of `/tmp` after the first brownout, but the
+slew-800 files are still **0 bytes** and the run log lost its final lines: `python3 -u` and
+`fprintf` are unbuffered *at the application level only*, and the page cache dies with the
+power. **Evidence from a brownout experiment must be fsync'd per record, or streamed off-box.**
+
+---
+
+## 3.10 Current as a telemetry channel — ✅ SHIPPED 2026-09-05
+
+`ogma_benchd` now owns the INA219 and publishes it in every 10 Hz frame. **Instrument only:
+nothing in the daemon or the brain consumes it.** With the part absent the frame carries
+`"ina": null` and every other behaviour is unchanged.
+
+```json
+"ina": {"ok":true,"i_a":-0.413,"v":8.084,"i_ema":-0.463,"i_peak":0.0,"i_max":0.0,
+        "charge_as":-87.9,"energy_j":-710.0,"r_shunt":0.01,"charging":true,"resync":false,"errors":0}
+```
+
+| field | what it is |
+|---|---|
+| `i_a`, `v` | instantaneous current and the INA219's **own** bus voltage — a second path to a number A4 also reports |
+| `i_ema` | **the slow metric**: τ = 30 s. Instantaneous current says nothing about duty |
+| `i_peak` | decaying peak-hold, τ = 60 s — the *recent* worst, not a number stuck on one old spike |
+| `i_max` | worst since daemon start |
+| `charge_as`, `energy_j` | what the robot has actually spent — the budget itself |
+| `charging` | see below |
+| `resync` | another process had reprogrammed `CONFIG`; this frame re-applied it |
+
+Time constants are in **seconds, converted per-sample** (`1 − exp(−dt/τ)`), so the numbers keep
+their meaning if the telemetry rate ever changes.
+
+**Consumers.** `picrawler-dash` gains a `power` line and a `slow` line. The Godot bench
+dashboard gains a `power` row and a **60 s scrolling graph** (`scripts/current_graph.gd`) sitting
+directly under `vbat` — the pair is the diagnostic, since sag without draw is a tired pack and
+draw without sag is a healthy one. The graph draws each column as the **min–max** of its samples
+(a per-column mean would smooth away the spike it exists to show), always keeps **zero and the
+3 A rail line** on screen, and runs a **pose-move activity band** along the bottom. That band is
+the point: a current trace with no record of what the body was doing is just a wiggle.
+
+⚠ **The 3 A line is the HAT's regulator rating — a datasheet fact, not the duty budget.** §3.9
+measured the budget to be surface-dependent (1.90 A on vinyl, 2.62 A on leather for the same
+move), so drawing a fixed budget line in an instrument people trust would be a lie.
+
+### 3.10.1 Charging runs backwards through the shunt
+
+First live reading was **−0.354 A** with `vbat` climbing: the charger feeds the pack **through
+the HAT input we instrumented**, so charge current crosses the shunt in reverse.
+
+- **Useful:** the sign is a plugged-in detector, and a real interoceptive state the robot could
+  eventually sense for itself.
+- **Dangerous:** while it is true, **every energy number is confounded** — the accumulators run
+  negative and any "what did that movement cost" reading is measuring the charger. Hence the
+  explicit `charging` flag and the banner on both dashboards.
+- `i_peak` / `i_max` floor at zero, because peak means *worst draw*; a signed peak-hold would
+  quietly report the charge rate instead.
+
+### 3.10.2 ⚠ Stop `benchd` before any high-rate capture
+
+benchd re-asserts `CONFIG` whenever it finds it changed (`Ina219::ensure_configured`), which
+keeps its own telemetry honest — **verified: 8 resync frames during a 2 s `hat_tool ina sag`,
+and zero frames with implausible bus voltage.** But the two processes then fight over the
+register, so **`hat_tool ina capture` / `sag` run against a live benchd is mutually corrupting.**
+
+**`sudo systemctl stop ogma-benchd` before a capture**, as the §3.8 slew sweep already did. Every
+capture in §3.5–§3.9 predates benchd owning the part and is unaffected.
+
+---
+
+## 9. The VL53L0X belly rangefinder — ✅ FITTED AND CALIBRATED 2026-09-07
+
+The downward belly-clearance channel: the `gc_raw` / `gc_norm` signal the promoted height
+homeostat rides. **Not** the forward ultrasonic (§7) — separate sensors, separate jobs, and
+crossing them would corrupt a promoted lever silently.
+
+Driver: `pi_host/src/Vl53l0x.cpp`. Bench tool: `hat_tool tof probe|watch|log`.
+
+### 9.1 Mounting — as built
+
+Mounted on a **solid boom off one of the HAT's own mounting screws**, on a standoff that puts
+the module about **4 mm below the top of the HAT**, looking down.
+
+| concern | as built |
+|---|---|
+| which face points down | the one carrying the **two shiny apertures** — VCSEL emitter and SPAD receiver, ~2.8 mm apart. On this breakout the chip is on the component side, so the **board mounts component-side-down**, connector facing up |
+| cover glass | **none.** Open path to the floor. Any window over the aperture couples emitter light straight into the receiver, and fixing that needs an air gap, an opaque barrier between the apertures, and a crosstalk calibration |
+| protective film | **removed.** Left on it does not block the reading — it gives a plausible wrong one |
+| XSHUT | **not wired.** The breakout pulls it up; `0x29` answering is the proof |
+| rigidity | boom + standoff, no tape. Measured sd is **1.51 mm, identical to the same sensor's sd on a static bench target** — so the mount contributes no measurable noise, and the spread is all sensor |
+
+⚠ **The cone is ~25° full angle**, so the spot is `0.44 × distance` across: ~29 mm at the
+belly-down standoff, ~51 mm at the sensor's own height above the floor. **Anything that enters
+that cone reads as floor.** A leg segment swinging through it returns a short distance and the
+homeostat reads that as *belly grounded* — see §9.5.
+
+### 9.2 The mount offset — ✅ FITTED 2026-09-07
+
+⚠ **`mount_offset_mm` is calibration data, on the same contract as the INA219's `r_shunt`
+(§3.3).** The published record is `raw_mm` as the chip reported it; clearance is derived
+host-side, so a later re-fit re-derives every stored sample instead of stranding the record.
+
+**Method: one point, at the end that matters.** With the **belly flat on the floor** the true
+clearance is 0 by definition, so the offset is simply the raw reading there. 243 samples off
+the live telemetry channel, robot still:
+
+```
+raw_mm   mean 64.84   median 65   sd 1.51   min 61   max 70
+drift    first half 65.02 mm -> second half 64.66 mm   (-0.37 mm over 25 s)
+signal   23.21 Mcps   ambient 0.030 Mcps      invalid 0/243
+```
+
+Unimodal, no settling. **`mount_offset_mm = 64.8`**, and re-reading belly-down after applying
+it gives **0.4 mm ± 0.69** — inside the sensor's own noise of zero.
+
+⚠ **The fit is only as repeatable as the belly-down pose itself.** Re-measuring the same
+resting baseline later, after the robot had been through a stand and a return to `rescue`, gave
+**66.5–66.6 mm** rather than 64.84 — a real +1.8 mm, several times the standard error, from the
+body settling differently on sprawled legs. So **the offset carries roughly ±2 mm of pose
+uncertainty**, which is larger than the sensor's own 1.5 mm noise and is the dominant error term
+in this channel. Re-fit with the belly deliberately flat, and treat sub-2 mm clearance readings
+as "down" rather than as a number.
+
+**Anchoring at belly-down is the deliberate choice, not a convenience.** It folds the sensor's
+own bias into the offset (§9.7: the part reads 8–11 mm long against a physical ruler), and
+in exchange it puts the calibration exactly at the dangerous end of the channel. A belly
+sensor that is honest at 0 mm and slightly optimistic at 50 mm is the right trade; the reverse
+is not.
+
+⚠ **The value currently lives in the systemd unit**, as `--tof-offset 64.8` on
+`ExecStart`. That is where `benchd` can read it today and it is the wrong home — a fitted
+constant invisible to anyone reading this file. `r_shunt` has the identical problem (§3.3 says
+it belongs in calib JSON and it is also a flag). **Both should move to `pi_host/calib/` together.**
+
+### 9.2.1 ⚠ THE ToF STOPS RANGING AND NEVER RESTARTS — observed 2026-09-13
+
+**Symptom:** the operator saw the ToF "stopped". Telemetry read `tof.ok = true`,
+`status = valid`, `raw_mm = 158` — a perfectly healthy-looking reading that was
+**240 seconds old**. `errors = 0`, `bus_errors = 0`. Nothing was flagged.
+
+**Cause, from the record.** The last fresh sample is at `t_mono = 238425173`; **0.2 s
+later a deadman fired (trip 601) and commanded the rescue pose**, and no measurement ever
+arrived again. A rescue is a twelve-channel move. The correlation is exact.
+
+**The part is fine.** With `benchd` stopped, `hat_tool tof probe` reports model `0xEE`,
+raw 69 mm, `valid`, signal 24.5 Mcps — immediately. `hat_tool` runs `init()` before it
+reads; **the VL53L0X had lost its continuous-ranging state**, and nothing in `benchd`
+restores it. Restarting `benchd` also fixes it, for the same reason.
+
+⚠ **`sample_tof()` treats a missing measurement as "not an error" forever.**
+`read_ready()` polls `data_ready()`; if the part is no longer ranging that is false on
+every call, so the previous reading stands, `age_ms` climbs, and **no code path ever
+re-initialises the sensor**. The staleness is published and nothing acts on it.
+
+**Rate: ~1 failure in 600 pose moves.** It survived 600 deadman rescues in this session
+and died on the 601st, so this is a marginal transient, not a deterministic logic fault.
+Rare, and therefore easy to not see coming.
+
+**★ THE INA219 WAS UNAFFECTED, which narrows it.** Through the whole ±8 s window around
+the stall the INA219 — **same I²C bus, same HAT 3V3** — reported `ok = true` and
+`errors = 0` without a break, and `vbat` sat flat at 7.85–7.95 V with no dip. So this was
+**not** a bus-wide corruption event and **not** a supply collapse deep enough to disturb
+every device. (Battery voltage staying flat does not by itself clear the 5 V/3V3 rails —
+§3.8.1 already established the real cliff is the regulator's current limit, not pack sag —
+but a dip that reset the VL53L0X while leaving the INA219 untouched has to be either very
+localised or a difference in the parts' sensitivity.)
+
+The two devices are not comparable in how much state they hold: the INA219 has a handful
+of config registers, while the VL53L0X carries an elaborate ranging state machine set up
+by a long boot sequence. **A perturbation too small to trouble the INA219 can still drop
+the ToF out of continuous mode**, which is consistent with everything observed.
+
+⚠ **A SEPARATE I²C CONNECTOR DOES NOT GIVE A SEPARATE BUS ON THIS HAT.** §1's interface
+table: the 4-pin P2.54 header and the SH1.0 QWIIC connector are **both GPIO2/3**, sharing
+the HAT's on-board 10 K pull-ups. Re-terminating the ToF onto QWIIC improves the
+*mechanical* connection — shorter leads, a positive-latching connector instead of parallel
+flying leads, less noise pickup and one less intermittent-contact failure mode, all of
+which are worth having — but it is electrically the same bus and would not have prevented
+this. A genuinely separate bus would need a second I²C, and §1 records that only GPIO7 and
+GPIO20 are unlisted, neither broken out (and GPIO20 is now the speaker enable), so there
+is no free pair for an `i2c-gpio` overlay.
+
+⚠ **WHY THIS MATTERS FOR FIRST POWER-ON.** `ground_clearance` is the **promoted** height
+homeostat's input — the lever that replaced the god's-eye `chassis_y_norm` and solved the
+hump. If it freezes mid-walk, the homeostat keeps defending a belly clearance the robot
+had *minutes* ago, while reporting itself healthy. Worse, the freeze is most likely during
+a large multi-servo move, which is exactly when the body is least settled.
+
+**✅ FIXED 2026-09-13 — escalating recovery, counted.** `benchd` now checks
+`model_id_ok()` first (a part that does not answer at all is a wiring or power fault, not
+a ranging one, and is counted as `unreachable` rather than hammered), then tries a cheap
+`stop/start` of continuous mode, and only escalates to a full `init()` if the cheap
+restart demonstrably did not take. The decision lives in `ogma::hw::TofRecoveryPolicy`
+(header-only, four unit tests) because `benchd`'s copy sits inside a thread-and-socket
+struct no test can reach. `tof.restarts` / `tof.reinits` / `tof.unreachable` are published
+in telemetry.
+
+✅ **VERIFIED ON THE ROBOT 2026-09-13, deterministically.** Waiting for the natural event
+was tried first and abandoned as underpowered: a soak produced **128 deadman trips in 520
+cycles** (the rescue's own `rescue_until_ms` window swallows some gaps) with no stall, and
+at a ~1-in-600 rate even 600 trips leaves P(zero events) ≈ 37 %. Roughly 1800 trips would
+be needed for 95 % confidence — hours of servo cycling to exercise a few register writes.
+
+So the stall is now **injected** (`tof.stall confirm=true`, PROTOCOL §verbs), which
+reproduces the observed failure exactly: the part stays addressable and simply stops
+producing measurements. Sampled at 10 Hz:
+
+| t (s) | age_ms | raw_mm | clearance_m | status | valid | restarts |
+|---|---|---|---|---|---|---|
+| 0.00 | 0 | 70 | 0.0052 | valid | true | 0 |
+| 0.11–0.93 | 102→928 | 8191 | 1.2000 | signal | **false** | 0 |
+| **1.04** | 1033 | 8191 | 1.2000 | signal | false | **1** |
+| 1.14 | 0 | 68 | 0.0032 | valid | true | 1 |
+
+**The cheap restart was sufficient** (`reinits` stayed 0), it fired at the 1 s threshold,
+and it did not thrash afterwards.
+
+### ⚠ 9.2.2 THE TEST FOUND A WORSE BUG THAN THE ONE IT WAS VERIFYING
+
+The **first** injection run, before the fix below, published this for the whole second
+between the stall and the recovery:
+
+```
+  t=0.11 .. 0.94   raw_mm = 0   clearance = 0.0000 m   status = valid   valid = TRUE
+```
+
+Stopping continuous ranging emits one final reading of `raw_mm = 0` carrying
+`status = Valid`, and `raw_to_clearance_m()` floors the resulting negative at **0.0**. So
+the channel handed the **promoted** height homeostat a confident *"the belly is on the
+floor"* — precisely the input that drives its setpoint ratchet (ledger 2026-09-13). This
+is the project's exactly-round-null shape, except **zero is not a neutral null on this
+channel, it is the alarm value**. Absence would have been safe; a plausible extreme was
+not.
+
+**Fixed:** `valid = (status == Valid) && raw_mm != 0`. After it, the same injection
+reports `raw 8191 / status signal / valid false / 1.2000 m` — the far-limit stand-in the
+driver already uses for "saw nothing", which errs toward *belly held high* and is the safe
+direction. `ogma_host` gates its publish on `status == Valid`, so the promoted topic goes
+**absent** rather than wrong.
+
+⚠ **The validity bound is deliberately not tighter.** "Reject anything at or below
+`mount_offset_mm`" is tempting — a target closer than the 64.8 mm recess is geometrically
+impossible — but **belly-on-the-floor reads `raw ≈ mount_offset`** and noise puts it either
+side, so that rule would discard the one measurement this channel exists to make.
+
+**The original diagnosis, for the record.** `benchd` needs to re-initialise the part when a
+measurement has been missing for much longer than the timing budget (32.9 ms, so healthy
+readings arrive ~30 Hz; ~1 s of silence is ~30 missed measurements and is not ambiguous).
+⚠ Two constraints on that fix: `sample_tof()` runs inside `frame()`, which holds the
+state mutex the servo tick also takes, and a VL53L0X `init()` is the long boot sequence
+(SPAD selection, ~80 tuning writes, two calibrations) — so it must **not** run inline
+under the lock. And any auto-recovery must be **counted and published**, or it will hide
+the electrical marginality that causes it rather than surfacing it.
+
+### ★★★ 9.9 THE BOOM RE-READ, AND WHY CALIBRATION MUST NOT MOVE INTO BRAIN INIT — ✅ 2026-09-26
+
+Prompted by an operator observation (±~3 mm of fluctuation standing still) and a question worth
+its own section: *should ToF height calibration be part of brain init?* Measured on vinyl,
+`pose_slew` 12 / stagger 100, signal **24.2 Mcps** against **0.031** ambient (SNR ~780:1, so the
+part is healthy and every number below is its ranging noise at strong return, not a weak echo).
+
+| pose | raw | sd | n | clearance (stored offset) | pitch | roll |
+|---|---|---|---|---|---|---|
+| `rescue` | 69.0 mm | 1.24 | 49 | +0.0042 m | +0.03° | +0.71° |
+| **`X` (belly ON floor)** | **68.0 mm** | 1.97 | 76 | **+0.0032 m** | −0.01° | +0.82° |
+| `rescue` again | 70.0 mm | 1.35 | 45 | +0.0052 m | +0.03° | +0.73° |
+
+**Four results, and the third is the one that decides the question.**
+
+**(1) The stored offset is 3.2 mm PERMISSIVE.** Belly-down measures 68.0 mm against a stored
+64.8, so with the belly flat on the floor the channel still reports **+3.2 mm of clearance**. ⚠
+The direction matters: **a threshold written as `clearance < 0` can never fire.**
+
+**(2) The 2026-09-26 91 mm excursion did not reproduce.** `rescue` read 69.0 and 70.0 mm either
+side of the X measurement — **1.0 mm apart**. That earlier 0.0952 m sample was a one-off and
+should not be treated as a channel property; what it does justify is never trusting a single
+clearance sample.
+
+**(3) ⚠⚠ `rescue` and `X` are only ~1.5 mm apart in raw range, against a sd of 1.5–2.0 mm — an
+SNR of about 1.** The pose that holds the belly *off* the floor and the pose that puts it *on*
+the floor are, to this sensor, nearly the same reading. **This is the argument against a
+boot-time calibration, and it is a measurement rather than a preference:** an init procedure
+would anchor on a reference it cannot resolve from its neighbour, using a handful of samples,
+and inject more error than the 3.2 mm it set out to correct. §9.2's careful multi-point fit is
+better than anything a boot routine can produce, which is why the 3.2 mm above is **recorded and
+deliberately not applied**.
+
+**(4) Attitude costs nothing in a static pose — and dominates in a moving one.** Pitch was
+**±0.03°** in both poses, so none of the spread above is tilt. But the boom sits ~70 mm aft
+(§9.1), so pitch enters at ~`70·sin θ` — **about 12 mm per 10°**. Set that beside result (3):
+**the signal of interest is ~1.5 mm and the pitch artifact is tens of mm.** During a gait this
+channel is closer to a pitch sensor than a height sensor, by an order of magnitude.
+
+⚠ **Hardware applies NO tilt compensation.** The sim has `tof_boom` (`tof_boom_z = -0.07`) and
+`tof_tilt_comp`, both defaulting off; `benchd` has neither, and `tof_m` is `raw − offset` with no
+attitude term. **This, not calibration drift, is the thing to fix first** — no calibration
+repairs a channel that is measuring the wrong quantity.
+
+#### 9.9.1 So: what SHOULD happen at init, and what the FSR toes actually break
+
+**The question conflates two constants that fail differently.**
+
+| constant | what it is | do the ~1 cm FSR toes break it? |
+|---|---|---|
+| `tof.mount_offset_mm` = 64.8 | sensor → belly-plane geometry, anchored belly-down | **No.** Belly-down means the belly is on the floor; toe length does not move the belly plane relative to a HAT-mounted boom. ⚠ Confirm the longer toes still *reach* belly-down in `X` |
+| `ground_clearance.stand_m` = 0.06 | the normalizer the promoted height homeostat rides | **Yes** — longer legs stand taller. ⚠ And it *must* match the sim's `GROUND_CLEARANCE_STAND`, so it cannot be re-fitted on the robot alone |
+
+⚠ **UPDATE 2026-09-27 — "the ~1 cm toes" are 1.7 cm.** The foot is designed and printed, and
+its stack measures 19.90 mm from the socket mouth to the ground contact
+([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §1.3). At the likely 3 mm of leg
+insertion that is **+16.9 mm of `L3`** and **+16.6 mm of standing height — 28 % of the 60 mm
+normalizer**, against 22 % more `L3`. Recommendation 4 below is the one that survives this;
+recommendations 1–3 are unaffected, and `mount_offset_mm` still does not move.
+
+**Recommended, in the order the measurements justify:**
+
+1. **Tilt compensation on hardware**, matching the sim's `tof_tilt_comp`, publishing raw *and*
+   compensated *and* the pitch used — result (4) makes this the only change that matters for a
+   moving robot, and publishing the pitch is the rule about confounds riding in the channel.
+2. **An init-time health CHECK, never a calibration.** In `X`, compare against prediction and
+   **fail loudly** on disagreement past the noise floor. It catches a fitted toe module, a
+   bumped boom, or the wrong surface, without silently moving a constant. ⚠ Its gate must clear
+   ~3 sd ≈ **6 mm**; anything tighter will cry wolf on result (3)'s noise alone.
+3. **One absolute number, and make it the grounding threshold** — in raw mm against the measured
+   standoff with an explicit margin, **not** `clearance < 0` (result 1), and **not** tighter than
+   ~6 mm (result 3). Toe length never enters it.
+4. **Make `stand_m` adaptive** rather than fitted, per CLAUDE.md §5 — a running normalizer
+   absorbs a 1 cm leg change in seconds and deletes the FSR problem. ⚠ It feeds a **promoted**
+   lever and is shared with the sim, so it is a two-body port under the gain-0 / byte-identity
+   bar, not a constant to edit.
+
+⚠ **A boot-time absolute zero would be wrong for a further reason:** §9.8 measured surface
+dependence, so a zero taken on vinyl at boot is a zero for vinyl — and terrain is the point.
+
+### ★★★ 9.10 BOOM TILT COMPENSATION — ✅ BUILT AND VALIDATED 2026-09-26
+
+`ogma::body::ground_clearance_boom()`, shared by both bodies, computing
+
+```
+belly_clearance = d·up.y − ( H·up.y + boom_z·up.z )        H = sensor-above-belly, boom_z = −0.070
+```
+
+with `up` the **fused** gravity estimate (`ImuAttitude::up_fused`) — never an exact basis,
+because the estimate is the only attitude a robot has.
+
+⚠ **The offset is taken from the BELLY PLANE, not the body origin, and that is what made the
+port possible.** About the origin the formula needs a third number — how far the belly sits
+below it — which this robot has never fitted. Taken from the belly it cancels exactly, leaving
+`H` (which *is* the fitted `mount_offset_mm`) and `boom_z`. Both are calibration data already
+owned, and `H` is **derived** from the loaded offset rather than duplicated, so the two cannot
+drift apart.
+
+**Validated on the robot by its own predicted magnitude**, which is the only test that works
+here: pitching by trimming leg lengths changes the belly height too, so "clearance stays
+constant" would prove nothing. What *is* predictable from attitude alone is the size of the
+correction, so that is what was checked.
+
+| knee trim | pitch | `comp_delta` | `−boom_z·up.z` | residual |
+|---|---|---|---|---|
+| 0 | −0.84° | +1.01 mm | +1.02 mm | −0.02 mm |
+| +120 µs | +0.94° | −1.17 mm | −1.15 mm | −0.02 mm |
+| −120 µs | **−3.51°** | **+4.19 mm** | +4.28 mm | **−0.09 mm** |
+
+**Sign correct at 4/4 tilted points** (nose-up → **positive** correction), checked separately
+because ⚠ **a sign error doubles the artefact instead of removing it and still looks
+plausible.**
+
+> ⚠ **CORRECTED 2026-09-27: this parenthetical originally read "nose-up → negative
+> correction", which is backwards.** The table above was right and only the label was wrong,
+> so nothing downstream of the measurement moved — but the same inverted reading DID
+> propagate into §9.10.3's safety claim, where it mattered. **Nose-up is NEGATIVE
+> `pitch_deg`**: `pitch_deg = atan2(−up.z, up.y)`, and the axis map (§4.1) makes the sim body
+> frame `+Z` forward, so pitching the nose up drives `up.z` **positive** and `pitch_deg`
+> negative. Measured directly: front feet on a 46 mm shim took pitch from −0.94° to −13.41°
+> with `up.z = +0.232` and `comp_delta = +14.6 mm`. Read the table with that in mind — its
+> −3.51° row is a **nose-up** point.
+
+★ **The residual is not noise — it is the term the prediction omits.** The check predicted only
+the leading `−boom_z·up.z`, dropping `(d−H)(up.y−1)`. At 3.51° that term is
+`0.053 × (1−cos 3.51°) = 0.10 mm`, against an observed **0.09 mm**. So the deployed formula is
+confirmed in its second-order behaviour, not merely its slope. ⚠ And that term is **not**
+negligible at gait pitches: ~1.8 mm at 15°, which is why `benchd` uses the full form and the
+approximation above is only the yardstick.
+
+⚠ **TESTED RANGE IS ONLY −3.5° TO +0.9°.** Differential knee trim measured out at
+**~0.0125 °/µs** — ±120 µs buys ±1.5° about the baseline, a 4.45° span from ±12.6° of knee
+angle. Extrapolation to the 10–15° a gait reaches is **model-based, not measured.**
+
+⚠ **And knee trim cannot get there.** 10° would need ~±800 µs of differential trim, which puts
+`stand`'s 1455–1620 µs knees at 2255–2420 — at or past the 2300–2400 envelope. **Use a wedge**
+to validate at gait amplitude, not a bigger trim.
+
+**The deadman was ruled out as a confound, positively rather than by silence.** `sensors.json`'s
+servo note warns that with no fresh client command `benchd` commands the **rescue pose**, and
+that a small excursion "looks like nothing happening" — which would have faked exactly this weak
+response. Three checks say it did not happen here:
+1. `handle()` sets `last_client_ms` on **every** verb including `status`, and the sampler polled
+   at 10 Hz, so `client_fresh` never lapsed;
+2. the `deadman` records in the JSONL sit **139–185 s after the last `pose.set`** — the idle
+   stretch after the script exited, not inside it;
+3. pitch responded **monotonically** to trim in both directions, which a pose being pulled back
+   to rescue could not produce.
+
+⚠ **Minor, noted in passing:** while idle and armed, the deadman re-fires on a **~9.2 s cycle**
+(the 8.2 s rescue window plus the 1 s deadman), re-commanding rescue indefinitely. Harmless
+when already in that pose, but it is why `watchdog_trips` climbs on a robot nobody is driving.
+
+#### 9.10.1 Shipped at gain 0, and what remains
+
+⚠ **`m_comp` is published ALONGSIDE `m`, never instead of it.** `m` feeds the **promoted**
+height homeostat through `ground_clearance()`; substituting the corrected value underneath it
+would change a promoted input with no A/B — a lever masquerading as a bug fix. The frame now
+carries `m_comp`, `comp_delta` and **`comp_valid`**, the last because the correction needs
+attitude and must say so rather than quietly emitting the uncorrected number under the
+corrected name.
+
+**Remaining, in order:**
+1. ✅ **DONE 2026-09-27 — the sim is swapped onto the shared helper**, via `StrideMath`
+   (`ground_clearance_boom`, `ground_clearance_boom_uncomp`). Only the raycast stays in
+   GDScript; the geometry is the robot's too, so it lives in `cpp_core`.
+   **Gate: byte-identical on the `tof_boom=ON / tof_tilt_comp=OFF` arm** — the arm where the
+   swapped code actually runs — over a 400-step seed-7 corridor run. Full stdout matched as
+   well, differing *only* in stack-trace line numbers shifted by the added comments.
+   ⚠ **State the gate's size, not just its verdict: 6 diagnostic lines, 18 `gc_*` values.**
+   Adequate to catch a changed formula, thin as a regression net.
+   ⚠ **The ON arm's change is NOT observable in that run**, and that is expected rather than
+   reassuring: the corridor posture sits at `tilt` ≈ 0.001 rad, where the divergence
+   `bottom·(1−cos θ)` is ~10⁻⁸ m — far below the 0.0001 snap. **The C++ unit tests are what
+   pin the ON arm**, not this run; a sim check of it needs real tilt.
+2. **Gait-amplitude sweep run 2026-09-27 on shims — `IN_FLIGHT`, not closed.** §9.10.4 below.
+3. **A/B `m_comp` against `m`** into the homeostat. Only then does the correction become the
+   published channel. ⚠ **FLAT GROUND ONLY, and it is now measurement rather than caution that
+   says so:** §9.10.5 measured the slope case in both headings, and climbing over-reports by
+   12 mm at 12°. An A/B on a level floor is legitimate and **is not a terrain result**.
+
+⚠ **Unrelated, found while running the parity check and left alone:** every diagnostic emission
+pushes `ERROR: Parse JSON failed ... at _emit_jsonl`. It is present **identically before and
+after** the swap, so it is pre-existing and not caused by this change — but the sim is throwing
+a parse error on every diag line and nothing has been chasing it.
+
+#### 9.10.4 THE GAIT-AMPLITUDE SWEEP — `IN_FLIGHT` 2026-09-27, on shims
+
+> ⚠ **`IN_FLIGHT`, one afternoon, one placement per condition, no repeats — a signal, not a
+> finding.** The sign is solid; the magnitudes are provisional and the setup was observed to
+> move. **Read the status block at the end of §9.10.5 before quoting any number here.**
+
+§9.10's range caveat addressed at amplitude. Front feet on a block, floor level, `stand` held throughout by
+`pi_host/tools/pose_hold.py` (the deadman folds an unattended standing robot in one second).
+Two shims, so compliance is bounded rather than assumed.
+
+| shim | pitch | `comp_delta` pred → meas | residual | 2nd-order term | `m_comp` | rise vs level | origin fraction | implied toe span |
+|---|---|---|---|---|---|---|---|---|
+| — (level) | −0.94° | — → +1.13 mm | — | −0.01 mm | 53.33 mm | — | — | — |
+| **46 mm** | **−13.41°** | +14.591 → **+14.595 mm** | **+0.004 mm** | −1.64 mm (11%) | 74.78 mm | +21.45 mm | **0.466** | 208.0 ± 0.9 mm |
+| **61 mm** | **−17.06°** | +17.754 → **+17.748 mm** | **−0.005 mm** | −2.78 mm (16%) | 80.97 mm | +27.64 mm | **0.453** | 211.1 ± 0.7 mm |
+
+n=115 and n=114, **0 samples rejected**, `raw_sd` 1.46 / 1.47 mm against §9.1's measured 1.51 mm.
+**−17.06° is 4.9× §9.10's −3.51° maximum**, and past the 10–15° a gait reaches. Records in
+`pi_host/log/tof_truth_check.jsonl`.
+
+⚠ **THE RESIDUAL IS VERY NEARLY A TAUTOLOGY, AND MUST NOT BE THE HEADLINE.** Expanding,
+`comp_delta = m_comp − m = uncomp·(up.y−1) − boom_z·up.z`, and the script's prediction is *that
+same expression* rebuilt from the same published `up` and `d`. A 4 µm residual is real evidence
+— it says the C++ clamps nothing, that `up` and `d` are mutually fresh, and that `comp_valid`
+means what it claims — but it could not have come out otherwise. §9.10 was already explicit
+that this is validation "by its own predicted magnitude"; at gait amplitude it is worth saying
+twice, because a 4 µm number reads far stronger than it is.
+
+★ **What IS a physical check, and what §9.10 could not do.** Knee trim changes belly height
+while it pitches, which is why §9.10 had no external reference. **A shim does not**: the front
+feet rise by a known amount, rotation is about the rear contact, so the mid-chassis rise is
+predictable from geometry alone. `m_comp` puts the body origin at **0.466 and 0.453** of the
+toe span (fit through origin **0.458**) — the midpoint, where a symmetric quadruped's origin
+belongs. The uncompensated arm says **0.174 and 0.180**, off by a factor of 2.6. Two points
+make that a line rather than a coincidence. **This is the correction being graded against the
+world rather than against its own algebra, and it passes.**
+
+★ **The second-order term `(d−H)(up.y−1)` is now unambiguous.** −1.64 mm at 13.41° (11% of the
+signal) and −2.78 mm at 17.06° (16%), where §9.10 had 0.09 mm at 3.51° and could fairly have
+been accused of fitting noise. The deployed full form is confirmed; the leading-term
+approximation is only the yardstick, exactly as §9.10 said.
+
+★ **Front-leg compliance is bounded POSITIVELY, not ruled out by silence.** The two shims back
+the toe span out independently as **208.0 ± 0.9** and **211.1 ± 0.7 mm**. Had the legs been
+absorbing the lift, the implied span would have grown *with* shim height. It grew 1.5% — ~3σ
+and real, most plausibly the rounded toe's contact point rolling as the leg angle changes —
+which bounds compliance at a couple of percent. **One shim could not have said this**; the
+second point is what turns a ratio into a line.
+
+⚠ **`FOOT_SPAN_M` was the sim's 0.233 receipt and is ~11% wide of the robot.** Refitted to
+0.210 from the two rows above. Both numbers can be right — that receipt is the sim's nominal
+pose, this is the robot's saved `stand` — but a robot-side setup check wants the robot's.
+
+⚠ **Still only ONE SIGN.** Every point here is nose-up, because a rear shim occludes the boom
+(operator's constraint, and it is a real one — the boom is 70 mm aft). §9.10's small-amplitude
+sweep has both signs; the large-amplitude sweep has one. **Nose-down at gait amplitude is
+unmeasured**, and it is the sign §9.10.3 calls conservative, so the gap is in the harmless
+direction — but it is a gap.
+
+⚠ **This is the LEVEL-GROUND case and is not a terrain result.** §9.10.3 is untouched by it:
+every row here has the floor horizontal, which is exactly the assumption that section says
+breaks. What this sweep does buy §9.10.3 is the empirical sign anchor its prediction hangs on.
+
+#### ⚠⚠ 9.10.3 THE CORRECTION ASSUMES HORIZONTAL GROUND — and terrain is where that breaks
+
+**Derived 2026-09-27 while planning the gait-amplitude sweep. A same-day bench run in both
+headings is CONSISTENT with it and reversed the sign as predicted (§9.10.5) — but that run is
+`IN_FLIGHT`, not a closing measurement.** Written down before measuring because it is a
+*signed, quantified* prediction and it points the wrong way.
+
+`ground_clearance_boom` infers the boom's geometry relative to the ground from **gravity-
+referenced attitude**. That is only the same thing when the ground is horizontal. Two cases the
+sensor set cannot distinguish:
+
+| | pitch vs **gravity** | pitch vs **ground** | raw reading | which arm is right |
+|---|---|---|---|---|
+| chassis pitches on level floor *(gait)* | α | α | changes by ~`boom_z·sin α` | **compensated** |
+| chassis aligned to a slope *(terrain)* | α | **0** | **unchanged** | **uncompensated** |
+
+On a slope with the chassis parallel to it and true perpendicular clearance `c`, the ray is
+perpendicular to the surface so `d = H + c`, and the formula returns
+
+```
+c·cos α + boom_z·sin α          instead of          c
+```
+
+⚠⚠ **CORRECTED 2026-09-27 — THE TWO CASES BELOW WERE THE WRONG WAY ROUND, and this is the
+safety-relevant one.** The original text put the phantom clearance on *descending*. It is on
+**climbing**. The magnitude (~18 mm at 15°) and the arms-swap conclusion were both right; only
+the heading label was inverted, inherited from §9.10's parenthetical above. ⚠ **The error is
+also in commit c9de3f4's message**, which cannot be rewritten — read this section, not that
+log entry. Tellingly, the original's own physical clause ("worst exactly when the belly's
+leading edge is nearest the ground") describes **climbing**, so its reasoning and its label
+already contradicted each other; that disagreement was the tell and it was not caught.
+
+**Write the error term in `up.z`, not in an α whose sign convention was never stated** — `up.z`
+is a published quantity and cannot be read two ways:
+
+```
+reported = c·up.y − boom_z·up.z  =  c·up.y + 0.070·up.z          (boom_z = −0.070)
+```
+
+⚠ **The error term is `−boom_z·up.z` — 18 mm at 15° — and its sign follows heading:**
+
+- ⚠ **Nose-up / climbing** (`up.z = +sin α`): **over-reports by ~16 mm** at 15° on a 53 mm
+  clearance (69.3 mm reported against 53 mm true). **Phantom clearance, the dangerous
+  direction**, and worst exactly when the belly's leading edge is nearest the ground.
+- **Nose-down / descending** (`up.z = −sin α`): under-reports by ~20 mm (33.1 mm against
+  53 mm). Conservative, harmless.
+
+**A bench run on 2026-09-27 in both headings reverses the sign with heading as predicted here
+(§9.10.5), so the ORIGINAL pairing — phantom clearance on descending — does not survive even a
+provisional look.** The *direction* is what that run establishes; its magnitudes are
+`IN_FLIGHT`. ⚠ **The arbiter is the brain's closed-loop behaviour on terrain, not bench
+precision** — see §9.10.5's closing note.
+
+⚠ **And the arms swap: on a slope-aligned chassis the UNCOMPENSATED reading `d − H` is exactly
+`c`, i.e. correct.** So neither arm is right in general, and the discriminator — pitch relative
+to the *ground* rather than to gravity — is not in the channel. A single-point rangefinder
+cannot supply it.
+
+**This is a bigger problem than the one §9.10 set out to fix.** The boom lever is ~12 mm per 10°
+on level ground; the slope error is ~18 mm at 15° and it is the *unsafe* sign. Terrain is the
+stated goal, so this is on the critical path.
+
+**What an actual fix needs — a surface-normal estimate, which means a new observation:**
+1. **Two range points fore/aft.** Their difference *is* ground pitch relative to the body, which
+   is precisely the missing quantity. The second VL53L0X would be doing real work here, not
+   redundancy.
+2. **The FSR toes.** Which feet are loaded, and how hard, constrains the supporting plane.
+3. ⚠ **Not a better single-point correction.** Per CLAUDE.md §1 step 2: the signal is absent from
+   the channel, so the fix is a **sensor**, not a smarter formula. This is the belly-ToF story
+   repeating one level up — the hump was a missing observation, and so is this.
+
+⚠ **Until it is resolved, do not promote `m_comp` over `m` for terrain work.** §9.10.1's step 3
+(A/B into the homeostat) is safe to run on flat ground and **is not a terrain result.**
+
+#### 9.10.5 THE SLOPE CASE — `IN_FLIGHT` 2026-09-27, both headings
+
+> ⚠ **`IN_FLIGHT`. The DIRECTION is what this establishes; the magnitudes are provisional.**
+> Status block at the end of this section — read it before quoting a number.
+
+§9.10.3 exercised on the bench. Robot standing inside a box tilted to **11.02°**, `stand` held
+throughout by `pose_hold.py`, `--mode slope`. The level reference and the nose-up runs share
+**one continuous stand**; nose-down is a fresh recall (see the pose-repeatability note below).
+
+| | pitch | `comp_delta` | **correction drift** | predicted (lead / 2nd-order) | residual |
+|---|---|---|---|---|---|
+| level reference | −1.04° | +1.25 mm | — | — | — |
+| **nose-up / climbing** | −12.06° | +13.46 mm | **+12.21 mm** | +12.20 (+13.36 / −1.16) | **+0.01 mm** |
+| **nose-down / descending** | +10.03° | −12.97 mm | **−14.22 mm** | −14.22 (−13.47 / −0.75) | **−0.00 mm** |
+
+n=112–114 per point, **0 samples rejected**, `raw_sd` 1.6–1.9 mm.
+
+★ **THE PHYSICAL CONTENT IS THE INVARIANCE, NOT THE RESIDUAL.** As in §9.10.4 the
+correction-drift match is algebra and cannot come out otherwise. What cannot be derived from
+the formula is that **the uncompensated reading did not move at all — 0.00 mm across 13° of
+tilt, within one continuous stand.** That is the chassis genuinely parallel to the surface with
+the ray perpendicular to it, so `d − H` **is** the true clearance — which is what makes the
+compensated arm, the one that moved 12–17 mm, demonstrably the wrong one. **The arms swap, and
+now it is measured rather than argued.**
+
+**The asymmetry is consistent with the second-order term, and that is all it is.** One box
+angle, so a lead-only model predicts near-symmetric drift — `|−13.47|` against `|+13.36|`,
+0.11 mm of asymmetry — while the second-order term, negative in *both* headings, predicts
+**2.02 mm**. Observed **2.01 mm**.
+
+> ⚠ **CLAIM WALKED BACK 2026-09-27, the same day it was made.** This was first written up as
+> "confirms the second-order term by a sign, not a fit — a 20× discrimination". **It is not.**
+> Both candidate models were compared against `comp_delta`, which `benchd` computes *using the
+> full formula*, so the full formula was always going to win. Like the residuals above, it is
+> an internal-consistency check wearing the clothes of a physical one. The distinction is the
+> whole point of the ⚠ block above and it was violated three paragraphs later.
+
+⚠ **The nose-down run is a DIFFERENT POSE RECALL and its uncompensated reading moved −3.00 mm.**
+The keepalive died between the two headings (a `timeout` on the operator's side, not the
+robot's) and the robot re-stood. §9.3 measured `stand` recalling to **52.1 / 48.7 / 50.8 mm**,
+so 3 mm is pose repeatability. **It does not touch the test**, which compares the correction's
+change and is immune to a shift in the stand underneath it — but it is why the invariance claim
+above is stated *within one stand* rather than across recalls.
+
+⚠ **This is what the tooling looked like before the run and why three fixes came out of it.**
+The nose-up run PASSED with all three defects present — it compared `d_cmp` against the
+correction drift alone (invisible while `d_unc` was exactly 0.00), used a prediction crude
+enough that a 4 mm gate absorbed its own 2.5 mm error, and printed a hardcoded warning
+contradicting the run it had just made. **A passing measurement is not evidence that the
+harness is sound**; the second heading is what exposed all three.
+
+**The operational conclusion is unchanged:** do not promote `m_comp` over `m` for terrain.
+Climbing is the unsafe heading. The fix remains a surface-normal estimate — a new observation,
+per §9.10.3's list — not a better single-point formula.
+
+##### ⚠ WHY §9.10.4 AND §9.10.5 ARE `IN_FLIGHT` AND NOT CLOSED — operator's call, 2026-09-27
+
+**Scale the claim to the power (CLAUDE.md §3 rule 7).** Both sections are **one afternoon, one
+box, one set of shims, one placement per condition, no repeats.** That is a *signal* — enough
+to promote-or-kill a direction — and it is not a finding. The sections were first written up
+with ✅ and ★★★ against sub-0.1 mm residuals, which reads far above the power that was actually
+behind them.
+
+**What is solid, and what is not:**
+
+| | status |
+|---|---|
+| **The SIGN** — nose-up → positive correction; climbing over-reports | **Solid.** Pitch is read from the IMU directly, never inferred from shim height, so a setup that shifts cannot flip it |
+| Order of magnitude — ~12–18 mm at 10–15° | Solid enough to act on |
+| Exact magnitudes, the toe-span fit, the 0.458 origin fraction | **Provisional.** All depend on the shim and box holding still |
+| The <0.1 mm residuals and the asymmetry | **Internal consistency, not world evidence** — see the ⚠ blocks above |
+
+⚠ **THE SETUP WAS OBSERVED TO MOVE, and it is recorded here rather than smoothed out.** Pitch
+stepped **−11.4° → −13.4°** partway through the 46 mm placement (roll squaring up from +1.1° to
+−0.1° at the same moment, so the feet were still seating). The stand shifted **3.00 mm** between
+the two slope headings. The two shims disagree by **1.5%, ~3σ**, on the toe span. A tilted box
+with a robot standing in it is not a metrology fixture, and the numbers above should be read as
+carrying that, not the residuals' implied precision.
+
+★ **THE ARBITER IS THE BRAIN, NOT THE BENCH.** Operator's judgement, and it is the doctrine's:
+this robot has already demonstrated good adaptivity at well above this noise level, so what
+decides whether the boom correction is worth anything on terrain is **closed-loop behaviour with
+the brain running** — error spiking on contact, the body feeling around, traversal — not a
+millimetre on a bench. **Re-open both sections against that**, per §9.10.1 step 3, and treat
+everything above as the instrument characterisation it is.
+
+#### ⚠ 9.10.2 The port found a bug in the sim it came from
+
+`picrawler_body.gd`'s `_compute_ground_clearance_boom` derives the sensor term correctly as a
+projection (`s · up`) and then adds the belly offset **un-projected**: it returns
+`d*up.y − (s·up) + _chassis_bottom_local` where the geometry requires `+ bottom * up.y`.
+
+The two agree exactly at zero tilt — which is where it was checked — and diverge by
+`bottom·(1 − cos θ)`: about **−0.3 mm at 10°, −2.8 mm at 30°**, conservative in direction.
+Small, real, and invisible at the level pose. Folding the belly offset into the sensor position
+removes the term entirely rather than correcting it in place, which is why the shared helper
+takes two parameters where the sim used three.
+
+⚠ **Side-finding worth keeping:** in `stand` the boom reads **~118 mm** against **68 mm**
+belly-down, so the chassis lifts ~50 mm. That is a far better posture measurement than the
+§9.9 attempt to infer posture from clearance in `rescue` vs `X`, where the two poses sat
+~1.5 mm apart — inside the noise.
+
+### 9.3 Two-point validation — the standing pose, ✅ MEASURED 2026-09-07
+
+A one-point fit calibrates but cannot be wrong-checked. The second point is the saved `stand`
+pose, in which **the upper leg is horizontal to the ground** — which is the geometry doc's own
+reference stance, so the belly height is predictable rather than merely comparable.
+
+| | belly clearance | sd | invalid |
+|---|---|---|---|
+| belly down | **0.4 mm** | 0.69 | 0/28 |
+| standing (`stand` pose) | **52.1 mm** | 1.27 | 0/58 |
+| **through the move itself** | — | — | **0/107** |
+
+Landed pulse matched the target on all 12 channels (the §3.5.1 deadman trap was fed
+throughout). Peak **1.731 A**, minimum pack **7.72 V** — comfortable against the 3 A rail.
+
+**Reconciling 52.1 mm with CAD's 56.3 mm.** With the upper leg horizontal the knee axis sits
+at hip2 height, so belly = `L3·cos(shin angle) − 19 mm`. Using the **measured** `L3` = 76.5 mm
+(geometry §"measured vs CAD"):
+
+| shin angle from vertical | predicted belly |
+|---|---|
+| 0° | 57.5 mm |
+| **10°** | **56.3 mm** — reproduces the figure the geometry doc quotes |
+| 21.7° | **52.1 mm** — what was measured |
+
+So the observed clearance implies a shin about **12° further from vertical** than the CAD
+reference — real splay under load, plus a hand-saved `stand` pose that is not the CAD nominal.
+The trace supports it: the belly hit **54.2 mm** the instant the servos reached position and
+then relaxed to 51–53 mm, which is ~2 mm of the body settling onto its own legs.
+
+**This is a stance result, not a sensor error.** Sensor bias runs the other way — the part
+reads long, which would push standing *higher*.
+
+⚠ **Standing repeats worse than belly-down.** Three separate recalls of the same `stand`
+pose measured **52.1 / 48.7 / 50.8 mm** — a 3.4 mm spread, against ±2 mm for belly-down (§9.2)
+and ±1 mm for the sensor itself (§9.7). The legs do not land identically. **So the channel's
+absolute accuracy in use is set by how repeatably the body settles, not by the sensor**, and
+any threshold on standing clearance needs to carry that 3 mm, not the sensor's 1 mm.
+
+⚠ **Consequence for sim2real.** `picrawler_body.gd` normalizes on `GROUND_CLEARANCE_STAND =
+0.06`. The real robot standing is 52.1 mm, so real **`gc_norm` at stand is 0.87, not 1.0**.
+Anything tuned against a sim whose belly channel saturates at 1.0 meets a real one that never
+reaches it.
+
+### 9.4 What the channel publishes, and why it is more than millimetres
+
+Every measurement carries its range status, signal rate, ambient rate and effective SPAD count,
+and `benchd` republishes all of it beside the distance.
+
+**A ToF reading that failed the part's own checks is not a large number or a small one — it is
+an arbitrary one, and at a consumer it is indistinguishable from a good reading.** The part
+computes the status for free. The slow metrics follow from the same argument:
+
+| field | what it is for |
+|---|---|
+| `m_ema` | 30 s mean — how high the body is riding |
+| `m_min` | 60 s decaying **min**-hold. A *min*, because on this channel the dangerous end is LOW; the peak-hold that serves current (§3.10) would faithfully report the safe extreme |
+| `bad_frac` | 30 s EMA of the rate at which the part rejects its own readings — the channel's honesty meter. A ToF wedged at a plausible number with a 90 % invalid rate reads as a healthy belly on distance alone |
+| `age_ms` | time since a measurement actually landed. Without it a part that stops ranging shows up as a very steady number |
+
+An invalid reading is published as **`max_range_m`, not zero**, matching `Ultrasonic` (§7):
+nothing came back, so the far limit is the honest floor. Zero would map "saw nothing" onto
+"something against the belly" — the opposite extreme, and the one the homeostat reacts hardest to.
+
+⚠ **`Valid` here is weaker than ST's full API's valid.** The driver decodes the branches of
+ST's status mapping that depend on the device code alone; the full API also raises a sigma
+failure from an estimate this driver does not carry. Seen once on the bench: device code 11
+("valid") on a 0 mm reading with signal 0.64 Mcps against 4.32 ambient. **This is why the rates
+are published** — a consumer can be stricter than the device code, and a collapsing
+signal-to-ambient ratio moves before the status flips.
+
+### 9.5 What this does NOT establish
+
+1. **The cone is clear of the legs — partially proven.** §9.1 predicts that a leg entering the
+   spot returns as floor and reads as belly-down. ✅ **MEASURED 2026-09-07, negative result:**
+   with the belly grounded (so the body cannot fall and the sensor still sees the floor at its
+   full standoff), every hip1 and every hip2 was swept across its **full operating range**, one
+   at a time, on all four legs — 72 positions in total.
+
+   | axis | worst deviation from the resting baseline | invalid | signal |
+   |---|---|---|---|
+   | hip1 (horizontal swing) | **−0.6 to +2.5 mm** — inside the sensor's own noise | 0/98 | 24.1–25.2 Mcps |
+   | hip2 (femur lift) | **+3 to +9 mm, all POSITIVE** | 0/97 | 23.7–25.0 Mcps |
+
+   **The sign is the finding.** An object entering the beam can only shorten the reading, and
+   nothing shortened it. The hip2 excursions are all *longer*, which is the body being levered
+   up as a leg pushes on the floor — the ToF incidentally working as a tilt detector. So the
+   boom's placement clears the legs on both axes.
+
+   ✅ **Extended to the STANDING pose 2026-09-07, also negative.** The operator's concern was
+   that a leg could pass under the sensor once the body is up — which the geometry makes
+   plausible: standing, the femur sits ~37 mm below the sensor, where the cone has narrowed to
+   only ~16 mm across, so clearance there is decided by boom placement rather than by margin.
+   Run in two stages, safest first:
+
+   | configuration | sweep | worst deviation | invalid |
+   |---|---|---|---|
+   | standing, **feet planted** | coxa ±300 µs, 4 legs | −0.5 to +3.7 mm | 0/180 |
+   | standing, **leg lifted** (knee tucked +350 µs) | coxa **full range**, 4 legs | −1.5 to +3.2 mm | 0/220 |
+
+   The lift is what makes the second row meaningful: unloading the foot allows the full coxa
+   range without stalling a planted leg against the floor, and it is the gait-like case. The
+   tuck lowered the belly by 2.5–4.8 mm on three of the four legs, which is that corner
+   unloading and the body settling — confirmation the foot actually left the floor. Current
+   stayed 0.57–0.89 A throughout with no stall, pack flat at 7.83–7.91 V.
+
+   **An intrusion here would have been unmissable rather than subtle**: a femur crossing the
+   beam sits ~37 mm below the sensor, so clearance would collapse toward zero, not drift.
+   Nothing of the kind appeared at any of 44 coxa positions.
+
+   **So there is nothing to map around** — no servo range needs restricting, which was the
+   option worth avoiding anyway (see §9.5.1).
+
+   ⚠ **What is still untested is COMBINATION, not range.** Every sweep moved one joint at a
+   time. A gait swings coxa, hip2 and knee together, and that space is not covered by the
+   union of single-axis sweeps. The evidence is strong that the boom is simply not over the
+   swing arc, but it is evidence from 4 configurations, not a proof over all of them.
+
+### 9.5.1 If a leg ever does occlude the beam, restricting its travel is the LAST option
+
+Recorded now, while it is cheap, because the instinct when an instrument gets occluded is to
+constrain the body around it — and that is backwards here (CLAUDE.md §1: imposed constraints
+fight the loop they ride on). In order:
+
+1. **Move the boom.** The occluding volume is a ~16 mm-wide cone at femur height. A centimetre
+   of relocation likely clears it, and costs nothing at the control layer.
+2. **Publish the confound rather than prevent it.** `benchd` already holds every joint angle,
+   so it can flag "leg in cone" beside the reading exactly as it already flags `bad_frac` and
+   `age_ms`, and a consumer discounts those samples. This keeps the leg's full range and makes
+   the channel honest about when it cannot see — the pattern the rest of this sensor follows.
+3. **Restrict the servo range** — only if the boom cannot move *and* the occlusion is wide
+   enough that flagging it would blind the channel too often. This buys instrument cleanliness
+   with permanent body capability, which is the wrong direction to trade.
+2. ~~One surface only.~~ ⚠ **PARTIALLY RESOLVED 2026-09-08 — see §9.8, and the answer was
+   not the one expected.** The optical worry was unfounded on the surfaces tried; the surface
+   that actually took the robot down did so *mechanically*. Still only two surfaces, both easy.
+3. ~~Two points, both static.~~ ✅ **RESOLVED 2026-09-07 — see §9.7.** Linearity is now
+   characterized across 1.5–90.5 mm, past the top of the operating band, at ±1 mm.
+4. **Not fed to anything.** Instrument only. Nothing in `benchd` or the brain consumes belly
+   clearance yet; `gc_raw` in the sim is still a raycast.
+
+### 9.6 Bring-up notes worth keeping
+
+- **The part boots unable to range.** Reference-SPAD selection out of the die's own NVM, ~80
+  tuning register writes ST publishes only as an opaque blob, and two reference calibrations.
+- ⚠ **`init()` must soft-reset first.** The stop variable at `0x91` is per-die and only valid
+  as read after a fresh boot, and `stop_continuous()` writes **zero** to it. So a second
+  `init()` reads `0x00`, replays it, and ranges wrongly — the part returned a correct 124 mm on
+  its first-ever init and then nothing but out-of-range on every init after, aimed at the same
+  target throughout. Metered on this die: **`0x3c` after a reset, `0x00` after a stop.**
+- **Timing budget** 33 000 µs requested reads back **32 908 µs** — the mclks encoding's own
+  quantization, and a useful sign the budget arithmetic round-trips against real registers.
+  Continuous back-to-back gives **~32 Hz** against `benchd`'s 10 Hz poll, so a fresh sample is
+  always waiting.
+- **Cost to the servo loop**, A/B against the pre-ToF binary on the same idle robot, 120
+  telemetry frames each, 20 ms tick budget: worst tick per 25-tick window went from a **3.5 %**
+  median (20.2 % tail) to **4.5–5.2 %** (14.8–26.7 % across two runs) — roughly +0.2–0.35 ms on
+  the one tick per telemetry frame that queues behind the bus mutex. **Zero overruns in every
+  run, tick flat at 50.00 Hz.** The tail is too noisy to call from single runs.
+- ⚠ **`hat_tool tof` re-inits the part**, which soft-resets it underneath a running `benchd`.
+  Read the daemon's telemetry instead of running the bench tool while it is up — the same
+  caution as §3.10.2.
+
+### 9.7 Linearity across the working range — ✅ MEASURED 2026-09-07
+
+**Method.** The channel operates at raw **65–121 mm** (belly-down to standing), so the way to
+sweep it is to *raise* the robot, not to put objects under the sensor — belly-down is already
+the closest the part ever gets, and sliding shims beneath it tests a range the channel never
+uses. The robot sat in the `rescue` pose throughout, on blocks used as platforms, with the beam
+clearing the block edge to the surface below. One rolling capture off the live telemetry, then
+plateaus segmented from the step changes.
+
+Truth = block thickness + **1.5 mm**, the gap `rescue` holds between the belly and whatever it
+rests on (operator, measured).
+
+| point | truth | measured | predicted | residual |
+|---|---|---|---|---|
+| bare surface (start) | 1.5 mm | 0.50 | 1.53 | **−1.03** |
+| 59 mm block | 60.5 mm | 61.84 | 61.15 | **+0.69** |
+| 89 mm block | 90.5 mm | 91.01 | 91.47 | **−0.46** |
+| bare surface (end) | 1.5 mm | 2.32 | 1.53 | **+0.79** |
+| ~~19 mm block~~ | ~~20.5 mm~~ | ~~25.51~~ | — | **dropped, §9.7.1** |
+
+```
+belly = 1.0106 · h + 0.01 mm        scale error +1.06 %
+```
+
+**0 invalid in 1315 samples** spanning raw 64 → 156 mm, and **sd flat at 1.47–1.64 mm at every
+height** — noise does not grow with distance across this band. Maximum error over the 0–52 mm
+operating band: **0.56 mm**.
+
+Two results fall out of this that were not what it was measuring:
+
+- **The intercept is +0.01 mm, which independently confirms the mount offset.** An error in the
+  64.8 mm fit of §9.2 would appear here precisely as a nonzero intercept, and this data never
+  touched that fit.
+- **The two bare-surface plateaus share a truth and differ by 1.82 mm** — an independent
+  reproduction of the ±2 mm pose repeatability of §9.2, from a different measurement entirely.
+
+⚠ **Do NOT apply a scale correction.** +1.06 % is at most 0.56 mm across the working band,
+which is smaller than the ±2 mm pose term that already dominates. A second calibration constant
+dominated by a larger uncorrected one buys nothing but false precision.
+
+### 9.7.1 ⚠ The part reads 8–11 mm LONG against a ruler — and that is not a fault
+
+Two independent comparisons against a physical measurement, at very different distances:
+
+| ruler | sensor | delta |
+|---|---|---|
+| ~114 mm (bench target) | 121.9 mm | **+7.6 mm** |
+| 70 mm (desk to sensor) | 80.6 mm | **+10.5 mm** |
+
+This is the VL53L0X's **inherent ranging offset**: the distance it reports is referenced to an
+internal plane, not to the visible front face of the module. It is what ST's offset-calibration
+procedure exists to remove, and it is why it stayed invisible until now — **the block sweep
+measures DIFFERENCES, and a constant offset cancels in a slope.** Hence the +1.06 % scale with a
+zero intercept while an absolute ruler check is out by ~9 mm.
+
+Two consequences, both of which will otherwise be read as broken hardware:
+
+1. **`mount_offset_mm = 64.8` is a READING, not a physical distance.** The true standoff from
+   the optical face to the belly plane is ~9 mm less, about **56 mm**. Anyone who calipers the
+   boom will measure ~56 mm and conclude the calibration is wrong. It is not — anchoring at
+   belly-down absorbs the inherent offset by construction, which is the whole reason for
+   anchoring there instead of deriving the standoff from CAD.
+2. **A tape-measure check will always read ~9 mm long.** That is the documented expectation.
+
+### 9.7.2 The 19 mm point, and why it was dropped
+
+Recorded rather than silently omitted, because a discarded datapoint deserves the same
+treatment as a refuted lever: **it was dropped for a reason found independently of the fit, not
+for disagreeing with it.**
+
+It came in **+4.78 mm** high while every other point sat inside ±1 mm. Two placement faults,
+both identified by the operator at the bench, not inferred from the residual:
+
+- **The small block does not span the chassis bottom screws** the way the larger blocks do, so
+  it contacts the belly plate directly rather than the screw heads — the resting height it
+  produces is not `1.5 + 19`.
+- **During the sweep the sensor sat near the desk edge**, where the beam cleared the surface
+  entirely. Re-measuring the same nominal setup gave **127.4 mm** — a confident, zero-invalid
+  reading of the floor beyond the edge rather than the desk.
+
+Re-placed centred and not leaning it read **80.6 mm**, 10 mm from the sweep's 90.3 mm for the
+nominally identical configuration. **The placement moved, not the sensor.** A point whose truth
+value cannot be stated is not evidence either way, so it is excluded — and the linearity result
+rests on the three whose geometry was unambiguous.
+
+⚠ **The general lesson is about the beam, not the block.** A ToF near an edge returns a
+confident, valid, low-noise reading of whatever is beyond it. Nothing in the status, the signal
+rate or the invalid count flagged the 127 mm reading as wrong, because *it was not wrong* — it
+was an honest answer about a different surface. **Only knowing where the beam lands makes the
+number mean anything**, which is the same reason §9.5 still wants a leg sweep at the standing pose.
+
+---
+
+## 9.8 Surface dependence — ✅ MEASURED 2026-09-08, and the threat was mechanical
+
+**Method (operator's).** Make the robot do **pushups** — a joint-space lerp between `rescue`
+and `stand`, 12 steps each way — so the same sweep of belly heights is replayed on each
+surface and readings compare at *matched poses*. No IK needed.
+
+⚠ **Read the OPTICS, not the height.** A surface changes both the return *and* the mechanics
+(compressibility, foot grip), so belly height at a matched pose is confounded and was not used
+as the comparison. `signal`, `ambient` and the effective SPAD count are surface properties at a
+given distance and are not.
+
+### 9.8.1 The finding that matters: signal rate is the WRONG metric
+
+| alpha | bare vinyl: belly / sig / spads | black cloth: belly / sig / spads |
+|---|---|---|
+| 0.00 | 1.4 mm · 24.3 · **13.0** | 0.0 mm · 26.7 · **6.0** |
+| 0.25 | 8.6 mm · 24.9 · **17.0** | 0.0 mm · 27.2 · **8.0** |
+| 0.50 | 17.0 mm · 23.9 · **21.6** | 11.0 mm · 24.5 · **13.8** |
+| 0.75 | 32.4 mm · 24.0 · **35.0** | 29.0 mm · 24.2 · **23.0** |
+| 1.00 | 50.5 mm · 23.4 · **49.8** | 46.6 mm · 24.1 · **36.8** |
+| median | sig 24.18 · spads 21.7 · 0/128 invalid | sig 24.48 · spads 13.4 · 0/125 invalid |
+
+**Signal rate is flat at ~24 Mcps on both surfaces at every distance — because the part
+REGULATES it.** It holds the return constant by recruiting more SPADs, so `signal_mcps` looks
+identical on a good surface and a bad one and reports almost nothing about either. The obvious
+thing to watch is the wrong thing to watch.
+
+**The effective SPAD count is the surface metric.** It rises with distance (13 → 50 on vinyl,
+6 → 37 on cloth) and is consistently **~40 % lower on black cloth**, which means the cloth is
+the *better* 940 nm reflector of the two. Which is the second lesson:
+
+⚠ **"Black" to the eye says nothing about 940 nm.** Most fabric dyes absorb across the visible
+band and reflect near-IR perfectly well. The intuitive worst-case test surface turned out to be
+the easier one, and a genuinely hostile surface would be one with low reflectance *at 940 nm* —
+not one that looks dark.
+
+**Headroom, and how to read it:** SPAD count at the TOP of the range is the number to watch.
+Bare vinyl needs ~50 at 50 mm of clearance. A surface roughly twice as poor would need ~100,
+and that is where the regulation runs out and `signal` finally starts to fall. **So the early
+warning is a rising SPAD count, and it moves long before `bad_frac` does.**
+
+### 9.8.2 ⚠ The surface that broke the robot broke it MECHANICALLY
+
+The first attempt ran on **black rubber** and **took the machine down**: a foot caught on the
+surface, stalled, and the Pi went. Operator's diagnosis, and it is §3.9's mechanism exactly —
+*"grip converts free motion into work and load torque then sets the current regardless of
+speed"* — plus §3.9.2, where a stall is what no duty budget prevents. The same pushups on vinyl
+peaked at **0.73–0.77 A**.
+
+**So the answer to "is this channel surface-dependent" is: less than feared optically, more
+than feared mechanically.** The optical worry that motivated the test found nothing on either
+surface; the surface property that mattered was friction, and it cost a shutdown.
+
+Two process failures came with it, both already predicted by this document and both repeated
+anyway:
+
+- **The capture was written to `/tmp`**, which is tmpfs, and the reboot cleared it (§3.10).
+  The baseline had to be re-run.
+- **The crash destroyed its own evidence again.** The last surviving `benchd` record was from
+  *before* the run — 0.52 A, 7.95 V, belly ~0 mm — and the final line is nulls. The measurement
+  that would have shown the stall current died with the machine that made it. What the session
+  did keep: peak 1.879 A over 99 minutes and pack never below 7.43 V, so this was **not** pack
+  sag — consistent with §3.8.1, where the cliff is the 5 V regulator and the INA219 cannot see it.
+
+### 9.8.3 Why the record now lives off-board — `tools/tele_record.py`
+
+The obvious fix was to `fsync()` `benchd`'s record. **It was tried and measured, and it is not
+available:**
+
+| | worst tick / window (median) | worst tick (max) | overruns / 12 s | tick_hz |
+|---|---|---|---|---|
+| without | 3.4–5.2 % | 12.9–26.7 % | 0 | 50.00 flat |
+| **fsync at 1 Hz** | **7.7 %** | **418.9 %** (~84 ms) | **54** | **min 35.8** |
+
+`record()` runs under the mutex the 50 Hz servo tick needs, and an SD fsync costs ~80 ms.
+**Durability bought with the control loop is not a trade this daemon may make**, and a longer
+cadence only makes the stall rarer, not smaller. Reverted, with the numbers left in the source
+so it is not retried.
+
+**The operator's answer was better than the one being built: record on another machine.**
+`benchd` already publishes every frame at 10 Hz, so a subscriber on the PC writes to a disk
+that cannot share the fate of the thing that browns out — no fsync, no page cache, no SD card,
+no extra thread on the robot, and zero cost to the loop.
+
+```sh
+python3 pi_host/tools/tele_record.py --host picrawler.local --out . --label <run>
+```
+
+⚠ **What it still cannot catch, stated so nobody over-trusts it.** It records what *arrived*.
+A hard power cut still loses whatever sat in the Pi's TCP buffer (`benchd` sets ZMQ `SNDHWM` 4),
+so expect to lose the last *frames* rather than the last *seconds*. And **a network drop is not
+the robot going quiet**: `seq` is monotonic from the daemon, so every gap is detected and
+written as an explicit `gap` record rather than left as a silent hole a reader would mistake
+for a still robot. The bare-vinyl run recorded 655 frames with 0 gaps.
+
+### 9.8.4 What this does NOT establish
+
+1. **Two surfaces, both easy.** Vinyl and black cloth. Untested: carpet (scatters *and*
+   compresses), gloss at a tilt (specular return steered away from the receiver, the case most
+   likely to produce genuine invalids), and anything genuinely low-reflectance at 940 nm.
+2. **Neither surface produced a single invalid reading**, so `bad_frac` has still never been
+   exercised in anger. The channel's honesty meter remains untested against a surface that
+   actually defeats it.
+3. **Rubber was never measured optically** — the run died before producing data, and the reason
+   was friction, not optics.

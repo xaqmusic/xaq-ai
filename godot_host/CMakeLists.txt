@@ -77,6 +77,9 @@ add_library(ami_ogma_host SHARED
     src/OgmaBrain.cpp
     src/BenchClient.cpp   # bench dashboard client (pi_host/PROTOCOL.md)
     src/VideoClient.cpp   # camera stream from ogma_host (receive-only)
+    src/ImuAttitude.cpp   # binding for cpp_core/ogma/body/ImuAttitude (port step a)
+    src/LegKinematics.cpp # binding for cpp_core/ogma/body/LegKinematics (port step a)
+    src/StrideOdometry.cpp # binding for cpp_core/ogma/body/StrideOdometry (port step b)
 )
 
 # No "lib" prefix — we reference it as "ami_ogma_host.so" in the .gdextension.
@@ -87,6 +90,13 @@ target_include_directories(ami_ogma_host PRIVATE
     ${eigen_SOURCE_DIR}
     ${json_SOURCE_DIR}/include
 )
+
+# ⚠ ogma::body must produce the SAME BITS here as on the robot — aarch64 GCC fuses
+# a*b+c into FMA by default and baseline x86-64 cannot, which made all three helpers
+# mismatch across machines until this was set (measured on the Pi 2026-09-12; see the
+# note in cpp_core/CMakeLists.txt).  A no-op on x86, and it matters the day the sim is
+# built on an ARM machine.
+target_compile_options(ami_ogma_host PRIVATE -ffp-contract=off)
 
 target_link_libraries(ami_ogma_host PRIVATE
     godot-cpp   # provides all Godot binding headers + implementations

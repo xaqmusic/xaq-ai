@@ -190,7 +190,6 @@ private:
     // facing it's dominated by the forward-progress reward.  NOT a behavioral knob —
     // a metabolic prior that makes the brake = stop.
     float       effort_cost_     = 0.15f;
-    float       vel_right_       = 0.0f;
     float       vel_fwd_         = 0.0f;
     std::vector<float> adv_value_;        // [n_err_bins_ * n_thrust_acts_] EMA(reward), 0-init
     std::vector<int>   adv_visits_;       // [n_err_bins_ * n_thrust_acts_] visit counts

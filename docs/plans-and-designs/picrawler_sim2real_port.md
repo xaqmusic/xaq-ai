@@ -500,9 +500,21 @@ architecture. Consequence for §1's parity argument: *same code* buys attributab
 bit-identical trajectories across machines. **Measured:** rebuilding with `-ffp-contract=off`
 still fails the test and moves μ from −2.74 to +2.94 — FMA contraction changes the trajectory
 but is not the whole difference (per-arch `libm` remains). No compiler flag buys cross-arch
-bit-parity: **golden replays are per-architecture**, and a test that asserts a hemisphere from
-one 4000-step seed is seed-fragile rather than a port defect (its owner should make it
-seed-robust).
+bit-parity **for that test**: golden replays of it are per-architecture, and a test that
+asserts a hemisphere from one 4000-step seed is seed-fragile rather than a port defect (its
+owner should make it seed-robust).
+
+> ⚠ **CORRECTED 2026-09-12 for `ogma::body`, which is the part the port depends on.** The
+> sentence above was generalized too far. Re-measured on the robot against the
+> x86-generated oracles, **`-ffp-contract=off` makes all three shared body helpers
+> bit-exact on aarch64** — `leg_kinematics` 400/400, `imu_attitude` 800/800,
+> `stride_odometry` 900/900, worst |delta| **0.000e+00**, where the default build
+> mismatched every one of them. RunTumbleNavV2 is double precision over 4 000 stochastic
+> steps leaning on `libm`, so per-arch `libm` survives contraction there; these helpers
+> are float32 and their trig agreed across the pair as soon as FMA was off. **Parity by
+> construction IS available for the body chain — it just has to be asked for.** The flag
+> is now set in `cpp_core`, `pi_host` and `godot_host`; it is a no-op on x86 (GCC emits no
+> FMA at baseline, verified), so the sim's byte-identity gates are unmoved.
 
 
 ### The bus map, as of 2026-08-27 (parts ordered)
@@ -640,6 +652,14 @@ one step away — and it would quietly undo the parity rationale while looking l
   path. The dashboard speaks only the former.
 - **The daemon refuses a brain-rate command stream on the calibration channel** outright.
 - **The dashboard has no path to start the brain.** Not discouraged — absent.
+
+> **Amended by the operator, 2026-10-03.** `picrawler_dash` — the terminal console that runs ON the
+> Pi — may run a brain config (C "run config": pick from the Godot launcher's allowlist, confirm, a
+> 10 s countdown that sends nothing, then pose → `dev` → `ogma_host --actuate` → resume). What stays
+> structural: the brain still runs in `ogma_host` on the Pi, never in Godot, so parity is untouched;
+> the launch goes through benchd's control socket, which is bound to 127.0.0.1, so a dash started
+> anywhere else cannot start a brain; and the laptop's Godot dashboard remains calibration-only.
+> `pi_host/tools/dash_run.py`.
 
 ### 2. Rates — sampling and transport are different problems
 
@@ -1062,6 +1082,13 @@ unless a vocabulary over range states is genuinely wanted.
 Four circular FSRs, **20 g – 2 kg**, one per foot, on the Robot HAT's existing ADC **A0–A3**.
 No new bus. **A4 stays on battery voltage** — it is the brownout and calibration-stall detector.
 
+> ⚠ **The parts fitted are Ø10.0, 20 g – 6 kg, 0.40 thick** (measured 2026-09-27) — wider
+> range than specced here, and the divider sized by measurement below absorbs it. **What the
+> wider range does change is that the actuator's area now sets where the robot sits on the
+> curve**, since a sensor's force range is quoted against an actuator covering the sensing
+> area. On the printed toe's Ø5.0 bump the gait's 148–197 g lands at 74–98 kPa, mid-band —
+> [`../operational/picrawler_foot_fsr_mod.md`](../operational/picrawler_foot_fsr_mod.md) §3.
+
 ### The operating point — and why 20 g – 2 kg is the right part
 
 `foot_load` is published as a **fraction of total body weight**, not in newtons:
@@ -1118,6 +1145,16 @@ than in hardware.
 
 ### Mounting — the puck is more of the design than the sensor is
 
+> ⚠ **SUPERSEDED 2026-09-27 — the foot is designed and printed.** The record is
+> [`../operational/picrawler_foot_fsr_mod.md`](../operational/picrawler_foot_fsr_mod.md):
+> source CAD, derived dimensions, the load path and the constants a longer leg re-baselines.
+> **The four rules below were the right rules and the built part answers three of them**, so
+> they stay as the reasoning rather than as instructions. Rule 1's puck is the toe's moulded
+> Ø5.01 × 0.50 bump; rule 2's slip layer is the Ø11.00-boss-in-Ø11.51-bore joint, which takes
+> shear on a resin bearing; rule 3's compliant backing is the upper foot's 0.50 mm socket
+> floor. Rule 4 — tail routing — is still on the builder, and the toe has a 68° window through
+> its bore wall for it.
+
 1. **A rigid disc, slightly SMALLER than the active area.** Force must arrive through a puck that
    stays inside the active circle. A puck that overlaps the inactive border ring loads the
    substrate instead of the sensing layer and produces nonlinearity and hysteresis that no
@@ -1160,10 +1197,35 @@ with the robot the way the servo map does.
 - **The 20 g floor means light initial contact reads zero.** For stance detection that is a free
   noise floor. Touchdown *timing* was already assigned to the accelerometer, not the FSR
   (ledger 2026-08-24 ★3), so this costs nothing.
-- **Contact sensing is not a prerequisite for stride odometry.** The median across four legs lets
-  swing legs fall out as outliers with no contact input at all (ledger 2026-08-24 ★2). FSRs
-  sharpen that; there they are an optimization. They are **required** for the `foot_load` weight
-  unit and the G2 per-leg minima guard.
+- ⚠ **CORRECTED 2026-09-11 — contact sensing IS a prerequisite for stride odometry.** This
+  bullet previously read *"not a prerequisite … FSRs sharpen that; there they are an
+  optimization"*, on the strength of a median-across-four-legs consensus that would let swing
+  legs fall out as outliers with no contact input (ledger 2026-08-24 ★2). **That result was
+  re-scored and refuted in `★★★ 2026-08-25 — GATE A` ★3**, two days before this spec was
+  written, and the spec cited the superseded version:
+
+  | estimator | r_w50 |
+  |---|---|
+  | median-of-legs consensus, no contact input | **0.29–0.36** (slope 0.14–0.19) |
+  | `foot_load ≥ ~0.2` stance gate | **0.74–0.79** |
+
+  The mechanism is in the same entry: *"these gaits simply do not keep 3+ feet loaded (stance
+  count mode 3 with heavy 2s), so the median regularly includes swing legs."* Gate A ★2 also
+  establishes that the stance rule **is** `foot_load ≥ ~0.2` — a measured plateau, not a
+  chosen constant. The ledger's own re-use context for the median names it *"the fallback
+  estimator **if load sensing dies** on hardware"*: a degradation path, not a substitute.
+
+  **So the FSRs are load-bearing for the deployed gait**, not an optimization. The chain is
+  `FSR → foot_load → stance gate → stride_v → the legal `imu` vector → MotorEPMv2 +
+  GainEvolver`, and the deployed stack config wires `foot_contact_topic`, `foot_load_topic`
+  and `travel_topic: reality.proprio.stride_v` together. They remain **required** for the
+  `foot_load` weight unit and the G2 per-leg minima guard as well.
+
+  ⚠ **This does not make FSRs the next thing to build.** They are the most invasive change to
+  the robot and they sit at the END of a chain whose earlier links are unbuilt — there is no
+  `cpp_core/include/ogma/body/`, no `LegKinematics`/`ImuAttitude`/`StrideOdometry`, no host
+  IMU driver, and by SPEC §1.1 no brain→servo path at all. Fit them when there is a loop for
+  them to feed; see the **Order** at the end of Phase 4, whose steps (a)–(c) need no hardware.
 
 ### Consuming it — one recorded negative
 
@@ -1216,10 +1278,273 @@ lives: **`cpp_core/include/ogma/body/`** (e.g. `LegKinematics`, `ImuAttitude`,
 `StrideOdometry`, `FootLoad`), linked by both the GDExtension and `ogma_host`; the GDScript
 then calls into it, and the sim's byte-identity across that swap is the gain-0 gate.
 
-**Order:** (a) port `LegKinematics` + `ImuAttitude` and prove them against the sim's own
-FK/IMU debug outputs (`get_imu_debug()`, the FK spot table); (b) `StrideOdometry` +
-`feet_y_gravity_cmd_imu`; (c) the sim-honesty A/B on `imu`/`upright`/`joints` substitutes;
-(d) `ogma_host` on the Pi with the parts.
+**Order:** (a) ✅ `LegKinematics` + `ImuAttitude`; (b) ✅ `StrideOdometry` +
+`feet_y_gravity_cmd_imu`; (c) ✅ the sim-honesty A/B; (d) **NEXT** — `ogma_host` on the
+Pi with the parts.
+
+### Step (a) · ✅ DONE — `LegKinematics` + `ImuAttitude`
+
+Both live in `cpp_core/include/ogma/body/`, both bit-verified against the GDScript
+original, and `pi_host`'s `Icm20948` was moved onto the shared filter so exactly one
+attitude implementation remains in the robot's process (it had carried a private
+Rodrigues copy — the same rotation and a different float).
+
+### Step (b) · ✅ DONE 2026-09-11 — `StrideOdometry` + `feet_y_gravity_cmd_imu`
+
+`cpp_core/include/ogma/body/StrideOdometry.hpp` — the stance-FK velocity primitive, the
+servo forward model, `feet_y_gravity`, and the `stride_v ⊕ slip` PI fusion. Bound as
+`ServoLag` / `StrideVNode` / `StrideMath`; `picrawler_body.gd` no longer implements any
+of them.
+
+**The cut follows step (a)'s rule — share the ESTIMATOR, never the simulation of a part
+we own.** The sim computes four stride variants and only `cmdlp` is one the robot can
+build (commanded angles through the servo lag, stance gated on published `foot_load`);
+`cmd`, `meas`, `tc` and `true` stay in GDScript as diagnostics. But all four share ONE
+formula, so `planted_foot_velocity` is public and the diagnostics call it too — the
+alternative leaves two implementations of the expression this port exists to unify,
+drifting apart because only one of them is gated.
+
+**Why this module was harder than the first two.** It ACCUMULATES. `est`, `bias` and
+`slip` carry forward every tick and `stride_v` is consumed by MotorEPMv2 and GainEvolver,
+so a 1-ULP divergence integrates rather than staying 1 ULP. Which makes the gate
+unusually sensitive — a feature, not a cost.
+
+⚠ **The widths are not uniform, and that is the whole difficulty.** `Array[float]` is
+DOUBLE, so the servo lag and the stance test run in double; `Vector2`/`Vector3` are
+float32 storage with double arithmetic between stores, narrowing at the constructor;
+and `_stridev_slip` is a bare `var x: float`, so slip accumulates in DOUBLE right beside
+two float32 accumulators in the same `if` block. Transcribed, not derived.
+
+**THE GAIN-0 GATE — two instruments, because the first one had a hole.**
+
+| run | result |
+|---|---|
+| 1200 ticks × seeds 7, 13, `continuous` | **IDENTICAL byte-for-byte**, 0 script errors |
+| 4999 ticks × seeds 7, 13, `instant_pause` (**14 / 15 hard resets**) | **IDENTICAL byte-for-byte**, 0 script errors |
+
+⚠ **The first gate was green over code it never ran.** `_do_hard_reset` — the path this
+port changes most (the filter owns the state now, so the reset had to move from zeroing
+GDScript vars to resetting the filter) — fires only on a gym switch, a manual reset, or
+an episode boundary, and `reset_mode=continuous` reaches none of them: `auto_reset_count`
+was 0 for all 1200 ticks. The `instant_pause` arm exists to run it. Same lesson as the
+step-(a) commit, from the other direction.
+
+**A wrong comment cost a build, and the mechanism is worth recording.** The declaration
+of `_strido_lp` said "cleared on hard reset"; a `grep | head` that truncated before line
+10410 said it never was. The port was written to the truncated evidence, asserted the
+comment was stale, and left a dangling reference that failed to parse — 421 k script
+errors and no trace at all. **The gate caught it because it produced nothing, which is
+the good failure mode.** The comment was right; the search was short.
+
+**Parity oracle:** `scripts_tools/stride_odometry_parity.gd` →
+`cpp_core/tests/body/stride_odometry_parity_check.cpp`. 900 steps, bit-exact on every
+field first try. Two things it does that the earlier two did not, both because StrideV
+branches: the oracle **asserts its own stance-count coverage** and the checker **exits
+non-zero on a coverage gap** rather than reporting a bit-exact pass over a branch it
+never entered — the coast branch (no planted feet) only fires on airborne ticks. The
+first load schedule reached stance counts 2 and 3 only, and said so.
+
+**Nothing was wired into `pi_host` here**, and deliberately: by SPEC §1.1 there is no
+brain→servo path, and the FSRs that would feed `foot_load` are unbuilt, so there is no
+consumer for `stride_v` on the robot yet. The estimator is in place for step (d).
+
+### Step (c) · ✅ DONE 2026-09-12 — the sim-honesty A/B
+
+Three gain-0 switches (`c09148f`), measured one at a time. **Full verdicts and tables in
+the ledger, `★★★ 2026-09-11`.** What the port needs to carry forward:
+
+| substitute | verdict | what it means for the robot |
+|---|---|---|
+| `honest_joints` — servo forward model, not achieved angles | **`WORKING` (signal)** | The only joint signal hardware can have is **better**, not merely survivable: phase-locking doubles (`plv_w` t = +14.2), 61 % more steps, ~11 % more ground. Costs straightness, scrub, tilt |
+| `honest_imu` — `ego_heading` / `stride_v` / body gyro | **`PARTIAL`** | No significant distance cost; `unstable` +63 % and a small consistent turn bias — dead-reckoning drift, as expected |
+| `honest_upright` — fused attitude, not exact basis | **`NULL`, behaviorally free** | Criterion term `ge_tilt` +5.4 % (the attitude gap is real) but evolved gains bit-identical. The cheapest of the three |
+
+**Two corrections to the H3 audit table above, found by reading the config rather than the
+summary** — the table is left as written, with these noted:
+
+- **`tilt` has no consumer in `native_measured`.** The row is right about the sim
+  publishing the exact basis and wrong that it matters here.
+- **`imu` reaches MotorEPMv2 only.** GainEvolver's `handle_imu` discards every value
+  while `travel_topic` is set, and the config sets it to `stride_v`, so **the flow term
+  is already legal** — the single largest oracle exposure the legality audit recorded is
+  already closed. The row's "consumed by MotorEPMv2 AND GainEvolver" overstates it.
+
+⚠ **A HORIZON RULE THE REST OF THIS PLAN MUST RESPECT.** GainEvolver's first generation
+lands at **tick 34 020** (measured: `warmup_ticks` 10 000 + `eval_window_ticks` 12 000,
+then one per ~24 000). At the 6 000-tick standard its scoring terms read **exactly 0.0** —
+it buffers and scores nothing. **Any A/B of a GainEvolver-fed input must run ≥ 34 000
+ticks**, and the (d) test's perturbation design has to account for the same latency.
+
+**The headline for the port:** of the five oracle-fed topics, the two measured here that
+the robot must give up cost **nothing and a little**, and the one it is forced onto —
+commanded joint angles — is the one that **helps**. The gait does not depend on the
+oracles the way the audit's framing implied. Still to substitute: `distress` (carries a
+units bug) and `target_compass` (needs `vision_compass`).
+
+### Step (d) · **IN PROGRESS — started 2026-09-12**
+
+**First result: the shared body chain now agrees bit-for-bit between sim and robot.**
+Built the three parity checkers on the Pi and replayed the x86 oracles:
+
+| build | leg_kinematics | imu_attitude | stride_odometry |
+|---|---|---|---|
+| default | **400/400 mismatch** (worst 3.1e-07) | **796/800 mismatch** (worst 6.3e-07) | **900/900 mismatch** |
+| `-ffp-contract=off` | 400/400 exact | 800/800 exact | 900/900 exact |
+
+The diagnosis came from an instrument the checker already carried: `imu_attitude` counts
+`up_accel` — sqrt and divide, **no trig** — separately, and it mismatched only 14/800
+against 796/800 overall. Arithmetic-only paths nearly clean, trig-bearing ones not, which
+points at FMA contraction rather than at the maths. Worst |delta| ~3e-7 on metre-scale
+links is 0.3 µm and was never physical error — but `stride_v` accumulates into MotorEPMv2
+and GainEvolver, and an accumulating estimator does not get to ignore 1 ULP per step.
+
+⚠ **The robot's IMU driver already uses the shared filter** (`Icm20948` holds an
+`ogma::body::ImuAttitude`), so until its build carries the flag it is running the same
+filter as the sim and producing **different bits**. One line in `pi_host/CMakeLists.txt`.
+
+**Hardware present as of 2026-09-12** (`i2cdetect -y 1`): `0x14` HAT, **`0x29` VL53L0X**,
+**`0x40` INA219** — the ToF and the current sensor are installed, which the bring-up log
+above predates. No `0x68`/`0x69`, so the ICM-20948 is on SPI as the bus map preferred.
+
+✅ **The robot is synced — 2026-09-12.** It now sits at the same commit as the laptop,
+working tree clean, `pi_host` rebuilt there (**42/42 `test_hw`**) and all three parity
+checks **bit-exact on aarch64 from the synced tree with the repo's own flag**.
+
+⚠ **A CORRECTION WORTH KEEPING, because it nearly caused damage.** This section first
+recorded the robot as being on a *divergent* branch carrying "~677 lines of uncommitted
+bench work", and recommended resolving the divergence before continuing. **Both halves
+were wrong, and the method that produced them is the lesson.** `git status` on the robot
+did show 7 modified and 12 untracked files — but the robot's HEAD was an **ancestor** of
+the laptop's, 40 commits behind on strictly linear history, and file-by-file comparison
+showed **every one of those files was already byte-identical to content committed
+upstream** (the sole exception being `GodotFloat.hpp`, where the robot held the *older*
+version). The "uncommitted work" was already-merged work sitting on a stale base.
+
+The error was inferring divergence from *"none of my commits are present"* without
+checking ancestry — absence of my commits is not divergence, exactly as absence in a
+truncated search is not absence. Acting on that reading — committing and pushing the
+robot's tree as new work — would have produced 19 duplicate commits of content already in
+history. **The check that settled it was `git merge-base --is-ancestor` plus a
+file-by-file diff against `HEAD`, not `git status`.** Sync was therefore a
+`git stash push -u` (nothing unique to lose, and preserved regardless) followed by
+`git merge --ff-only`; both pre-existing stashes survive and a tarball snapshot was taken
+first on both machines.
+
+#### ✅ The belly channel reaches the brain — measured on the robot 2026-09-12
+
+`ogma_host --tof` (default OFF) opens the VL53L0X and publishes
+`reality.proprio.ground_clearance` — the `gc_raw` channel the **promoted** height
+homeostat rides. Live, robot on the stand, 250 ticks at 50 Hz:
+
+```
+VL53L0X 0x29 ready — calib pi_host/calib/sensors.json (loaded), mount_offset 64.80 mm, gc_stand 0.060 m
+belly ToF — 162 reads, 162 valid (100.0%), last raw 157 mm -> 0.092 m
+            (status valid, signal 21.24 ambient 0.10 spads 158.0) -> ground_clearance 1.0000
+```
+
+The offset arithmetic checks out by hand (157 − 64.8 = 92.2 mm), validity is 100 %, and
+the signal-to-ambient ratio is ~200:1. **Two things in those numbers matter more than
+"it works":**
+
+- ⚠ **On the stand the channel is SATURATED.** 92 mm of belly clearance against a 60 mm
+  normalizer clamps to exactly 1.0000, so *the channel carries no information in this
+  posture*. Any bench test of the height homeostat against a stand-mounted robot is
+  testing a constant. Its dynamic range only exists with the body on the ground.
+- ⚠ **The sensor produces ~32 Hz against a 50 Hz tick** (162 samples in 250 ticks), so the
+  brain sees a fresh belly reading about two ticks in three and the same value on the
+  third. That is the part's timing budget, not a fault — but it is a transport fact a
+  consumer reasoning about belly *rate* needs, and it is why the driver's `read_ready()`
+  returning false is normal rather than an error.
+
+**The normalizer is now shared code**, `ogma::body::ground_clearance()`, and the sim was
+swapped onto it (byte-identity re-verified). A robot dividing by a different standing
+height would have fed a plausible, differently-scaled number into a promoted lever.
+
+**The status is published as a channel, not folded away.** `sense.belly` always carries
+raw mm, status, signal, ambient and spads; `reality.proprio.ground_clearance` is published
+**only on a valid reading and is absent otherwise** — this project's own rule for an
+exactly-round null. ⚠ The driver reports `distance_m = max_range_m` on a bad read (not
+zero, deliberately: zero would map "saw nothing" onto "something against the belly"), so
+gating on the status is what keeps that honest floor out of the homeostat.
+
+**`pi_host/calib/sensors.json`** now holds the ToF mount offset, the INA219 shunt and the
+`gc_stand` normalizer, with `SensorCalib` as the single loader and a printed receipt. They
+were CLI flags on `ExecStart` — and the **checked-in unit did not carry
+`--tof-offset 64.8` while the live one did**, so reinstalling the unit from the repo would
+have silently dropped the belly calibration and left the channel ~65 mm short while
+looking perfectly healthy.
+
+⚠ **OPERATOR ACTION: the systemd units now declare `Conflicts=` but the INSTALLED copies
+predate it.** Both `ogma-benchd` and `ogma-host` are `WantedBy=multi-user.target`, so
+today they both run; once `ogma_host` is given `--tof` they would interleave transactions
+on `/dev/i2c-1`, and an interleaved multi-byte read does not fail — it returns a plausible
+wrong number. Re-run `pi_host/systemd/install.sh` to pick the guard up. Not done from here:
+installing units is a deployment change.
+
+#### ✅ The IMU reaches the brain — measured on the robot 2026-09-13
+
+`ogma_host --imu` (default OFF) publishes `reality.proprio.upright` and
+`reality.proprio.tilt` from the ICM-20948's **fused** gravity estimate, plus
+`sense.imu_health`. Live, robot on the stand, 600 ticks:
+
+```
+ICM-20948 ready (who_am_i 0xEA) — level_ref [-0.03493 -0.00558 0.99937] from pi_host/calib/sensors.json (loaded)
+IMU — 600 samples, disagree 0.367 deg, |a| 1.0017 g, trust 0.0199,
+      bias CONVERGED (600 samples) [0.395 -2.592 -0.189 dps],
+      up_fused [0.0009 0.9999 -0.0134] -> upright 0.9999
+```
+
+- **600 samples in 600 ticks — 1:1 with the loop**, in contrast to the ToF's ~2-in-3.
+  The IMU is on SPI and keeps up; the belly channel is the one with a transport gap.
+- `disagree` 0.367° and `|a|` 1.0017 g: the filter agrees with the accelerometer to a
+  third of a degree at rest, which is the only health signal a robot has.
+- ⚠ **The gyro bias estimate is −2.59 dps on the body-up axis.** Uncorrected that is
+  ~156°/minute of phantom yaw — and it is worth reading beside step (c)'s `honest_imu`
+  result, where the dead-reckoned heading produced a small consistent turn bias. The
+  estimator converged here, but *this is the magnitude it is holding back*, and nothing
+  removes it while the body is moving and the still-window never opens.
+
+**The derived forms are shared contracts, and the sim was swapped onto them**
+(`ogma::body::upright_from_up`, `pitch_roll_from_up`) so the two cannot drift. `upright`
+is provably the same scalar as the sim's `basis.y.y`; `tilt` goes out as
+`[sin p, cos p, sin r, cos r]` because raw radians wrap at ±π and an EPM reads that as a
+jump in the world. **Step (c) measured this substitution as behaviourally free**, so the
+channel was validated in sim before it existed on the robot.
+
+**`level_ref` joined the calib file**, which `Icm20948Config`'s own comment had asked for.
+A dead IMU is a **startup failure**, not an absent topic — `upright` gates keyframe baking.
+
+#### Bus arbitration: the guard went on the DEVICE, not the services
+
+The first attempt was `Conflicts=` between the two units, and it was **wrong — caught
+before installing.** `ogma_host` touches `/dev/i2c-1` only under `--tof`, its unit does
+not pass it, and the operator deliberately runs both services; mutual exclusion would have
+removed a working arrangement to solve a problem that only exists under a flag, and
+`install.sh` enables both units, so a symmetric `Conflicts=` would have made the boot
+state ambiguous. `LinuxI2cBus` now takes `flock(LOCK_EX|LOCK_NB)` instead: it covers
+`hat_tool` (until now guarded only by the README's convention) and any future tool however
+started, bites only when someone actually opens the bus, and makes the loser fail loudly
+naming the remedy. Two tests pin it — including that the claim **dies with its owner**, so
+a crash cannot wedge the bus into looking like it needs a reboot.
+
+**Units installed 2026-09-13**, binaries rebuilt into `pi_host/build` first so the
+flagless unit could not run a stale binary that knew nothing of `sensors.json` — which
+would have silently zeroed the 64.8 mm belly offset. Verified after: benchd prints
+`calib pi_host/calib/sensors.json (loaded) — tof_offset 64.80 mm`, 44/44 `test_hw`, and
+both services coexist as before.
+
+**Remaining for step (d), and a correction to this plan's own scope.** I wrote above that
+the remaining topics were `joints`, `feet_y_gravity_cmd_imu` and `ground_clearance`. Only
+the last was actually buildable: **the other two need the COMMANDED servo angles, which
+exist only in `ogma_benchd`, and SPEC §1.1 gives `ogma_host` no servo path by design.**
+So they are not "remaining work" on the sensor side at all — they are gated on the
+actuation architecture that §1.1 deliberately defers, and the scope line above was
+under-specified. `stride_v` remains blocked on the FSRs for its stance gate. What is
+genuinely next for step (d) is therefore the **IMU on SPI** (no I2C contention, driver
+already on the shared filter), which yields `upright`/`tilt` honestly; everything
+efference-derived waits on the actuation decision.
+
+---
 
 ## Phase 5 — Bring-up and the (d) test · recorded, not scheduled
 
@@ -1304,3 +1629,288 @@ have — and it is exactly what the (d) test is meant to measure properly once t
   top plate as CAD's "Top plate / battery" label suggests. Visual confirmation would firm up G1.
 - `KNEE_DROP_SIGN` (`:289`) has **zero use sites** — dead code. Out of Phase 0 scope
   deliberately (no opportunistic cleanup while the sprawl PR is open); revisit after the merge.
+
+---
+
+## SPEC — Brain input contract for P-e, and what the robot can publish (2026-10-02)
+
+The config being ported is **P-e** (`..._native_measured__tofboom__fsrleg.json`): FSR leg,
+raw boom ToF, `MAX_SERVO_SPEED` 3.668 rad/s. This is every input it reads from outside the
+graph, how the sim produces it, and the robot's source. Line refs are into
+`picrawler_body.gd` (pb), `MotorEPMv2.cpp` (M) and `GainEvolver.cpp` (GE) as of `3a4f453`.
+⚠ **Several consumers update per MESSAGE, not per tick** (MotorEPMv2's height EMA and running
+max, and its heading integral at 1/60 per `imu` message), so the robot must publish each of
+these **exactly once per 50 Hz tick**.
+
+| topic | read by (what) | P-e sim source | robot source | status |
+|---|---|---|---|---|
+| `joints` [12, joint-major] | Bridge, both body-pose EPMs, MotorPlanner | **achieved** hinge angle ÷1.4 / ÷1.4 / (knee+1.6)÷1, ±1 (pb ~6753) | ServoForwardModel (α 0.2) of the commanded angle, from benchd's `current_us` via the servo map at **545.2 µs/rad**, same normalisation. **= the sim's `honest_joints` form** | needs benchd feed ✅ (built) + port |
+| `imu` [4] | MotorEPMv2: [2] fwd_v → commit/height fade; [3] yaw rate → bearing hold | world yaw, world fwd_v (m/s), world ω_y (pb ~6420) | honest form: ego heading (gyro dead-reckoned), `stride_v.y`, body-up ω. **= `honest_imu`** | port |
+| `gyro` [3] | GainEvolver [1] → turn factor | body ω ÷π (exact physics) | ICM-20948 `gyro_body` ÷π | port (trivial) |
+| `stride_v` [2] | GainEvolver [1] → flow term | shared `StrideV` (stance-FK on servo-lag FK, accel, foot_load ≥ 0.2) | the same shared `StrideV`, with the FSR load | port |
+| `foot_contact` [4] | MotorEPMv2 swing tuck + rear landing (**control**); GainEvolver touchdowns | whole-shank physics contact | FSR counts ≥ the touchdown threshold (wiring doc §5.7: 30 g ≈ 1536 counts) | needs feed ✅ + port |
+| `foot_load` [4] | GainEvolver: 12-tick max after touchdown vs 0.05 | EMA(0.15 @ 240 Hz) of normal impulse ÷ body weight per substep | FSR counts → grams (§5.7 table, interpolated) ÷ 598 g | needs feed ✅ + port |
+| `joint_torque` [12] | GainEvolver energy term (w 1.0) | PD model of **achieved** angle & velocity (pb ~9858) | **no sensor on hobby servos** | ⚠ DECISION |
+| `feet_y_gravity_cmd_imu` [4] | MotorEPMv2: sign(value − own EMA) gates `stance_lift` | FK of the **zero pose** · `up_est` − L3/2 (`servo_targets` stays 0: ledger 2026-10-02). Closed form: `0.09936·(sₓ·up.x + s_z·up.z) − 0.04984·up.y − 0.0435` | the same closed form from the fused up vector, to MATCH P-e | port (parity with a known quirk) |
+| `ground_clearance` [1] | MotorEPMv2 height homeostat | raw boom, `clamp(max(0, d − 0.103)/0.06)`, every tick, miss → 1.0 | published, offset 64.8 mm; **valid readings only, ~30 Hz** | ⚠ rate/hold mismatch |
+| `upright` [1] | GainEvolver falls, tilt_sd | **exact** basis.y.y | fused `up.y` (already published). **= `honest_upright`** | published |
+| `distress` [1] | MotorEPMv2 panic; MotorPlanner plan cut | **world XZ displacement** × exact-tilt perch accumulator | no world position | ⚠ DECISION |
+| `tilt` [4] | MotorEPMv2 by **default** → coord-fitness wobble penalty | **not published** in P-e | ogma_host publishes it | ⚠ mismatch: set `tilt_topic: ""` |
+| `events.miss` / `reset` | MotorEPMv2 reset mask (any intensity) | **legacy reward shaping**: fires on ≥ 39 % of ticks at 3.668 (world height, world speed) | none | ⚠ DECISION — ledger 2026-10-02 |
+| `target_compass`, `lateral_v` | MotorEPMv2 | world-derived | — | inert in P-e; omit |
+
+**The gate before hardware is a sim arm whose inputs are all ones the robot can publish
+("P-e honest")**, A/B'd against P-e and watched in the UI. It needs:
+1. `honest_joints`, `honest_imu`, `honest_upright` = 1 (all exist, all gain-0).
+2. `tilt_topic: ""` on MotorEPMv2 in both sim and robot (byte-identical in the sim, which never
+   publishes `tilt` in P-e).
+3. **Events:** the robot cannot emit the reward-shaping misses. Options: switch them off in the
+   sim (`stability_gain` / `height_penalty_gain` = 0), or keep them as a robot-side scaffold
+   computed from what it can sense. The fall miss can use fused tilt; the world-height and
+   world-speed ones cannot be reproduced honestly.
+4. **`distress`:** needs an honest form (e.g. stride-odometry displacement × fused tilt), or
+   panic off.
+5. **`joint_torque`:** zeros (energy term inert), or a legal proxy. The INA219 on the servo
+   rail (Mod C, not fitted) would give a whole-rail current, not per joint.
+6. `ground_clearance`: ⚠ **NOT changed — the existing rule stands.** `ogma_host` publishes it only
+   on a valid reading and leaves it ABSENT otherwise ("never substitute a number for a missing
+   measurement"). The cost is known and recorded: the robot's ToF is ~30 Hz against the sim's
+   50 Hz, so MotorEPMv2's per-message EMA runs ~1.7× slower on the robot. An operator decision
+   if it matters.
+
+**benchd state feed (built 2026-10-02, untested on hardware).** `--state-pub <port>` (default
+off) publishes `"state " + {seq, t, us[12], armed, fsr[4], fsr_ok}` on its own PUB socket
+every 50 Hz tick. The fields:
+- `us` = driver output after slew, in HAT channel order.
+- `fsr` = A0–A3 = physical FL, FR, RL, RR; −1 with `fsr_ok:false` on a failed read.
+
+The FSR reads are shared with `adc.rate` when both are on. The socket carries no verbs, so it
+cannot become the brain-rate control path §1.1 forbids. The leg mapping, including the sim's
+leg-name mirror, belongs to `ogma_host`'s calibration.
+
+### Robot side as built (2026-10-03) — brain inputs for P-e·h0, NOT yet run on hardware
+
+The operator chose **P-e·h0** (robot-faithful inputs, height homeostat off) as the target.
+
+**benchd** `--state-pub 5592` publishes the 50 Hz state frame: `us[12]`, `fsr[4]`, `fsr_ok`,
+`tof_m`, `tof_valid`, `tof_ms`. With the feed on, benchd also polls the belly ToF from the
+tick (non-blocking). In brain mode **benchd owns all of `/dev/i2c-1`**: the HAT, the FSRs and
+the ToF.
+
+**ogma_host** `--imu --brain-inputs` (refuses `--tof`, which would be a second process on the
+bus) subscribes to the feed and publishes, through `ogma/hw/BrainInputs.hpp`'s
+`BrainInputBuilder`:
+- `joints` (servo map + measured 545.2 µs/rad → shared ServoForwardModel);
+- `imu` (ego heading, previous stride_v, body-up yaw rate) and `gyro`;
+- `stride_v` (shared StrideV; stance = FSR load ≥ 0.2 of body weight at both ends of the tick);
+- `foot_contact` / `foot_load` (FSR counts, mirrored into sim leg order);
+- `joint_torque` (zeros);
+- `feet_y_gravity_cmd_imu` (the zero-pose form P-e uses);
+- `distress` (shared DistressAccumulator);
+- `ground_clearance`, once per NEW valid ToF reading from the feed.
+
+`upright` and `tilt` come from the existing IMU path; P-e·h0 sets `tilt_topic: ""`, so `tilt`
+is published but unread.
+
+A tick with no fresh IMU sample, or a state frame older than 200 ms, publishes NOTHING (absent,
+never guessed), and the exit report counts every withheld tick.
+
+**Calibration:** the leg geometry comes from `pi_host/calib/body_measured_fsr.json`, exported
+by the sim (`scripts_tools/export_body_calib.gd`); re-export when the body changes. Also
+`pi_host/calib/servo_map.json` and `sensors.json` (`servo.us_per_rad`).
+
+**Verified:**
+- `test_hw` 67/67 on x86. The shared FK reproduces the sim's own FK to 1e-6 at 8 non-zero
+  poses. The unit-conversion and lag tests were mutation-checked: the first versions passed
+  vacuously and were fixed.
+- `ogma_host.cpp` passes a `-Wall -Wextra -fsyntax-only` check.
+
+**NOT verified:**
+- `ogma_host` linked and run (needs the Pi's ALSA/gpiod);
+- the state feed on real hardware;
+- the FSR contact threshold (200 counts) on the bench;
+- the I²C budget with 4 ADC reads plus a ToF poll per tick.
+
+**Shadow-mode run (no actuation exists):**
+```
+ogma_benchd --body measured --state-pub 5592
+ogma_host --config godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo.json --imu --brain-inputs --listen 0.0.0.0
+```
+
+### First hardware run of the brain-input path (2026-10-03) — what the robot taught
+
+Robot on the stand, then the desk; DC bench supply. Shadow mode only: no actuation path exists.
+
+**Worked:**
+- the Pi build (P-e·h0 graph linked into `ogma_host`, `test_hw` 75/75);
+- the benchd state feed at 50 Hz;
+- `ogma_host --imu --brain-inputs` running the full P-e·h0 graph for 3000 ticks with **0
+  overruns**: tick wall p95 ~0.69 % of the 20 ms budget, i.e. **~0.14 ms** (first written as
+  "0.7 ms" by reading the percentage as milliseconds; see the correction below);
+- IMU bias converged;
+- ground clearance from the feed at the sensor's ~31 Hz.
+
+**Found and fixed on the robot:**
+1. **0 µs means "not commanded by THIS benchd", not "limp".** A fresh benchd reports 0 on every
+   channel it has not commanded, while the HAT keeps holding the last pulse. The converter
+   would have published ±2.7 rad, clamped to the rails. Ticks with any uncommanded mapped
+   channel are now withheld (`f92b586`).
+2. **A feed-enabled benchd hung forever on SIGTERM,** holding `/dev/i2c-1`, because the feed
+   socket was never closed before `zmq_ctx_term`. Fixed and verified: exits cleanly, and a
+   replacement starts (`69551f2`).
+3. **A leg moved onto the stand when the services were stopped** (operator). ⚠ The mechanism is
+   NOT established: benchd's shutdown path commands no rescue (it joins its threads and stops
+   the ToF). Treat service stops as possibly-moving until it is understood.
+4. **The 6.4 V low-voltage limp tripped on a ~100 ms inrush dip to 6.21 V** from the bench
+   supply, 0.6 s into a `stand` move. Per the operator (the Pi is on its own BEC now), the
+   limp now needs a SUSTAINED drop: 1 s by default (`d999f17`). `pose_hold.py` labels every
+   rescue "the deadman fired", which misread this one; benchd's own record said
+   "low battery".
+
+**Open, blocking a held-pose shadow run and any actuation:**
+- ~~I²C budget~~ ⚠ **RETRACTED (same day): there is no I²C budget problem.** benchd's
+  `cpu.wall_*` / `cpu_*` are **percent of the tick budget** (`TickBudget`), not milliseconds,
+  and were read as ms. "9.5" was 9.5 % (≈1.9 ms) and "16.6" was 16.6 % (≈3.3 ms). Measured
+  directly with per-block timers (`tick_split` in the telemetry, `a6165d4`…`776492c`), state
+  feed on:
+
+  | | unarmed | 12 servos armed |
+  |---|---|---|
+  | servo writes | 0 | 1.50 ms |
+  | four FSR reads | 1.18 ms | 1.18 ms |
+  | ToF poll | 0.46 ms | 0.46 ms |
+  | lock wait | 0.12 ms | 0.13 ms |
+  | **whole tick** | **1.75 ms** | **3.29 ms** of 20 |
+
+  Zero I²C retries on every address. The feed costs ~1.6 ms per tick; the ToF poll needs no
+  fix. Process note: the ToF was blamed twice, by subtraction from the misread number, before
+  it was timed. Both telemetry emitters now say `"units": "pct_of_budget"` in-band.
+- **The bench supply sags under inrush.** Raise its current limit, or expect `vbat_dip`
+  records.
+- **FSR in-air baseline:** the 541 / 248 counts turned out to be real contact (a leg on the
+  stand). The 200-count contact threshold is still unvalidated on free feet.
+
+### The full-speed first move, and the supply (2026-10-03, later)
+
+**Operator observation:** the first command after benchd starts moved the servos at FULL speed;
+only later commands moved at the slew rate.
+
+**Cause:** `ServoDriver` started an unarmed channel AT its target, a step the servo crosses at
+its own top speed, on all 12 at once.
+
+**Fixed (`09b25e1`):** the driver tracks the pulse last written to the HAT (`known_`). The HAT
+holds it; it survives `limp_all()` and is cleared by an MCU reset. A first command ramps from
+there. benchd carries it across restarts in `/dev/shm/ogma_benchd_pulses.json`, stamped with
+the boot id.
+
+**Verified on the robot:**
+- cold receipt "pulses UNKNOWN";
+- after one rescue command and a restart, the receipt reads "12/12 seeded";
+- the next `stand` move started from the seeded pulses.
+
+**The supply is still the limit.** The `stand` move from rescue (lifting the body off the desk)
+still dipped the HAT rail three times for ~100 ms each, to **6.37 / 5.80 / 5.89 V**, late in
+the move: load, not speed. The 1 s sustained rule absorbed them. Then, at REST in rescue after
+the release, the rail stayed below 6.4 V for 1058 ms (min **5.64 V**) and the sustained limp
+fired. ⚠ **Cause (operator): a leg caught on the silicone mat, stalling a servo.** So the
+sustained rule caught a REAL sustained overload, which is what it is for, and ignored the
+~100 ms move dips, which is also what it is for. Two notes stand:
+- Its response is the rescue pose, and this stall happened WHILE holding rescue. Rescue cannot
+  clear a stall caused by rescue itself; only less force or releasing the joint can.
+- The rail fell to 5.6–5.8 V (below the HAT's 6.0 V minimum) at a captured servo-branch peak
+  of only 1.33 A (10 Hz samples). That is worth checking against the bench supply's current
+  limit before judging brownout behaviour on it.
+
+### Held-pose shadow run (2026-10-03) — PASSED, with three findings
+
+`ogma_benchd --state-pub 5592` (12/12 seeded), `pose_hold stand` (ramped, no vbat dips), and
+`ogma_host --imu --brain-inputs --dump-inputs 250`, P-e·h0, 3000 ticks.
+- **3000/3000 ticks published.** 2990 frames, 2 superseded, 1944 ToF readings, 0 overruns.
+  Brain tick 1.5 % of budget (~0.3 ms).
+- **Inputs vs the still standing pose:**
+  - foot_contact [1,1,1,1];
+  - foot_load sum 1.03× body weight at tick 0, mirrored mapping checked against the raw counts;
+  - stride_v |v| < 0.001 m/s;
+  - heading drift 0.003 rad in 55 s;
+  - zero-pose foot heights −0.088…−0.098 (−0.093 level, ±tilt);
+  - upright 0.9994, distress 0;
+  - hips ≈ 0 (physical FL hip1 75 µs off origin → −0.098).
+
+**Findings:**
+1. **FSR creep, first measurement.** Counts rose over 55 s at constant load (physical FL 1677 →
+   2078, RL 1923 → 2120). Load sum went 1.03 → 1.39× body weight. The light feet (0.06–0.17)
+   are drifting toward the stride stance gate at 0.2. Wiring doc §8 item 5 asked for this.
+2. **Knees read +1, saturated, in `stand`.** The sim's own normalisation `clamp(knee + 1.6)`
+   saturates above −0.6 rad, and `stand` ≈ the construction pose (knee hinge ≈ 0). The sim
+   spawns the same way, so this is parity, but in `stand` the brain sees no knee motion until a
+   knee flexes past −0.6 rad.
+3. **The deadman did not fire on release.** Two `picrawler_dash.py` instances on the Pi poll
+   `status` at ~2 Hz, and benchd refreshes `last_client_ms` on EVERY verb. PROTOCOL.md says
+   only `ping` feeds the deadman. So any open dashboard keeps armed servos alive with no
+   controlling client. The robot was left standing on the HAT's held pulses, unsupervised,
+   until rescue was commanded by hand. ⚠ Nine bench tools hold poses while polling only
+   `status`, so making `status` non-feeding needs those tools to `ping`. **FIXED (operator's
+   choice, `0f1f067`):** read-only verbs no longer feed the deadman, and the eight tools ping
+   in their rpc helper. Verified on the robot with both dashboards polling: `pose_hold` holds
+   on its pings, and the deadman fired 930 ms after release.
+
+### The actuation path, as built (2026-10-03) — built and unit-tested, NOT yet run on the robot
+
+The brain's actions reach benchd through a path that the calibration channel cannot reach.
+That keeps SPEC §1.1 structural rather than a matter of restraint. Wire details are in
+`pi_host/PROTOCOL.md` ("Run modes").
+- **Mapping.** `ogma_host --actuate` reads the 12 `action.<leg>_<joint>` topics. It keeps the
+  same per-tick freshness rule as `OgmaBrain`, and maps u → joint target with the sim's own
+  function (`_discrete_joint_targets`, exported with 24 `u_check` samples and re-checked at
+  start). The target is then converted to µs by the exact inverse of the `joints` input
+  (`hinge_angles_from_us`), so proprioception and the motor output agree on where a leg is.
+  Nothing is sent until every channel has been published once, and nothing is sent on a tick
+  whose inputs were withheld.
+- **Transport.** `cmd {seq, tick, us[12]}` over PUB→SUB (CONFLATE). benchd binds that socket
+  to **127.0.0.1**, and the run-mode socket too.
+- **Who applies it.** Only `dev` / `autonomous` (SPEC §4.2.1), and only while not STOPPED. The
+  command goes through the same driver clamp and the same 40 µs/tick slew as everything else.
+  The calibration deadman is gone in those modes (§4.2). A quiet brain freezes the body:
+  `dev` latches a stop, and `autonomous` holds, then goes to rescue after 5 s.
+- **Entering a brain mode latches STOP**, so the first brain-driven move is always an operator's
+  SPACE. Resume is refused while any channel's pulse is unknown.
+- **STOP freezes and pauses.** benchd holds every servo where it is, and `ogma_host` stops
+  ticking the graph (held, not reset, §4.2.2).
+- **Knee travel.** `u_knee = 0` is KNEE_REST −1.6 rad = origin + 872 µs on these sign −1 knees,
+  past the calibrated `max_us`. So at the rest command the knees sit on the envelope clamp.
+  This is the same saturation the held-pose run saw on the input side (finding 2 above).
+  `brain.clamped_mask` in telemetry shows it live.
+
+Verified: `test_hw` 90/90 on the Pi (12 new). Not yet verified on the robot:
+- benchd's mode, STOP and stream-loss handling;
+- `ogma_host`'s pause;
+- the first brain-driven move.
+
+### First brain-driven run (2026-10-03) — the path works
+
+30 s on battery in the safety box. Path `WORKING`: commands applied at 50 Hz, STOP froze the
+servos and paused the brain, and the deadman rescue ran on exit. The first attempt, on the bench
+supply, reset the Pi; that record was lost, and the off-board recorder now runs for every brain
+run. Open:
+- the thrash the sim predicted, now visible on hardware;
+- a blind tilt guard in my harness;
+- `ogma_host`'s attitude filter ending 117° from the accelerometer.
+
+Ledger 2026-10-03 "FIRST BRAIN-DRIVEN RUN".
+
+### Status 2026-10-04 — sim-to-real validated by the operator; power is the next blocker
+
+**The P-e·h0 brain, trained in the sim with frozen gains, walks the real robot.** The operator
+watched it: the gait with the FSR feet "looks very much like the sim". The full chain is built and
+in use:
+- `picrawler-dash` (C: run config, 10 s countdown, SPACE / R / E);
+- benchd `autonomous` mode, with the loopback command and control sockets;
+- `ogma_host --actuate`, servo output lag 0.2, the IMU on a 225 Hz thread;
+- automatic HAT-reset recovery to the start pose.
+
+Measured parity and known gaps: ledger 2026-10-04 "MILESTONE".
+
+**Next blocker: servo power.** Agile moves draw 2.4–3.0 A against a ~1.9 A budget on the HAT's
+regulator, and its MCU resets about every 10–40 s. Software now makes that safe and recovers in
+~3 s; agility needs the cause removed, most directly a dedicated servo supply. Then the
+finding-level evidence: a distance/heading measure on the robot and many runs.

@@ -28,6 +28,7 @@
 
 #include "ogma/GraphConfig.hpp"
 #include "ogma/InProcessBus.hpp"
+#include "ogma/ThreadCpuTime.hpp"
 
 namespace ogma {
 
@@ -91,10 +92,7 @@ public:
 
     uint64_t current_tick() const override { return current_tick_; }
 
-    static double cpu_us() {
-        timespec ts; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
-        return double(ts.tv_sec) * 1e6 + double(ts.tv_nsec) * 1e-3;
-    }
+    static double cpu_us() { return thread_cpu_us(); }
     void print_profile() const {
         if (whole_.empty()) return;
         std::vector<double> w = whole_; std::sort(w.begin(), w.end());
