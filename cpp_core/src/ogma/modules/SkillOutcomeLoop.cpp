@@ -39,6 +39,7 @@ std::vector<TopicSpec> SkillOutcomeLoop::input_topics() const {
              TopicSpec{seek_range_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
              TopicSpec{pose_topic_,       std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
     if (!context_topic_.empty()) v.push_back(TopicSpec{context_topic_, std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false});
+    if (!target_topic_.empty()) v.push_back(TopicSpec{target_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     return v;
 }
 std::vector<TopicSpec> SkillOutcomeLoop::output_topics() const {
@@ -73,6 +74,7 @@ ParamSchema SkillOutcomeLoop::params_schema() const {
         {"reach_short_m",    ParamMutability::HotMutable, "With reach_m: a kick or a peck is asked for only when the sighting is within this range; beyond it only the push (if present).", ParamValue{0.35}},
         {"reach_cos",        ParamMutability::HotMutable, "The bearing's forward component (cosine) a live sighting needs to count as ahead.", ParamValue{0.7}},
         {"armed_ticks",      ParamMutability::HotMutable, "How long after an arrival the loop stays armed for a sighting within reach (a miss is counted when it lapses).", ParamValue{int64_t{1500}}},
+        {"target_topic",     ParamMutability::ConstructionOnly, "§17.113 A1: the seek loop's target_out_topic (values[5] = the target's source); the end of an AMBUSH target (source 4) is not a thing's arrival -- no skill is asked for.  Empty = every arrival is a thing's.", ParamValue{std::string("")}},
         {"context_topic",    ParamMutability::ConstructionOnly, "S3: a context EPM's RealityToken; its winner splits each kind's cells (key = kind x context_n + ctx). Empty = kind only.", ParamValue{std::string("")}},
         {"context_n",        ParamMutability::ConstructionOnly, "S3: the context vocabulary's size (the context EPM's max_nodes).", ParamValue{int64_t{4}}},
         {"pull_topic",       ParamMutability::ConstructionOnly, "S3: [pull], the expected answer at the attended thing's cell -- 1 while uncertain, else its answered share (Laplace); a context whose pooled outcomes are known lends its share to its unknown cells. The seek loop's need for a sighted thing. Empty = not published.", ParamValue{std::string("")}},
@@ -94,7 +96,7 @@ ParamMap SkillOutcomeLoop::current_params() const {
     m["peck_id"] = ParamValue{int64_t{peck_id_}}; m["push_id"] = ParamValue{int64_t{push_id_}};
     m["reach_m"] = ParamValue{reach_m_}; m["reach_cos"] = ParamValue{reach_cos_}; m["armed_ticks"] = ParamValue{int64_t{armed_ticks_}};
     m["reach_short_m"] = ParamValue{reach_short_m_};
-    m["context_topic"] = ParamValue{context_topic_}; m["context_n"] = ParamValue{int64_t{context_n_}};
+    m["context_topic"] = ParamValue{context_topic_}; m["target_topic"] = ParamValue{target_topic_}; m["context_n"] = ParamValue{int64_t{context_n_}};
     m["pull_topic"] = ParamValue{pull_topic_}; m["answer_m"] = ParamValue{answer_m_};
     m["context_pool_min"] = ParamValue{int64_t{context_pool_min_}};
     return m;
@@ -127,6 +129,7 @@ void SkillOutcomeLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "reach_short_m",    [&](auto const& v){ reach_short_m_ = get_double(v,"reach_short_m"); });
     apply_param(params, "armed_ticks",      [&](auto const& v){ armed_ticks_ = int(get_double(v,"armed_ticks")); });
     apply_param(params, "context_topic",    [&](auto const& v){ context_topic_ = get_string(v,"context_topic"); });
+    apply_param(params, "target_topic",     [&](auto const& v){ target_topic_ = get_string(v,"target_topic"); });
     apply_param(params, "context_n",        [&](auto const& v){ context_n_ = std::max(1, int(get_double(v,"context_n"))); });
     apply_param(params, "pull_topic",       [&](auto const& v){ pull_topic_ = get_string(v,"pull_topic"); });
     apply_param(params, "answer_m",         [&](auto const& v){ answer_m_ = get_double(v,"answer_m"); });
@@ -247,8 +250,16 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
             pending_ = true; kx_ = tx_; ky_ = ty_; knode_ = nd; kctx_ = ctx_; wait_ = 0; kicked_tick_ = now;
         }
     };
+    // §17.113 A1: the source of the target the seek loop last held (an ambush place is no thing)
+    bool ambush_end = false;
+    if (!target_topic_.empty())
+        if (auto tt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(target_topic_)))
+            if (tt->values.size() >= 6) {
+                if (tt->values[0] > 0.5f) last_src_ = int(tt->values[5]);
+                else ambush_end = last_src_ == 4;
+            }
     // the arrival: the seek need falls to 0 with the range under arrive_range
-    const bool arrival = seek_prev_ > 0.0f && seek_v == 0.0f && seek_r < arrive_range_ && seen_ && !pending_;
+    const bool arrival = seek_prev_ > 0.0f && seek_v == 0.0f && seek_r < arrive_range_ && seen_ && !pending_ && !ambush_end;
     if (reach_m_ <= 0.0) {
         if (arrival) ask(tick_id, 0.0);                                // the old rule: ask on the arrival tick
     } else {

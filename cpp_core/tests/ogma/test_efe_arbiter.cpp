@@ -900,3 +900,104 @@ TEST(EFEArbiter, PrecisionModeAbsentTrustScoresZero) {
     EXPECT_FLOAT_EQ(f.arb.g_prag_planner(), 0.0f);
     EXPECT_FLOAT_EQ(f.arb.g_prag_klino(), 0.0f);
 }
+
+// §17.112 (the duck, 2026-10-08): the look -- the stop-and-look as a fifth policy in precision mode,
+// G_look = look_weight · (1 − hunger) · look need · trust_look.  Absent, the race is unchanged.
+namespace {
+int run_look(float hunger, float need, std::unordered_map<std::string, float> w, bool wired = true, float* gain_look = nullptr) {
+    ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")},
+                        {"play_weight", 1.0}, {"play_value_topic", std::string("reality.cognitive.play_value")},
+                        {"vision_weight", 1.0}, {"vision_value_topic", std::string("reality.cognitive.seek_value")},
+                        {"trust_key_vision", std::string("reality.loop.seek")}};
+    if (wired) p["look_value_topic"] = std::string("reality.cognitive.look");
+    Fix f(p);
+    uint64_t t = 0; int last = -1;
+    for (int i = 0; i < 300; ++i) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.proprio.hunger",        p1(hunger));
+        f.bus.publish("reality.cognitive.seek_value",  p1(hunger));
+        f.bus.publish("reality.cognitive.play_value",  p1(1.0f));
+        f.bus.publish("reality.cognitive.look",        p1(need));
+        f.bus.publish("consensus.1", trust_token(w));
+        f.arb.tick(t++);
+        f.bus.end_tick();
+        last = f.arb.winner();
+    }
+    if (gain_look) {
+        auto g = std::dynamic_pointer_cast<const ogma::ProprioToken>(f.bus.last_value("arbiter.gain.look"));
+        *gain_look = g ? g->values[0] : -1.0f;
+    }
+    return last;
+}
+}  // namespace
+
+TEST(EFEArbiter, LookWinsWhenItsNeedOutweighsPlayAndYieldsToTheSeek) {
+    std::unordered_map<std::string, float> w = {{"reality.loop.seek", 0.4f}, {"reality.loop.play", 0.3f}, {"reality.loop.look", 0.4f}};
+    float g = -1.0f;
+    // nothing sought: look 1·0.9·0.4 = 0.36 beats play 1·0.3 = 0.30
+    EXPECT_EQ(run_look(0.0f, 0.9f, w, true, &g), 4);
+    EXPECT_FLOAT_EQ(g, 1.0f);
+    // a spent look: 1·0.2·0.4 = 0.08 loses to play
+    EXPECT_EQ(run_look(0.0f, 0.2f, w, true, &g), 2);
+    EXPECT_FLOAT_EQ(g, 0.0f);
+    // a chase (the seek need high): seek 0.9·0.4 = 0.36, the look silenced by the surplus 0.1 -> 0.036
+    EXPECT_EQ(run_look(0.9f, 1.0f, w), 3);
+}
+
+TEST(EFEArbiter, LookAbsentLeavesTheRaceAndPublishesNoGain) {
+    std::unordered_map<std::string, float> w = {{"reality.loop.seek", 0.4f}, {"reality.loop.play", 0.3f}, {"reality.loop.look", 0.4f}};
+    float g = 0.0f;
+    EXPECT_EQ(run_look(0.0f, 0.9f, w, false, &g), 2) << "unwired, the look never wins";
+    EXPECT_FLOAT_EQ(g, -1.0f) << "and no gain is published";
+}
+
+TEST(EFEArbiter, AMoverInMindHoldsTheLookOff) {
+    // §17.112 lever 1: the look's gate is 1 − max(hunger, hold); a chase that just dropped (hunger 0, hold 0.8) keeps it off
+    std::unordered_map<std::string, float> w = {{"reality.loop.seek", 0.4f}, {"reality.loop.play", 0.3f}, {"reality.loop.look", 0.4f}};
+    auto run = [&](bool hold_wired) {
+        ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")},
+                            {"play_weight", 1.0}, {"play_value_topic", std::string("reality.cognitive.play_value")},
+                            {"vision_weight", 1.0}, {"vision_value_topic", std::string("reality.cognitive.seek_value")},
+                            {"trust_key_vision", std::string("reality.loop.seek")}, {"look_value_topic", std::string("reality.cognitive.look")}};
+        if (hold_wired) p["look_hold_topic"] = std::string("reality.cognitive.seek_mind");
+        Fix f(p); uint64_t t = 0;
+        for (int i = 0; i < 300; ++i) {
+            f.bus.begin_tick(t);
+            f.bus.publish("reality.proprio.hunger", p1(0.0f)); f.bus.publish("reality.cognitive.seek_value", p1(0.0f));
+            f.bus.publish("reality.cognitive.play_value", p1(1.0f)); f.bus.publish("reality.cognitive.look", p1(0.9f));
+            f.bus.publish("reality.cognitive.seek_mind", p1(0.8f)); f.bus.publish("consensus.1", trust_token(w));
+            f.arb.tick(t++); f.bus.end_tick();
+        }
+        return f.arb.winner();
+    };
+    EXPECT_EQ(run(false), 4) << "without the hold, the dropped chase hands the body to the look";
+    EXPECT_EQ(run(true), 2)  << "with it, the look waits (0.2·0.9·0.4 = 0.07 < play 0.3)";
+}
+
+TEST(EFEArbiter, ACommittedLookYieldsOnlyToTheSeek) {
+    // §17.112 lever 4: while the look holds the body and commits, play cannot take it back; the seek can
+    std::unordered_map<std::string, float> w = {{"reality.loop.seek", 0.4f}, {"reality.loop.play", 0.3f}, {"reality.loop.look", 0.4f}};
+    auto run = [&](bool commit, float seek_late) {
+        ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")},
+                            {"play_weight", 1.0}, {"play_value_topic", std::string("reality.cognitive.play_value")},
+                            {"vision_weight", 1.0}, {"vision_value_topic", std::string("reality.cognitive.seek_value")},
+                            {"trust_key_vision", std::string("reality.loop.seek")}, {"look_value_topic", std::string("reality.cognitive.look")},
+                            {"look_commit_topic", std::string("look.commit")}};
+        Fix f(p); uint64_t t = 0;
+        for (int i = 0; i < 400; ++i) {
+            const bool late = i >= 200;
+            f.bus.begin_tick(t);
+            const float seek = late ? seek_late : 0.0f;
+            f.bus.publish("reality.proprio.hunger", p1(seek)); f.bus.publish("reality.cognitive.seek_value", p1(seek));
+            f.bus.publish("reality.cognitive.play_value", p1(1.0f));
+            f.bus.publish("reality.cognitive.look", p1(late ? 0.5f : 0.9f));   // late: the look's need sinks under play's
+            f.bus.publish("look.commit", p1(commit ? 1.0f : 0.0f));
+            f.bus.publish("consensus.1", trust_token(w));
+            f.arb.tick(t++); f.bus.end_tick();
+        }
+        return f.arb.winner();
+    };
+    EXPECT_EQ(run(false, 0.0f), 2) << "uncommitted: play (0.3) beats the sunk look (0.5·0.4 = 0.2)";
+    EXPECT_EQ(run(true, 0.0f), 4)  << "committed: the look keeps the body against play";
+    EXPECT_EQ(run(true, 0.9f), 3)  << "but a payoff (the seek need) takes it back";
+}

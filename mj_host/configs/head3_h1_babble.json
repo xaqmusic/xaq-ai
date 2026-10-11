@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H1/3 \u00b7 head babble on head_pitch + head_yaw + head_roll",
-  "description": "Three motors \u2014 head_pitch, head_yaw, head_roll \u2014 neck at zero. Load rows start at 9: roll 9, pitch 10, down 11, head w_x 12, w_y 13, w_z 14, trunk g 15,16, trunk w 17,18,19. Yaw is the gaze axis (2026-09-10: it carries the largest share of the camera's motion, 91 deg/s RMS on the walker's head). H1: babble 600 s, hold 25, scale 0.3, prior off.",
-  "launcher_rank": 0
+  "description": "Three motors \u2014 head_pitch, head_yaw, head_roll \u2014 neck at zero. Load rows start at 9: roll 9, pitch 10, down 11, head w_x 12, w_y 13, w_z 14, trunk g 15,16, trunk w 17,18,19. Yaw is the gaze axis (2026-09-10: it carries the largest share of the camera's motion, 91 deg/s RMS on the walker's head). H1: babble 600 s, hold 25, scale 0.3, prior off."
  },
  "description": "H1/3 \u00b7 head babble on head_pitch + head_yaw + head_roll",
  "modules": [

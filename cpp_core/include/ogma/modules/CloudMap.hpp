@@ -269,7 +269,11 @@ private:
     void body_rel(const Thing& t, double yaw, double& bx, double& by, double& rng) const;
 
     Bus* bus_ = nullptr;
-    std::string input_topic_, place_topic_, output_topic_, change_topic_;
+    std::string input_topic_, place_topic_, output_topic_, change_topic_, state_topic_, presence_topic_;
+    // §17.113: the seek target in the cloud's frame, the last thing confirmed there, the free-ray crossings below its top
+    double tgt_gx_ = 0.0, tgt_gy_ = 0.0, tgt_top_ = 0.16, tgt_r_ = 0.04; bool tgt_ok_ = false; int refute_n_ = 0;
+    bool presence_fresh_ = false, fresh_ = false;
+    bool presence_track_ = false, track_ok_ = false, target_conf_ = false; double track_ox_ = 0.0, track_oy_ = 0.0;   // T1c   // T1b: the evidence is any fresh hit, not a classified thing
     std::string things_topic_, thing_bearing_topic_;
     double small_top_ = 0.16, small_ext_ = 0.20, small_ext_min_ = 0.0, gap_min_ = 0.10, gap_k_ = 0.12, things_range_ = 0.0;
     bool   things_shape_ = false;

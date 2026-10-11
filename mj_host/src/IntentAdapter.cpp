@@ -141,16 +141,40 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     last_sensed_ = {unit(vel_body[0] / kTwistRangeVx), unit(vel_body[1] / kTwistRangeVy),
                     unit(vel_body[2] / yaw_range_)};
     publish("intent", {last_sensed_[0], last_sensed_[1], last_sensed_[2]});
+    if (progress_on_) publish("progress", {float(progress_err_), progress_valid_ ? 1.0f : 0.0f});   // §17.116 M1
+    if (traverse_on_) {
+        // §17.114 S1, conditioned (CLAUDE.md §0 rule 2): both averaged over ~1 s, so a walk's restart -- full command, no motion
+        // for its first half second, 40 times a run -- stays near the usual command-to-motion line while both ramp, and only
+        // a block that lasts reaches "commanded, not moving"
+        trv_cmd_ += (unit(traverse_cmd_ / kTwistRangeVx) - trv_cmd_) / 50.0;
+        trv_sen_ += (last_sensed_[0] - trv_sen_) / 50.0;
+        // ...and the turn asked for: a hard turn makes little forward progress by itself, a known context, not a surprise
+        trv_yaw_ += (unit(std::fabs(traverse_yaw_) / kTwistRangeVyaw) - trv_yaw_) / 50.0;
+        publish("traverse_in", {float(trv_cmd_), float(trv_yaw_), float(trv_sen_)});
+    }
     publish("imu", {float(g[0]), float(g[1]), float(g[2]), float(w[0]), float(w[1]), float(w[2])});
     // The 12-slot sense the bridge appends as load slots: attitude, rates, accel, the
     // sensed velocity again, two spare.
     std::array<float, 4> tof_s = tof;
+    if (!(seek_gate_ && last_steer_ == 3 && seek_present_)) gate_slot_ = -1;   // GH: the held sector lapses with the seek's reference
     if (seek_gate_ && last_steer_ == 3 && seek_present_) {
         // the seek loop won the reference last tick: the slot of its target's sector reads free
         // (slots 12/13/14 = columns 0-2 / 3-4 / 5-7 = left / ahead / right; the sector by the bearing)
-        const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1);
-        if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
+        const int slot = gate_slot_for(seek_ego_);   // §17.117 GM / GH (the defaults: +-0.3 rad, no hysteresis)
+        // §17.117 G1: the slot's proximity is 1 - range / 1 m; a return nearer than the target by M is not the target
+        bool nearer = seek_gate_near_m_ > 0.0 && tof_s[size_t(slot)] > 0.0f && seek_range_ > 0.0
+                            && 1.0 - double(tof_s[size_t(slot)]) < seek_range_ - seek_gate_near_m_;
+        // §17.117 SD: structure at the target, and the return within its radius of it: the thing's own setting
+        if (nearer && stand_down_r_ > 0.0 && cloud_target_tall() > 0 && seek_range_ - (1.0 - double(tof_s[size_t(slot)])) <= stand_down_r_) {
+            nearer = false; ++stand_downs_;
+        }
+        seek_nearer_now_ = nearer;
+        if (nearer) ++seek_gate_kept_;
+        else if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
         if (seek_gate_contact_m_ > 0.0 && seek_range_ > 0.0 && seek_range_ <= seek_gate_contact_m_ && tof_s[3] > 0.0f) { tof_s[3] = 0.0f; ++seek_gated_contact_; }
+        if (seek_gate_range_m_ > 0.0 && seek_range_ > 0.0)   // §17.117 RG: the target's own return, in whichever sector it fell
+            for (int k = 0; k < 3; ++k)
+                if (k != slot && tof_s[size_t(k)] > 0.0f && std::fabs((1.0 - double(tof_s[size_t(k)])) - seek_range_) < seek_gate_range_m_) { tof_s[size_t(k)] = 0.0f; ++seek_gate_ranged_; }
     }
     {
         std::vector<float> sense = {float(g[0]), float(g[1]), unit(0.3 * w[1]), unit(0.3 * w[0]), unit(0.3 * w[2]),
@@ -299,7 +323,9 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                 const double ego = std::atan2(cx, cy);                              // + = right
                 const int slot = ego < -0.3 ? 0 : (ego > 0.3 ? 2 : 1);              // left / ahead / right
                 // the seek gate covers this check too (2026-09-29): the thing walked to is a hit in its own sector
-                const bool own = seek_gate_ && steer_code == 3 && seek_present_;
+                bool own = seek_gate_ && steer_code == 3 && seek_present_;
+                // §17.117 G1: a return nearer than the target by M is not the thing walked to
+                if (own && seek_gate_near_m_ > 0.0 && seek_range_ > 0.0 && 1.0 - double(tof[size_t(slot)]) < seek_range_ - seek_gate_near_m_) own = false;
                 if (!own && std::fabs(ego) < 1.2 && double(tof[size_t(slot)]) > ref_free_) blocked = true;
                 if (contact_release_ && double(tof[3]) > ref_free_) blocked = true;
             }
@@ -385,16 +411,71 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         }
         // the yaw rate that closes the error in tau seconds, minus damping on the sensed rate, in rad/s
         const double want = -err / hr_tau_ - hr_damp_ * vel_body[2];
-        const double reflex = std::clamp(want, -yaw_range_, yaw_range_);
+        const bool esc = escape_authority_ && last_steer_ == 4;   // §17.114 E2
+        const double rr = esc ? std::max(1.5, yaw_range_) : (reflex_range_override_ > 0.0 ? reflex_range_override_ : yaw_range_);   // §17.113 T1
+        const double reflex = std::clamp(want, -rr, rr);
         // the share: 1 with nothing within the gate's reach, 0 at a wall (the brain's avoidance keeps the yaw)
         // the seek gate covers the reflex too (2026-09-29, sweep 19: the reflex closed on its target at 1-1.5 m and was
         // released within a metre of it -- the thing walked to is a ToF hit -- handing yaw to the avoidance that orbits it)
         std::array<float, 4> tof_r = tof;
-        if (seek_gate_ && last_steer_ == 3) { const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1); tof_r[size_t(slot)] = 0.0f; }
+        if (seek_gate_ && last_steer_ == 3) {
+            const int slot = (gate_hyst_ > 0.0 && gate_slot_ >= 0) ? gate_slot_ : (seek_ego_ < -gate_mid_ ? 0 : (seek_ego_ > gate_mid_ ? 2 : 1));   // GH: this tick's held sector
+            tof_r[size_t(slot)] = 0.0f;
+            if (seek_gate_range_m_ > 0.0 && seek_present_ && seek_range_ > 0.0)   // §17.117 RG: and the target's return wherever it fell
+                for (int k = 0; k < 3; ++k)
+                    if (k != slot && tof_r[size_t(k)] > 0.0f && std::fabs((1.0 - double(tof_r[size_t(k)])) - seek_range_) < seek_gate_range_m_) tof_r[size_t(k)] = 0.0f;
+        }
         double near = std::max({double(tof_r[0]), double(tof_r[1]), double(tof_r[2])});
         if (contact_release_) near = std::max(near, double(tof[3]));   // contact: the reflex lets go
         hr_share_ = std::clamp(1.0 - near / std::max(1e-6, hr_gate_), 0.0, 1.0);
+        if (esc) hr_share_ = 1.0;
         last_twist_[2] = hr_share_ * reflex + (1.0 - hr_share_) * last_twist_[2];
+        if (esc && last_twist_[0] < 0.0) last_twist_[0] = 0.0;   // §17.114 E2: the way out is walked, not backed
+        if (esc && escape_vx_ > 0.0) last_twist_[0] = std::max(last_twist_[0], escape_vx_ * std::max(0.0, std::cos(err)));   // §17.114 E4: walked out, as the chase's floor
+    }
+    if (detour_back_vx_ > 0.0) {   // §17.117 D1, the detour (see the header)
+        detour_started_ = false;
+        if (detour_walking_ && ref_hold_left_ == 0) detour_walking_ = false;
+        if (detour_reopen_ > 0.0 && detour_walking_ && ref_hold_left_ > 0 && double(tof[1]) > detour_reopen_) {
+            // D1c: the way ahead closed on the walk out -- turn again, the same way, as a repeat
+            ref_hold_left_ = 0; detour_walking_ = false; ++detour_reopens_;
+            if (detour_forget_n_ > 0 && ++detour_chain_ >= detour_forget_n_) { forget_seek_target(); ++detour_forgets_; detour_chain_ = 0; }   // DF
+            detour_left_ = detour_max_ticks_; detour_age_ = 0; ++detours_; ++detour_repeats_; detour_started_ = true;
+            detour_out_now_ = std::min(2 * detour_out_now_, 4 * detour_out_ticks_);
+        }
+        if (detour_left_ == 0 && ref_hold_left_ == 0) {
+            detour_arm_ = (last_steer_ == 3 && seek_nearer_now_) ? detour_arm_ + 1 : 0;
+            if (detour_arm_ >= detour_arm_ticks_) {
+                detour_arm_ = 0; detour_left_ = detour_max_ticks_; detour_age_ = 0; ++detours_; detour_started_ = true;
+                // + yaw = left; slot 0 = left, 2 = right: toward the lower proximity, the target's side on a tie
+                const bool repeat = detour_commit_ && int(tick_id_) - detour_last_end_ <= 500;   // D1b: within 10 s
+                if (detour_forget_n_ > 0) {   // DF: a chain of detours refutes the held target
+                    detour_chain_ = (int(tick_id_) - detour_last_end_ <= 500) ? detour_chain_ + 1 : 1;
+                    if (detour_chain_ >= detour_forget_n_) { forget_seek_target(); ++detour_forgets_; detour_chain_ = 0; }
+                }
+                if (repeat) { ++detour_repeats_; detour_out_now_ = std::min(2 * detour_out_now_, 4 * detour_out_ticks_); }
+                else {
+                    detour_out_now_ = detour_out_ticks_;
+                    detour_dir_ = tof[0] < tof[2] ? 1.0 : tof[2] < tof[0] ? -1.0 : (seek_ego_ > 0.0 ? -1.0 : 1.0);
+                }
+            }
+        }
+        if (detour_left_ > 0) {
+            --detour_left_; ++detour_age_;
+            // clear: ahead, and the side the obstacle swings into as the body turns away from it (a turn of ~20 deg or more)
+            const bool clear = detour_age_ >= 10 && double(tof[1]) <= 0.0 && double(tof[detour_dir_ > 0.0 ? 2 : 0]) <= 0.0;
+            if (clear || detour_left_ == 0) {
+                if (clear) ++detour_clear_;
+                detour_left_ = 0;
+                set_ref_hold(0.0, detour_commit_ ? detour_out_now_ : detour_out_ticks_);   // the heading found, held: the walk out
+                detour_last_end_ = int(tick_id_) + (detour_commit_ ? detour_out_now_ : detour_out_ticks_);
+                if (detour_reopen_ > 0.0) detour_walking_ = true;
+            } else {
+                last_twist_[0] = (detour_back_ticks_ > 0 && detour_age_ > detour_back_ticks_) ? 0.0 : -detour_back_vx_;   // RL: then in place
+                last_twist_[2] = detour_dir_ * yaw_range_;
+                last_steer_ = 4;
+            }
+        }
     }
     ++tick_id_;
     if (has_override_) return override_;
@@ -443,6 +524,23 @@ void IntentAdapter::set_learning(bool on) {
     }
 }
 
+int IntentAdapter::gate_slot_for(double ego) {
+    const int raw = ego < -gate_mid_ ? 0 : (ego > gate_mid_ ? 2 : 1);
+    if (gate_hyst_ <= 0.0) return raw;
+    int s = gate_slot_ < 0 ? raw : gate_slot_;
+    if (raw != s) {
+        const double h = gate_hyst_;
+        const bool go = (s == 1 && raw == 0) ? ego < -gate_mid_ - h
+                      : (s == 1 && raw == 2) ? ego >  gate_mid_ + h
+                      : (s == 0 && raw == 1) ? ego > -gate_mid_ + h
+                      : (s == 2 && raw == 1) ? ego <  gate_mid_ - h
+                      : true;                                   // across the ahead sector in one tick
+        if (go) { s = raw; ++gate_switches_; }
+    }
+    gate_slot_ = s;
+    return s;
+}
+
 void IntentAdapter::set_map_learning(bool on) {
     if (map_module_id_.empty() || on == !map_frozen_) return;
     map_frozen_ = !on;
@@ -477,6 +575,10 @@ std::string IntentAdapter::place_form_desc() const {
 }
 
 nlohmann::json IntentAdapter::brain_state() const { return instance_->snapshot_state(); }
+nlohmann::json IntentAdapter::seek_state() const {
+    auto* m = instance_->module("seek");
+    return m ? m->diag_lite() : nlohmann::json();
+}
 nlohmann::json IntentAdapter::play_state() const {
     auto* m = instance_->module("play");
     return m ? m->diag_lite() : nlohmann::json();
@@ -524,6 +626,14 @@ const ogma::MotionField* IntentAdapter::motion_field() const {
     return nullptr;
 }
 int    IntentAdapter::cloud_target_tall()  const { auto* c = find_cloud(*instance_); return c ? c->target_tall() : 0; }
+double IntentAdapter::cloud_iso_radius() const {
+    auto* c = find_cloud(*instance_);
+    if (!c) return 0.35;
+    const auto p = c->current_params();
+    auto it = p.find("target_iso_radius");
+    if (it != p.end()) if (auto d = std::get_if<double>(&it->second)) return *d;
+    return 0.35;
+}
 int    IntentAdapter::cloud_target_small() const { auto* c = find_cloud(*instance_); return c ? c->target_small() : 0; }
 std::array<int, 4> IntentAdapter::chase_cand_fates() const { auto* q = find_seek(*instance_); return q ? std::array<int, 4>{q->cand_replaced(), q->cand_fast(), q->cand_still(), q->cand_timeout()} : std::array<int, 4>{0, 0, 0, 0}; }
 std::array<double, 3> IntentAdapter::chase_last_judgement() const { auto* q = find_seek(*instance_); return q ? std::array<double, 3>{q->last_miss(), q->last_speed(), double(q->last_decision())} : std::array<double, 3>{0.0, 0.0, 0.0}; }
@@ -585,6 +695,7 @@ int    IntentAdapter::seek_lead_option() const { auto* q = find_seek(*instance_)
 int    IntentAdapter::seek_lead_node()   const { auto* q = find_seek(*instance_); return q ? q->lead_node() : 0; }
 bool   IntentAdapter::chase_coasting() const { auto* q = find_seek(*instance_); return q && q->coasting(); }
 int    IntentAdapter::chases_reacquired() const { auto* q = find_seek(*instance_); return q ? q->chases_reacquired() : 0; }
+int    IntentAdapter::coasts_refused() const { auto* q = find_seek(*instance_); return q && q->coast_needs_confirm() > 0 ? q->coasts_refused() : -1; }
 void   IntentAdapter::restore_brain_state(nlohmann::json const& s) { if (g_brain_tape) g_brain_tape->restore(0, s.dump()); instance_->restore_state(s); }
 bool   IntentAdapter::chase_lost_now() const { auto* q = find_seek(*instance_); return q && q->chase_lost_now(); }
 double IntentAdapter::chase_lost_ego() const { auto* q = find_seek(*instance_); return q ? q->chase_lost_ego() : 0.0; }
@@ -602,6 +713,38 @@ bool IntentAdapter::cloud_walking() const { auto* c = find_cloud(*instance_); re
 int  IntentAdapter::cloud_voxels() const { auto* c = find_cloud(*instance_); return c ? c->voxels() : 0; }
 int  IntentAdapter::cloud_break() const { auto* c = find_cloud(*instance_); return c ? c->break_voxels() : 0; }
 int  IntentAdapter::cloud_place() const { auto* c = find_cloud(*instance_); return c ? c->last_key() : -1; }
+double IntentAdapter::look_gain() const {
+    auto g = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("arbiter.gain.look"));
+    return (g && g->values.size() > 0) ? double(g->values[0]) : 0.0;
+}
+std::vector<double> IntentAdapter::ambush_now() const {
+    auto a = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.cognitive.ambush"));
+    if (!a || a->values.size() < 5) return {};
+    return std::vector<double>(a->values.data(), a->values.data() + 5);
+}
+std::vector<double> IntentAdapter::mover_pos_now() const {
+    auto mp = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.proprio.mover_pos"));
+    if (!mp || mp->values.size() < 2 || mp->tick_id == mover_pos_seen_) return {};
+    mover_pos_seen_ = mp->tick_id;                 // each sighting reported once (the adapter's own tick has moved on by the log)
+    double w = -1.0, n = 0.0;
+    if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(instance_->bus()->last_value("reality.cognitive.motion_map"))) { w = rt->winner_id; n = rt->node_count; }
+    return {double(mp->values[0]), double(mp->values[1]), w, n};
+}
+std::vector<double> IntentAdapter::thing_belief_now() const {
+    auto b = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.cognitive.thing_belief"));
+    if (!b || b->values.size() < 5) return {};
+    return std::vector<double>(b->values.data(), b->values.data() + 5);
+}
+std::vector<double> IntentAdapter::look_commit_now() const {
+    auto c = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.cognitive.look_commit"));
+    if (!c || c->values.size() < 1) return {};
+    return {double(c->values[0]), look_gain()};
+}
+std::vector<double> IntentAdapter::look_now() const {
+    auto lk = std::dynamic_pointer_cast<const ogma::ProprioToken>(instance_->bus()->last_value("reality.cognitive.look"));
+    if (!lk || lk->values.size() < 5) return {};
+    return std::vector<double>(lk->values.data(), lk->values.data() + 5);
+}
 double IntentAdapter::cloud_newfrac() const { auto* c = find_cloud(*instance_); return c ? c->new_fraction() : 0.0; }
 double IntentAdapter::cloud_revisit() const { auto* c = find_cloud(*instance_); return c ? c->revisit_change() : -1.0; }
 double IntentAdapter::cloud_revisit_dist() const { auto* c = find_cloud(*instance_); return c ? c->revisit_anchor_dist() : -1.0; }
@@ -656,6 +799,14 @@ double IntentAdapter::cloud_voxel_m() const {
     return 0.0;
 }
 
+std::array<double, 4> IntentAdapter::traverse_token() const {
+    auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(instance_->bus()->last_value("reality.proprio.traverse"));
+    return {rt ? double(rt->winner_id) : -1.0, rt && rt->is_novel ? 1.0 : 0.0, trv_cmd_, trv_sen_};
+}
+double IntentAdapter::traverse_tle() const {
+    auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(instance_->bus()->last_value("reality.proprio.traverse"));
+    return rt ? double(rt->tle) : -1.0;
+}
 double IntentAdapter::motor_tle() const {
     for (auto* m : instance_->modules()) {
         const std::string type(m->type_name());

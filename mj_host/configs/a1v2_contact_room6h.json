@@ -4,7 +4,6 @@
   "description": "a1v2_contact_room6 with the head's attitude at the front of the walker's sense (host --intent-head-sense: head-frame gravity y = roll, z = pitch; load_slots 16 -> 18) and state_grow_at 9: a restored six-motor brain (25 elements) grows to 27 with the two new rows unidentified, and --rebabble identifies them. Priors as room6 (negative indices keep their elements).",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

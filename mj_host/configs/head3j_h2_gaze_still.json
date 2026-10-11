@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/3 the learned gaze + the head still (yaw rate -> 0)",
-  "description": "H2/3 the learned gaze at 1 + the head STILL in space: a prior on the head's yaw rate (head gyro x, load slot 3 = state 12) -> 0 beside the gaze -- the bird's hold phase, and the error the ToF's real timing showed the cloud needs (\u00a717.87); it damps the gaze loop by an error, not a limiter",
-  "launcher_rank": 0
+  "description": "H2/3 the learned gaze at 1 + the head STILL in space: a prior on the head's yaw rate (head gyro x, load slot 3 = state 12) -> 0 beside the gaze -- the bird's hold phase, and the error the ToF's real timing showed the cloud needs (\u00a717.87); it damps the gaze loop by an error, not a limiter"
  },
  "description": "H2/3 the learned gaze at 1 + the head STILL in space: a prior on the head's yaw rate (head gyro x, load slot 3 = state 12) -> 0 beside the gaze -- the bird's hold phase, and the error the ToF's real timing showed the cloud needs (\u00a717.87); it damps the gaze loop by an error, not a limiter",
  "modules": [

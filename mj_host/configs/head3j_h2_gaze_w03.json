@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/3 the learned gaze at precision 0.3 (the loop gain: at 1 the yaw thrashed, p90 2.7 rad/s)",
-  "description": "H2/3 the learned gaze at precision 0.3 (the loop gain: at 1 the yaw thrashed, p90 2.7 rad/s)",
-  "launcher_rank": 0
+  "description": "H2/3 the learned gaze at precision 0.3 (the loop gain: at 1 the yaw thrashed, p90 2.7 rad/s)"
  },
  "description": "H2/3 the learned gaze at precision 0.3 (the loop gain: at 1 the yaw thrashed, p90 2.7 rad/s)",
  "modules": [

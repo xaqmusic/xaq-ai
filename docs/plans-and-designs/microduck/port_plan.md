@@ -20,6 +20,43 @@
 
 ## ▶ Resume here
 
+**2026-10-11: ★ MV promoted — navigation and telling what moves.** Since ★ M2: ★ L1 / ★ P2 (the saccade look, no pause),
+★ E4 (2026-10-10: sit on a stall, then look and walk out). Then design doc §17.116 (places: the place map never forgets; the
+memory levers NULL against a placebo arm — the lesson: on the duck, ±1 trap a run needs a placebo beside the base), §17.117
+(first-time traps met by perception on the approach: the turn-in-reverse detour, its stand-down at things, the reverse leg
+capped; the kick's head-pitch bug fixed; the approach's forward/back dither traced to the seek gate's sector choice and damped by
+range and hysteresis — ST3) and §17.118 (half of all chases were false movers since the chase began; MotionField's vouch cuts
+them by half with the real chase intact, and the walk spends more of its time at things). ★ MV = ST3 + the vouch, launcher first
+row. The viewer's camera now eases after the duck and keeps a pan. **Open:** M1's drifting static fixes (now the main false
+mover), the coast's velocity overshoot, ~2.3 fewer skills a run than ★ E4's placebo (since the detour family, §17.117).
+
+**2026-10-09 (late): the body under the chase.** The walking policy delivers ~45 % of its forward command in plain MuJoCo (0.155
+m/s at 0.35 on the open floor) and turns 0.6–1.1 rad/s while walking at yaw 1.0–1.5. BAM (Rhoban's XL330 m6, the model Pollen
+trains with) is ported (`--bam`) and validated, and changes neither: the XML actuator already had its stiffness. A1 (the ambush)
+is the operator's candidate; H2 and the dash are reverted; the neck burst is causal but small (+9 %); T1 (the chase's yaw range
+1.5) tightens the turn by a sixth. All in design doc §17.113; presets A1 and T1 await the eye.
+
+**2026-10-09: ★ M2 promoted — the chaser.** The world changed: the train runs constantly (`--train 0.2 8 0`, the operator's
+call, to study belief and moving things). On ★ LOOK 2b: a fixed target that drifts is chased, not walked to (M1), and the
+impeded look no longer stops a chase (M2) — the train chased 23 → 28 s a run, stops inside a chase 3.2 → 0.3. A passive
+`ThingBelief` (the presence of the targeted thing) is in the graph; its evidence is limited by the walking cloud (§17.113).
+**Open, in the operator's words:** the head follows the train but the body cannot turn enough while walking (the turning
+radius, O67); and the hunter's drive — a stalk loop whose interest spends itself only on failed searches (§17.113).
+
+**2026-10-08 (later): ★ LOOK 2b promoted — the stop is a loop.** The timer stop is gone: an arbitrated look loop
+(`LookLoop` + `EFEArbiter`'s fifth policy) starts and ends the stop on what a stop pays (a new target, a skill), held off by
+a chase (design doc §17.112). The operator's eye found what the chase still lacks: a mover seen at a stop becomes a static
+target, walked to and kicked at nothing. **The push now: a loop above the chase** (§17.113).
+
+**2026-10-08: the demo is ★ F5 and it is posted.** ★ F5 = ★ LA1 (★ T4's stack, the chase at T11, the look-around on the
+walk) + the four §17.108 correctness fixes, promoted on the operator's eye 2026-10-04 (design doc §17.108–17.109; the
+companion document "Inside the MicroDuck Brain"). The design document for Pollen is open as pollen-robotics/microduck#381
+(2026-10-07); replies there are the operator's call. Its §9 sets the work ahead: (1) the client on a board, (2) the head,
+the stand and the camera as separate issues, (3) **the scaffolds replaced one at a time, each by a loop that owns the error
+it stands in for**, (4) new states. The cost on ARM (the replay benchmark on the Pi 5, then a Radxa Zero 3W) runs on another
+machine — ten-minutes phase page, last section. **The push now: (3), starting with the stop and its look** (the operator,
+2026-10-08: "the look is currently interrupting the chase") — design doc §17.112.
+
 **2026-10-02 (later): the ten-minutes phase opened** — [`microduck/ten_minutes_phase.md`](ten_minutes_phase.md):
 the goal is ten minutes of interesting behaviour for the plan to Pollen. The instrument (`ten_minutes.py`) measured ★ TURN
 43 % boring; the fragments it walked to were clusters whose top was never seen, and "small needs a seen top" (preset

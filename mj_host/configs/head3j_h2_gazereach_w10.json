@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/3 the learned gaze, pure reach, precision 1.0",
-  "description": "H2/3 the learned gaze as a pure REACH at precision 1.0: the gaze prior's feedback (C) descent off (state_prior_c_weights 0), its tonic (h) on; the level prior keeps both. At C on, the gaze grew a +2.41 feedback gain on its own error in 300 s and the yaw thrashed (\u00a717.90).",
-  "launcher_rank": 0
+  "description": "H2/3 the learned gaze as a pure REACH at precision 1.0: the gaze prior's feedback (C) descent off (state_prior_c_weights 0), its tonic (h) on; the level prior keeps both. At C on, the gaze grew a +2.41 feedback gain on its own error in 300 s and the yaw thrashed (\u00a717.90)."
  },
  "description": "H2/3 the learned gaze as a pure REACH at precision 1.0: the gaze prior's feedback (C) descent off (state_prior_c_weights 0), its tonic (h) on; the level prior keeps both. At C on, the gaze grew a +2.41 feedback gain on its own error in 300 s and the yaw thrashed (\u00a717.90).",
  "modules": [

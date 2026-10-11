@@ -4,7 +4,6 @@
   "description": "R113 + the bird's neck + a CENTRING prior on where the head sits fore-aft (state 9 -> 0) at precision 0.3 against the speed prior's 1: the speed prior slides the head forward while it cannot be met; the centring prior brings it back -- the lean on acceleration, the head centred at a steady pace",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

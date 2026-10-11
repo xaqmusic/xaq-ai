@@ -655,3 +655,162 @@ TEST(BearingSeekLoop, ARestoredLeadTableAimsWithItsBestOptionAndBringsNoTarget) 
     ASSERT_TRUE(r.m.chasing());
     EXPECT_EQ(r.m.lead_option(), 1) << "situation 0, both known: the best mean (1 s ahead)";
 }
+
+// §17.112 lever 1 (2026-10-08): the mover in mind -- 1 while chasing, then falling to 0 over chase_memory_ticks after the
+// last chased tick, whatever ended the chase.
+TEST(BearingSeekLoop, AMoverStaysInMindForTheMemoryAfterTheChaseEnds) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_memory_ticks"] = int64_t{100}; p["mind_topic"] = std::string("reality.cognitive.seek_mind");
+    Rig r(p);
+    auto mind = [&]() { auto m = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.cognitive.seek_mind"));
+                        return m ? m->values[0] : -1.0f; };
+    r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FLOAT_EQ(mind(), 0.0f) << "nothing chased yet";
+    for (int k = 0; k < 10; ++k) {
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(r.m.chasing());
+    EXPECT_FLOAT_EQ(mind(), 1.0f);
+    int ended = -1;
+    for (int i = 0; i < 200; ++i) { r.step(0, 0, 0, 0.0f, 0.0f, 0.0f); if (ended < 0 && !r.m.chasing()) ended = i; }
+    ASSERT_GE(ended, 0);
+    EXPECT_FALSE(r.m.chasing());
+    EXPECT_FLOAT_EQ(mind(), 0.0f) << "the memory's span has passed";
+    Rig q(p);
+    for (int k = 0; k < 10; ++k) {
+        q.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    int i = 0; while (q.m.chasing() && i++ < 200) q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    for (int k = 0; k < 49; ++k) q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    auto m2 = std::dynamic_pointer_cast<const ogma::ProprioToken>(q.bus.last_value("reality.cognitive.seek_mind"));
+    ASSERT_TRUE(m2); EXPECT_NEAR(m2->values[0], 0.5f, 0.02f) << "half the memory's span after the last chased tick";
+}
+
+// §17.113 M1 (2026-10-09): a static target whose own re-sightings drift at the chase's speed is a thing moving -- chased,
+// not fixed; one that stays put stays a place.
+TEST(BearingSeekLoop, AStaticSightingThatDriftsIsChasedNotFixed) {
+    for (bool moving : {false, true}) {
+        ogma::ParamMap p = chase_params();
+        p["chase_min_v"] = 0.1; p["static_motion_check"] = true;
+        Rig r(p);
+        for (int i = 0; i < 60; ++i) {                     // the thing seen every tick, straight ahead
+            const double range = 1.0 + (moving ? 0.2 * i / 50.0 : 0.0);
+            r.step(0, 0, 0, 0.0f, 1.0f, prox_of(range));
+        }
+        if (moving) { EXPECT_TRUE(r.m.chasing()) << "drifting at 0.2 m/s: a mover"; EXPECT_EQ(r.m.static_promoted(), 1); }
+        else        { EXPECT_FALSE(r.m.chasing()) << "still: a place"; EXPECT_EQ(r.m.static_promoted(), 0); EXPECT_TRUE(r.m.have_target()); }
+    }
+}
+
+TEST(BearingSeekLoop, AChasedMoversSightingsArePublishedForTheMotionMap) {
+    ogma::ParamMap p = chase_params(); p["mover_pos_topic"] = std::string("reality.proprio.mover_pos");
+    Rig r(p); int fresh = 0;
+    for (int k = 0; k < 14; ++k) {
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        auto mp = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.proprio.mover_pos"));
+        if (mp && mp->tick_id == r.t - 1) { ++fresh; EXPECT_NEAR(mp->values[1], 0.0f, 1e-3f); EXPECT_GT(mp->values[0], 0.5f); }
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(r.m.chasing());
+    EXPECT_GE(fresh, 3) << "one token per confirmed sighting once chased, none before";
+}
+
+TEST(BearingSeekLoop, AnAmbushPlaceIsHeldNotReached) {
+    ogma::ParamMap p = chase_params(); p["ambush_topic"] = std::string("amb"); p["target_out_topic"] = std::string("tt");
+    Rig r(p);
+    auto amb = [&](float have, float need) { auto a = std::make_shared<ogma::ProprioToken>(); a->values.resize(5); a->values << have, 1.0f, 0.0f, need, 0.0f; r.bus.publish("amb", a); };
+    for (int i = 0; i < 3; ++i) { amb(1.0f, 0.6f); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f); }
+    ASSERT_TRUE(r.m.have_target()); EXPECT_NEAR(r.m.value(), 0.6f, 1e-6f);
+    for (int i = 0; i < 20; ++i) { amb(1.0f, 0.6f); r.step(1.0, 0, 0, 0.0f, 0.0f, 0.0f); }     // standing on the place
+    EXPECT_TRUE(r.m.have_target()) << "held: no arrival drop at an ambush place";
+    EXPECT_EQ(r.m.arrivals(), 0);
+    amb(0.0f, 0.0f); r.step(1.0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r.m.have_target()) << "the stalk let go";
+    auto tt = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("tt")); ASSERT_TRUE(tt); ASSERT_EQ(tt->values.size(), 6);
+}
+
+// §17.116 S1, THE APPROACH'S COST: a stuck place (excess 0.8) on the straight approach to a held target discounts its need by
+// 1 - stall_cost x 0.8 x taper; one beside the approach beyond stall_radius costs nothing; the need never drops below the floor.
+TEST(BearingSeekLoop, AStuckPlaceOnTheApproachDiscountsTheNeed) {
+    ogma::ParamMap p; p["proximity_range"] = 2.5; p["stall_field_topic"] = std::string("reality.cognitive.stall_field");
+    p["stall_cost"] = 1.0; p["stall_radius"] = 0.3;
+    Rig r(p);
+    const auto field = [&](double x, double y, float ex) {
+        auto f = std::make_shared<ogma::ProprioToken>();
+        f->values = Eigen::VectorXf(3); f->values << float(x), float(y), ex;
+        r.bus.publish("reality.cognitive.stall_field", f);
+    };
+    field(0.5, 0.0, 0.8);                        // half way to the target, on the line
+    r.step(0, 0, 0, 0.0f, 1.0f, 0.6f);           // a thing 1 m ahead
+    ASSERT_TRUE(r.m.have_target());
+    EXPECT_NEAR(r.m.approach_cost(), 0.8, 1e-6);
+    EXPECT_NEAR(r.m.value(), 0.2f, 1e-5) << "need 1 x (1 - 0.8)";
+    field(0.5, 0.5, 0.8);                        // 0.5 m beside the approach: beyond the radius
+    r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_EQ(r.m.approach_cost(), 0.0);
+    EXPECT_GT(r.m.value(), 0.99f);
+    field(0.5, 0.0, 1.0);                        // a place stuck to the full: the floor, not a refusal
+    r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_TRUE(r.m.have_target());
+    EXPECT_NEAR(r.m.value(), 0.05f, 1e-6);
+}
+
+TEST(BearingSeekLoop, TheApproachCostIsOffByDefault) {
+    ogma::ParamMap p; p["proximity_range"] = 2.5;
+    Rig r(p);
+    auto f = std::make_shared<ogma::ProprioToken>();
+    f->values = Eigen::VectorXf(3); f->values << 0.5f, 0.0f, 1.0f;
+    r.bus.publish("reality.cognitive.stall_field", f);
+    r.step(0, 0, 0, 0.0f, 1.0f, 0.6f);
+    EXPECT_EQ(r.m.value(), 1.0f);
+}
+
+// §17.118 THE VERIFIED COAST: a chase whose velocity no sighting confirmed after it began is not coasted on -- it ends as a
+// thing that stopped, at its last sighting; one with a confirmed prediction coasts as before; off by default.
+namespace {
+// sightings every 4 ticks of a thing walking away at 0.2 m/s, until the chase starts plus `after` more sightings
+void chase_then_vanish(Rig& r, int after) {
+    int k = 0, more = -1;
+    while (k < 40 && more != 0) {
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        if (more < 0 && r.m.chasing()) more = after; else if (more > 0) --more;
+        ++k;
+    }
+    ASSERT_TRUE(r.m.chasing());
+    for (int i = 0; i < 60; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);   // out of sight past chase_forget_ticks
+}
+}  // namespace
+
+TEST(BearingSeekLoop, AChaseNoSightingConfirmedEndsAsAThingThatStopped) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_permanence_ticks"] = int64_t{150}; p["coast_needs_confirm"] = int64_t{1};
+    Rig r(p);
+    chase_then_vanish(r, 0);
+    EXPECT_FALSE(r.m.chasing());
+    EXPECT_FALSE(r.m.coasting()) << "no prediction of the chase was ever fulfilled: nothing to coast on";
+    EXPECT_TRUE(r.m.have_target()) << "the thing is where it was last seen";
+    EXPECT_EQ(r.m.chases_stopped(), 1);
+    EXPECT_EQ(r.m.coasts_refused(), 1);
+    EXPECT_EQ(r.m.diag_snapshot()["counts"]["coasts_refused"], 1);
+}
+
+TEST(BearingSeekLoop, AChaseWithAConfirmedPredictionStillCoasts) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_permanence_ticks"] = int64_t{150}; p["coast_needs_confirm"] = int64_t{1};
+    Rig r(p);
+    chase_then_vanish(r, 2);
+    EXPECT_TRUE(r.m.coasting()) << "two sightings where the chase predicted: the velocity is a belief";
+    EXPECT_EQ(r.m.coasts_refused(), 0);
+}
+
+TEST(BearingSeekLoop, TheVerifiedCoastIsOffByDefault) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_permanence_ticks"] = int64_t{150};
+    Rig r(p);
+    chase_then_vanish(r, 0);
+    EXPECT_TRUE(r.m.coasting()) << "as before: every chase may coast";
+    EXPECT_FALSE(r.m.diag_snapshot()["counts"].contains("coasts_refused"));
+}

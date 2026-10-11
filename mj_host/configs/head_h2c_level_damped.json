@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2c level+damped \u00b7 the level prior with the controller's brake (ctrl_damping 2e-5, as R12c)",
-  "description": "H2c: as H2 level (prior on head roll, pitch -> 0), plus ctrl_damping 2e-5 with ctrl_damping_lr_scaled 1 \u2014 the module's own note on the state prior says configs running it SHOULD set ctrl_damping > 0 (the feedback column's slow growth on residual noise; the undamped H2 arms wound their commands to the trained rails). Yaw is masked to 0 by the adapter after the babble (follows the trunk).",
-  "launcher_rank": 0
+  "description": "H2c: as H2 level (prior on head roll, pitch -> 0), plus ctrl_damping 2e-5 with ctrl_damping_lr_scaled 1 \u2014 the module's own note on the state prior says configs running it SHOULD set ctrl_damping > 0 (the feedback column's slow growth on residual noise; the undamped H2 arms wound their commands to the trained rails). Yaw is masked to 0 by the adapter after the babble (follows the trunk)."
  },
  "description": "H2c level+damped \u00b7 the level prior with the controller's brake (ctrl_damping 2e-5, as R12c)",
  "modules": [

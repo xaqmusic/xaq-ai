@@ -4,7 +4,6 @@
   "description": "a1v2_contact_room6 with the walker's motors the twist and action.head_fore (host --intent-head-translate: neck and head pitch together, the view unchanged, the head sliding fore-aft) and the head's fore-aft position leading the sense (--intent-fore-sense, load_slots 17). Open 600 s, then the 2 m room 600 s.",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

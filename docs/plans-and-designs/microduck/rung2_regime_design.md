@@ -7099,14 +7099,14 @@ digest caught at exactly that tick.
 
 **The numbers for Pollen (desktop, Intel Core Ultra 7 265F, ★ F5 seed 1, 600 s):** intent 199 µs a tick (1.0 % of a core at
 50 Hz; p99 1.6 ms, max 2.9 ms), head 8 µs (0.04 %), stop 31 µs (0.15 %, while standing); the whole brains-only process 24 MB
-resident, ~0.6 MB heap *(corrected in §17.112: that was read after the brains were destroyed; with every brain alive at the
+resident, ~0.6 MB heap *(corrected in §17.111b: that was read after the brains were destroyed; with every brain alive at the
 end of the tape the heap is 4.4 MB)*. The Radxa Zero 3W's A55 is an estimated 10–15× slower: still to be measured — the replay runs there.
 
 **O2b settled:** on the same inputs, `cast_once 2` (weighted) costs 158 µs a tick against ★ F5's 199 (−21 %; p99 1.58 →
 1.37 ms, max 2.9 → 2.3 ms), the same as the unweighted form; with its n = 24 behaviour tie (§17.110) it is a candidate for the
 stack — the operator's eye decides.
 
-### 17.112 The brain on ARM: the Pi 5 measured, the Radxa Zero 3W projected (2026-10-08)
+### 17.111b The brain on ARM: the Pi 5 measured, the Radxa Zero 3W projected (2026-10-08)
 
 **Built:** `mj_host/tools/arm_bench/` (its README has the method). One command, `arm_bench.py all picrawler`, records ★ F5 seed 1
 (600 s, argv from the launcher's own `host_args()`), stages a replay-only build to the board's `/tmp` (tmpfs: the Pi's SD card is
@@ -7153,3 +7153,1269 @@ the board is real. B's DRAM term dominates its upper bound, and the RK3566's L3 
 contention number on the real board is the one to watch. **Next:** `arm_bench.py all <radxa>`: the same harness on the real A55,
 which turns projection into measurement and checks B's parameters against measured cycles. The write-up for Pollen's PR (a Claude Docs page, "What the autonomous brain costs on a Radxa Zero 3W") uses these
 1.8 GHz figures.
+
+### 17.112 The stop as a loop: the look, arbitrated with the chase (2026-10-08, design)
+
+**The operator (2026-10-08):** the scaffolds are next (the design document's §9.3), starting with the stop and its look:
+"the look is currently interrupting the chase." The form chosen: a look loop in the intent brain, arbitrated beside seek and
+its chase, that starts and ends the stop. The host keeps the stop's mechanics (the settle, the stander's hand-back, the
+sweep) and gives up its decisions.
+
+**What the scaffold costs the chase (★ F5, the 24 logged runs `log/ten/fx5`; `mj_host/tools/stop_readout.py`).**
+
+| trigger | a run | length s | surprise resolved s | `new_fraction`, 1st s | moving train near s | ended by a chase |
+|---|---|---|---|---|---|---|
+| arrival | 17.2 | 5.0 | 2.35 | 0.46 | 15.6 | 26 of 412 |
+| the look after a skill's back-off | 8.2 | 7.0 | 3.48 | 0.75 | 11.0 | 48 of 198 |
+| impeded | 6.0 | 9.1 | 4.47 | 0.40 | 8.6 | 20 of 145 |
+| the timer | 3.6 | 8.9 | 4.24 | 0.50 | 6.5 | 11 of 87 |
+| stuck | 0.5 | 8.6 | 4.88 | 0.83 | 1.0 | 2 of 11 |
+
+(surprise resolved = the integral of the stop cloud's `new_fraction` over the stop; every stop not ended by a chase ended on
+the cloud's growth rule — none reached the 60 s cap; the host logs a stop ended by a chase as `stop:bored`, the instrument
+recovers them from the chase's rising edge: 107, the host's own count 110.)
+- **The duck stands 235 s of 600**, in 35.5 stops a run, every phase counted (the settle, the stander, the walker's hold).
+- **A stop rarely starts in the middle of a chase** (11 of the 102 chases at the train end with a stop starting; most
+  simply drop, median 2.7 s).
+- **The stop itself is what costs the chase.** The moving train is within 1.5 m ~117 s a run: 71 s of it on the walk,
+  chasing 17 % of it, and **46 s of it standing, chasing 5.6 %**. The stop does see the train: its sightings on the train
+  are confirmed 188 times in the 24 runs and almost never become a chase; 129 are judged still, the sightings too sparse to
+  show the motion while the sweep turns the head to the least-looked-at cell.
+So the look and the chase are not in one decision: the stop is a host rule outside the arbiter, and nothing weighs "a mover is
+passing" against "keep looking".
+
+**The loop's five fields.**
+
+| | the look (`LookLoop`) |
+|---|---|
+| infers | whether standing still here would teach the cloud something: the expected surprise a stop would resolve |
+| sensors | the cloud's own surprise (`CloudMap.change_topic` value 0, `new_fraction`: of the voxels touched in the last second, the share never seen before), the body's stillness (odometry), and a context: the place map's TLE (have I stood here?), the seek loop's need and range (have I just arrived?), the outcome loop's need (is there an answer to watch?) |
+| predicts | per context (an EPM node over that descriptor, EPM rule 1), the surprise a stop resolves: the integral of `new_fraction` over a stop, a running mean per node, optimistic while a node is untried |
+| honest signal | the realized integral at the stop's end against the prediction; during a stop, `new_fraction` itself — it falls as the cloud resolves |
+| need handed to the arbiter | before a stop, the node's prediction over its own running peak of realized gains; during one, `new_fraction` over this stop's own peak (the host's cloud-end rule as a continuous need) |
+
+**The arbitration.** `EFEArbiter` (precision mode) gains a fifth policy, off unless its topics are set (byte-identical
+otherwise): `G_look = look_weight · (1 − seek need) · look need · trust_look`, where trust comes from a `LoopCompetence`
+over the cloud's surprise (sign −1: while the look holds the body, the surprise should fall). The look is epistemic, gated by
+the pragmatic surplus as play is (the recipe's sign of play). **A confirmed chase raises the seek need and silences the look
+by construction**: no look starts in a chase, and a chase confirmed during a look hands the body back (`--stop-on-chase`,
+generalised). Arrival drops the seek target and the need with it, so the arrival stop becomes the look's best case rather
+than a rule. Hysteresis is the arbiter's own adaptive margin.
+
+**What it retires, in order:** the timer stop (`--stop-every` as a trigger), the arrival stop as a rule, the cloud-end rule,
+the 60 s cap, `--stop-on-chase`. Kept as named scaffolds for now: the stuck stop and its escape, the impeded look, the look
+after a skill's back-off (each a later step), and the sweep's gaze (the next lever on the look: the mover is the most
+informative thing in view).
+
+**Stages, each guarded.** S0 the instrument (`stop_readout.py`: per stop, the trigger, the length, the end cause including
+chase, the cloud's surprise integral, the train's time within 1.5 m while standing and the chase made of it). S1 the loop
+passive (it predicts beside the host's stops; does its need rise before the stops that pay and stay low in chases?). S2 the
+arbiter's look starts the stop (the timer and the arrival rule off). S3 the look's loss ends it. Each judged on the ten-minute
+set and the first minute against ★ F5, n = 24, and the chase readout; the eye promotes.
+
+**S1, the loop passive (`a1v2_f5_look_passive`, `log/ten/lk1`, n = 24 × 600 s).** Built: `LookLoop` (cpp_core, unit-tested 6/6),
+`CloudMap.state_topic` [open, walking, voxels, new_fraction] (empty = byte-identical), a 4-node context EPM over [the place
+TLE over its running peak, the seek need, the outcome need], the host's `look` record. Guard: all 24 runs tick for tick ★ F5
+(fx5) with the `look` field stripped; ★ F5 on the new binary byte-identical to the old.
+- **The prediction is `NULL`, and the measure is a `TAUTOLOGY`.** Over 908 stops, the loop's prediction against the realized
+  integral: r = 0.05; its error (1.92 s) worse than the run's plain running mean (1.39), which knowing the host's trigger
+  does not beat either (1.41). The realized integral is the stop's LENGTH (r = 0.94), and the length is the host's cloud-end
+  rule. Nothing sensed before a stop predicts its yield (the walking cloud's new_fraction, its size, the place TLE: |r| ≤ 0.08),
+  because **every stop opens a fresh cloud**: new_fraction is 0.97 in its first second, 0.63 in the second, 0.34 at the end.
+  It measures the stop's cloud rebuilding what the walking cloud had already seen, not the world being new.
+- **What a stop delivers** (★ F5's own stops, a seek target acquired during the stop or 2 s after / a skill fired): arrival
+  67 % / 75 %; the timer 48 % / 6 %; impeded 50 % / 1 %; the look after a skill 55 % / 0 %. The timer and impeded stops start
+  while the seek loop holds a target (76 %, 99 %): they interrupt a pursuit.
+- **Re-use / next form of the error:** the look's yield is pragmatic (a new thing to go to, an answer to watch), not the stop
+  cloud's growth. A world-novelty form needs a cloud that remembers across stops (new against the cached place clouds and
+  the walking cloud), not against a fresh one. Arbitration does not depend on the prediction: the in-stop need (new_fraction
+  over the stop's own peak) is the cloud-end rule's continuous form, and the chase's silencing is the arbiter's gate — L1
+  measures those.
+
+**L1, the look owns its stops (`a1v2_f5_look_l1` + host `--stop-every 0 --stop-by-look`, `log/ten/lk2`, n = 24 × 600 s, paired
+against ★ F5 `fx5`).** The look wins 8.8 stops a run (the timer's 3.6 gone) and every one ends on its loss; they are short
+(1.5 s mean against the timer's 8.9 s): the look wins on its optimistic walking need, the stop starts, and the need is
+overtaken before the stop's cloud has opened.
+- **Behaviour ties.** Boring 20.9 → 22.2 % (CI [−3.8, +6.5]); interesting 48.2 → 48.1; walls 11.5 → 15.1 /min (CI [−3.0,
+  +10.3]); falls 2.75 → 3.71 (CI [−0.2, +2.1]); the block touched in the first minute 19 → 20 of 24; skills 11.9 → 10.6,
+  touching 35 → 29 %; map baked at stops 22.0 → 19.2 (CI [−5.2, −0.4], the one difference beyond the noise: fewer, shorter
+  stops bake less). Chase: 23.6 → 25.5 s a run, on the moving train 13.0 → 12.8, contacts 3.7 → 3.5. The moving train within
+  1.5 m while standing 45.7 → 39.5 s a run, chasing while standing 5.6 → 7.9 %.
+- **The chase's gate leaks.** 28 look stops started within 1 s after a chase (the timer's 11) and 5 on a chasing tick: a chase
+  drops (median 2.7 s) and the seek need with it, and the look, the best epistemic bid, takes the body at once. "A confirmed
+  chase silences the look" holds only while the chase is held; the moment it blinks off, the look is what interrupts it.
+- **Verdict `NULL` (the mechanism lands; the run ties, leaning worse on falls and walls).** Not a verdict on the look as a
+  loop: its walking need is the S1 prediction, which predicts nothing (r = 0.05), so L1 arbitrated a loop with no information
+  about when to stop. Re-use: with a need that carries information (S1's re-use: what a stop delivers — a new target, an
+  answer to watch) and a seek need that holds through the chase's short drops (the pursuit's coasting, not the chased flag).
+
+**Lever 1, the mover in mind holds the look off (`a1v2_f5_look_hold`, `log/ten/lk3`, n = 24, on L1).** The seek loop publishes
+`mind_topic` [1 while chasing or coasting, then falling to 0 over `chase_memory_ticks` (5 s) after the last chased tick,
+whatever ended the chase]; the arbiter's look gate becomes 1 − max(seek need, mind) (`look_hold_topic`). Both empty =
+byte-identical (★ F5 and L1 tick for tick on the new binary). Unit-tested (seek 27/27, arbiter 36/36).
+- **The leak is closed:** look stops starting within 1 s after a chase 28 → 0 (L1 → lever 1); 20 of L1's 28 came 0.02 s after
+  a chase yielded to tall structure, which left no memory.
+- **The chase grows** (★ F5 → L1 → lever 1): chase 23.6 → 25.5 → 29.9 s a run, on the moving train 13.0 → 12.8 → 15.1,
+  pursuit 13.3 → 14.7 → 17.1 s; with the moving train near and the duck standing, chasing 5.6 → 7.9 → 12.2 %.
+- **Falls 2.75 → 4.08 a run against ★ F5 (CI [+0.13, +2.54]), L1 3.71.** Attributed: falls within 3 s after a look stop 14
+  (L1 9; the timer's in ★ F5, 5), after an impeded stop 19 (★ F5 7). The look's stops last 1.3 s; of 240, 100 end on a new
+  seek target (a payoff), 140 with the look's need still high (median 0.89) — its trust falls, because `comp_look` grades it
+  on the cloud's surprise falling and a stop's fresh cloud makes it RISE in the first windows. A stop of a second, settled
+  and handed back, is what the walker falls out of.
+- **Verdict: `WORKING` on its mechanism (the leak, the chase), `REGRESSION` on falls inherited from L1's short stops** —
+  not promoted. Kept in the stack under lever 2, which replaces the need and the trust that make the stops short.
+
+**Lever 2, the pragmatic look (`a1v2_f5_look_pay`, `log/ten/lk4`, n = 24, on lever 1).** `LookLoop.need_mode yield`: a stop PAYS
+when a seek target appears or a skill is requested during it; the need is P(payoff) per context (Beta, optimism 1), during a
+stop the probability a payoff is still to come given none yet (P·S(τ) / (1 − P + P·S(τ)), S the learned time to payoff),
+0 once paid; the trust is its own calibration (1 − mean Brier) in place of `comp_look`. Unit-tested 9/9; the surprise form
+and lever 1 byte-identical.
+- **Falls back to ★ F5's level:** 2.75 → (lever 1 4.08) → 2.83 (CI [−1.18, +1.35]); skills touching 35.0 → (30.0) → 34.1 %;
+  outcomes observed 67 → 71 %. The look's stops 6.0 a run, 2.5 s.
+- **The chase's gain does not carry over:** on the moving train 13.0 → (15.1) → 9.9 s a run, chase 23.6 → (29.9) → 23.0;
+  walls 11.5 → 17.0 /min (CI [−0.8, +11.9]); map baked at stops 22.0 → 18.7 (CI [−5.9, −0.7]). Boring 20.9 → 22.9 %.
+- **Faithfulness (§3.2 rule 6): a weakened slice.** The look's payoff rate read 31 % and its predictions were no better than
+  the base rate (Brier 0.229 against 0.215): arrival stops read 32 % paid. An arrival's skill is requested ON THE WALK at
+  the arrival and fired at the stop's hand-back, before the stop's cloud opens (304 of 306 skills) — the look never saw the
+  payoff that justifies most arrival stops. **Verdict `PARTIAL` as built; not a verdict on the pragmatic need.** Fixed as
+  `pending_skill_pays` (a skill requested since the last stop is that stop's payoff at t = 0; off = byte-identical): lever 2b.
+- **Lever 2b's first run did not land (§3.2 rule 7, a silent confound caught):** `log/ten/lk5` came out tick for tick lever 2.
+  The look took a skill request only on a token stamped with the current tick, but the outcome loop runs AFTER the look in
+  the scheduler (config order), so every request reached it a tick old: lever 2 as measured never saw ANY skill, in a stop or
+  deferred. Fixed unconditionally (a request is a token not seen before; unit test `YieldSeesASkillRequestedOnThePreviousTick`);
+  lever 2's config now behaves differently from its record. 2b re-run on the fixed binary.
+
+**Lever 2b, the pragmatic look measured faithfully (`a1v2_f5_look_pay2`, `log/ten/lk5`, n = 24, on the fixed binary).**
+- **The need is now informative:** after a run's first 5 stops, stops predicted under 0.3 paid 19 %, 0.3–0.5 32 %, 0.5–0.7 49 %,
+  over 0.7 63 % — monotone; Brier 0.229 against the base rate's 0.243 (modest). By trigger: arrival 77 % paid, the look
+  after a skill 45 %, the look's own stops 27 %, impeded 23 %.
+- **Behaviour against ★ F5:** interesting 48.2 → 52.4 % (CI [−1.4, +9.9]), boring 20.9 → 21.7, walls 11.5 → 11.3, falls 2.75 →
+  3.12 (CI [−0.8, +1.5]), the first minute 19 → 20 of 24, skills touching 35 → 37 %, outcomes observed 67 → 72 %, stops at
+  things 74 → 76 %; skills 11.9 → 10.2 a run (CI [−3.2, −0.2]); the moving train chased 13.0 → 9.7 s a run (CI [−6.9, +0.3]),
+  contacts 3.7 → 2.6. The look's own stops 13.6 a run, 1.9 s; no look stop starts within 1 s after a chase.
+- **Verdict `PARTIAL`, a signal, not a capability:** the look is the first form here whose need predicts its payoff, and the
+  run ties ★ F5 everywhere but skills (fewer) and the chase (leaning worse). Not loud (§3.3). Diagnosis for the next form:
+  the time to a payoff is learned over ALL stops, dominated by arrival skills at t = 0 (served at the hand-back), so S(τ)
+  falls within a second and the look gives up on its own stops at 1.9 s, where its payoffs come at ~5 s (★ F5's timer and
+  impeded stops: median 4.8–5.8 s). Re-use: the time to payoff per context. Presets "LOOK 2b" and "LOOK 1" beside ★ F5
+  for the operator's eye.
+
+**Lever 2c, the time to a payoff per context (`a1v2_f5_look_pay3`, `log/ten/lk6`, n = 24, on 2b).** `LookLoop.per_context_times`:
+each context cell's own payoff times, the all-stops distribution as a prior worth one observation (unit-tested; 2b and ★ F5
+byte-identical). Operator, 2026-10-08: "look 2b is an improvement" — this lever asked whether it reaches promotion.
+- **It ties 2b and ★ F5:** boring 20.9 / 21.7 / 24.8 % (★ F5 / 2b / 2c), interesting 48.2 / 52.4 / 49.4, walls 11.5 / 11.3 /
+  13.6, falls 2.75 / 3.12 / 2.50, the first minute 19 / 20 / 21 of 24, skills 11.9 / 10.2 / 10.5, outcomes observed 67 / 72 /
+  75 %, the moving train chased 13.0 / 9.7 / 9.8 s, contacts 3.7 / 2.6 / 2.1. No difference beyond the noise.
+- **Why it moves nothing: the look's stops are not ended by its need.** Its own stops last 1.7 s (2b 1.9); of 351, 194 end
+  before the stop's cloud opens. At their ends: 155 with a seek target already held (a payoff in the first second — before
+  the cloud opens, so the look never counts it), 111 with the look's need unchanged (a competitor's score rose past it: the
+  arbitration has no commitment to a stop it started), ~70 with the need fallen (the only case this lever acts on).
+- **Verdict `NULL` against 2b; not promoted.** 2b stays the candidate for the eye. Re-use / next, one at a time: the
+  payoff window from the stop's START (the look's own body still, not the cloud's opening: the 155 quick finds are its
+  payoffs); then commitment — the look holds the body it took while its own need stands (the 111), the switching cost of a
+  stop (the settle, the hand-back, the falls after short stops) set against the competitor's lead.
+
+**Lever 3, the payoff window opens when the stop does (`a1v2_f5_look_pay4`, `log/ten/lk7`, n = 24, on 2c).** `LookLoop.episode_start
+hold`: a stop is the look holding the body (its arbiter gain) or the trunk still (`CloudMap.state_topic` value 4, the input's
+stillness), not the stop's cloud being open. The first run cycled every tick (488 look stops a run, 0.0 s; `log/ten/lk7_cycle`):
+payoffs recorded at exactly t = 0 (deferred skills) counted as already passed, so the need dropped the tick the look took the
+body. Fixed inside hold mode (a payoff at τ is still to come; a deferred skill, certain, is not a time the look waits for).
+The re-run still churns: 150 look stops a run of 0.2 s, concentrated on 6 seeds (180–1039 a run): with the window opened at
+the stop's start, the recorded times to payoff cluster at 0.02–0.06 s — seek targets re-arming at the walk-to-stand
+transition, which nothing the look did could have caused — and the need falls 0.50 → 0.37 within two ticks; walk, stand,
+walk. Stops at things 74 → 62 % (CI [−24.2, −0.5]), interesting 48.2 → 46.6, the rest ties. **`REGRESSION`, killed.** The
+lesson: 2c's 155 "quick finds before the cloud opened" were not the look's payoffs either; the cloud's opening is the right
+start of the look's window. Re-use: none in this form; what it exposed — the look has not looked before its cloud opens —
+is lever 4's commitment.
+
+**Lever 4, commitment (`a1v2_f5_look_commit`, `log/ten/lk8`, n = 24, on 2c).** `LookLoop.commit_topic` → `EFEArbiter.look_commit_topic`:
+the look commits to a stop it took — before its cloud opens (it has not looked yet), then while unpaid and under half of its
+context's payoffs would have come by now — and while committed only the seek (a payoff, a chase) may take the body back.
+Unit-tested; 2c and ★ F5 byte-identical. The host logs `lkc` [committed, the look's gain] when wired.
+- **Against ★ F5:** the moving train chased 13.0 → 8.3 s a run (CI [−9.1, −0.3]), contacts 3.7 → 2.3 (CI [−2.7, −0.2]); the
+  rest ties (boring 23.4, interesting 50.4, walls 13.6, falls 3.04, the first minute 21/24, skills 10.5). The look's stops 15.3
+  a run, still 1.9 s.
+- **Why it does not lengthen them (the `lkc` trace, seed 2):** the commitment holds the body through the settle (1.1 s) and
+  expires within two ticks of the cloud opening — in the look's own data the payoff comes AT the cloud's opening (the stop
+  cloud's first casts hand the seek loop a thing) or hardly at all, so the median time to a payoff is ~0.04 s. The short stops
+  are what the look has learned is worth it, by its own definition of a payoff. A glitch on the side: the seek need drops to 0
+  for a single tick (an arrival and its renewal) and the look takes the body for that tick (stops of 0.02 s).
+- **Verdict `NULL` on the stops, `REGRESSION` on the chase; not promoted.** The series' reading: the pragmatic look (2b) is
+  honest and calibrated, and what it learns is that a look pays at the instant the stop's cloud opens. Re-use of the
+  commitment: with a payoff that takes time to come (an answer to watch after a kick, a mover to see pass), not a fix the
+  first casts deliver.
+
+**The operator's eye (2026-10-08) and the turn to the chase.** "It seems the stop look works correctly. The issue is when the
+robot sees the moving object, it will walk to the place the object was when it completed the look, stop there, and begin
+the stationary object interaction on nothing. It seems we need a higher-level loop above chase that could solve the issue."
+The eye locates the cost the numbers circled (the stop's 5–6 % chasing beside the walk's 12–17 %): a mover seen at a stop
+becomes a STATIC target — the seek loop fixes where the thing was, the arrival stop fires there, and the outcome loop asks
+for a skill at an empty place. A belief that the thing moves (and where it will be) has to sit above the chase and own
+what the seek loop is sent to — register O69's phantom is one form of it. Preset "LOOK 3" (lever 3) added for the eye
+before the promotion decision; the next push is the chase.
+
+**★ LOOK 2b PROMOTED on the operator's eye (2026-10-08):** "look 2b is an improvement"; lever 3 "is not an improvement".
+The stack is now ★ F5 + the look loop as built in lever 2b — config `a1v2_f5_look_pay2` with host `--stop-every 0
+--stop-by-look` (launcher preset ★ LOOK 2b, first row). Levers 2c, 3 and 4 stay in the record with their re-use contexts.
+The push moves to the chase (§17.113).
+
+### 17.113 A loop above the chase: what the thing is doing, not where it was (2026-10-08, design)
+
+**The operator (2026-10-08), watching ★ LOOK 2b:** "When the robot sees the moving object, it will walk to the place the
+object was when it completed the look, stop there, and begin the stationary object interaction on nothing. It seems we need a
+higher-level loop above chase."
+
+**Measured (`mj_host/tools/moved_targets.py`: each seek target matched to the movable thing under it when taken, looked up
+again at the next arrival stop and the next skill; n = 24 per arm).**
+
+| | arrivals at a thing that had moved | skills at a thing that had moved | which thing | target taken |
+|---|---|---|---|---|
+| ★ F5 | 1.88 a run (14 %) | 1.46 a run (14 %) | train 42, ball 35, block 3 | at a stop 44, on the walk 36 |
+| ★ LOOK 2b | 1.71 a run (12 %) | 1.62 a run (16 %) | train 48, ball 28, block 4 | at a stop 29, on the walk 51 |
+
+The failure predates the look loop: one interaction in seven is aimed at an empty place. The train (it runs 8 s, stands 8 s)
+is the larger half — a train seen standing is a still thing like any other, fixed as a place; the balls are the other —
+most of them, likely, rolled by the duck's own kicks.
+
+**Why the brain does this.** The seek loop's target is a PLACE. A sighting fixes it by dead reckoning; the chase is a
+separate path that only a mover seen moving (young voxels, isolated, confirmed by its own prediction) can enter; a chased
+thing that stops becomes a place again (`chase_stop_v`); and the arrival — range under `arrive_m` — fires the stop and the
+outcome loop's request without anything checking the thing is still there. Nothing in the brain holds a belief about the
+THING: whether it is still where it was, whether its kind moves on its own, where it went.
+
+**What exists to build on (the record):** the chase and its pursuit, memory and "mover in mind" (§17.53–17.103, §17.112
+lever 1); `CloudMap`'s counts at the seek target (`target_small`, `target_tall`; the impeded look's wall verdict, §17.99)
+and the free rays (`--tof-free-rays`, §17.97: a ray that passes over a place says it is empty); the thing's kind
+(`thing_kind_epm`, O62) and the outcome loop keyed by kind × context; the outcome loop's "fire at what you see"
+(`reach_m`, R75–R78: honest, starved because the gaze could not see a thing at the feet — the sweep sign fix since put the
+target in view at 51 % of arrival stops); the phantom's design (O69: particles bounded by structure, thinned by negative
+evidence along rays, gaze first, interest that spends itself); the coverage limit (§17.106: a 45° cone sees the train
+~15 % of the time it is near — the camera case).
+
+**The proposal: a thing loop (an object file) above seek and chase.**
+
+| | the thing loop |
+|---|---|
+| infers | whether the thing the seek loop is sent to is still where the brain believes it is, and if not, where it went |
+| sensors | the sightings (the thing bearing, the mover bearing); the cloud AT the believed position — something small there, or rays passing through it to beyond (negative evidence); the thing's kind |
+| predicts | the thing's presence at its believed position, decaying with time unseen at a rate learned per kind (a train-kind thing leaves; a block stays); and, for a thing seen moving, its position from its last velocity |
+| honest signal | a re-sighting at the believed place (presence confirmed) or a view of the place that comes back empty (refuted) — its own prediction error |
+| need / what it owns | the target: the seek loop is sent to the belief, not to a place; when presence falls the target is released and the look is handed a lost thing (where it went), the phantom's entry; the outcome loop's request waits on presence (a learned gate where `reach_m` was a rule) |
+
+**Stages, each guarded and measured on `moved_targets.py` + the ten-minute set + the chase readout:** T0 the instrument
+(done, above). T1 the presence belief, passive: does it fall before the arrivals at moved things (an ROC over the 80 a
+24-run arm makes) and stay up for the rest? T2 release: a target whose presence is refuted is dropped before the walk ends
+(no walk to nothing). T3 the request waits on presence (no kick at nothing). T4 the release hands the look the lost thing
+(the look gets a payoff that takes time — §17.112 lever 4's re-use). T5 mobility per kind (the train-kind thing is a
+mover even while it stands).
+
+**The operator's fork (2026-10-09): a new module, presence first.** Built: `ThingBelief` (cpp_core, unit-tested), the seek
+loop's `target_out_topic` [have, x, y, set tick, chasing], `CloudMap.presence_topic` (per tick: a small thing at the target
+confirms; free-ray samples through its footprint below its top refute), the host's `thb` record; instrument
+`mj_host/tools/presence_roc.py`. All guarded: ★ LOOK 2b and ★ F5 byte-identical; the passive arm tick for tick ★ LOOK 2b.
+
+**T1, the presence belief passive (`a1v2_lk2b_thing_passive`, `log/ten/th1`, n = 24, 391 arrivals: there 291, moved 41,
+nothing 59).** AUC of the presence at arrival, 'there' against moved + nothing: 0.69 (vs moved 0.66, vs nothing 0.71);
+releasing under 0.1 would keep 79 % of the real targets and drop 46 % of the moved and empty ones. Recency helps a little
+(refutations since the last confirmation: vs moved 0.74) but every scoring caps near 0.70 — the limit is the evidence: a
+confirmation needs a CLASSIFIED small thing (on a walking cloud a thing often is not: its top unseen), and refutation is
+measured at the seek's believed point, so a target 0.1–0.2 m off a still thing reads as an empty place. **`PARTIAL`, a
+signal.** T1b: the evidence by fresh hits (any voxel this cast hit within the target radius below the small top confirms;
+low free rays there with no fresh hit refute; `CloudMap.presence_evidence fresh`), the belief unchanged.
+
+**T1b, the evidence by fresh hits (`a1v2_lk2b_thing_fresh`, `log/ten/th2`, n = 24, passive, tick for tick ★ LOOK 2b).** AUC
+0.57 (vs moved 0.58, vs nothing 0.56) against T1's 0.69; the recency forms fall under 0.5. A fresh hit within 0.12 m below
+the small top is not specific to the thing: wall bases, clutter and the passing train confirm it, and a target that was
+never on a thing is confirmed too. **`REGRESSION` as evidence; T1's classified-thing evidence stays.** Re-use: none in this
+form. What both say: the evidence is judged at the seek loop's believed POINT, and that point is 0.1–0.2 m off the thing often
+enough to blur both confirmation and refutation. Next form (T1c, passive): the belief keeps the confirmed thing's own
+position (the nearest small thing within the confirmation radius) and judges refutation at THAT point — an object file that
+tracks where its thing is, not where the seek loop aimed.
+
+**The world changes: the train runs constantly (the operator, 2026-10-09: "keep the train running constantly so we can study
+how belief and moving objects can work together; the 8-second stop-start is likely making our job harder").** Host
+`--train 0.2 8 0` (the stop phase of zero length; no code change). Baseline re-measured there: ★ LOOK 2b + T1 passive
+(`log/ten/tc1`, n = 24): arrivals at a thing that had moved 1.54 a run (13 %), skills 1.29 (13 %) — **the train is still
+the larger half (41 of 68)**: a train seen at a stop is not seen MOVING (the stop's sightings rarely confirm a mover), so its
+sighting fixes a place even though it never stops. The phenomenon survives the cleaner world. Chase 23.4 s a run, all of it
+on the moving train. T1's AUC there 0.72.
+
+**T1c, the evidence follows the confirmed thing (`CloudMap.presence_track`; `a1v2_lk2b_thing_track`, `log/ten/tc2`, passive,
+tick for tick tc1).** AUC 0.72 — unchanged. The target point's offset is not where the false refutations come from. **They
+come from the walking cloud:** at things still there, stopped ticks confirm 71 871 and refute 8 825 (1 in 9), walking ticks
+confirm 61 178 and refute 47 109 (nearly 1 to 1) — the walking cloud's registration (dead-reckoned, de-rotated while
+moving) smears what is at the target. At things gone, walking refutes 9 : 1. **`NULL` as a lever; the diagnosis is the
+gain.**
+- **T2's rules replayed over the walk (`presence_roc.py`, exact up to the first release):** `ub` releases 50 % of real targets
+  (65 % of moved, 77 % of nothing); `after_confirm` 36 % (73 %, 27 %); `either` 59 % (84 %, 82 %). With this evidence every
+  rule costs more real interactions than it saves; T2 was not run live.
+- **T3 (the skill waits on presence) has no evidence to wait on:** between the arrival and the skill (median 2.0 s) stopped
+  evidence exists for 2 % of real targets — the skill fires at the hand-back, before the stop's cloud forms, and the thing
+  at the feet is under the ToF's view (R75's limit, §17.49).
+- **What would carry it:** evidence weighted by how reliable the cloud is that produced it — learned by the belief from its
+  own record (a walking refutation later contradicted by a stop's confirmation is a false one), not set — or presence judged
+  from the stop's clean cloud before the walk is committed (the look that STARTS the walk, not the arrival).
+
+**The operator's fork (2026-10-09): judge motion at the sighting.** How the constant train becomes a static target
+(`log/ten/tc1`, 84 targets set on the moving train): 57 set with the body walking and no chase before (the stop's cloud
+still open in the first ticks of the walk, or the outcome loop's renewal of a remembered place — walking sightings are
+ignored in this stack), 17 sightings at a stop, 10 a chase that had just ended; 50 never re-chased. A mover candidate near the
+fix in the last second: 43 % of train targets, 13 % of others — not a decision. **The fix's own drift is:** over the first
+second the seek loop's re-fixed point moves at 0.20 m/s median on the train (its true speed) against 0.03 on still things;
+AUC 0.82; at the chase's own bar (`chase_min_v` 0.1) 69 % of train targets against 18 % of still ones.
+
+**M1, a static target that drifts is chased (`BearingSeekLoop.static_motion_check`; `a1v2_lk2b_motion_m1`, `log/ten/tc3`,
+n = 24, the constant train, against tc1).** The chase's speed test (`chase_min_v`, over `chase_v_window_s`) run on a static
+target's own re-sightings; a drift at the bar makes it a chase, never a place. No new constant. Unit-tested; the passive arm
+byte-identical. 3.8 targets a run promoted.
+- **The chase:** the moving train chased 23.4 → 31.1 s a run (CI [+1.5, +14.0]), pursuit 15.3 → 26.3 s; falls 4.05 → 2.88
+  (CI [−2.18, −0.15]).
+- **The empty-place interactions do not move:** arrivals at a moved thing 1.54 → 1.42 a run, skills 1.29 → 1.29; at the
+  train's old place 41 → 39. Boring, walls, the first minute tie; outcomes observed 71.8 → 65.1 % (CI [−13.9, +0.4]).
+- **Verdict `WORKING` on the chase, `NULL` on what the operator saw.** The stale place is re-armed by another route: the
+  outcome loop's RENEWAL (34 a run) re-arms the seek target at the position it remembers for a thing it wants to watch, and
+  that position never learns the thing moved. Next lever: the renewal judged by the thing — refused for a thing seen moving,
+  or re-aimed at where the belief says it went. Presets "★ LOOK 2b · CONSTANT TRAIN" (the baseline) and "M1" for the eye.
+
+**The operator's eye on M1, seed 1 (2026-10-09):** "Around 320 the robot sees the train moving and starts a chase with the head
+pointed at the target. However, at 330 the robot stops and looks. This is repeated around 450 and 515, where the robot knows
+the object is moving (the yellow arrow is visible) but stops to look. The brain needs strong tendencies toward moving objects
+(like all animal hunters), so the arbiter chooses chase/stalk behaviours until truly bored with not finding anything moving."
+**The log names it:** all three are the IMPEDED scaffold (`--look-up-when-impeded`: seek steers and its range has not closed by
+5 cm for 3 s → back off, stop, look up). A train running away keeps the range from closing, so the rule fires on exactly what a
+chase is: 325.1 `impeded:back` with the chase active at 0.76 m, the stop at 325.7, the train coasted out of reach (0.9 →
+2.3 m). Over 24 runs: 3.0 impeded stops a run start inside a chase (55 s of chasing a run); nothing else comes close (the look
+after a skill 0.1).
+
+**M2, the impeded look does not judge a chase (host `--impeded-not-chasing`).** Not closing on a mover is the chase's own
+business (its lead, its pursuit), not evidence of an approach blocked. Byte-identical without the flag.
+
+**The drive the operator asks for (design, after M2): a stalk loop.** A hunter's attention to motion is not a tie-break; it is
+a need that holds the body until it spends itself. As a loop:
+- infers: whether something is moving that the body could get to;
+- senses: the mover evidence (the cloud's mover candidates, the chase and its coasting, the mover in mind, the fix's drift —
+  M1's cue);
+- predicts: where the mover will be (the chase's own prediction), and that looking/turning/following will find it again;
+- honest signal: a re-sighting where predicted (the chase re-acquires) or not;
+- need: mover salience — high on motion evidence, held through the losses that a pursuit can recover (the coasting, the
+  memory), spent by failed searches (each search that finds nothing removes some), not by a timer — "until truly bored".
+It sits in the arbiter above look and play (the look's gate already reads the mover in mind), owns the gaze while a mover is in
+mind, and every scaffold that stops the body (the impeded look, the arrival stop, the stuck stop) yields to it while its need
+stands. The phantom (O69) is its search phase.
+
+**M2 measured (`log/ten/tc4`, n = 24, on M1, the constant train).** Stops starting inside a chase 3.2 → 0.3 a run (impeded 3.0 →
+0.08); standing within 4 s after a chase 6.8 → 2.3 s. The chase does not lengthen: the moving train chased 31.1 → 28.1 s a run
+(M1 → M2, inside the noise; baseline 23.4), pursuit 26.3 → 21.8 s; falls 2.88 → 4.42 (vs the baseline 4.05: a tie); boring,
+walls, the first minute, skills tie. **`WORKING` on its mechanism (the interruption the operator saw is gone), `NULL` on the
+chase's length** — the chase ends for another reason once it is no longer stopped: the sightings run out (coverage, §17.106)
+and the pursuit coasts to its loss. That is the stalk loop's job (search, the gaze, interest that spends itself). Preset "M2"
+for the eye (seed 1 at 320, 450, 515 s).
+
+**★ M2 PROMOTED on the operator's eye (2026-10-09): "the best chaser so far without bad effects on other behaviours."** The
+stack is now ★ LOOK 2b + M1 + M2 in the constant-train world: config `a1v2_lk2b_motion_m1` (the thing belief passive in it)
+with ★ LOOK 2b's host args, `--train 0.2 8 0` and `--impeded-not-chasing` (launcher preset ★ M2, first row). On the numbers it
+ties the constant-train baseline; boring (24.9 → 28.4 %) and falls (4.05 → 4.42) lean worse inside the noise. Not measured
+in the stop-go train world.
+
+**The operator's eye on ★ M2 (seed 18 from 170 s):** "I see the head following the train but the body can't turn enough
+during walking to follow the train around the turns. Turning radius in general has been an ongoing issue." The gaze keeps
+the mover; the walk cannot: the record's turning limits (§17.90–17.92: the walking policy's in-place yaw deadband, the
+walker's yaw range, the heading loop's limit cycle) — register O67, the navigation, open. A chase on a curved track is the
+sharpest test of it the duck has had.
+
+**The operator (2026-10-09) on falls:** they usually come from walking over a block and from the head tilted back as the stop's
+standing brain takes over; a few are not what makes a run boring. (Weigh falls by their cause and rate, not as a veto.)
+
+**C1, the chase's forward floor scaled by facing (host `--chase-vx-facing`: the floor × max(0, cos) of the mover's bearing;
+`log/ten/tc5`, n = 24, on ★ M2).** Instrument `mj_host/tools/chase_turn.py` (half-second windows of a chase, binned by the target's
+bearing off the nose: commanded and real speed, commanded yaw, the real turn rate, the turning radius). Before (★ M2): the walker
+commanded 0.34–0.38 m/s moves at 0.12–0.14 m/s, turns 0.2–0.5 rad/s (radius 0.26–0.65 m), the target > 60° off 24 % of the
+chase. With C1: the forward command falls only to 0.25–0.32 (the walker's own command sits above the scaled floor — it never
+reaches the 0.15 m/s under which the in-place yaw is compensated), the turn rate unchanged (0.52 rad/s with the target behind),
+the target > 60° off 19 %. The chase 28.1 → 32.7 s a run (CI [−2.4, +11.8]); the block touched in the first minute 20/24 → 16/24
+(CI [−0.33, −0.01]); the rest ties. **`NULL` on the turn, a first-minute `REGRESSION`; not promoted.** The limit is the body:
+whatever the command, it walks 0.11–0.14 m/s (the train runs 0.2) and turns ≤ 0.5 rad/s — the walker and the policy (O67), not
+the chase's floor.
+
+**The stalk loop, before building: what a lost chase does now (★ M2, `log/ten/tc4`).** 94 chases went into a coast (the pursuit
+of the predicted position, need falling linearly over `chase_permanence_ticks`, 10 s); 9 re-acquired the train (median 1.0 s,
+all within ~2 s), 85 were lost (median 6.7 s); in 30 of the lost the predicted spot was never in the ToF's view (no refutation).
+With the body at 0.11–0.14 m/s against the train's 0.2 (C1), pursuing a prediction longer mostly walks a slow body after a
+mover it cannot catch. **A hunter with a slow body intercepts or waits.** Three forms for the stalk's search, one per lever:
+- (a) **evidence-spent pursuit:** the coast's need spent by refutations at the predicted spot (looked at, empty), not by the
+  timer; the gaze on the prediction. The first plan; the numbers above say it pays rarely.
+- (b) **ambush / intercept:** a slow loop over mover sightings learns WHERE movers pass (a motion map in the place
+  vocabulary); the stalk goes to the nearest place the mover will come through and waits there, watching; interest spent by
+  waits that see nothing. The train returns every ~37 s (7.48 m of track at 0.2 m/s).
+- (c) **motion-seeking gaze after a loss:** the head scans along the mover's predicted path and its learned passing places
+  (coverage is the limit, §17.106) before the body commits.
+
+**The operator's fork (2026-10-09): ambush / intercept first.** A0, the motion map, passive (`a1v2_m2_motion_map`, `log/ten/tc6`,
+n = 24, tick for tick ★ M2): the seek loop's `mover_pos_topic` (each confirmed sighting of a chased mover, odometry / 2) into an
+EPM (`motion_map_epm`, rbf, ≤ 24 nodes); instrument `mj_host/tools/motion_map_readout.py`. 249 sightings a run (the first at
+46 s median), error to the train's true position 0.12 m median; 8.5 nodes at the end (3.8 with ≥ 5 sightings); a node's
+centroid 0.08 m from the train's path median (p75 0.31), its spread 0.17 m (p75 0.42 — the dead reckoning's drift); 55 % of
+nodes collect ≥ 2 passes. **`WORKING` (passive): the map learns where the mover passes, on the track, within the odometry's
+drift.**
+
+**A1, the ambush (design):** after a lost chase, while the stalk's interest stands, the seek loop is sent to a learned passing
+place (a node with ≥ 2 passes, the nearest the body), the body waits there watching, and the wait lasts as long as the
+mover's own return at that node predicts (the median interval between its passes there, learned from the map's recurrence;
+no constant). A wait that outlasts the predicted return without a sighting spends interest; any chase restores it. An
+ambush arrival is not a thing's arrival: no skill is asked for there.
+
+**A1, the ambush (`StalkLoop`; `a1v2_m2_ambush`, `log/ten/tc7`, n = 24, against ★ M2 `tc4`).** The stalk loop learns, per
+motion-map node, the passing place's position, the mover's passes through it and the median interval between them, and
+P(a wait sees the mover) (Beta); after a lost chase, the mover out of mind and nothing held, it sends the seek loop to the
+place that scores highest on P / (1 + distance) (a node with ≥ 2 passes); the seek loop HOLDS an ambush place (target
+source 4: no arrival, the walker's range-scaled speed falls to nothing, the head free), the outcome loop asks no skill at one;
+a wait that outlasts the place's own return spends it (b += 1), a chase during it pays (a += 1). No new constant: the place,
+the wait, the interest are the map's record. Unit-tested; A0 and ★ F5 byte-identical.
+- 23 ambushes a run, 2.9 ending in a chase (13 %); holding a place 105 s a run, waiting at it 26 s.
+- The train chased 28.1 → 33.5 s a run (CI [−1.6, +12.4]), followed (within 1.5 m, walking) 148 → 163 s, contacts 3.3 → 3.9;
+  walls 15.1 → 11.6 /min (CI [−8.9, +1.9]); skills 10.6 → 9.5 (CI [−2.4, +0.4]), arrivals at things 10.4 → 7.7 (the ambush holds
+  the seek loop's time), skills at a thing that had moved 1.21 → 0.75 a run; boring 28.4 → 31.6 % (CI [−1.5, +8.0]); falls and
+  the first minute tie.
+- **Verdict `PARTIAL`: the hunter waits and it sometimes pays (one ambush in eight); the chase and the walls lean the right
+  way, boring and the interactions with things lean the wrong way — all inside the noise.** The eye decides; preset "A1"
+  (seed 10: waits that pay at 73, 348, 539, 571 s).
+
+**The operator's eye on A1 (2026-10-09):** "The ambush is showing promise, and the robot's behaviour is already more interesting
+because of it. Movements with the head and looking in the direction of the moving object give the impression that the robot is
+really paying attention to things that are changing in the environment." Before promotion, two issues: (1) the head tilted up
+entering the look → a fall backwards, the chase lost; (2) the turning radius — and an idea for it: a DASH (lean the centre of
+mass forward with the standing brain, release, the policy catches the fall running; seen organically).
+
+**The backward falls at a stop's start (A1, `log/ten/tc7`; instrument `mj_host/tools/stop_falls.py`).** 1.12 backward falls a run
+come within 4 s of a stop's start (0.29 forward). The anatomy (the head's own gravity, the measured joints): at the hand-back to
+the standing brain the head pitch joint goes +0.30 → −0.53 rad in 0.2 s (up), the head's gravity reading 0.04 → 0.83, and the
+duck goes over 0.7 s later. On the walk and through the settle the head sits near its walking angle while the head brain's pitch
+command reads −0.9 to −1.1; at the stand the joints are driven to home + that command (`ctrl = head_targets` under
+`--stop-keep-head`), so a stale command takes effect at once. Stops that stood had a command near 0.
+- **H1, the record's protocol (`--head-slew 1.0 --head-home 1.5`, from the six-motor arm, §17.86): `REGRESSION`, killed** —
+  falls 3.67 → 11.33 a run, backward at a stop's start 1.12 → 7.25 (`log/ten/tc8`). The home pose is not a safe stance in this
+  embodiment; the protocol does not transfer.
+- **H2, the head held at the stand (`--stop-head-hold`: the neck, head pitch and roll held where the walk left them; the yaw
+  free; `log/ten/tc9`):** backward falls at a stop's start 1.12 → 0.88, total 3.67 → 4.17 (tie); outcomes observed 67 → 55 %
+  (CI [−23, −4]: the stop's look can no longer pitch down to watch an answer), skills 9.5 → 7.7. The head no longer swings
+  (moved 0.02–0.07 rad in most falls), and the duck still goes over backwards ~0.9 a run, the trunk tipping 0.3–0.4 rad by
+  itself: most of what is left is the standing brain's takeover, not the head. **`PARTIAL`, not promoted.** Re-use: the hold of
+  the pitch only through the takeover's first second, the look's pitch free after.
+
+**D1, the dash (host `--dash [SIN]`; probes, ★ M2 + A1 + H2):** a chase confirmed while the standing brain holds the legs, the
+mover in the forward half-plane, sets the standing brain's pitch prior (sense slot −12, the trunk's g_x) to a forward target
+(`OgmaBrainAdapter::set_prior_target`); the lean hand-off (6.5°) ends the stop at once and the walker catches the fall under
+the chase's forward command; no release in 1.5 s ends the stop as a chase does; the target is reset at every stop's end. At
+1.5 × the hand-off lean (sin 9.75° = 0.17) the body leans only ~3° in 1.5 s (2 of 2 timed out); at 0.5–0.7 it reaches 7–8° in
+0.5–0.7 s and is released (7 of 7 on seeds 14, 18; no falls). The first second after release: peak 0.19–0.23 m/s, mean 0.12–0.17
+(the walk's 0.14) — **a burst, not yet the organic run**: the hand-off releases at 6.5°, before the lean the policy answers with a
+sprint. Open: release later during a dash (a larger lean), the operator's call on how far.
+
+**D1's release angle (the operator, 2026-10-09: "try a 15 degree lean for the dash release; most likely we will have to try a
+few angles; a short burst then normal walking without pause is a win").** Host `--dash SIN DEG`: a dash is released at DEG of
+lean (normal stops keep 6.5°). Probes, lean target sin 0.9, on A1 + H2 (dashes in 600 s runs; the walk is 0.14 m/s):
+
+| release | seeds · dashes | lean reached | 1st s peak | 1–3 s mean | falls ≤ 6 s |
+|---|---|---|---|---|---|
+| 10° | 14, 18 · 5 | 11–12° | 0.21–0.27 m/s | 0.12–0.17 (walks on) | 0 |
+| **12.5°** | 14, 18, 10, 22 · 19 | 13–15° | 0.19–0.38 | ≥ 0.12 in about half | **0** |
+| 15° | 14, 18 · 5 | 16–19° | 0.25–**0.57** (two sprints, ~4× the walk) | 0.03–0.16 (a pause) | 1 |
+| 20° | 14, 18 · 4 | 24–26° | 0.36–0.52 | 0.03–0.07 | 4 |
+
+After a 15° sprint the chase loses the train (the view shakes in the sprint), the seek need drops, and a stop starts within a
+second (seed 14, 375.6 s); walking resumes after a short stand. **12.5° is the compromise on the operator's criterion (no falls,
+a burst, walking on about half the time); 15° is the dash the operator described, at the cost of a pause and an occasional
+fall.** Presets "D · THE DASH at 12.5 deg" and "at 15 deg" for the eye.
+
+**The operator's eye on H2 and D1 (2026-10-09): both reverted.** H2: "during the look the head no longer pitches, it only yaws —
+the robot looks very stiff during the look, and the cloud's errors make interactions with small objects less accurate"
+(the numbers agreed: outcomes observed 67 → 55 %). D1: "the lean forward and recover speeds up briefly, but it mostly looks like
+an accident." Both stay in the code behind their flags (off = byte-identical); the dash presets are removed. **H2 `REGRESSION`
+(the look), D1 `NULL` (on the eye).** Re-use: the head's stale pitch at the stand still wants a fix that leaves the look its pitch
+(the hold only through the takeover's first second); the dash, never from a stand.
+
+**The operator's next idea: a burst from the neck while walking** — the neck extends the head farther forward for a short burst of
+speed. The record agrees in correlation: on the walk (H2's runs, `fore` logged), the bird's-neck slide at the forward end of
+its range (+0.6, +0.7 of the 0.66 rad limit) goes with a real speed of 0.19–0.21 m/s against 0.105–0.127 everywhere else, at a
+similar or lower speed command (0.21–0.29 against 0.31 at 0); and on the six-motor arm (§17.86) the walker's speed tonic ran
+through the head's pitch. Not yet causal: the walker owns the slide, and may push the head out because it is already fast.
+
+**N1, the causal test of the neck burst (host `--neck-burst 1.5 4`: in a chase, walking, the mover ahead, the slide driven to its
+forward limit for 1.5 s, at most every 4 s; `a1v2_m2_ambush`, `log/ten/tc10`, n = 24, on A1; instrument
+`mj_host/tools/neck_burst_readout.py`).** 490 bursts. Chase windows on the walk: speed 0.166 m/s in a burst against 0.151 without
+(paired by run +0.014, CI [+0.009, +0.020]); the slide reaches +0.45 on average (its 1 rad/s rate limit), and the trunk pitches
+LESS nose-down in a burst (+0.019 against +0.060 rad) — the policy leans the trunk back against the head's forward mass. Falls
+3.67 → 3.83 a run (tie); 14 of 92 falls within 3 s of a burst's start (2.9 % of bursts). Chase time, walls, the ten-minute set
+tie. **`WORKING` and small: the neck has authority over speed (+9 %), not a burst.** The correlation that motivated it (0.19–0.21
+m/s with the slide forward) was mostly the reverse: the walker extends the neck when it is already fast.
+
+**What caps the speed (★ A1's own walks, one-second windows, `log/ten/tc7`):** commanded straight ahead at ≥ 0.3 m/s (|yaw| <
+0.15) the body moves 0.147 m/s median (p90 0.175); turning, 0.128–0.138. Pollen's walking task trains forward commands up to
+±0.4 m/s (`microduck_rl/.../microduck_velocity_env_cfg.py`: `lin_vel_x = (-0.4, 0.4)`); in our host it delivers ~40 % of the
+command. The train (0.2 m/s) is faster than the duck can walk. Open, and the larger lever: why the policy tracks speed so
+poorly here (the head brain's joints and the bird's neck in place of the policy's own trained head? the playroom floor? the
+body model?) — a probe of the plain walker on the same command answers it.
+
+**The plain-walker probe (the operator, 2026-10-09: "run the plain walker probe; in that probe let's examine the turning radius").**
+Host `--level2 … --l2-twist VX 0 VYAW` (the brain's command replaced, open loop), the open arena, 20 s a run, measured over the last
+15 s, two or three seeds a cell; arm A the plain walker (the policy's own trained head), B the head brain on the joints, C B + the
+bird's neck (`--intent-head-translate 0.6`).
+- **Forward:** at 0.15 m/s commanded none of the arms walks (the policy's standing regime, §16.2); at 0.25 / 0.35 / 0.4 the plain
+  walker moves 0.090 / 0.102 / 0.111 m/s and curves (0.1–0.2 rad/s of drift); B and C within ±0.02 of it. **The head is not what
+  slows the duck: the policy itself delivers ~25–30 % of its forward command in this simulation** (the record had 0.128 m/s at 0.3,
+  §16.5). Pollen's walking task leaves the body-pose command untrained (weight 0), so it offers no lean either.
+- **Turning while walking:** at forward 0.3–0.4 the trained maximum yaw (1.0) turns 0.58–0.68 rad/s, a radius of 0.21–0.28 m; 1.5
+  (beyond training) 0.75–1.07 rad/s, 0.15–0.21 m, without a fall; yaw 0.5 gives 0.26–0.31 rad/s, 0.42–0.55 m. In place (forward
+  0) 1.0–1.5 turns 0.29–0.75 rad/s. C turns as well as A or better.
+- **The chase does not use it:** in ★ M2's chases with the train > 80° off the nose the yaw command sits at ~0.8 and the body turns
+  0.50 rad/s at a 0.26 m radius (`chase_turn.py`) — the heading reflex is mixed with the walker brain's yaw by proximity and the
+  range is the trained ±1.0. **The turning radius the operator sees is mostly command, not body:** the body can turn ~1.5–2×
+  faster while walking than the chase asks it to.
+
+**BAM ported and validated (the operator, 2026-10-09: "port BAM and validate it first; then proceed with the lever; if there is
+a real delta, examine the effects on our promoted configs").** Host `--bam [VIN [LAG_S]]` (`DuckBody::bam_setup` /
+`bam_update`): Rhoban's BAM (`github.com/Rhoban/bam`, branch `mjlab_frictionloss`, the one `microduck_rl` pins), the XL330 "m6"
+model in the form `bam.mjlab.BamActuator` trains with — the 14 position actuators turned to motors (force-limited at 8.2 V kt/R),
+the firmware P loop (kp_fw 200, error gain (4096/2π)/(256·885), the 1.75 A current limiter as a duty window, the PWM clamp), the DC
+motor with back-EMF, and the m6 friction budget (Coulomb, Stribeck, directional load-dependent, the quadratic term) written each
+physics step into MuJoCo's per-dof frictionloss and damping, the friction constraint stiffened as mjlab does; vin 7.35 V (the
+middle of Pollen's 6.5–8.2), an optional command delay. Off = byte-identical (★ F5's guard). **Validation** (`mj_host/tools/bam/
+bam_reference.py`, the duck's MJCF edited at the spec level as `edit_spec` does, the control law and torque from Rhoban's own
+`bam` classes, the friction budget from `bam/mjlab.py`, fed the host's dumped per-tick targets, `--bam-dump`): the first
+substep's 14 torques, recomputed from the host's own state each tick, agree to 0.000 Nm over 50 ticks; a free-running replay from
+the host's first state agrees to 1e-3–1e-2 rad for a second (it cannot carry the host's solver warm start or previous torques)
+and then diverges, as walks do.
+
+**The delta: none that matters.** The port's own arithmetic says why: BAM's firmware loop is kt/R · vin · kp_fw · error gain ≈ 0.55
+Nm/rad — the XML actuator's kp 0.55, which was set to match it. The plain walker (open loop, 3 seeds, the open floor of
+`scene_walk.xml` — the arena's walls stop a straight walk inside 20 s and undercounted the earlier straight runs):
+
+| plain walker, open floor | XML actuator | BAM | BAM + 20 ms delay (arena) |
+|---|---|---|---|
+| straight, 0.25 m/s commanded | 0.112 m/s | — | — |
+| straight, 0.35 | 0.155 | 0.131 | — |
+| forward 0.4, yaw 1.0 | 0.627 rad/s, radius 0.26 m | 0.567, 0.26 | 0.669, 0.27 |
+| forward 0.4, yaw 1.5 | 0.873 rad/s, 0.18 m | 0.901, 0.16 | 1.073, 0.15 |
+
+A 5 ms timestep with the training's 30 / 50 solver iterations (either integrator) and mjlab's contact rule (`--train-contacts`:
+the soles frictional, the rest condim 1) change nothing measurable either. **`NULL` as a fix for the speed: the policy delivers
+~45 % of its forward command in plain MuJoCo whatever the actuator model, and BAM is no faster.** The record's 2026-08-31 reading
+("the XML actuator cannot walk") is corrected: the XML actuator already had BAM's stiffness; what kp × 5 showed was a stiffer body
+than the real servo. Per the operator's condition, the promoted configurations are not re-measured on BAM. Open: why the policy
+tracks forward speed at ~45 % here (the training's domain randomisation and delays, terrain, or simply its trained behaviour) —
+a question for Pollen, who can compare with their own training rollouts and the real duck.
+
+**T1, the chase may turn as hard as the policy can (host `--chase-yaw-range 1.5`: while a mover is chased or coasted after, the
+heading reflex's clamp opens from the walker's ±1.0 to ±1.5; `log/ten/tc11`, n = 24, on A1 `tc7`).** With the train > 80° off the
+nose: the yaw command 0.85 → 1.06, the turn 0.42 → 0.49 rad/s, the radius 0.31 → 0.26 m (the obstacle-proximity mix with the
+walker's own yaw still holds the command under the clamp). The train chased 33.5 → 36.0 s a run (CI [−5.7, +10.7]), followed
+163 → 176 s; falls 3.67 → 2.62 (CI [−2.09, +0.01]); boring, walls, the first minute tie; skills touching 30.8 → 23.7 % (CI
+[−13.7, −0.4]) and stops at things 71.2 → 62.7 % (CI [−15.8, −1.2]). **`PARTIAL`: the turn tightens by a sixth and the chase
+leans longer; interactions with things lean worse.** Not promoted; preset "T1" for the eye. Re-use: the reflex's share released
+from the obstacle mix while the target is the mover (the mix, not the clamp, is what holds the command at ~1.0); the policy itself
+turns 0.9–1.1 rad/s at 1.5.
+
+**★ T1 PROMOTED on the operator's eye (2026-10-09): "T1 looks good and is a slight improvement."** The stack: ★ M2 + the ambush
+(A1, `a1v2_m2_ambush`) + `--chase-yaw-range 1.5` (launcher preset ★ T1, first row).
+
+### 17.114 The plan after ★ T1: a catchable mover, the head on it, a livelier look, no pause (2026-10-09)
+
+**The operator (2026-10-09):** slow the train as suggested; "the head did not follow the moving train even as it was in view —
+if we keep the head tracking the train while walking we may have some gains"; then, in order of priority for keeping the robot
+interesting: "the head movement during the standing look is very mechanical and scripted looking and seems like it takes longer
+than necessary (we have some data on voxel fidelity vs head speed)"; and "the pause between transitions — if our standing brain is
+the root of the pause, experiment with using the existing RL behaviour to hold the stance; we can revisit our standing brain
+later."
+
+**Order, one lever at a time, each against the current ★ (n = 24, the chase readouts, the ten-minute set, the first minute,
+stop_falls, then the eye):**
+0. **The world: the train at 0.12 m/s** (`--train 0.12 8 0`), below the duck's real top speed (~0.155 m/s); ★ T1 re-measured
+   there as the baseline.
+1. **The head on the mover while walking.** First measure what the head does in a chase (the head's direction against the
+   train's true bearing, the chase target's bearing, the gaze sense the head brain receives). The record: a host yaw offset
+   toward the chase was `NULL` at three gains (§17.65, §17.68) — "the gaze as an intent the head brain fulfils, not a host
+   offset"; since ★ GAZE the head brain senses the seek target's bearing while seek steers (chases included), so the question is
+   why that does not hold the head on the train.
+2. **The standing look.** The sweep (`--stop-gaze-sweep 0.6 0.7`: never holds, 0.6 rad/s toward the least-looked-at of 14 × 3
+   gaze cells, a quarter of that while the view is novel) reads as scripted; and the stop lasts as long as the cloud's growth.
+   First the record's numbers on the cloud's registration error against head speed (the ToF studies, `tre`), then a sweep at the
+   speed the cloud can bear, and an end when the view is covered, not when growth falls.
+3. **The pause at the transitions.** First measure where the time goes (the settle, the hand-back to the standing brain, the
+   hand-off back to the walker, the first steps); then the stop held by the walking policy at zero command (`--stop-brain
+   walker`, the record's control arm) against the standing brain.
+
+**Step 0, the slow train (★ T1 with `--train 0.12 8 0`, `log/ten/sl0`, n = 24, against ★ T1 at 0.2 m/s, `tc11`).** The chase
+closes on the train 43 → 62 % of its time; the train chased 36.0 → 38.7 s a run, followed 176 → 163 s (both inside the noise);
+skills touching 23.7 → 37.0 % (CI [+3.2, +23.4]); boring, interesting, falls, the first minute tie; walls 10.8 → 18.7 a minute
+with one seed far out (CI [−4, +20]). The slow train is the baseline from here (`sl0`). Note: the chase's start threshold
+(`chase_min_v` 0.1 m/s) sits just under the train's 0.12 — chases still start as often.
+
+**Step 1, the head on the mover (`mj_host/tools/head_on_mover.py`: on the walk, the train moving within 2 m, the head-yaw joint
+against the train's true bearing; "on it" = inside the cone's ±22.5°).**
+
+| `sl0`, n = 24 | seconds | the head on the train | the head yaw's share of the bearing |
+|---|---|---|---|
+| chasing (or coasting) | 1 191 | 66 % (86 % within 22°, 14 % beyond 69°) | 0.83 |
+| not chasing | 4 575 | 14 % | 0.05 |
+
+**While chasing, the head already follows the train**: the seek loop steers on the chase target (0.03 rad from the true bearing),
+and the head brain's gaze sense wants that bearing. The train beyond ~70° off the nose is out of the head's reach (its yaw is
+clamped at ±1.2 and the body turns slower than the train goes round). **Not chasing**, the train is beside or behind 62 % of
+the time; with it in front and within 2 m (1 131 s, ~47 s a run), the duck is walking to a static target 76 % of that time with
+its head on the target (the gaze sense: where the walk is going) and the train outside the 45° cone (64 %). Of that in-front
+time, 56 % is within 5 s of a chase ending. A ToF cone is not an eye: what the operator sees "in view" is beside the duck's
+narrow view unless the head turns to it, and the duck cannot know to turn to what its cone never caught.
+
+**G1, the gaze wants the mover the brain holds (host `--gaze-mover-memory`: on the walk, when no chase is on, the head brain's
+gaze sense wants `BearingSeekLoop::chase_gaze_ego` — the coasted target or the lost mover's extrapolated 5 s memory — before
+the static target; `log/ten/hg1`, n = 24, against `sl0`).** The head on the train while not chasing 14 → 14 %; every
+ten-minute measure ties (boring −1.3, falls −0.4, the train chased −1.5 s, stops at things +5, all inside the noise). **`NULL`,
+and nearly `DEAD_CODE`: the memory was live only 4.7 s a run against 38 s a run of walking within 5 s of a chase's end.** The
+brain keeps a memory only for a chase LOST while the mover was still moving (`lose()`); most chases end otherwise, and after
+them the train is mostly beside or behind (60 %), beyond where the head can turn. Re-use: a memory for every ending (a stopped
+chase whose mover moves on), or a glance at a mover's last place while walking to a static target (the look-around is off
+while the seek steers) — both would trade the view ahead the walk steers by (§17.102's `REGRESSION`).
+
+**Step 2, the standing look. The record first:** cloud quality holds to 0.6 rad/s and frays above it (walls and furniture read
+as small), and head speed does not set the stop's length — the growth rule does (§17.32); the registration error under the
+real ToF timing follows the head's angular speed, ~2 cm below 0.3 rad/s to 5–9 cm at 1–2 rad/s (§17.86's `tre` table). The
+sweep (`--stop-gaze-sweep 0.6 0.7`) glides at a constant 0.58 rad/s (p25–p90 0.50–0.61) and the head is still on 6–11 % of
+stand ticks: a scan, which is what reads as mechanical.
+
+**L1, saccade and fixate (host `--stop-saccade 2.0`: the sweep's next least-looked-at cell is reached at 2 rad/s, and the gaze
+holds there while that view still grows the cloud — the fixation ends when the voxels added over the last 0.2 s fall below
+half the fixation's own peak, between 0.2 and 0.8 s; the stop's end rule untouched; `log/ten/sc1`, n = 24, against `sl0`).**
+Fixations average ~0.4 s.
+
+| n = 24 | `sl0` (the glide) | L1 (saccade and fixate) |
+|---|---|---|
+| head still, % of stop ticks · yaw span p50 | 11 % · 0.85 rad | 26 % · 1.13 rad |
+| head speed while moving p50 / p90 | 0.60 / 0.89 rad/s | 0.98 / 2.02 |
+| voxels a cloud · walls located | 2 343 · 55 % | 2 606 · 60 % |
+| objects within 2 m found · rule precision | 28 % · 0.22 | 28 % · 0.22 |
+| obstacles read as small | 11.1 % | 12.3 % |
+| stop length mean (settle · stand) | 5.3 s (1.2 · 3.4) | 5.6 s (1.2 · 3.6) |
+
+The ten-minute set ties (boring −2.6, falls −0.3, skills touching −8.4 with CI [−17.8, +1.0], outcomes observed +2.8). **`PARTIAL`:
+the look covers more (span +33 %, a fuller cloud, more of the walls) at the same length and the same object finding; it is a
+form for the eye, not a time saving — as §17.32 found, the stop's length is the growth rule's.** Caveat: this stack runs the
+ToF without its real timing; at 2 rad/s the saccades' casts would smear 5–9 cm on hardware (a fixation's casts would not).
+Preset L1 (on S0, the slow-train ★ T1).
+
+**Step 3, the pause. Where a stop's time goes (`mj_host/tools/stop_phases.py`, `sl0`):** 39.5 stops a run, 5.3 s each. The
+**settle** — the walker at zero command, waiting for stillness before the standing brain may take the legs — is 1.2 s a stop
+(p50 1.6, p90 the 2.0 s timeout), 49 s a run, and the look has not started; the stand that follows is p50 1.2 s. The restart
+after a stop is quick (0.5 s to 5 cm of travel). **The pause is the settle: the wait the standing brain needs before it can take
+over, longer than the typical look itself.**
+
+**P1, the walker holds the stop (host `--stop-walker-hold`: from the stop's first tick the walking policy at zero command holds
+the stance — no settle, no standing brain; a skill request, or one deferred from the walk, starts at once; the look and the
+cloud run as before).** As first built (`log/ten/wh1`) the unwind and the look after a skill followed only a skill from the
+standing brain's phase, so the outcome loop lost its look (outcomes observed 64 → 43 %) — a weakened slice (§3.2 rule 6),
+fixed in P1b. One finding from that slice stands: **skills fired from the walker's stance moved their thing far more often**
+(82 of 243 → 128 of 235; kicks 29 → 50 of 89).
+
+**P1b (`log/ten/wh2`, n = 24, against `sl0`):**
+
+| n = 24 | `sl0` | P1b |
+|---|---|---|
+| stops a run · mean length · settle a run | 39.5 · 5.3 s · 49 s | 52.1 · 3.7 s · 0 s |
+| standing a run | 211 s | 191 s |
+| falls · backward at a stop's start | 3.04 · 0.96 | 3.17 · 0.62 |
+| skills a run · touching · outcomes observed | 8.6 · 37 % · 64 % | 21.4 (CI +9.7, +15.9) · 26 % (CI −20, −2) · 72 % |
+| the train chased · contacts | 38.7 s · 3.7 | 28.6 s (CI −24.6, +4.4) · 2.5 |
+| boring · interesting · walls | 31 · 46 % · 18.7 | 31 · 45 % · 14.1 |
+
+**`PARTIAL`: the pause is gone, and a new loop appears.** In `sl0` every skill follows an arrival stop (239 of 243); in P1b,
+272 of 571 fire at the look stop after a skill's unwind, half within 6 s of the last skill. The quick look observes the answer
+(the outcome loop's `pending` clears), the seek loop re-arrives at the same thing 0.3 m away, the outcome loop arms again and
+asks: skill → unwind → look → skill. The standing brain's 1.6 s settle had been the delay that let the walk move on. Re-use
+(the next lever, not a timer): the outcome loop arms only where acting still has something to teach — a thing just acted on
+whose answer was just observed carries little expected information; its own outcome statistics are the measure. Preset P1b for
+the eye: whether the stop now reads as continuous, and whether repeated batting at a thing is lively or a stutter.
+
+**★ L1 PROMOTED on the operator's eye (2026-10-10):** "the L1 saccade looks better with no noticeable dropoff in object
+engagement." The stack: ★ T1 + the slow train (S0) + `--stop-saccade 2.0` (launcher preset ★ L1, first row). On P1b: "the kicks
+seem to be clashing with walking since they are fired when the robot is in motion. The delay before a kick or peck is fine since
+it makes those skills obvious to the eye. The delay before the look was the problem to solve." Next: P2, the two combined with
+the settle kept before a skill only.
+
+**P2, ★ L1 + the walker holds the stop + a skill waits for stillness (host `--stop-walker-hold --stop-skill-settle`: the look
+starts on the stop's first tick; a kick or peck — deferred from the walk or asked for during the stop — fires only once the body
+passes the settle's stillness test, at most its 2 s timeout; `log/ten/p2a`, n = 24, against ★ L1 `sc1`; and the same without
+the skill settle, `p2b`, to isolate it).**
+
+| n = 24 | ★ L1 | + walker hold (`p2b`) | P2: + the skill waits (`p2a`) |
+|---|---|---|---|
+| stops a run · mean · settle before the look | 37.8 · 5.6 s · 45 s | 49.7 · 3.8 s · 0 | 43.6 · 4.3 s · 0 |
+| falls · backward at a stop's start | 2.71 · 0.42 | 3.12 · 0.54 | **2.21 · 0.00** |
+| skills a run | 9.2 | 19.5 (the cascade) | 9.5 |
+| things moved by kicks, pecks, pushes · answers observed | 87 / 257 · 148 | — | 86 / 266 · 187 |
+| the train chased | 36.5 s | 39.0 | **49.2** (CI +0.9, +24.5) |
+| the skill-window contact flag | 28.6 % | 21.8 | 14.9 (CI −21.8, −5.6) |
+| boring · interesting · walls · first minute | 26.9 · 46.7 · 10.6 · 0.75 | ties | ties (0.58, CI touches 0) |
+
+**`WORKING` on the pause, and the skill settle is what removes the cascade.** The settle before a skill gives the walk its
+chance to move on; the kicks fire from a stiller trunk (0.010 against 0.026 m/s) at the same distance and bearing from the thing
+(edge 0.12 m, 32–34°), and move as many things. The contact flag during the skill window halves while the things moved tie —
+the stander's stance rested against things more; the outcome is what the eye should judge. Preset P2 for the eye.
+
+**★ P2 PROMOTED on the operator's eye (2026-10-10):** "accuracy of pecks and kicks seems similar while the look has improved."
+The stack: ★ L1 + `--stop-walker-hold --stop-skill-settle` (preset ★ P2, first row). The operator, next: "we may be getting to
+the end of what we can accomplish in sim, so I would like to try adding the sit skill for a bit of flavour. There are still
+cases where the robot backs into walls or chairs or otherwise collides with an object unexpectedly. It would be fun if, when the
+robot has a big TLE spike from not traversing when expected, it sits down for a few seconds, then stands back up and continues."
+
+### 17.115 The sit on a stall: flavour from the walk's own surprise (2026-10-10)
+
+**The skill.** Pollen's `alpha_sitstand.onnx` (`pollen-robotics/microduck` `76d4ea6`, pinned in `fetch_scaffolds.sh`): one
+network for sit and stand, the posture flag in the twist's vx slot (1 = sit, 0 = stand), the 61-value observation of every other
+skill, run as their daemon runs it (action scale 1.0, a rise at flag 0 before the walker takes over). Here: flag 1 for 3 s,
+then flag 0 until both knees are within 0.15 rad of the stand (at most 2.5 s). The trunk goes 0.12 → 0.06 m and back.
+
+**The observation first (CLAUDE.md §1 step 2).** Contact odometry carries the signal: walking forward it senses 0.30 (command
+units; 0.12 m/s, the truth's 0.121), and with the body blocked 0.003 at the same command. The twist brain's own forward-model
+surprise (`mtle`) does not separate the two (p50 0.35 blocked against 0.30 walking; its tail is the gait). Contacts with walls
+and furniture are frequent and brief (120 a run, 40 ms each); merged across sub-second gaps they are ~14 bumps a run, ~4 of
+them sustained wrangles of 2 s or more, mostly backing and walking forward against the same wall.
+
+**S1, the EPM form (config `a1v2_s1_sit`: a traversal EPM over [the applied forward command, the applied |yaw|, the sensed
+forward speed], each averaged over 1 s; `--sit-on-surprise K`: its TLE held above K × its running mean).** Unconditioned, a
+walk's restart (full command, no motion for half a second, 40 times a run) is the blocked state, and the EPM learns it as
+ordinary; averaged over 1 s, a sharp turn's low forward progress is still a common node. Scanned offline against the true
+contacts, about one trigger in ten is at a contact, at every window and K. **`NULL` as a collision signal at this power:**
+"commanded and not moving" is common in this walk, and the TLE's transition term is noisy around ordinary states.
+
+**S1b, the progress form (`--sit-on-stall F`).** Predictive coding with the simplest predictor: the walk's own delivery ratio
+(sensed over commanded, one per direction, learned online over ~60 s) is the prediction; once the command has held its
+direction for 1 s (a start-up is slow by nature), progress under F of the prediction for 1 s is the stall. Offline, ~30 %
+of triggers at a contact at F 0.2 before the start-up gate; with it, in the sweep (`log/ten/st1`, n = 24): **5.6 sits a run,
+82 % at a wall, a chair or an object**; but one seed pinned in a corner sat 24 times, and 17 of 135 sits were followed by a
+fall within 7 s, 12 of them while sitting down or rising, mostly backward — the sit began with the body still moving.
+
+**S2 = S1b + `--sit-settle`:** the walker holds still before the sit (the settle's stillness test, at most 2 s), the rule
+★ P2 gave the kicks; and the sit **habituates** — each sit halves the stall needed for the next, recovering over ~60 s (the
+form of the chase's own habituation, `BearingSeekLoop.chase_pull_decay`). `log/ten/st2`, n = 24, against ★ P2 `p2a`:
+
+| n = 24 | S1b | S2 |
+|---|---|---|
+| sits a run (max) · at a contact | 5.6 (24) · 82 % | 3.3 (9) · 74 % |
+| falls within 7 s of a sit | 17 / 135 | 4 / 80 |
+| seated, p50 | 2.4 s | 2.5 s |
+| falls a run (★ P2 2.21) | 2.79 (CI −0.15, +1.32) | 2.46 (CI −0.41, +0.91) |
+
+Against ★ P2 every ten-minute measure ties (boring −0.7, interesting +2.8, walls +0.9, the train chased −6.0 with CI
+[−16.0, +4.0], outcomes observed +4.6); skills +3.8 a run is the sits themselves. **`WORKING` as flavour: a sit a few times a
+run, three in four at a real bump, without costing the walk.** Not a navigation fix — the corner the duck backs into is still
+§17.17's deadlock. Preset S2 (seed 20: sits at 128 s and 150 s at contacts) for the eye.
+
+**The way out after the sit (the operator, 2026-10-10: "the sit is firing as expected but the robot remains in the corner,
+which is boring. After the sit, the play loop or another mechanism should be attempting to get the robot back into open
+areas so it can notice objects to interact with. Without the sit the robot normally babbles its way out of corners, but if
+we can navigate more assertively out of those situations it is a win for dynamic behaviour").** Instrument
+`mj_host/tools/after_sit.py`: per sit, how far the trunk gets from the sit's place within 10 / 20 / 40 s and the time to 0.6 m.
+On S2 (`st2`): 0.6 m in 25 s (p50), 30 % of the walk 5–15 s after spent backing; an escape follows 9 of 80 sits.
+
+| n = 24, against S2 | 0.6 m away, p50 (p75) | within 20 s | backing after | an escape's 6 s | sits a run | walls / min |
+|---|---|---|---|---|---|---|
+| S2 (`st2`) | 25 s (37) | 0.51 m | 30 % | — | 3.3 | 13.5 |
+| E1 the sit ends in a look stop and the stuck escape (`se1`) | 41 (115) | 0.33 | 42 % | 0.19 m | 3.7 | 12.7 |
+| E2 + the reflex owns the escape's yaw, no backing (`se2`) | 29 (56) | 0.38 | 16 % | 0.18 | 4.1 | 13.9 |
+| E3 + no stop or sit interrupts an escape (`se3`) | 24 (43) | 0.49 | 16 % | 0.27 | 3.4 | 13.5 |
+| **E4 + the escape walks out while facing the free side (`se4`)** | **18 (38)** | **0.72** | **12 %** | **0.57** | **2.4** | **10.4** |
+
+Each step was a diagnosis of the one before. **E1** (`--sit-then-escape`: the sit ends in a look stop whose cloud gives the
+stuck escape's freest sector, with a turn-about when nothing ahead is free within ~1.2 m; 6 turn-abouts in 24 runs) made it
+worse: the escape held the heading reference, but near a wall the walker brain's avoidance owned the body — 37 % of the
+escape backing at full reverse, and the heading reflex's yaw share mixed down to ~0.4 by proximity (T1's re-use context).
+**E2** (`--escape-authority`: during an escape the reflex owns the yaw at up to 1.5 rad/s and the walk may not back) removed
+the backing (8 %) and the escape still went 0.18 m: new stops and sits began inside it and its 6 s ran out standing. **E3**
+(`--escape-commit`: no stop or sit starts while an escape holds) let it run, 0.27 m. **E4** (`--escape-vx 0.3`: forward at
+least 0.3 × cos(heading error), the form of the chase's `--chase-vx` floor) walks it out: 0.57 m in 6 s, and the duck is
+stuck less, so it sits less. Against S2 every ten-minute measure ties (boring −2.1, walls −3.1 with CI [−8.0, +1.9], falls
++0.12, the first minute, skills, outcomes). **`WORKING` on the way out: the sit is followed by a look and a walk into the
+open, 7 s sooner at the median.** Preset E4 (seed 16 from 250 s) for the eye. Re-use: the escapes of the stuck stop and the
+impeded look share the authority, the commitment and the floor (they are on for every escape under these flags).
+
+**★ E4 PROMOTED (the operator's eye, 2026-10-10): "E4 looks good. The sit works as long as the robot is not backed against the
+wall (the wall keeps it standing). This should translate well to a real environment."** Launcher first row.
+
+### 17.116 Places — what the walk remembers of where it was (plan, 2026-10-10)
+
+**The operator, 2026-10-10:** "the next improvement is in the play loop and how we handle places. I believe we are only holding
+onto the map for a short period of time. I am wondering how we can hold the walls in memory more permanently (don't let baked
+nodes decay) so the robot can avoid areas it has been stuck in or are simply corners without objects to interact with."
+
+**What holds and what fades, read from ★ E4 (`se4`, n = 24, 600 s).**
+- **The place map does not forget.** The map EPM's nodes grow monotonically, 12 at 1 min to 38 at 9 min (max 50 of 128);
+  `health_death_spares_baked` is on, and insertion is shut on the walk (`--map-on-stop`), so the vocabulary only grows at stops.
+- **The walls as voxels do.** `CloudMap` caches the clouds of the 8 most recently filed places (LRU); the walking cloud resets
+  every metre and is never cached. Nothing steers from the cache: it feeds `revisit_change` only. A larger cache alone would
+  change no behaviour.
+- **Play's memory of where it has been does.** `PlayLoop.hab_decay` 0.002 a tick: a visited place is "recent, boring" for ~10 s.
+- **Nothing remembers where the walk stalled.** The progress prediction (the sit's signal, §17.114) is host-side and per tick.
+
+**Where the duck is, and whether it goes back** — new instrument `mj_host/tools/places.py` (truth labels only: corner = within
+0.5 m of two walls; open = 0.5 m from every wall and every piece of furniture's edge; traps = sits and stuck stops; back =
+within 0.4 m of an earlier trap):
+
+| n = 24 | corner % | open % | cells | traps | back | back > 60 s | skills |
+|---|---|---|---|---|---|---|---|
+| ★ P2 (`p2a`) | 3.5 | 43.1 | 112 | 0 | 0 | 0 | 9.5 |
+| ★ E4 (`se4`) | 3.0 | 42.3 | 113 | 2.6 | 0.6 | 0.2 | 10.5 |
+
+Room corners hold the duck 3 % of the time; it is in open floor 42 %, about the same under every steering loop (play 40–43 %,
+seek 33–47 %, the escape 22–29 %). It rarely returns to a trap after a minute (0.2 a run); the returns are the same episode
+re-firing (0.6 a run, median 24 s apart). 39 of 62 sits come while the seek loop walks to a remembered thing; play steers 24 %
+of the time, as everywhere. Sweeps 33–35 (§17.81) refused targets at places the walk had failed: the loop went without a
+target a quarter more of the walk and play's walk doubled the walls. So the lever belongs to play's walk, as the operator says.
+
+**The levers, one at a time against ★ E4, n = 24, judged on `places.py` + `fx_study.py`:**
+- **M2 — places stay boring** (config only): `play.hab_decay` 0.002 → 0.0002, a visited place recent for ~100 s instead of
+  ~10 s. The error: play's novelty field is the place EPM's TLE, which a known place no longer raises; the habituation is what
+  keeps a learned empty place from pulling play back. Predicted: cells ↑, back ↓, play's share ↓ (its value falls on known
+  ground).
+- **M1 — the stuck place** (`PlayLoop.stall_topic`, gain `stall_weight`, 0 = off and byte-identical): the walk's progress
+  error (1 − progress / predicted progress, the sit's own signal) attached to the map node the walk is at, an EMA per node
+  that never decays (a node is permanent, so is what it taught). Play's value iteration multiplies each node's value by
+  (1 − stall_weight × stall): a place where the walk stalls is a hole in the field, and the climb routes around it, which is
+  what avoiding it means. The error minimised: the expected progress error along play's route. Predicted: traps ↓, back ↓,
+  walls ↓, open % ↑, the rest ties.
+
+**M2 measured (`log/ten/pm2`, n = 24, against ★ E4 `se4`; `hab_decay` read back 0.0002): `NULL`, leaning the wrong way.**
+Paired: cells −8.1 [−18.9, +2.7], traps +1.2 [−0.1, +2.5], back +0.5 [−0.1, +1.2], open % −2.5, walls +3.2 a minute
+[−1.7, +8.1], escapes +1.4 [+0.1, +2.7] (the one beyond the noise); boring, interesting, skills, falls, the train, outcomes tie.
+Play's share of the steering did not move (24.3 → 25.1 %): the longer habituation did not hand the walk to anything else, it
+sent play's climb to other places, and those were no better. The likely reason is the place vocabulary itself: the map's nodes
+are VIEWS (pose, head yaw and the ToF columns), so the least-habituated nodes near a known region are often close views of a
+wall. A longer memory of "recent" without a memory of what the place costs pushes play toward exactly those — which is M1's
+question. Re-use: on top of M1, once a stuck place is a hole in the field, a longer habituation may sweep the open ground.
+
+**M1 measured (`log/ten/pm1`, n = 24, `--place-stall` + `play.stall_topic` / `stall_weight 1`; every seed echoes the place
+stall, the per-node read-back `pst` live: 24–35 places learned a run, 5–14 of them above 0.3, the worst 0.78–0.98).** Against
+★ E4 it read as a regression — traps +1.6 [+0.6, +2.7], escapes +1.5 [+0.2, +2.8], skills −1.9 [−3.9, +0.2] — and so did M2.
+Both levers moved the same numbers the same way, so a **placebo arm** was run: ★ E4 with only `play.explore_seed` 11 → 12
+(`log/ten/pplc`, the wander's RNG; it diverges from `se4` from the first minute). **The placebo against ★ E4: traps +1.0
+[+0.1, +1.9], corner +2.0, cells −5.0, skills −0.2.** The `se4` sweep is a favourable draw on traps and escapes — a re-roll
+of the play loop's dice costs a trap a run. Against the placebo:
+
+| paired vs placebo `pplc`, n = 24 | traps | back | cells | walls / min | escapes | skills | boring % | falls |
+|---|---|---|---|---|---|---|---|---|
+| M2 places stay boring | +0.2 | +0.3 | −3.1 [−13.2, +6.9] | +1.3 | +0.5 | −0.3 | −1.2 | +0.5 |
+| M1 the stuck place | +0.6 | +0.3 | +1.9 [−8.8, +12.6] | +1.1 | +0.6 | −1.0 | +0.5 | +0.2 |
+
+(traps / back from `places.py`, the rest `fx_study.py`; every CI spans 0.) **M1 `NULL`, M2 `NULL`** — both in the context of
+play steering ~23 % of the walk. The diagnosis is the consumer, not the memory: the memory is live and permanent, but the traps
+it would prevent are mostly not play's. Traps by the loop steering the 5 s before them (a run): ★ E4 play 0.62 / seek 1.58 /
+escape 0.38; M1 play 0.58 / seek 2.79 / escape 0.67 — play's own traps did not fall, and they were a quarter of the total to
+begin with. The seek loop walks a straight bearing to a remembered thing and reads no place memory.
+
+**A correction to §17.115 from the placebo:** E4's "sits 3.3 → 2.4 a run" is inside the spread a dice re-roll gives (traps
+±1 a run); the way-out numbers (0.6 m in 18 s against 25, 0.57 m in an escape's 6 s, backing 30 → 12 %) are per-sit and
+stand. **Method note for the duck:** a single base sweep is one draw of a chaotic walk; a lever whose deltas against the base
+sit near ±1 trap or ±1 escape a run needs a placebo arm (a seed of a module the lever does not touch) beside it.
+
+**Re-use and next.** The stuck place now exists as a learned, permanent, per-place quantity (`PlayLoop.stall`). It earns its
+keep only with a consumer that steers where the traps are: (a) the SEEK loop — a target whose approach runs through stuck
+places loses value the way play's nodes do (sweeps 33–35 refused targets outright and lost a quarter of the walk's targets; a
+graded cost is the untried form); (b) the escape — choosing among the cloud's free sectors the one whose places have not
+stalled. M2's re-use stands: a longer habituation is worth retrying only once something makes stuck places unattractive to
+the consumer that walks into them.
+
+**S1 — the approach's cost (the operator chose it, 2026-10-10: "go with (a), the graded cost on the seek targets").** Built:
+`PlayLoop.stall_pose_topic` / `stall_field_topic` (each stuck place's error-weighted position in the odometry frame, published
+as [x, y, excess] for the places above the walk's mean) and `BearingSeekLoop.stall_cost` / `stall_radius` (a held static
+target's need × (1 − stall_cost × the worst excess within 0.3 m of the straight approach, tapered), never below the floor —
+graded, the target is never refused). Play's own use of the memory (M1's weight) is off in this arm: one lever. Byte-identical
+off (E4 seed 5, P2 seed 3, 120 s); unit tests for both modules. `log/ten/ps1`, n = 24, every seed echoes the place stall.
+
+**The consumer fired:** seek's share of the steering 68.5 → 62.3 %, play's 24.3 → 30.3 %; the cost above 0.3 on 11 % of
+held-target ticks, and above 0.3 in the 10 s before 41 of 75 traps.
+
+| n = 24 | traps | back | cells | corner % | boring % | skills | skills touching % | map nodes | baked at stops | train s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ★ E4 `se4` | 2.6 | 0.6 | 113 | 3.0 | 27.2 | 12.9 | 15.1 | 37.0 | 19.9 | 43.8 |
+| placebo `pplc` | 3.6 | 0.8 | 108 | 5.0 | 28.7 | 13.4 | 19.1 | 37.4 | 22.1 | 31.4 |
+| **S1 `ps1`** | **3.1** | **1.0** | **113** | **2.4** | **24.2** | **12.0** | **12.7** | **33.3** | **17.0** | **47.1** |
+
+Against the placebo (paired): boring **−4.5 [−8.8, −0.3]**, corner −2.6 [−4.7, −0.5], skills touching −6.5 [−11.8, −1.1],
+map nodes −4.1 [−8.2, −0.0], baked at stops −5.2 [−7.9, −2.4], the train chased +15.7 [+3.8, +27.5] (E4 itself is +12.4 over
+the placebo there); traps −0.5, back +0.2, cells +5.4, walls, falls, escapes, outcomes tie. Against ★ E4 every places measure
+ties (traps +0.5 [−0.1, +1.2]).
+
+**`NULL` on what it was built for — the traps and the returns — and the diagnosis is the size of the target, not the cost.**
+70–77 % of traps happen at a place no earlier trap was within 0.4 m of (E4 48 of 62, the placebo 67 of 86); the median cost on
+the approach in the 5 s before a trap is 0.00. A memory of stuck places can only prevent the returns, about a quarter of the
+traps, and where it was live the halved need still won the race: seed 3, 173–321 s, seven sits along ~0.7 m of the −x wall,
+the target 1.8–2.1 m away, the cost 0.45–0.58 — the need halved and seek still steered. (The sits along one
+wall more than 0.4 m apart are also an undercount in `places.py`'s "back"; a wall-run is one trap repeated, not seven.)
+The side effects are the arbiter's hand-over: play walks more, so fewer arrival stops (fewer map nodes baked at stops) and
+fewer skills that touch; and less boring time against the placebo — a signal, not a finding, since it is −3.0 against E4.
+
+**Re-use.** (1) Most traps are first-time: what prevents them is perception on the approach (the walking cloud or the ToF
+seeing what blocks the straight line), not a memory of where the walk failed. (2) For the returns, the cost must make play
+WIN the race at a stuck place, not halve the need — e.g. the excess subtracted from seek's trust rather than its need, or the
+stuck places as obstacles in play's own route (M1's weight on, with S1). (3) The "back" measure needs a wall-run form (a trap
+within 0.4 m of the previous trap's escape path).
+
+### 17.117 First-time traps — perception on the approach (2026-10-10)
+
+**The operator, 2026-10-10: "go after the first-time traps with perception on the approach."** §17.116 left 70–77 % of traps at
+places the duck had never been trapped at; a memory cannot prevent those.
+
+**What precedes a first-time trap (★ E4 + the placebo, 115 first-time traps, truth labels for scoring only).** 82 come while
+the seek loop steers. 1 s before them the trunk is within 0.25 m of: a chair 21, the train 18, a wall 17, nothing (open floor)
+14, a block 5, the table or the shelf 6. The seek gate (`--seek-gate`, things phase T2: while seek holds the reference, its
+target's ToF sector reads free so the walker's avoidance does not push the duck off the thing it walks to) fired in the 5 s
+before 67 of the 82. It erases the sector whatever the return's range: a chair leg 0.3 m ahead of a target 1.2 m away reads
+"free" as surely as the target itself. **The sensory channel carries the signal and the gate removes it**: in the 5 s before 52
+of the 82, the target's sector held a return nearer than the target's range by 0.15 m or more, while the seek gate was erasing
+that sector; on seek walking at large such a return occurs in 43 % of 5 s windows (63 % before the traps, ×1.5).
+
+**G1 — the gate erases only what could be the target** (`--seek-gate-near M`, 0 = off and byte-identical): the sector reads free
+only when its nearest return is no nearer than the target's range less M; a return nearer than that is something on the approach
+and the walker keeps seeing it (and the reference's free-space check, where on, keeps releasing into it). No new behaviour is
+written: the walker's own proximity prior does the avoiding, as it does everywhere else. M = 0.15 m (a thing's own half-extent
+plus the sector's range spread). Predicted: seek-led first-time traps at chairs, walls and furniture ↓; arrivals, skills and
+the train's chase tie (the target's own return stays erased). Against ★ E4 and the placebo, n = 24.
+
+**G1 measured (`log/ten/pg1`, n = 24, `--seek-gate-near 0.15` echoed on every seed; 838 ticks of a nearer return left visible
+against 2 039 gated in seed 16's first 300 s).**
+
+| n = 24 | traps | first | first, seek-led | back | cells | open % | skills |
+|---|---|---|---|---|---|---|---|
+| ★ E4 `se4` | 2.6 | 2.0 | 1.4 | 0.6 | 113 | 42.3 | 10.5 |
+| placebo `pplc` | 3.6 | 2.8 | 2.0 | 0.8 | 108 | 39.4 | 10.3 |
+| G1 `pg1` | 4.2 | 3.1 | 2.2 | 1.0 | 111 | 43.4 | 9.0 |
+
+Against the placebo (paired): traps +0.6 [−1.0, +2.1], first-time seek-led +0.1 [−0.7, +1.0], skills −1.3 [−3.3, +0.7]; the
+rest ties. Seek-led first-time traps by what is within 0.25 m (placebo → G1): chair 11 → 12, wall 10 → 13, the train 14 → 3,
+table and shelf 2 → 9, open floor 7 → 10 — the chairs and walls it was built for did not move. **`NULL` at the sweep.**
+
+**What the walker does with what it now sees** — every encounter (a return nearer than the target by 0.15 m in its sector
+while seek steers; in the placebo the gate hid it, in G1 it is kept), the 3 s after:
+
+| | encounters | forward command | displacement | heading change | a trap within 5 s |
+|---|---|---|---|---|---|
+| placebo, hidden | 696 | 0.19 | 0.24 m | 0.45 rad | 6.8 % |
+| G1, visible | 801 | 0.15 | 0.20 m | 0.37 rad | 4.0 % |
+
+Per encounter a trap follows less often (a signal: 47 → 32 traps after encounters), but the walker's answer to an obstacle it
+can see is to **brake, not to turn** — it turns less than when it was blind to it, because the heading reflex still holds the
+yaw on the target's bearing. The body creeps toward what it sees, and over a run the local gain is inside the dice.
+
+**Re-use.** The perception is there and the walker now has it; what is missing is a reference that goes AROUND. Releasing the
+reference (`--ref-free`) is refuted twice (§17.44, §17.79: the released yaw goes to the twist brain's avoidance, which is what
+fails at surfaces). The untried form is a **detour**: with G1's condition (a return nearer than the target in its sector), the
+reference set to the freest direction of the walking cloud's view on the target's side, held until the target's sector reads
+free again — the escape's choice of direction, made on the walk before the stall instead of after it.
+
+**G1, a missing slice found while building D1:** the heading reflex's share (`IntentAdapter`, the reflex block) zeroes the seek
+target's sector with no range check, so under G1 the walker's sense slots see the nearer return but the reflex keeps its full
+share of the yaw toward the target — part of why G1's walk turned less. Re-use for G1 alone: the same range check in the share.
+
+**D1 — the detour (the operator, 2026-10-10: "the most effective escapes seem to be achieved by turn-in-reverse manoeuvres.
+Therefore the braking lever makes good sense, so the robot can turn in place to find an escape vector").** `--detour BACK_VX
+[MAX_S [OUT_S]]`, with G1 (its trigger is G1's condition); 0 = off, byte-identical (E4 seed 5, P2 seed 3). A SCAFFOLD of the
+escape's kind, named as such: when the seek target's sector has held a return nearer than the target for 0.5 s, the walk backs
+at BACK_VX while turning at the full yaw range toward the freer side sector (the target's side on a tie). The turn sweeps the
+sensor, so the escape vector is FOUND by the turn rather than chosen from a map: it ends when the ahead sector and the sector
+the obstacle swings into both read clear (nothing within 1 m, a turn of ~20° or more) after at least 0.2 s, or at MAX_S; then
+the heading found is held for OUT_S (the escape's hold — under `--escape-authority` the reflex owns the yaw and the walk goes
+forward on it at the floor). `escaping()` covers the turn, so under `--escape-commit` no stop or sit interrupts it. (The
+walking cloud's 8-sector view was the first candidate for the direction; it is laid out in the frame of the cloud's last
+anchor, up to a metre back and turned, so it cannot steer a turn on the walk.) Smoke, seed 16, 300 s, BACK_VX 0.15: 11
+detours, 10 ended clear, 1 sit (★ E4: 2 sits by 300 s on this seed); some dithering at one spot (260–272 s, a detour every
+~2.5 s). Sweep `log/ten/pd1`, n = 24, against ★ E4, the placebo and G1.
+
+**D1 measured (`log/ten/pd1`, n = 24, BACK_VX 0.15; echoed on every seed): 22.6 detours a run, 17.5 ended by the clear reading.**
+
+| n = 24 | traps | first | first, seek-led | back | open % | skills | boring % | escape: 10 s disp |
+|---|---|---|---|---|---|---|---|---|
+| ★ E4 `se4` | 2.6 | 2.0 | 1.4 | 0.6 | 42.3 | 10.5 | 27.2 | 0.59 m |
+| placebo `pplc` | 3.6 | 2.8 | 2.0 | 0.8 | 39.4 | 10.3 | 28.7 | 0.57 m |
+| G1 `pg1` | 4.2 | 3.1 | 2.2 | 1.0 | 43.4 | 9.0 | — | — |
+| D1 `pd1` | 3.4 | 2.5 | 1.6 | 0.9 | 45.7 | 9.5 | 25.3 | 0.69 m |
+
+Against the placebo (paired): first-time seek-led −0.46 [−1.12, +0.20], first −0.29, traps −0.21, open +6.3 [−2.1, +14.7],
+boring −3.5 [−7.0, +0.0], escapes −1.0 [−2.4, +0.3], an escape's 10 s +0.12 m [−0.01, +0.26]; map baked at stops −5.4
+[−8.3, −2.4] (fewer stops); walls +0.0, falls −0.7, skills −0.8, skills touching −5.1 [−11.1, +0.8], outcomes, the train tie.
+Against G1: first-time seek-led −0.58 [−1.47, +0.31]. **Per detour** (536): a trap within 5 s 3.2 % (an encounter: placebo
+6.8 %, G1 4.0 %), the next detour a median 5.0 s later and within 4 s on 34 %, the median turn 0.25 rad, the target's range
+closed by 0.04 m in 5 s. **`PARTIAL`:** the direction is right everywhere it is measured and nothing regresses, but the effect
+is inside a sweep's dice; the defect is plain in the per-detour numbers — the duck turns ~15–20°, walks out 1.5 s, the seek
+loop aims it back at the target and the same obstacle, and it detours again. **D1b** (`--detour-commit`): a detour within 10 s
+of the last one's end turns the same way and walks out twice as long (1.5 → 3 → 6 s): one way around, held longer while the
+obstacle persists. Byte-identical off (E4; D1 seed 16 300 s). Smoke, seed 16: the nook between the −x wall and chair 0
+(258–271 s, the target 1.7 m away; ★ E4 sits here at 253 s) worked out of by 278 s in five detours. Sweep `log/ten/pd1b`.
+
+**D1b measured (`log/ten/pd1b`, n = 24; 16.6 detours a run, 13.2 clear, 9.6 repeats).** Against the placebo: first-time
+seek-led **−0.71 [−1.37, −0.04]**, cells **+10.4 [+2.5, +18.3]** — the first two beyond the dice in this push — but traps
++0.5, back +0.6, interesting **−5.8 [−9.7, −1.9]**, outcomes observed **−7.7 [−15.1, −0.3]**, walls +3.5 [−2.0, +9.1],
+fewer stops (baked at stops −4.9). The traps moved: by the loop steering the 5 s before (a run), placebo seek 2.58 / held
+heading 0.29, D1 2.08 / 0.75, **D1b 1.58 / 1.92** — the long walk outs (to 6 s, the reflex owning the yaw, forward at the
+floor, no backing) walk the body into the next wall. **`PARTIAL` with a cost** (interesting time, observed outcomes).
+**D1c** (`--detour-reopen 0.5`): the walk out ends when the ahead sector closes (a return within 0.5 m) and the turn starts
+again the same way — the heading found is held only while it stays open. Byte-identical off (E4; D1b seed 16). Smoke, seed 16:
+22 detours, 11 ended clear, 18 walk outs reopened, 1 sit. Sweep `log/ten/pd1c`.
+
+**D1c measured (`log/ten/pd1c`, n = 24; a run: 24.7 detours, 18.3 ended clear, 18.2 repeats, 12.5 walk outs reopened).**
+
+| n = 24, paired | traps | first | first, seek-led | open % | corner % | cells | walls / min | boring % | interesting % | skills |
+|---|---|---|---|---|---|---|---|---|---|---|
+| D1c − placebo | **−1.71 [−2.66, −0.76]** | **−1.29 [−1.93, −0.65]** | **−0.96 [−1.51, −0.41]** | **+12.3 [+5.5, +19.2]** | **−3.5 [−6.1, −1.0]** | **+9.1 [+2.2, +16.0]** | **−4.8 [−9.4, −0.2]** | **−4.4 [−7.0, −1.8]** | **−9.8 [−14.1, −5.5]** | **−2.4 [−4.5, −0.3]** |
+| D1c − ★ E4 | −0.71 [−1.69, +0.27] | −0.50 | −0.29 | **+9.4 [+2.8, +16.0]** | −1.5 | +4.1 | — | — | — | −1.2 |
+
+Means: traps 1.9 a run (★ E4 2.6, placebo 3.6), walls 7.5 a minute (10.4, 12.3), open floor 51.7 % (42.3, 39.4), corners
+1.5 % (3.0, 5.0); escapes −1.4 [−2.6, −0.3], an escape's 10 s in wall contact −2.8 points, falls −1.0 [−2.1, +0.1]; against
+D1b, traps −2.2 [−3.4, −1.1] and back −1.0 — the traps D1b moved to the held heading are gone (by the loop steering the 5 s
+before: seek 1.42, held heading 0.29, play 0.17 a run). **The cost:** interesting time −9.8, skills −2.4, stops at things −8.6
+[−19.0, +1.7], outcomes observed −5.4, map nodes −6.8 (fewer stops at new places). Boring and interesting both fall: the
+time goes to the middle — walking and detouring rather than engaging — and the likeliest reason is the things that stand at
+the foot of a chair or a wall, whose approach now reads as an obstacle nearer than the target and is turned away from.
+
+**`WORKING` on the navigation — loud, seed-robust on every places measure against the placebo, walls and escapes down with
+it — with a `REGRESSION` on engagement.** The operator's eye decides. Preset D1c (seed 3 from 160 s: detours at 171–203 s
+along the −x wall where ★ E4 sits four times at 173–238 s; seed 16 from 240 s). Re-use for the cost: G1's margin is the
+lever — a thing at the foot of a structure is a return AT the target's range with structure behind it, which the cloud's
+target-tall count (`target_tall_topic`, the static yield's signal) already reports; the detour could stand down when the
+target's own cluster is the nearest return (the arrival's range), or M could grow with the target's measured extent.
+
+**The kick, restored (the operator, 2026-10-10: "we also need to investigate the kick skill — it seems like it is not firing
+after one of the past changes").** Kicks still START at every arm's rate (4.0–4.4 a run from S0 to D1c), but the kicking leg's
+swing (the largest joint excursion of that leg in the window, from the tick before) fell at ★ P2: S0 0.47 / L1 0.45–0.49 /
+P1b and P2-without-the-skill-settle 0.49–0.58 rad → ★ P2, E4, D1c 0.12–0.16 rad. The kick's branch runs (a trace: the joint
+targets are the network's), and the network's observation is the body alone — so the body differed: ★ P2's kicks start after
+the stillness wait with the head pitched down at the thing (+0.91 rad on average, against +0.33 at the stander's stop and
++0.24 without the wait), a posture Pollen's kick networks (trained from the stand, head home) answer by holding the leg still.
+Confirmed by masking: with the head joints read as home in the kick's observation (a debug run, not kept), seed 1's kick swung
+0.57 rad against 0.19. **`--kick-head-home`**: a kick at a walker-held stop waits with the head driven home until neck and
+head pitch are within 0.15 rad (at most 1 s), then fires from the posture it knows. Byte-identical off (E4, P2). `log/ten/pkh`
+(★ E4 + the fix, n = 24): the swing 0.45 (right) / 0.47 (left) over 103 kicks, 4.3 waits a run, no timeouts; against the
+placebo everything ties — skills touching 22.2 % (★ E4 15.1, placebo 19.1), the block touched in the first minute 0.75
+(0.50, 0.58), falls 3.1 (2.6, 2.8). A defect fix, not a lever; preset K1 (seed 2: kicks at 8, 64, 175, 192, 284 s).
+
+**SD — the stand-down at things by structure** (the operator: "go ahead with the stand-down lever for things at a wall").
+Where D1c's detours were aimed (truth labels): 36 % at a target position with no thing within 0.2 m, 28 % at a thing in open
+floor, 16 % at a thing by structure; at the things in open floor the nearer return lies a median 0.58 m in front of the thing
+(a real obstacle), at the things by structure 0.26 m (the structure itself). `--detour-stand-down`: with tall structure within
+the cloud's `target_iso_radius` (0.35 m, the static yield's reach) of the seek target and the nearer return within that of it,
+the gate erases the return as before G1. Byte-identical off (E4, P2, D1c seed 16). `log/ten/psd` (D1c + SD, n = 24; 25.3
+detours a run, 436 stood-down ticks):
+
+| vs placebo, paired | traps | open % | boring | interesting | stops at things | skills | walls / min (mean) | escapes |
+|---|---|---|---|---|---|---|---|---|
+| D1c | −1.7 | +12.3 | −4.4 | **−9.8** | −8.6 | −2.4 | 7.5 (−4.8) | −1.4 |
+| D1c + SD | −1.7 | +11.7 | −5.2 | **−5.0** | −3.1 | −2.8 | **15.0 (+2.7)** | −1.1 |
+
+Against D1c every places measure ties. The stand-down halves the engagement cost (interesting −9.8 → −5.0, stops at things
+−8.6 → −3.1), but the detours aimed at blocks by a chair did not fall (58 → 65) — the walking cloud (reset every metre) often
+holds no structure around the target yet — and the walls rose on three seeds (22: 84 a minute, 10: 58, 11: 39; the medians
+~9 and ~5), the contact almost all during a detour or escape (seed 22: 4 164 of 4 736 wall ticks under the held heading, bursts
+under 3 s): **the turn-in-reverse rubbing a wall it backs into**, a detour defect the stand-down's changed trajectories met on
+more seeds. **`PARTIAL`**. Next: the reverse leg — a detour turns in place (no backing) when the last one ended in wall
+contact, or backs only for its first half second; then SD and the kick fix stacked on it. Preset SD (seed 3 from 160 s).
+
+**RL — the reverse leg** (the operator: "go ahead with the reverse-leg fix, then stack them"). `--detour-back-s S`: the detour's
+turn backs only for its first S seconds, then turns in place (0 = off; byte-identical: E4, P2, D1c seed 16). Seed 22 under SD,
+600 s: walls 84.4 → 7.3 a minute, wall ticks 4 736 → 485, sits 3 → 3. Then two sweeps, n = 24 each: **RL** = D1c + SD + RL
+(`log/ten/prl`) and **the stack ST1** = RL + the kick fix (`log/ten/pstk`; every seed echoes all five flags).
+
+| vs placebo `pplc` (paired Δ, * beyond the dice) | D1c | + SD | + RL | **+ kick = ST1** |
+|---|---|---|---|---|
+| traps (a run; placebo 3.6) | 1.9 | 1.9 | 2.2 | **2.4 (−1.21 [−2.29, −0.12])** |
+| first-time, seek-led (2.0) | 1.1 | 1.0 | 1.4 | **1.2 (−0.83 [−1.40, −0.27])** |
+| open floor % (39.4) | 51.7 | 51.1 | 52.9 | **47.7 (+8.3 [+0.4, +16.1])** |
+| boring % (28.7) | −4.4* | −5.2* | −5.0* | **−4.2*** |
+| interesting % (48.9) | −9.8* | −5.0* | −5.0 | −5.9 |
+| walls / min (12.3) | 7.5* | 15.0 | 10.1 | 12.3 |
+| skills (13.4) | −2.4* | −2.8* | −2.2* | **−3.0*** |
+| skills touching % (19.1) | 16.6 | 16.6 | 12.7* | **18.9** |
+| falls (2.8) | 1.75 | 2.04 | 1.83 | 2.08 |
+| the train chased, s (31.4) | +11.8* | +18.2* | +15.3* | +6.1 |
+
+ST1's kicks swing 0.44–0.47 rad (84 kicks). **RL `WORKING` on its defect** (SD's wall outliers gone: walls 15.0 → 10.1).
+**ST1: `WORKING` on the navigation and on the kick** — fewer traps, more open floor, less boring time, the kicks connecting
+as often as the placebo's — **with a cost of ~3 skills a run** (the detour family costs 2.2–2.8 in every arm; the kick's head
+wait adds a little), interesting time −5.9 inside the dice, and the walls back to a tie (D1c alone was the only arm to cut
+them beyond the dice). Preset ST1 (seed 22 from 120 s: detours at 127, 187, 255–263 s, a kick at 220 s, no sits; ★ E4 sits
+four times on this seed). The operator's eye decides between ST1, D1c and K1 alone.
+
+**The resonance (the operator, 2026-10-10, watching ST1: "the detour is causing the robot to walk forward and back repeatedly
+when approaching objects. If we can damp that resonance or uncertainty then the kicks and interaction metrics should
+improve").** ST1's detours (`log/ten/pstk`, 536): 71 % come within 10 s of the last one; over their 0.5 s arm window the
+target's range does not close (median 0.000 m), so a progress gate would not thin them; 0–5 % are followed by a skill within
+10 s; 53 % fire with the target 1 m or more away. What the nearer return is (truth labels, the point at the return's range on
+the sector's bearing): a wall 288, a chair 134, the shelf or the table 46, a thing 63. With the D1c finding that 36–55 % of the
+detours' targets have no thing within 0.2 m of the remembered position, the loop reads: **the held target is a position the
+walk cannot reach — drifted behind a wall or a chair, or never a thing — and each walk out hands back to a seek loop that aims
+at the same wall again.** The uncertainty is the target belief's, and the oscillation is the belief failing to update.
+**DF** (`--detour-forget N`): the N-th detour of a chain (each within 10 s of the last one's walk out, the reopened ones
+included) makes the seek loop forget its static target — the progress forget's kind: forgotten, not refused (sweeps 33–35
+refused and lost a quarter of the targets); a real thing is seen again at the next look, at its corrected position. Byte-
+identical off (E4, P2, ST1 seed 16). Seed 22, ST1 + DF 2: detours 18 → 10, repeats 10 → 4, 3 forgets, skills 12 → 11.
+Sweep `log/ten/pdf` (ST1 + `--detour-forget 2`).
+
+**DF measured (`log/ten/pdf`, ST1 + `--detour-forget 2`, n = 24; a run: 18.8 detours (ST1 22.3), 7.4 forgets).** Repeats
+within 10 s 71 → 63 %; against ST1 every places measure ties (skills 8.2 vs 8.3, traps −0.2); against the placebo walls −3.3*,
+interesting −7.0*, skills −3.3*, the rest as ST1. **`NULL` on the resonance** — the forgotten target is re-taken within seconds
+and the approach repeats; it does not reach the interactions.
+
+**The resonance is not the detour's.** Measured on every arm, while the seek loop steers an approach within 1 m (no stop, no
+skill): the forward command reverses sign (|vx| > 0.05 either side) **~60 times a minute on ★ E4 (62) and the placebo (65)**,
+G1 60, and fewer under the detours (D1c 44, ST1 51, DF 50); the walk backs 17–20 % of that time. It is worst close in: within
+0.3 m of the target 95 reversals a minute and 28 % backing (★ E4). A trace (★ E4 seed 3, 264–267 s, range 0.35 → 0.16 m):
+the forward command at +0.40 with single ticks at −0.25, the yaw swinging +0.7 / −0.4 every few tenths of a second, and the
+right sector's proximity toggling 0.47 ↔ 0 as the target's bearing crosses the ahead/right boundary. Within 0.6 m: the seek
+gate's sector switches 66 times a minute, the yaw reverses 69 and the forward command 76 (★ E4; ST1 67 / 70 / 68), and the
+thing's own return lies in a sector the gate is NOT erasing on 11–13 % of the ticks. **The approach's dither is the seek gate
+choosing its sector by the bearing alone:** at a sector boundary the target's return falls on the ungated side, the walker's
+avoidance pushes off it (yaw, a tick of reverse), the bearing moves, the gate switches, and the same happens from the other
+side. It predates today's levers (it is ★ T1's and ★ P2's approach too); the operator saw it as the detour's because ST1 made
+approaches more frequent and closer.
+
+**RG — the gate knows the target by its range** (`--seek-gate-range M`): a return within M (0.15 m) of the target's range is
+the target in any of the three sectors and is erased there too, for the walker's sense slots and for the heading reflex's
+share (the share was G1's missing slice). Byte-identical off (E4, P2, ST1 seed 16). Seed 3 smoke (ST1 vs + RG, 300 s): time
+within 0.6 m of a target 0.5 → 0.9 min, skills 2 → 6; the reversal rates on one seed's short approaches are noise. Sweep
+`log/ten/prg` (ST1 + RG).
+
+**RG measured (`log/ten/prg`, ST1 + `--seek-gate-range 0.15`, n = 24, echoed on every seed).** The approach's forward/back
+reversals (while seek steers within 1 m): ★ E4 62.4, ST1 51.4, **RG 44.0 a minute**; paired per run **−7.6 [−14.9, −0.3]
+against ST1, −17.6 [−25.6, −9.6] against ★ E4**; the walk backs 15.9 % of the approach (ST1 17.6, ★ E4 18.9). Against the
+placebo: skills −1.6 [n.s.] (ST1 −3.0*), stops at things −3.3 (−6.4), outcomes observed −2.2 (−4.6), skills touching 19.5 %
+(18.9), the block touched in the first minute 0.79 (0.58), cells **+12.2*** (+1.0), first-time seek-led traps **−0.83*** (as
+ST1), traps −1.0, walls +1.0, falls −0.75, boring −2.6, interesting **−6.1*** (−5.9). The kicks: 100 (ST1 84), swing 0.43–0.47 rad.
+**`WORKING` on the dither** (beyond the dice against ST1), and it gives back about half of the detour family's cost in skills,
+stops at things and observed outcomes; the interesting-time cost stands. Preset ST2 (seed 20 from 60 s: 15 skills against
+ST1's 7 on this seed, kicks at 95, 126 and 239 s). The dither is not gone — 44 reversals a minute is still one every ~1.4 s
+close in — and its remaining sources are the next question (the forward command's single-tick reversals in the trace are the
+walker brain's own action, under the seek gate's proximity slots).
+
+**GH / GM — the gate's sector choice (the operator, 2026-10-10: "did you try hysteresis on the gate?").** Not until then. Two
+guarded options (`IntentAdapter::gate_slot_for`; byte-identical at the defaults: E4, P2, ST2 seed 16): **GH** `--seek-gate-hyst
+RAD` holds the erased sector until the target's bearing is past the boundary by RAD; **GM** `--seek-gate-mid RAD` moves the
+boundary — found while building GH: the gate maps the bearing to "ahead" within ±0.3 rad (±17°), but the sensor's ahead sector
+is ±5.6° (columns 3–4 of 8 across 45°; `--tof-body` bins the same widths), so a target 6–17° off the nose has always been
+gated "ahead" while its return lay in a side sector. Three arms, n = 24 each: A = ST1 + GH 0.1 (`pgha`), B = ST2 + GH 0.1
+(`pghb`), C = ST1 + GM 0.098 (`pgm`).
+
+Approach reversals a minute (seek steering within 1 m), fwd/back · yaw: ST1 51.6 · 78.6, ST2 (RG) 44.0 · 66.5, A 47.3 ·
+62.3, B 43.3 · 59.7, C 50.1 · 72.4. Paired: **A − ST1 yaw −16.3 [−25.6, −7.1]**, fwd/back −4.3 [−13.6, +5.0]; B − ST2 yaw −6.8
+[−16.6, +3.0], fwd/back −0.7; C − ST1 −6.2 / −1.6 (inside the dice).
+
+| vs placebo | ST1 | ST2 | A | **B** | C |
+|---|---|---|---|---|---|
+| interesting % | −5.9 | −6.1* | −4.0 | **−2.6** | −9.8* |
+| outcomes observed % | −4.6 | −2.2 | −6.3 | **+0.8** | −5.6 |
+| stops at things % | −6.4 | −3.3 | −8.2 | **−1.3** | −10.1 |
+| skills touching % (19.1) | 18.9 | 19.5 | 16.7 | **22.5** | 16.5 |
+| skills | −3.0* | −1.6 | −2.8* | −2.8* | −3.2* |
+| walls / min | −0.0 | +1.0 | −0.8 | −2.1 | +1.9 |
+| escapes | −0.5 | −0.9 | −1.6* | −1.7* | −0.7 |
+| falls | −0.7 | −0.8 | −0.9 | −1.1 | −0.5 |
+
+Traps and first-time seek-led traps tie across A, B, C and their bases. **GH `WORKING` on the yaw dither by itself (A), and B
+= ST2 + GH is the arm with the engagement cost nearly gone** (interesting, observed outcomes, stops at things at the
+placebo's level; inside the dice against ST2, a signal); the skill count stays ~2.8 a run under the placebo. **GM `NULL`, a
+REGRESSION on interesting time**: matching the sensor's narrow ahead sector makes the bearing cross a boundary more often — the
+mismatch was hiding a narrower sector's switching, and RG (range) is the better answer to it. Preset ST3 = B (seed 7 from
+200 s: kicks at 216 and 247 s, 19 skills, one sit).
+
+### 17.118 Telling what moves — the chase's false movers, measured (2026-10-11)
+
+**The operator, watching ST3 (seed 7, the first red-ball encounter):** "when the robot notices something moving, according to
+the arrow icon in the UI, it may suddenly sense the object has changed direction. The robot may also sense movement when it does
+not exist." The arrow is the seek loop's chase: its target and its velocity (`chase[2..5]`).
+
+**The case, 165–173 s.** The red ball never moved. The body, impeded at a thing, turned in place; the cloud took the ball as a
+mover CANDIDATE (the pale ring, 165.6 s: young voxels as it came into view). At 166.10 s M1 (§17.113, `static_motion_check`)
+promoted the HELD STATIC target instead — the green block 2.2 m away, its fixes drifting 0.12 m/s while the body turned — so
+the arrow appeared 2 m from the ring (the "change of direction"), and with no sighting after it, coasted on that drift for 7 s.
+
+**Measured over the promoted line (`mj_host/tools/phantom_chase.py`; a chase is PHANTOM when nothing within 0.4 m of its
+start moved over the second around it; scoring only):**
+
+| n = 24 each | ★ M2 `tc4` | A1 `tc7` | ★ L1 `sc1` | ★ P2 `p2a` | ★ E4 `se4` | placebo `pplc` | ST1 | ST2 | ST3 `pghb` |
+|---|---|---|---|---|---|---|---|---|---|
+| chases a run | 13.1 | 15.1 | 13.1 | 16.4 | 18.9 | 16.9 | 15.1 | 16.1 | 15.8 |
+| phantom % | 50 | 50 | 55 | 53 | 62 | 66 | 58 | 53 | 54 |
+
+- **Half the chases have always been phantoms** — since the chase began; not something the walking work introduced. E4 raised
+  it (62–66 %); ST3 is back at P2's level. (The train slowed to 0.12 m/s at ★ L1, three cm/s over the motion bar `chase_min_v`
+  0.1, which the 55 % reflects.)
+- **On the real train the belief is good:** the believed heading's median error 10–11° on every arm; > 90° wrong on 5 % of
+  updates (P2) to 7 % (ST3), 1.3–1.9 reversals a chase.
+- **Where the phantoms start:** a cloud candidate that "moved" (decision 5; 143 of 273 in ST3) — a static ball, block, wall
+  base or chair leg whose visible part changes as it comes into view (45 % at nothing movable); half of them with the body
+  STANDING (moved < 1 cm over the watch; the real ones 21 %); their apparent speed is HIGHER than the train's (0.20 against
+  0.14 m/s median) — nothing in the start's own evidence separates them (AUCs 0.30–0.69 for speed, scatter, sightings, range,
+  yaw and head travel). And M1's promotions (decision 7): 57 of 81 phantoms (70 %, as on every arm since M1).
+- **What the operator sees is mostly the COAST:** ST3's phantom seconds a run are 18 (real movers 45): 10 of them coasting —
+  the pursuit extrapolating a velocity that no sighting after the start ever confirmed (phantom coasts: median ONE velocity
+  update, 1.0 s of chase; real coasts: 26). The 293 s red ball (seed 7) is the other form: a static ball held as the mover by
+  the follow's any-age hold for 5.5 s, its velocity at 0.01–0.07 m/s with the heading flipping on every update.
+
+**Two levers, one at a time against ST3 (n = 24 each, with a placebo arm `pp3` = ST3 on the play dice re-rolled):**
+- **VC, the verified coast** (`BearingSeekLoop.coast_needs_confirm` 1, config `pvc`): a chase coasts only after a sighting
+  fulfilled its prediction since it began; one whose velocity no sighting confirmed ends as a thing that stopped (its last
+  sighting a remembered place — what a static thing newly in view is). Offline on ST1–ST3's logs: phantom coast seconds −65 %,
+  real −28 % (M1's train promotions are mostly unconfirmed coasts too). Unit tests `AChaseNoSightingConfirmedEndsAsAThingThatStopped`,
+  `AChaseWithAConfirmedPredictionStillCoasts`, `TheVerifiedCoastIsOffByDefault`; ST3 seed 7 tick-identical without it (240 s).
+- **VM, the motion sensor vouches** (re-use of §17.103 M7 in today's stack; config `pvm`): MotionField between the cloud and the
+  seek loop, a cloud sighting passing to the chase only with ray-traced motion evidence within 0.3 m in the last 0.6 s. M7 was
+  `PARTIAL` (precision up, a third less chasing) before the slow train and the any-age follow.
+
+**Measured (n = 24 each, ST3's host args; the placebo `pp3`, the stack `pvmc` = VM + VC).** The chase's own record
+(`phantom_chase.py`), per run:
+
+| | ST3 `pghb` | placebo `pp3` | VC `pvc` | **VM `pvm`** | VM + VC `pvmc` |
+|---|---|---|---|---|---|
+| chases | 14.8 | 15.1 | 15.0 | 12.4 | 11.0 |
+| phantoms (share) | 8.3 (54 %) | 7.8 (51 %) | 8.2 (52 %) | **4.5 (37 %)** | 4.2 (38 %) |
+| phantom s (of it coasting) | 18.3 (10.2) | 14.3 (8.2) | **9.1 (3.3)** | 12.6 (8.5) | **2.5 (0.4)** |
+| real movers s · the train s | 44.5 · 42.1 | 53.4 · 49.6 | 41.2 · 40.2 | **52.8 · 49.5** | 40.9 · 40.0 |
+
+Paired against ST3: **VC** phantom s −9.2 [−15.2, −3.2], its coasting −6.9; real −3.3 (inside). **VM** phantoms −3.8
+[−5.4, −2.3], share −16.9 [−28.7, −5.1]; real +8.4 (inside; the placebo +8.9). The stack: phantom s −15.8 [−22.0, −9.7] —
+but against VM alone the real movers −11.9 [−25.2, +1.3] and the train −9.5. The cloud-candidate phantoms (decision 5) fall
+143 → 46 under the vouch; M1's (decision 7) stay (62 of 101). The heading on the real train is the same on every arm (median
+10°, > 90° on 6–7 % of updates).
+
+| vs placebo `pp3` | ST3 | VC | **VM** | VM + VC |
+|---|---|---|---|---|
+| boring % (25.2) | +0.7 | +0.9 | **−3.8*** | −2.4 |
+| skills touching % (17.4) | +5.1 | +5.9 | **+10.3*** | +4.1 |
+| stops at things % (66.8) | +3.8 | +0.9 | **+8.3*** | +2.3 |
+| walls / min (10.9) | −0.8 | +0.2 | −1.6 | **+3.8** |
+| moving train s · contacts | −3.4 · −0.9 | −3.9 · −0.9 | −1.8 · +0.4 | −7.9 · −0.4 |
+| interesting · outcomes observed % | +2.7 · +0.6 | −0.2 · −0.2 | +3.4 · −1.6 | +2.3 · −3.7 |
+| falls · skills | −0.5 · −0.5 | +0.3 · 0.0 | +0.2 · 0.0 | 0.0 · +1.8 |
+
+Traps, returns and the first minute (the green block: a skill at it 17/24, touched 11–12/24) tie on every arm.
+
+- **VM `WORKING`** — the false movers' starts fall by 46 % with the real chase intact, and what the duck does with its time
+  improves beyond the dice: less boring, more of its skills touching their thing, more of its stops at things (the phantom
+  chases had been pulling it off things). Preset **MV** (seed 7 from 140 s: the train chased from 156 s with the arrow along
+  the track; the red ball passed at 168–173 s with no false mover — in ST3 the arrow jumped to the green block there and slid
+  for 7 s). Config `a1v2_st3_vouch.json`.
+- **VC `WORKING` on its mechanism, `NULL` on the rest** — it halves the time on phantoms (the coasts are gone) and nothing
+  else moves.
+- **VM + VC `REGRESSION`** — under the vouch the chase's sightings are sparser, so real chases miss their confirmation and end
+  as stopped things: walls 10.9 → 14.7 a minute (across the seeds, not outliers), the train −8 s, the vouch's engagement gains
+  gone. Re-use: a confirmation counted from the vouched AND the unvouched sightings near the prediction (the vouch gates the
+  start, not the evidence), or VC on a stack without the vouch.
+- **Still open:** M1's promotions are now the largest phantom source (62 of 101 under VM: static targets whose fixes drift
+  while the body turns, 70 % phantom on every arm since M1); the coast's velocity overshoots the slow train (0.20 against
+  0.12 m/s on seed 7, 156 s); > 90° heading errors on 7 % of real updates.
+
+**★ MV PROMOTED (the operator's eye, 2026-10-11): "MV is promoted."** The stack is now ★ E4 + ST3's navigation levers
+(§17.117: `--seek-gate-near 0.15 --detour 0.15 --detour-commit --detour-reopen 0.5 --detour-stand-down --detour-back-s 0.5
+--kick-head-home --seek-gate-range 0.15 --seek-gate-hyst 0.1`) on config `a1v2_st3_vouch.json` (ST3's brain + MotionField's
+vouch). Launcher first row. The open items above (M1's drifting fixes, the coast's overshoot, the real train's > 90° heading
+updates) are the chase's next levers.
+
+**The viewer's camera (same day, the operator: "the camera shakes with the walking motion ... right mouse drag does not work since
+the camera is tied to the robot's center").** The look-at point now eases toward the trunk (0.5 s of run time) and a right-drag
+pan is kept as an offset that rides with the duck; `O` recentres (`tools/duck_viewer/view.py` `CameraFollow`). The operator:
+"the camera works well."

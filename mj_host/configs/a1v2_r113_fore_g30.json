@@ -4,7 +4,6 @@
   "description": "R113 + the bird's neck + the centring prior at 3.0, PACE-GATED (state_prior_gated_by: the sensed forward speed's change at the stride's timescale against its own running RMS): the head centred at a steady pace, free to reach while the speed changes",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

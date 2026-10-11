@@ -178,6 +178,69 @@ public:
     // --seek-gate-contact R (§17.85): while seek holds the reference with its target within R metres, the ToF's too-close
     // share reads 0 to the walker's sense -- the thing walked onto fills the near field at the arrival.  0 = off.
     void set_seek_gate_contact(double r) { seek_gate_contact_m_ = r; }
+    // §17.117 G1 (--seek-gate-near M): the gate erases only what could be the target -- the sector reads free only when its
+    // nearest return is no nearer than the target's range less M; a return clearly nearer than the target is something on
+    // the approach, and the walker keeps seeing it (and the free-space gate keeps releasing the reference into it).  0 = off.
+    void set_seek_gate_near(double m) { seek_gate_near_m_ = m; }
+    // §17.117 SD (--detour-stand-down): a thing at the foot of a chair or a wall -- the cloud counts tall structure within its
+    // target_iso_radius of the seek target (the static yield's signal) -- has that structure in front of it: the nearer return
+    // within the radius of the target is the thing's own setting, not something on the approach, and the gate erases it as
+    // before G1 (no detour).  D1c turned away from these: in its detours at things by structure the return lay a median
+    // 0.26 m in front of the thing.  R <= 0 = off, byte-identical.
+    void set_detour_stand_down(double r) { stand_down_r_ = r; }
+    // §17.117 RG (--seek-gate-range M): the seek gate knows the target by its RANGE, not only by its bearing's sector: a
+    // return within M of the target's range is the target in any of the three sectors, and is erased there too -- for the
+    // walker's sense slots and for the heading reflex's share alike.  Within 0.6 m of a target the gated sector switches 66
+    // times a minute as the bearing crosses a sector boundary, the thing's own return lands in an ungated sector on 11-13 % of
+    // the ticks, and the yaw (69/min) and the forward command (76/min) reverse at the same rate: the forward-and-back of an
+    // approach.  0 = off, byte-identical.
+    void set_seek_gate_range(double m) { seek_gate_range_m_ = m; }
+    // §17.117 GH / GM: the seek gate's sector choice.  The gate maps the target's bearing to a sector at +-0.3 rad (17 deg),
+    // but the sensor's ahead sector is +-5.6 deg (columns 3-4 of 8 across 45 deg; --tof-body bins the same widths), so a target
+    // 6-17 deg off the nose is gated "ahead" while its return lies in a side sector.  GM (--seek-gate-mid RAD) sets the
+    // boundary (0.098 = the sensor's); GH (--seek-gate-hyst RAD) holds the sector chosen until the bearing is past the
+    // boundary by RAD (the operator, 2026-10-10: "did you try hysteresis on the gate?").  Defaults 0.3 / 0 = byte-identical.
+    void set_seek_gate_slots(double mid, double hyst) { gate_mid_ = mid; gate_hyst_ = hyst; }
+    int  gate_switches() const { return gate_switches_; }
+    int  seek_gate_ranged() const { return seek_gate_ranged_; }
+    int  stand_downs() const { return stand_downs_; }
+    int  seek_gate_kept() const { return seek_gate_kept_; }   // ticks a nearer return was left visible
+    // §17.117 D1, THE DETOUR (the operator, 2026-10-10: "the most effective escapes seem to be achieved by turn-in-reverse
+    // manoeuvres ... so the robot can turn in place to find an escape vector").  A SCAFFOLD, the escape's kind: with G1 on,
+    // when the seek loop's target sector has held a return nearer than the target for ARM ticks, the walk backs at BACK_VX
+    // while turning at the full yaw range toward the freer side sector (the target's side on a tie) -- the turn sweeps the
+    // sensor -- until the ahead sector and the sector the obstacle swings into read clear (nothing within 1 m) after at least
+    // 0.2 s, or MAX ticks; then the reference
+    // is held on the heading found for OUT ticks (the escape's hold: with --escape-authority the walk goes forward on it).
+    // escaping() covers the turn, so no stop or sit interrupts it under --escape-commit.  BACK_VX 0 = off, byte-identical.
+    void set_detour(double back_vx, int arm_ticks, int max_ticks, int out_ticks) {
+        detour_back_vx_ = back_vx; detour_arm_ticks_ = arm_ticks; detour_max_ticks_ = max_ticks; detour_out_ticks_ = out_ticks; }
+    // §17.117 D1b (--detour-commit): a detour that starts within 10 s of the last one's end is the same obstacle still in the
+    // way: it turns the same way as the last, and its walk out is twice the last's (at most 4 x OUT) -- one way around, held
+    // longer each time the obstacle persists; a detour after 10 s free starts fresh.  Off = byte-identical to D1.
+    void set_detour_commit(bool on) { detour_commit_ = on; }
+    // §17.117 D1c (--detour-reopen P): a detour's walk out ends when the way ahead closes -- the ahead sector's proximity
+    // above P (P 0.5 = a return within 0.5 m) -- and the turn starts again the same way (a repeat): the heading found is held
+    // only while it stays open (D1b's long walk outs walked into the next wall: traps led by the held heading 0.3 -> 1.9 a
+    // run).  0 = off, byte-identical to D1b.
+    void set_detour_reopen(double p) { detour_reopen_ = p; }
+    // §17.117 RL (--detour-back-s S): the turn backs only for its first S seconds, then turns in place -- the reverse leg
+    // backs into what the sensor cannot see behind (SD's wall outliers: seed 22, 4 164 of 4 736 wall ticks under the detour's
+    // held heading, bursts under 3 s).  0 = off (backs for the whole turn), byte-identical.
+    void set_detour_back_ticks(int n) { detour_back_ticks_ = n; }
+    // §17.117 DF (--detour-forget N, the operator, 2026-10-10: "the detour is causing the robot to walk forward and back
+    // repeatedly when approaching objects ... damp that resonance or uncertainty"): the N-th detour of a chain (each within
+    // 10 s of the last one's walk out, the reopened ones included) refutes the held target -- its approach keeps meeting
+    // something nearer than it, 71 % of ST1's detours repeat, and half are aimed at a remembered position with no thing at it
+    // -- so the seek loop forgets it (the progress forget's kind: forgotten, not refused; a real thing is seen again at the
+    // next look, where it is).  0 = off, byte-identical.
+    void set_detour_forget(int n) { detour_forget_n_ = n; }
+    int  detour_forgets() const { return detour_forgets_; }
+    int  detour_reopens() const { return detour_reopens_; }
+    int  detour_repeats() const { return detour_repeats_; }
+    int  detours() const { return detours_; }
+    int  detour_clear() const { return detour_clear_; }        // turns ended by the ahead sector reading clear
+    bool detour_started() const { return detour_started_; }    // this tick
     // THE HEADING REFLEX (2026-09-17, `--heading-reflex TAU DAMP GATE`).  The twist brain's yaw column
     // does not hold a heading (design doc §17.17: with a quiet reference the error sits at two radians and
     // the command saturates at the gait frequency), so every loop's bearing -- play's, seek's -- goes into a
@@ -262,6 +325,7 @@ public:
     int    mover_cands()   const;
     const ogma::MotionField* motion_field() const;   // the graph's MotionField, or nullptr (--log-motion)
     int    cloud_target_tall()  const;   // the cloud's tall voxels around the seek target (CloudMap target_tall)
+    double cloud_iso_radius()   const;   // CloudMap target_iso_radius (0.35 m default): the reach target_tall counts structure in
     int    cloud_target_small() const;   // ...and the small things there (the impeded look's wall-or-thing)
     double chase_gaze_ego() const;
     std::array<int, 4> chase_cand_fates() const;   // replaced, too fast, still, timed out
@@ -274,6 +338,7 @@ public:
     std::array<double, 3> chase_last_judgement() const;   // miss (m), implied speed (m/s), decision code    // the bearing the head should turn to (rad, + = right), NaN when nothing moving is in mind
     bool   chase_coasting() const;    // the target is the lost thing's prediction, coasting (chase_permanence_ticks)
     int    chases_reacquired() const;
+    int    coasts_refused() const;     // §17.118: chases ended as a stopped thing for want of a confirmed velocity; -1 = the lever off
     void   restore_brain_state(nlohmann::json const& s);
     bool   chase_lost_now() const;    // this tick a chase was dropped with the thing still moving...
     double chase_lost_ego() const;    // ...and where it was last predicted: bearing (rad, + = right) and range from the body
@@ -305,6 +370,14 @@ public:
     // channel live while the walker drives the legs -- the joint brain is not even ticked then
     // (main.cpp, the W-line) -- so a stumble can only show up here.  -1 = no such module.
     double motor_tle() const;
+    // §17.114 S1: the traversal observation [the applied forward command, the sensed forward speed] (command units) on
+    // reality.proprio.traverse_in, published only once the host sets it; and the traversal EPM's TLE (-1 = none)
+    void   set_traverse_cmd(double vx, double vyaw = 0.0) { traverse_on_ = true; traverse_cmd_ = vx; traverse_yaw_ = vyaw; }
+    // §17.116 M1 (--place-stall): the walk's progress error [1 - progress / predicted progress, valid] on
+    // reality.proprio.progress, for the play loop's stuck place.  Never called = never published (byte-identical).
+    void   set_place_progress(double err, bool valid) { progress_on_ = true; progress_err_ = err; progress_valid_ = valid; }
+    double traverse_tle() const;
+    std::array<double, 4> traverse_token() const;   // [winner, novel, input cmd, input sensed]
     // The CloudMap module, if the graph declares one.  The host reads these for the JSONL and for
     // the replay dump; it never writes the cloud.
     bool   cloud_present()   const;
@@ -315,6 +388,15 @@ public:
     int    cloud_break()     const;
     int    cloud_place()     const;
     double cloud_newfrac()   const;
+    std::vector<double> look_now() const;
+    double look_gain() const;
+    void set_reflex_range_override(double r) { reflex_range_override_ = r; }   // §17.113 T1
+    void set_escape_authority(bool on, double vx = 0.0) { escape_authority_ = on; escape_vx_ = vx; }   // §17.114 E2 (E4: the forward floor while facing)
+    bool escaping() const { return ref_hold_left_ > 0 || detour_left_ > 0; }   // §17.114 E3: an escape holds the reference (§17.117 D1: or turns)
+    std::vector<double> look_commit_now() const;
+    std::vector<double> thing_belief_now() const;
+    std::vector<double> mover_pos_now() const;
+    std::vector<double> ambush_now() const;        // §17.113 A1: the stalk loop's [have, x, y, need, waiting]; empty if absent     // §17.113 A0: [x/2, y/2, the motion map's winner, its nodes] on a fresh confirmed mover sighting; empty otherwise  // §17.113: the ThingBelief token, if the graph has one; empty otherwise   // [commit, look gain] when the look publishes a commitment; empty otherwise               // the arbiter's gain for the look (arbiter.gain.look); 0 when absent   // the look loop's value token, if the graph has one (§17.112); empty otherwise
     double cloud_revisit()   const;
     double cloud_revisit_dist() const;
     int    cloud_cached()    const;
@@ -358,6 +440,7 @@ public:
     double thing_range() const { return thing_rng_; }
     // the play loop's bearing this tick and its state (climbing / wandering / next node), for the record
     std::array<float, 2> play_bearing() const { return play_bearing_; }
+    nlohmann::json seek_state() const;   // §17.116 S1: the seek loop's diag (its approach cost)
     nlohmann::json play_state() const;
     uint64_t ticks() const { return tick_id_; }
 
@@ -366,8 +449,11 @@ private:
     std::recursive_mutex instance_mtx_;
     std::unique_ptr<InspectorSurface> inspector_;
     uint64_t tick_id_ = 0;
+    mutable uint64_t mover_pos_seen_ = ~uint64_t{0};   // §17.113 A0
     std::array<double, 3> last_twist_{};
     std::array<float, 3> last_sensed_{};
+    bool progress_on_ = false, progress_valid_ = false; double progress_err_ = 0.0;   // §17.116 M1
+    bool traverse_on_ = false; double traverse_cmd_ = 0.0, traverse_yaw_ = 0.0, trv_cmd_ = 0.0, trv_yaw_ = 0.0, trv_sen_ = 0.0;   // §17.114 S1
     std::map<std::string, double> frozen_rates_;
     bool frozen_ = false;
     std::array<double, 3> override_{};
@@ -390,6 +476,8 @@ private:
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
     double yaw_range_ = kTwistRangeVyaw;
+    bool escape_authority_ = false; double escape_vx_ = 0.0;   // §17.114 E2: while an escape holds the reference, the reflex owns the yaw (no proximity mix, range 1.5) and the walk does not back
+    double reflex_range_override_ = 0.0;   // §17.113 T1: the heading reflex's clamp while a mover is chased (0 = yaw_range_)
     bool head_sense_ = false; std::array<double, 3> head_g_{-1.0, 0.0, 0.0};
     bool range_sense_ = false;
     bool mover_sense_ = false;
@@ -397,6 +485,18 @@ private:
     bool map_bake_honest_ = false;
     double translate_frac_ = 0.0, fore_target_ = 0.0, head_fore_ = 0.0; bool fore_sense_ = false;
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
+    double seek_gate_near_m_ = 0.0; int seek_gate_kept_ = 0;   // §17.117 G1
+    double stand_down_r_ = 0.0; int stand_downs_ = 0;           // §17.117 SD
+    double seek_gate_range_m_ = 0.0; int seek_gate_ranged_ = 0;  // §17.117 RG
+    double gate_mid_ = 0.3, gate_hyst_ = 0.0; int gate_slot_ = -1, gate_switches_ = 0;   // §17.117 GM / GH
+    int gate_slot_for(double ego);
+    bool seek_nearer_now_ = false;                              // G1's condition this tick
+    double detour_back_vx_ = 0.0; int detour_arm_ticks_ = 25, detour_max_ticks_ = 150, detour_out_ticks_ = 75;   // §17.117 D1
+    int detour_back_ticks_ = 0;   // §17.117 RL
+    int detour_forget_n_ = 0, detour_chain_ = 0, detour_forgets_ = 0;   // §17.117 DF
+    double detour_reopen_ = 0.0; int detour_reopens_ = 0; bool detour_walking_ = false;   // §17.117 D1c
+    bool detour_commit_ = false; int detour_out_now_ = 0, detour_last_end_ = -1000000, detour_repeats_ = 0;   // §17.117 D1b
+    int detour_arm_ = 0, detour_left_ = 0, detour_age_ = 0, detours_ = 0, detour_clear_ = 0; double detour_dir_ = 0.0; bool detour_started_ = false;
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double ref_hold_ = 0.0; int ref_hold_left_ = 0;

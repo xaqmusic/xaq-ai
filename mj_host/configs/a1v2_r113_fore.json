@@ -4,7 +4,6 @@
   "description": "R113 + the bird's neck: the walker's fourth motor slides the head fore-aft with the view unchanged (host --intent-head-translate F --intent-fore-sense), the head brain keeps the tilt; no centring prior",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

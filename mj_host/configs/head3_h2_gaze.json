@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/3 gaze \u00b7 restored from H1/3: prior on roll, pitch -> 0 AND head yaw rate -> 0 (hold gaze), slow prior, model learning",
-  "description": "Three motors \u2014 head_pitch, head_yaw, head_roll \u2014 neck at zero. Load rows start at 9: roll 9, pitch 10, down 11, head w_x 12, w_y 13, w_z 14, trunk g 15,16, trunk w 17,18,19. Yaw is the gaze axis (2026-09-10: it carries the largest share of the camera's motion, 91 deg/s RMS on the walker's head). Y1: babble 0, state_prior on load slots 9,10 (roll, pitch) and 14 (head w_z, 0.3 rad/s to unit) -> 0, gain 1, lr 0.02; model_lr 0.02, state_model_lr 0.05. The identity start on the yaw position holds the joint where the rate prior leaves it; a sustained turn winds it toward its \u00b11.4 rad rail \u2014 the number to read.",
-  "launcher_rank": 0
+  "description": "Three motors \u2014 head_pitch, head_yaw, head_roll \u2014 neck at zero. Load rows start at 9: roll 9, pitch 10, down 11, head w_x 12, w_y 13, w_z 14, trunk g 15,16, trunk w 17,18,19. Yaw is the gaze axis (2026-09-10: it carries the largest share of the camera's motion, 91 deg/s RMS on the walker's head). Y1: babble 0, state_prior on load slots 9,10 (roll, pitch) and 14 (head w_z, 0.3 rad/s to unit) -> 0, gain 1, lr 0.02; model_lr 0.02, state_model_lr 0.05. The identity start on the yaw position holds the joint where the rate prior leaves it; a sustained turn winds it toward its \u00b11.4 rad rail \u2014 the number to read."
  },
  "description": "H2/3 gaze \u00b7 restored from H1/3: prior on roll, pitch -> 0 AND head yaw rate -> 0 (hold gaze), slow prior, model learning",
  "modules": [

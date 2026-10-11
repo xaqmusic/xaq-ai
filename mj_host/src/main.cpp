@@ -1310,6 +1310,23 @@ bool g_tof_free_rays = false;
 // never fires: all 41 stops of 40 s or more on the T1 sweep held a walking cloud 99 % of the time and ran to the cap.  The
 // body knows it stopped (it commanded the stop: efference, not an oracle).  Off = byte-identical.
 bool g_stop_is_still = false;
+bool g_imp_not_moving = false;
+bool g_stop_head_hold = false;
+double g_escape_vx = 0.0;   // --escape-vx V (§17.114 E4): with --escape-authority, the escape walks forward at least V x cos(heading error)
+bool g_escape_authority = false, g_escape_commit = false;   // --escape-commit (§17.114 E3): no stop or sit starts while an escape holds the reference
+   // --escape-authority (§17.114 E2)
+bool g_place_stall = false;   // --place-stall (§17.116 M1): publish the walk's progress error on reality.proprio.progress (needs --sit-on-stall)
+bool g_sit_progress = false, g_sit_settle = false, g_sit_escape = false;   // --sit-then-escape (§17.114 E1): the sit ends in a look stop and the stuck escape (a turn-about when nothing ahead is free)   // --sit-settle (§17.114 S2): stillness before the sit, and habituation
+   // --sit-on-stall F [HOLD_S]: the progress form (S1b)
+double g_sit_k = 0.0, g_sit_hold_s = 3.0, g_sit_rise_s = 1.0; double g_sit_need_s = 1.0;   // --sit-on-surprise K [HOLD_S] (§17.114 S1)
+bool g_stop_skill_settle = false;   // --stop-skill-settle (§17.114 P2): under the walker hold, a kick or peck waits for stillness (the settle's test, at most its timeout); the look does not
+bool g_kick_head_home = false, g_kick_homing_now = false;   // --kick-head-home (2026-10-10): a kick at a walker-held stop waits for the head at its home pose
+bool g_stop_walker_hold = false;   // --stop-walker-hold (§17.114 P1): the walking policy holds the stop's stance from its first tick (no settle, no standing brain)
+double g_saccade_speed = 0.0, g_fix_min_s = 0.2, g_fix_max_s = 0.8;   // --stop-saccade SPEED [FIX_MIN [FIX_MAX]] (§17.114 L1)
+bool g_gaze_mover_memory = false; int g_gmm_now = 0;   // --gaze-mover-memory (§17.114 G1): the gaze sense wants the mover the brain holds (incl. a lost one in memory) on the walk
+double g_chase_yaw_range = 0.0;   // --chase-yaw-range R (§17.113 T1): the heading reflex's yaw clamp while a mover is chased (0 = the walker's range)
+double g_neck_burst_s = 0.0, g_neck_burst_gap_s = 4.0;   // --neck-burst SECS [GAP] (§17.113 N1): in a chase, walking, the mover ahead, the slide at its forward limit for SECS, at most every GAP s
+bool g_dash = false; double g_dash_lean = 0.0, g_dash_release = 0.0;   // --dash [SIN [DEG]]: DEG the lean (deg) a dash is released at (0 = the stop's hand-off lean)   // --dash [SIN]: the lean target's sine (0 = 1.5 x the hand-off lean)   // --dash (§17.113 D1): a chase confirmed at a stand leans the standing brain toward the mover; the lean hand-off releases a run   // --stop-head-hold (§17.113 H2): at the stand the head's pitch, roll and neck held where the walk left them   // --impeded-not-chasing (§17.113 M2): the impeded look does not judge a chase -- a mover not closing is the chase's business
 // --freeze-walker (2026-10-03): the walker's learning off for the whole run (the learned chase's practice)
 bool g_freeze_walker = false;
 // --log-motion (2026-10-02, the chase push): on every tick a new ToF cast reached the graph's MotionField, the record gains
@@ -1408,13 +1425,18 @@ bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the refer
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
 double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
+double g_detour_vx = 0.0, g_detour_max_s = 3.0, g_detour_out_s = 1.5; double g_seek_gate_range = 0.0;
+double g_seek_gate_mid = 0.3, g_seek_gate_hyst = 0.0;   // --seek-gate-mid RAD, --seek-gate-hyst RAD (§17.117 GM / GH)   // --seek-gate-range M (§17.117 RG)
+bool g_detour_stand_down = false; double g_detour_back_s = 0.0; int g_detour_forget = 0;   // --detour-forget N (§17.117 DF)   // --detour-back-s S (§17.117 RL)   // --detour-stand-down (§17.117 SD)
+bool g_detour_commit = false; double g_detour_reopen = 0.0;   // --detour-reopen P (§17.117 D1c)   // --detour-commit (§17.117 D1b)   // --detour BACK_VX [MAX_S [OUT_S]] (§17.117 D1)
+double g_seek_gate_near = 0.0;      // --seek-gate-near M (§17.117 G1): the gate erases only returns no nearer than the target less M
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
 bool g_head_gaze_sense = false; double g_head_stop_slew = 0.0;   // --head-stop-slew RATE: at a stop the yaw slews home until the look takes it; on release it slews back   // --head-gaze-sense: the gaze error in the head brain's 12th sense slot
 double g_yaw_range = 0.0; bool g_yaw_lin = false; bool g_range_sense = false; bool g_mover_sense = false; double g_yaw_lin_below = 0.0;   // --yaw-linearize-below VX: the calibration only while |vx cmd| < VX (the in-place deadband)   // --intent-range-sense   // --yaw-linearize: the walker's yaw is a desired RATE, mapped through the body's measured response   // --twist-yaw-range R: the walker's yaw command range (0 = the default 1.0)
 double g_tof_body = -1.0;   // --tof-body MEM: the walker's ToF slots in the BODY frame from the last MEM s of returns (-1 = off)
 double g_seek_gaze = 0.0, g_seek_gaze_rate = 1.0, g_seek_gaze_max = 0.7;   // --seek-gaze K [RATE [MAX]]: on the walk the head yaw turns toward the seek loop's target
-double g_translate = 0.0, g_translate_rate = 1.0; bool g_fore_sense = false;   // --intent-head-translate F [RATE] (the bird's neck), --intent-fore-sense
+double g_translate = 0.0, g_translate_rate = 1.0; bool g_fore_sense = false; double g_fore_now = 0.0;   // g_fore_now: the slide's offset this tick, for the record   // --intent-head-translate F [RATE] (the bird's neck), --intent-fore-sense
 bool g_intent_head_sense = false;   // --intent-head-sense: the head's roll and pitch at the front of the walker's sense (the graph declares load_slots 18)
 double g_intent_head = 0.0, g_intent_head_tau = 0.0, g_head_rate = 0.0, g_head_home_s = 0.0; bool g_tell_head = false;   // --head-home S: for S s after a stop begins the head's targets are HOME (slewed), then the head brain's   // --tell-head: while the head brain owns the joints the policy's head command is where the head IS (offsets from home), not zero   // --head-slew R: the head's joint targets and command slew at most R rad/s across an ownership hand-off (0 = off; --head-rate is the older head-brain lever)   // --intent-head F [TAU]: the head command's low-pass time constant (s), 0 = none   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
 double g_rebabble_s = 0.0;   // --rebabble S: a restored brain reopens its babble window for S seconds (§17.85, the contact room)
@@ -1478,6 +1500,7 @@ constexpr SkillDef kSkills[] = {
     {"roulade",    "roulade.onnx",           1.0, 0.0, 0.0},
     {"peck",       "alpha_ground_pick.onnx", 2.8, 4.0, 0.0},
     {"push",       nullptr,                  1.2, 0.0, 0.25},
+    {"sit",        "alpha_sitstand.onnx",    4.0, 0.0, 0.0},    // §17.114 S1: Pollen's sit<->stand, the posture flag in vx
 };
 const SkillDef* skill_def(const std::string& n) {
     for (const auto& d : kSkills) if (n == d.name) return &d;
@@ -1527,6 +1550,7 @@ std::string g_load_brain_modules = "motor_epm_intent";   // --load-brain-modules
 // a mover, the forward command is raised to at least VX -- the walker's trained range reaches 0.4 m/s and the brain's own
 // pace is ~0.22.  A global lean (--body-pitch, --head-forward) bought falls; speed spent only on the chase.  0 = off.
 double g_chase_vx = 0.0;
+bool   g_chase_vx_facing = false;   // --chase-vx-facing (§17.113 C1): the chase's forward floor scaled by max(0, cos) of the mover's bearing
 // --chase-gaze GAIN (2026-09-29, the operator: "the robot should be able to turn its head while it's walking to try to
 // reacquire the moving target"): on the walk, the head yaw target is offset by GAIN x the bearing of the chased target,
 // or of the lost mover's extrapolated memory, clamped to +-0.7 rad; nothing moving in mind = the head brain's own.  0 = off.
@@ -1605,6 +1629,7 @@ struct StopPlan {
     // A 4 cm block at 1 m sits ~7 deg below level, so what finds it is a NARROW band held
     // there, not a wide sweep.  0 = centred on level, byte-identical.
     double gaze_down = 0.0;
+    bool   by_look = false;        // --stop-by-look (§17.112 L1): a stop starts while the arbiter's look holds the body and ends when it loses; the timer may be off (--stop-every 0)
     bool   on_arrive = false;      // --stop-on-arrive (things phase T4): a stop starts when the seek loop reaches its target
     bool   on_lost = false;        // --stop-on-lost (2026-09-29): a stop starts when a chase is LOST (the thing left the view still moving), its sweep centred on where the thing was last predicted -- a look, not a walk
     bool   on_chase = false;       // --stop-on-chase (2026-09-28): a stop ENDS when the seek loop confirms a chase -- the orienting reflex's substrate form: the thing moved while I watched, follow it
@@ -1662,10 +1687,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
     if (g_chase_gaze > 0.0) std::fprintf(stderr, "  chase gaze: on the walk the head yaw turns toward the chased target or the lost mover's memory (gain %.2f, +-0.7 rad)\n", g_chase_gaze);
-    if (g_chase_vx > 0.0) std::fprintf(stderr, "  chase vx: the forward command raised to at least %.2f m/s while a mover is chased or coasted after\n", g_chase_vx);
+    if (g_chase_vx > 0.0) std::fprintf(stderr, "  chase vx: the forward command raised to at least %.2f m/s while a mover is chased or coasted after%s\n", g_chase_vx,
+                                       g_chase_vx_facing ? ", scaled by max(0, cos) of its bearing (the nose must face it)" : "");
     if (g_head_forward != 0.0) std::fprintf(stderr, "  head forward: the neck and head pitch targets offset by %.2f rad (the head over the feet)\n", g_head_forward);
     if (g_body_pitch != 0.0) std::fprintf(stderr, "  body pitch: the walker's body_pitch command slot set to %.2f rad\n", g_body_pitch);
     if (g_stop.on_lost) std::fprintf(stderr, "  stop on lost: a stop starts when a chase is lost, its sweep centred on where the thing was last predicted (a look, not a walk)\n");
+    if (g_stop_head_hold) std::fprintf(stderr, "  stop head hold: at the stand the neck, head pitch and head roll are held where the walk left them; the yaw stays the head brain's\n");
+    if (g_imp_not_moving) std::fprintf(stderr, "  impeded not chasing: the impeded look does not run while a mover is chased or coasted after\n");
+    if (g_stop.by_look) std::fprintf(stderr, "  stop by look: a stop starts while the arbiter's look (the LookLoop's need) holds the body and ends when it loses (the cloud-end rule is not applied to these stops; the --stop-secs cap stays)\n");
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
     if (g_stuck_contact > 0.0) { brain.set_stuck_contact(g_stuck_contact); std::fprintf(stderr, "  stuck on contact: a forward push with the ToF's too-close share above %.2f for a second is a stall\n", g_stuck_contact); }
@@ -1675,6 +1704,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_head_gaze_sense) std::fprintf(stderr, "  head gaze sense: the head brain's 12th sense slot carries the gaze error (the seek target's bearing while seek steers, else straight ahead, minus the head's yaw)\n");
     if (g_fix_escape_sign) std::fprintf(stderr, "  fix: the escapes head for the freest sector, not its mirror image\n");
     if (g_fix_sweep_sign) std::fprintf(stderr, "  fix: a stop's sweep is centred on its target's side, not the mirror image\n");
+    if (g_place_stall) {
+        if (!g_sit_progress) { std::fprintf(stderr, "--place-stall needs --sit-on-stall (the progress prediction it publishes)\n"); return 2; }
+        std::fprintf(stderr, "  place stall: the walk's progress error on reality.proprio.progress (§17.116 M1)\n");
+    }
     if (g_map_bake_honest) { brain.set_map_bake_honest(true); std::fprintf(stderr, "  fix: the place map's walk freeze keeps its bake check (bake_gate)\n"); }
     if (g_look_around > 0.0) std::fprintf(stderr, "  look around: on the walk, with nothing else holding the gaze, the head's target is the bearing least recently seen within %.2f rad, if older than %.1f s\n", g_look_around, g_look_stale_s);
     if (g_freeze_walker) { brain.freeze_walker(); std::fprintf(stderr, "  walker frozen: its MotorEPM learning is off for the whole run\n"); }
@@ -1696,6 +1729,30 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_fore_sense) { brain.set_fore_sense(true); std::fprintf(stderr, "  intent fore sense: where the head sits fore-aft leads the walker's sense (one more load slot)\n"); }
     if (g_intent_head_sense) { brain.set_head_sense(true); std::fprintf(stderr, "  intent head sense: the head's roll and pitch (head-frame gravity y, z) lead the walker's sense (load_slots 18)\n"); }
     if (g_intent_head > 0.0) { brain.set_intent_head(g_intent_head, g_intent_head_tau); std::fprintf(stderr, "  intent head: on the walk the intent's four head actions are the walker's head command, %.2f of the trained ranges, low-passed at %.2f s; the head brain owns the head at stops\n", g_intent_head, g_intent_head_tau); }
+    if (g_detour_vx > 0.0) {
+        if (g_seek_gate_near <= 0.0) { std::fprintf(stderr, "--detour needs --seek-gate-near (its trigger is G1's condition)\n"); return 2; }
+        brain.set_detour(g_detour_vx, 25, int(g_detour_max_s * kBrainHz), int(g_detour_out_s * kBrainHz));
+        if (g_detour_reopen > 0.0) { brain.set_detour_reopen(g_detour_reopen); std::fprintf(stderr, "  detour reopen: the walk out ends when the ahead sector reads above %.2f, and the turn starts again (§17.117 D1c)\n", g_detour_reopen); }
+        if (g_detour_forget > 0) { brain.set_detour_forget(g_detour_forget); std::fprintf(stderr, "  detour forget: the %d-th detour of a chain (each within 10 s of the last) forgets the seek target (§17.117 DF)\n", g_detour_forget); }
+        if (g_detour_back_s > 0.0) { brain.set_detour_back_ticks(std::max(1, int(g_detour_back_s * kBrainHz))); std::fprintf(stderr, "  detour back: the turn backs for its first %.2f s, then turns in place (§17.117 RL)\n", g_detour_back_s); }
+        if (g_detour_stand_down) {
+            const double r = brain.cloud_iso_radius();   // the same reach the static yield counts structure in
+            brain.set_detour_stand_down(r);
+            std::fprintf(stderr, "  detour stand-down: structure within %.2f m of the target and the nearer return within that of it -> the gate erases it as before (§17.117 SD)\n", r);
+        }
+        if (g_detour_commit) { brain.set_detour_commit(true); std::fprintf(stderr, "  detour commit: a detour within 10 s of the last turns the same way and walks out twice as long (§17.117 D1b)\n"); }
+        std::fprintf(stderr, "  detour: a return nearer than the target for 0.5 s -> back at %.2f m/s turning to the freer side until ahead is clear (max %.1f s), then %.1f s on that heading (§17.117 D1)\n", g_detour_vx, g_detour_max_s, g_detour_out_s);
+    }
+    if (g_seek_gate_mid != 0.3 || g_seek_gate_hyst > 0.0) {
+        brain.set_seek_gate_slots(g_seek_gate_mid, g_seek_gate_hyst);
+        std::fprintf(stderr, "  seek gate, sectors: boundary +-%.3f rad, hysteresis %.3f rad (§17.117 GM / GH)\n", g_seek_gate_mid, g_seek_gate_hyst);
+    }
+    if (g_seek_gate_range > 0.0) {
+        if (!g_seek_gate) { std::fprintf(stderr, "--seek-gate-range needs --seek-gate\n"); return 2; }
+        brain.set_seek_gate_range(g_seek_gate_range);
+        std::fprintf(stderr, "  seek gate, range: a return within %.2f m of the target's range is the target in any sector (§17.117 RG)\n", g_seek_gate_range);
+    }
+    if (g_seek_gate_near > 0.0) { brain.set_seek_gate_near(g_seek_gate_near); std::fprintf(stderr, "  seek gate, near: a return nearer than the target by %.2f m stays visible to the walker (§17.117 G1)\n", g_seek_gate_near); }
     if (g_seek_gate_contact > 0.0) { brain.set_seek_gate_contact(g_seek_gate_contact); std::fprintf(stderr, "  seek gate, contact: the too-close share reads 0 to the walker while seek's target is within %.2f m\n", g_seek_gate_contact); }
     if (g_contact_forget) std::fprintf(stderr, "  contact forget: a stall fired by contact drops the seek loop's target (the position the surface refutes)\n");
     if (g_contact_release) { brain.set_contact_release(true); std::fprintf(stderr, "  contact release: the heading reflex and the free-space gate take the ToF's too-close share as proximity\n"); }
@@ -1887,7 +1944,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
 
     // The joint brain at the stops (W1).  Calibrated and restored exactly as --brain does it; its
     // learning is off until it drives.
-    const bool stop_on = g_stop.every_s > 0.0 && g_stop.secs > 0.0;
+    const bool stop_on = (g_stop.every_s > 0.0 || g_stop.by_look) && g_stop.secs > 0.0;
     std::unique_ptr<OgmaBrainAdapter> stander;
     const bool stop_walker_holds = (g_stop_brain == "walker");   // the control: the same stops, the walker stands them
     if (stop_on && stop_walker_holds) {
@@ -1925,6 +1982,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     }
     enum class StopPhase { None, Settle, Brain, Walker };
     StopPhase stop_phase = StopPhase::None;
+    bool head_hold_on = false; std::array<double, 3> head_hold{};   // §17.113 H2: the head held at the stand (neck, head pitch, head roll)
+    int dash_left = 0, dashes = 0, dash_released = 0, dash_timeouts = 0;   // §17.113 D1
+    int neck_burst_left = 0, neck_burst_since = 1 << 30, neck_bursts = 0;  // §17.113 N1
     const int stop_period = int(g_stop.every_s * kBrainHz), stop_ticks = int(g_stop.secs * kBrainHz);
     const int stop_from = int(g_stop.from_s * kBrainHz), stop_settle_ticks = std::max(1, int(g_stop.settle_s * kBrainHz));
     int stop_left = 0, stop_settle_left = 0, stop_confirm = 0;
@@ -1994,6 +2054,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     double spin_heading = 0.0, spin_prev_yaw = 0.0; bool spin_have_yaw = false; int spin_walk_run = 0, spins = 0, spin_rolls = 0, spin_last_roll = -100000;
     std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
+    bool wh_ready = true; int wh_settle_left = 0;   // §17.114 P2
+    int kick_home_wait = 0, kick_home_waits = 0, kick_home_timeouts = 0;   // --kick-head-home
+    int sit_pre_left = 0; double sit_hab = 1.0;   // §17.114 S2
+    bool sit_escape_due = false, stop_is_sit = false; int sit_turnabouts = 0;   // §17.114 E1
+    double place_err = 0.0; bool place_valid = false;   // §17.116 M1 (--place-stall): the walk's progress error, for the play loop
+    double sit_rho_f = 0.75, sit_rho_b = 0.5; int sit_dir = 0, sit_dir_ticks = 0, sit_rise_extra = 0;   // §17.114 S1 progress form
+    double sit_applied_vx = 0.0, sit_applied_yaw = 0.0, sit_ema = -1.0, sit_tle = -1.0; int sit_over = 0, sit_walk_ticks = 0, sits = 0;   // §17.114 S1
+    int fix_ticks = -1, fix_n = 0; double fix_peak = 0.0, fix_len_sum = 0.0; std::deque<int> fix_vox;   // §17.114 L1: the fixation (-1 = in a saccade)
     if (sweep_on) std::fprintf(stderr, "  gaze SWEEP at stops: never holds; %.2f rad/s (a quarter while the view is novel) toward the least-looked-at of %d x %d gaze cells, yaw +-%.2f rad, pitch %+.3f..%+.3f\n",
                                g_stop.gaze_sweep, sweep_ny, sweep_np, g_stop.gaze_sweep_yaw, sweep_p_lo, sweep_p_hi);
     if (sweep_on && g_stop.gaze_sweep_slow != 0.25)
@@ -2007,6 +2075,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const int kCloudWin = int(2.0 * kBrainHz);
     std::vector<int> cg_vox; double cg_peak = 0.0; int cg_below = 0, stops_cloud_ended = 0;
     bool chase_prev = false; int stops_chase_ended = 0;
+    bool stop_is_byl = false; int stops_byl = 0, stops_byl_lost = 0;   // §17.112: stops the look started; of them ended by its loss
     bool stop_is_lost = false; int stops_lost = 0; double lost_ego = 0.0, lost_range = 0.0;
     if (g_map_view_cloud && !(cloud_on && brain.cloud_present()))
         throw std::runtime_error("--map-view cloud needs --cloud and a CloudMap in the graph");
@@ -2070,7 +2139,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 scan_stop(); if (looking) look_stop();
                 if (g_stop.map_on_stop) brain.set_map_learning(false);
                 if (stop_phase == StopPhase::Brain) end_stop_drive(false);
-                stop_phase = StopPhase::None; stop_left = 0; ++stop_rescued; stop_event = "stop:rescued";
+                stop_phase = StopPhase::None; stop_left = 0; ++stop_rescued; stop_event = "stop:rescued"; stop_is_byl = false; if (g_dash && stander) { stander->set_prior_target(-12, 0.0); dash_left = 0; }
             }
         } else if (recovery.handed_back_this_tick()) {
             if (down_rise_watch > 0) { ++down_rises; down_rise_watch = 0; }   // upright within the watch after the roll: the roll rose
@@ -2122,7 +2191,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const double fore = -0.5 * ((qf[5] - kHomePose[5]) + (qf[6] - kHomePose[6]));
             brain.feed_head_fore(fore / (std::max(g_translate, 0.05) * 1.10));
         }
+        if (g_chase_yaw_range > 0.0)   // §17.113 T1: the reflex may turn as hard as the policy can while a mover is chased
+            brain.set_reflex_range_override(chase_on && (brain.chase_active() || brain.chase_coasting()) ? g_chase_yaw_range : 0.0);
+        if (g_sit_k > 0.0) brain.set_traverse_cmd(sit_applied_vx, sit_applied_yaw);
+        if (g_place_stall) brain.set_place_progress(place_err, place_valid);   // §17.116 M1: last tick's progress error
+        if (g_escape_authority) brain.set_escape_authority(true, g_escape_vx);   // §17.114 S1: last tick's applied forward command
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
+        if (g_detour_vx > 0.0 && brain.detour_started() && !*stop_event) stop_event = "detour";   // §17.117 D1
         // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
         if (cloud_on) {
             const bool now_open = brain.cloud_open();
@@ -2139,8 +2214,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         }
         if (driver == Driver::Brain) command.twist = twist;
         if (g_body_pitch != 0.0 && driver == Driver::Brain) command.body_pitch = g_body_pitch;
+        const bool sit_hold_now = sit_pre_left > 0;   // §17.114 S2: the walker holds still before the sit (applied after the chase floor below)
         if (g_chase_vx > 0.0 && driver == Driver::Brain && chase_on && (brain.chase_active() || brain.chase_coasting()) && stop_phase == StopPhase::None)
-            command.twist[0] = std::max(command.twist[0], g_chase_vx);     // the pursuit at speed
+            command.twist[0] = std::max(command.twist[0], g_chase_vx_facing
+                ? g_chase_vx * std::max(0.0, std::cos(brain.seek_ego()))   // §17.113 C1: the floor only as the nose faces the mover
+                : g_chase_vx);                                              // the pursuit at speed
+        if (sit_hold_now) command.twist = {0.0, 0.0, 0.0};
         if (g_yaw_lin && driver == Driver::Brain) command.twist[2] = yaw_calibrated(command.twist[2], command.twist[0]);   // the yaw motor's calibration
         else if (g_yaw_lin_below > 0.0 && driver == Driver::Brain && std::fabs(command.twist[0]) < g_yaw_lin_below)
             command.twist[2] = yaw_calibrated(command.twist[2], command.twist[0]);   // only the in-place deadband: the walk's own yaw untouched
@@ -2174,12 +2253,70 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 skill_from_step = true; if (skill_start(nxt)) stop_event = "skill:reach"; skill_from_step = false;
             }
             if (skill_active && skill_left == 0) {
+                if (g_sit_escape && skill_name == "sit") sit_escape_due = true;   // §17.114 E1: the sit ends in a look, then the way out
                 skill_active = false;
                 if (down_skill_running) { down_skill_running = false; down_rise_watch = int(2.0 * kBrainHz); }
                 if (skill_then_stop) { skill_then_stop = false; skill_arrive_done = true; }
                 // the unwind and the look follow a skill from standing -- and, with --skill-now, one fired from the walk
                 // (R82: without it the arrival stop never came, and 2 of 39 answers were seen)
-                if (g_skill_unwind_s > 0.0 && (stop_phase == StopPhase::Brain || (g_skill_now && stop_phase == StopPhase::None && skill_name != "approach"))) { stop_left = 0; unwind_left = int(g_skill_unwind_s * kBrainHz); unwind_then_stop = true; ++unwinds; }
+                if (g_skill_unwind_s > 0.0 && (stop_phase == StopPhase::Brain || (g_stop_walker_hold && stop_phase == StopPhase::Walker) || (g_skill_now && stop_phase == StopPhase::None && skill_name != "approach"))) { stop_left = 0; unwind_left = int(g_skill_unwind_s * kBrainHz); unwind_then_stop = true; ++unwinds; }
+            }
+            if (sit_pre_left > 0) {
+                // §17.114 S2: the walker holds still (zero command) until the body is still, at most 2 s; then the sit
+                --sit_pre_left;
+                const bool still_now = g[2] < -0.999 && std::max({std::fabs(w[0]), std::fabs(w[1]), std::fabs(w[2])}) < 0.15;
+                if (stop_phase != StopPhase::None || skill_active || driver != Driver::Brain) sit_pre_left = 0;   // something else took the body
+                else if ((still_now || sit_pre_left == 0) && skill_start("sit")) {
+                    sit_pre_left = 0; skill_left = std::max(1, int((g_sit_hold_s + g_sit_rise_s) * kBrainHz)); skill_total = skill_left;
+                    ++sits; stop_event = "skill:sit"; sit_rise_extra = 0; sit_hab *= 0.5;
+                }
+            }
+            if (g_sit_k > 0.0) {
+                // §17.114 S1, THE SIT ON SURPRISE: on the walk, the traversal EPM's TLE (its error on [applied forward command,
+                // sensed forward speed]) against its own running mean; held above K x the mean for SIT_NEED, the duck sits
+                // (Pollen's sit<->stand: HOLD seconds seated, then the rise) and walks on
+                sit_tle = brain.traverse_tle();
+                place_valid = false;
+                const bool walking = stop_phase == StopPhase::None && !skill_active && driver == Driver::Brain;   // the back-offs included: they back into things
+                if (walking && sit_tle >= 0.0 && g_sit_progress) {
+                    // the PROGRESS form: the walk's own prediction of its progress -- the sensed forward speed it usually gets
+                    // from its command (one ratio per direction, learned online) -- against what it gets; once the command has
+                    // held its direction for 1 s (a start-up is slow by nature), progress under F of the prediction counts
+                    const auto tk = brain.traverse_token();
+                    const double c = tk[2], sn = tk[3];
+                    const int sg = c > 0.15 ? 1 : (c < -0.15 ? -1 : 0);
+                    sit_dir_ticks = (sg != 0 && sg == sit_dir) ? sit_dir_ticks + 1 : 0; sit_dir = sg;
+                    double frac = 1.0;
+                    if (sg != 0) {
+                        double& rho = sg > 0 ? sit_rho_f : sit_rho_b;
+                        const double q = std::clamp(sn / c, -0.5, 1.5);
+                        if (sit_dir_ticks >= 50) {
+                            frac = q / std::max(0.05, rho); rho += (q - rho) / 3000.0;
+                            place_valid = true; place_err = std::clamp(1.0 - frac, 0.0, 1.0);
+                        }
+                    }
+                    ++sit_walk_ticks;
+                    sit_ema = frac;
+                    sit_over = (sit_walk_ticks > 1500 && sit_dir_ticks >= 50 && frac < g_sit_k) ? sit_over + 1 : 0;
+                    sit_hab = std::min(1.0, sit_hab + 1.0 / 3000.0);   // S2: habituation recovers over ~60 s
+                    if (sit_pre_left == 0 && !(g_escape_commit && brain.escaping()) && sit_over >= int(g_sit_need_s * kBrainHz) && (!g_sit_settle || frac < g_sit_k * sit_hab)) {
+                        sit_over = 0; unwind_left = 0; imp_back_left = 0;   // the sit answers the surprise: a pending back-off and its stop are dropped
+                        if (g_sit_settle) { sit_pre_left = 2 * int(kBrainHz); stop_event = "sit:settle"; }
+                        else if (skill_start("sit")) {
+                            skill_left = std::max(1, int((g_sit_hold_s + g_sit_rise_s) * kBrainHz)); skill_total = skill_left;
+                            ++sits; stop_event = "skill:sit"; sit_rise_extra = 0;
+                        }
+                    }
+                } else if (walking && sit_tle >= 0.0) {
+                    ++sit_walk_ticks;
+                    sit_ema = sit_ema < 0.0 ? sit_tle : sit_ema + (sit_tle - sit_ema) / 500.0;   // ~10 s of walking
+                    sit_over = (sit_walk_ticks > 1500 && sit_tle > g_sit_k * sit_ema) ? sit_over + 1 : 0;   // after 30 s of walking
+                    if (sit_over >= int(g_sit_need_s * kBrainHz) && skill_start("sit")) {
+                        skill_left = std::max(1, int((g_sit_hold_s + g_sit_rise_s) * kBrainHz)); skill_total = skill_left;
+                        sit_over = 0; ++sits; stop_event = "skill:sit"; sit_rise_extra = 0;
+                        unwind_left = 0; imp_back_left = 0;   // the sit answers the surprise: a pending back-off and its stop are dropped
+                    }
+                } else sit_over = 0;
             }
             if (!skill_active && stop_phase == StopPhase::None && t >= stop_from) {
                 const int req = brain.skill_request();      // a module's request through the bus, by name (id)
@@ -2218,7 +2355,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (g_imp_s > 0.0) {
                 // IMPEDED: seek steers and its range has not closed by 5 cm for g_imp_s
                 const bool driving = stop_phase == StopPhase::None && !skill_active && unwind_left == 0 && imp_back_left == 0
-                                     && orient == Orient::None && t >= stop_from && brain.last_steer() == 3 && brain.seek_value() > 0.0;
+                                     && orient == Orient::None && t >= stop_from && brain.last_steer() == 3 && brain.seek_value() > 0.0
+                                     && !(g_imp_not_moving && (brain.chase_active() || brain.chase_coasting()));   // §17.113 M2
                 if (driving) {
                     const double r = brain.seek_range();
                     if (imp_prev < 0.0 || r > imp_prev + 0.2) { imp_best = r; imp_timer = 0; }        // a new target
@@ -2238,16 +2376,37 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const bool chase_edge = chase_on && brain.chase_active() && !chase_prev;
             chase_prev = chase_on && brain.chase_active();
             if (g_stop.on_chase && chase_edge && stop_phase != StopPhase::None && stop_left > 0) {
-                stop_left = 0; ++stops_chase_ended; stop_event = "stop:chase";
+                if (g_dash && stop_phase == StopPhase::Brain && stander && dash_left == 0 && std::cos(brain.seek_ego()) > 0.0) {
+                    // §17.113 D1, THE DASH: the standing brain leans the body toward the mover (its pitch prior's target past
+                    // the hand-off lean); the lean hand-off releases it and the walker catches the fall running
+                    const double lean = g_dash_lean > 0.0 ? g_dash_lean : std::sin(1.5 * g_stop.handoff_lean * M_PI / 180.0);
+                    if (stander->set_prior_target(-12, lean) > 0) { dash_left = int(1.5 * kBrainHz); ++dashes; stop_event = "dash:lean"; }
+                    else { stop_left = 0; ++stops_chase_ended; stop_event = "stop:chase"; }
+                } else { stop_left = 0; ++stops_chase_ended; stop_event = "stop:chase"; }
             }
-            if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now || lost_now)
+            if (dash_left > 0 && stop_phase != StopPhase::None) {
+                if (--dash_left == 0) { stop_left = 0; ++stops_chase_ended; ++dash_timeouts; stop_event = "stop:chase"; }   // no release: end as a chase does
+            }
+            // §17.112 L1: the look holds the body -- a stop starts (and lasts while it holds)
+            const bool byl_now = g_stop.by_look && stop_phase == StopPhase::None && t >= stop_from && !skill_active && unwind_left == 0
+                                 && imp_back_left == 0 && brain.look_gain() > 0.5;
+            if (g_stop.by_look && stop_is_byl && stop_phase != StopPhase::None && stop_left > 0 && brain.look_gain() <= 0.5) {
+                stop_left = 0; ++stops_byl_lost;                     // the look lost the body: the stop ends
+            }
+            const bool esc_commit = g_escape_commit && brain.escaping();   // §17.114 E3: the escape is walked out before anything else stops the body
+            const bool sitlook_now = sit_escape_due && stop_phase == StopPhase::None && !skill_active;   // §17.114 E1
+            if (sitlook_now) sit_escape_due = false;
+            if (stop_phase == StopPhase::None && !esc_commit && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now || lost_now || byl_now || sitlook_now)
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
                 ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : (lost_now ? "stop:lost" : "stop:start")); stop_started_tick = t;
                 stop_is_arrive = arrive_now; stop_is_stuck = stuck_now && !arrive_now; stop_is_look = false; spin_walk_run = 0;
                 stop_is_lost = lost_now && !arrive_now && !stuck_now;
+                stop_is_byl = byl_now && !arrive_now && !stuck_now && !lost_now;
+                if (stop_is_byl) { ++stops_byl; stop_event = "stop:bylook"; }
                 if (arrive_now) ++stops_arrive;
                 if (stuck_now && !arrive_now) ++stops_stuck;
+                if (sitlook_now && !arrive_now && !stuck_now) { stop_is_stuck = true; stop_is_lost = false; stop_is_byl = false; stop_is_sit = true; stop_event = "stop:sitlook"; }
                 if (stop_is_lost) ++stops_lost;
                 brain.set_learning(false);                 // its command is not applied during the stop
                 if (stander) stander->on_reset();          // a fresh pairing after the walk
@@ -2260,14 +2419,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 if (stop_phase == StopPhase::Settle) {
                     --stop_settle_left;
                     if (stander) (void)stander->act(body); // observes, frozen: its attitude error is then fresh
-                    if (still || stop_settle_left == 0) {
+                    if (still || stop_settle_left == 0 || g_stop_walker_hold) {   // §17.114 P1: the walker holds from the first tick
                         double att = 0.0;
                         if (stander) for (double v : stander->attitude_error()) att = std::max(att, v);
                         if (scan_on) { scanning = true; scan_idx = 0; scan_left = scan_hold_ticks; }
                         if (look_on) { looking = true; look_idx = 0; look_held = 0; look_novel_seen = false; look_round_novel = false; scan_target = 0.0; }
                         if (gaze_on) { looking = true; look_held = 0; look_novel_seen = false; gaze_quiet_run = 0; gaze_yaw = 0.0; gaze_pitch = g_stop.gaze_down; scan_target = 0.0; }
                         if (sweep_on) {
-                            std::fill(sweep_count.begin(), sweep_count.end(), 0); sweep_have_target = false;
+                            std::fill(sweep_count.begin(), sweep_count.end(), 0); sweep_have_target = false; fix_ticks = -1;
                             if (g_stop.gaze_at_thing && stop_is_arrive) {
                                 const double centre = std::clamp(std::atan2(0.2, std::max(0.05, brain.seek_range()) + 0.15), 0.2, 0.55);
                                 sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp((g_fix_sweep_sign ? -1.0 : 1.0) * brain.seek_ego(), -0.5, 0.5);
@@ -2284,8 +2443,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         }
                         ticks_in_stop = 0; rolled_this_stop = false;
                         if (g_stop.map_on_stop) brain.set_map_learning(true);
-                        if (!stander) {
+                        if (!stander || g_stop_walker_hold) {
                             stop_phase = StopPhase::Walker; stop_event = "stop:walker";
+                            wh_ready = !g_stop_skill_settle; wh_settle_left = stop_settle_ticks;   // §17.114 P2: a skill waits for stillness
+                            if (g_stop_walker_hold && wh_ready && !skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); }
                         } else if (g_stop.att_gate <= 0.0 || att < g_stop.att_gate) {
                             stop_phase = StopPhase::Brain; ++stop_handbacks; stop_event = "stop:handback";
                             if (!skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); }
@@ -2301,7 +2462,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         const int req = brain.skill_request();
                         if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && skill_start(kSkills[req].name)) { stop_event = "skill:stand"; ++skills_requested; req_consumed = true; }
                     }
-                    double sig = lean, thresh = g_stop.handoff_lean;
+                    double sig = lean, thresh = (dash_left > 0 && g_dash_release > 0.0) ? g_dash_release : g_stop.handoff_lean;   // D1: a dash releases later
                     if (g_stop.handoff_att > 0.0) {
                         sig = 0.0; for (double v : stander->attitude_error()) sig = std::max(sig, v);
                         thresh = g_stop.handoff_att;
@@ -2311,6 +2472,38 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     if (stop_confirm >= g_stop.confirm_ticks) {
                         end_stop_drive(true);
                         stop_phase = StopPhase::Walker; ++stop_handoffs; stop_event = "stop:handoff";
+                        if (dash_left > 0) { stop_left = 0; dash_left = 0; ++dash_released; ++stops_chase_ended; stop_event = "dash:go"; }   // D1: released
+                    }
+                }
+                if (g_stop_walker_hold && stop_phase == StopPhase::Walker && !wh_ready && (still || --wh_settle_left <= 0)) wh_ready = true;
+                g_kick_homing_now = false;
+                if (g_kick_head_home && g_stop_walker_hold && stop_phase == StopPhase::Walker && wh_ready && !skill_active && unwind_left == 0 && !req_consumed) {
+                    // --kick-head-home (2026-10-10, the operator: "the kick ... is not firing"): Pollen's kick networks were trained
+                    // from the stand, head home; since ★ P2 a kick starts after the stillness wait with the head pitched down at the
+                    // thing (+0.91 rad against +0.33 at the stander's stop), and the network holds the leg still (swing 0.12-0.16 rad
+                    // against 0.47-0.49).  The kick waits with the head driven home until neck and head pitch are within 0.15 rad of
+                    // it (at most 1 s), then fires from the posture it knows.
+                    std::string want = skill_pending;
+                    if (want.empty()) {
+                        const int req = brain.skill_request();
+                        if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && std::string(kSkills[req].name).rfind("kick", 0) == 0) {
+                            want = kSkills[req].name; skill_pending = want; ++skills_requested; req_consumed = true; stop_event = "skill:request";
+                        }
+                    }
+                    if (want.rfind("kick", 0) == 0) {
+                        const auto jq = body.joint_positions();
+                        const bool home = std::fabs(jq[5] - kHomePose[5]) < 0.15 && std::fabs(jq[6] - kHomePose[6]) < 0.15;
+                        if (!home && kick_home_wait < int(kBrainHz)) { g_kick_homing_now = true; if (kick_home_wait++ == 0) ++kick_home_waits; }
+                        else { if (!home) ++kick_home_timeouts; kick_home_wait = 0; req_consumed = false; }
+                    }
+                }
+                if (g_stop_walker_hold && stop_phase == StopPhase::Walker && wh_ready && !skill_active && unwind_left == 0 && !req_consumed && !g_kick_homing_now) {
+                    // §17.114 P1: with the walker holding there is no hand-back to defer to -- a request (or one deferred from
+                    // the walk) starts at once, as it does from the stand
+                    if (!skill_pending.empty()) { if (skill_start(skill_pending)) stop_event = "skill:stand"; skill_pending.clear(); req_consumed = true; }
+                    else {
+                        const int req = brain.skill_request();
+                        if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && skill_start(kSkills[req].name)) { stop_event = "skill:stand"; ++skills_requested; req_consumed = true; }
                     }
                 }
                 if (!req_consumed && ((stop_phase != StopPhase::None && stop_phase != StopPhase::Brain) || (stop_phase == StopPhase::Brain && (skill_active || unwind_left > 0)))) {
@@ -2332,7 +2525,22 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     const int cy_i = std::clamp(int(std::floor((hc[2] - sweep_yc + g_stop.gaze_sweep_yaw) / sweep_wy)), 0, sweep_ny - 1);
                     const int cp_i = sweep_np == 1 ? 0 : std::clamp(int(std::floor((cp - sweep_p_lo) / sweep_wp)), 0, sweep_np - 1);
                     if (ticks_in_stop > 0) ++sweep_count[size_t(cp_i * sweep_ny + cy_i)];
-                    const bool arrived = std::fabs(hc[2] - sweep_ty) < 1e-3 && (g_stop.gaze_pitch_sd <= 0.0 || std::fabs(hc[1] - sweep_tp) < 1e-3);
+                    const bool arrived0 = std::fabs(hc[2] - sweep_ty) < 1e-3 && (g_stop.gaze_pitch_sd <= 0.0 || std::fabs(hc[1] - sweep_tp) < 1e-3);
+                    bool arrived = arrived0;
+                    if (g_saccade_speed > 0.0 && sweep_have_target && arrived0) {
+                        // §17.114 L1, SACCADE AND FIXATE: on arrival the gaze holds while this view still adds to the cloud --
+                        // the fixation ends when the view's growth (new voxels over the last 0.2 s) falls below half its own
+                        // peak, between FIX_MIN and FIX_MAX -- then the next cell is taken at the saccade's speed
+                        if (fix_ticks < 0) { fix_ticks = 0; fix_peak = 0.0; fix_vox.clear(); }
+                        ++fix_ticks;
+                        fix_vox.push_back(brain.cloud_open() ? brain.cloud_voxels() : 0);
+                        if (fix_vox.size() > 11) fix_vox.pop_front();
+                        const double grow = fix_vox.size() > 10 ? double(fix_vox.back() - fix_vox.front()) : 0.0;
+                        fix_peak = std::max(fix_peak, grow);
+                        const bool spent = fix_vox.size() > 10 && grow < 0.5 * fix_peak;
+                        arrived = fix_ticks >= int(g_fix_max_s * kBrainHz) || (fix_ticks >= int(g_fix_min_s * kBrainHz) && spent);
+                        if (arrived) { fix_len_sum += fix_ticks / kBrainHz; ++fix_n; fix_ticks = -1; }
+                    }
                     if (!sweep_have_target || arrived) {        // the next target: at random among the least-looked-at cells
                         const int least = *std::min_element(sweep_count.begin(), sweep_count.end());
                         std::vector<int> ties;
@@ -2359,7 +2567,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     }
                     if (look_held > 10 && view_novel) look_novel_seen = true;
                     const bool slow = look_novel_seen && view_novel && look_held < gaze_max_ticks;   // the dwell, as speed
-                    head->set_override_slew(slow ? g_stop.gaze_sweep_slow * g_stop.gaze_sweep : g_stop.gaze_sweep);
+                    head->set_override_slew(g_saccade_speed > 0.0 ? g_saccade_speed : (slow ? g_stop.gaze_sweep_slow * g_stop.gaze_sweep : g_stop.gaze_sweep));
                     if (look_held >= gaze_hold_ticks && !slow) {
                         if (look_novel_seen) { ++novel_holds; gaze_quiet_run = 0; } else ++gaze_quiet_run;
                         ++saccades; look_held = 0; look_novel_seen = false;
@@ -2482,7 +2690,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         }
                     }
                 }
-                if (cloud_end_on && stop_phase != StopPhase::None && stop_left > 0) {
+                if (cloud_end_on && stop_phase != StopPhase::None && stop_left > 0 && !stop_is_byl) {
                     // the growth judged is the STOP's cloud: a walking cloud (walk_cloud) still open at the stop's
                     // start is not it (R74: its file-and-reopen read as "stopped growing" and ended every stop at 1.4 s)
                     if (brain.cloud_open() && !brain.cloud_walking()) {
@@ -2509,6 +2717,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     const bool bored = (look_on || gaze_on) && (t - stop_started_tick) < stop_ticks - 1 && orient == Orient::None;
                     if (bored) ++stops_bored;
                     stop_phase = StopPhase::None; stop_event = orient != Orient::None ? "stop:orient" : bored ? "stop:bored" : "stop:end";
+                    stop_is_byl = false;
+                    if (g_dash && stander) { stander->set_prior_target(-12, 0.0); dash_left = 0; }   // D1: level again
                     if (stop_is_stuck && g_stuck_escape_s > 0.0) {
                         // the escape: the freest sector of the stop's cloud view (8 sectors across +-64 deg, 1 = nothing
                         // off the floor within 4 m; sector 0 on the right), ties to the one nearest straight ahead
@@ -2516,11 +2726,20 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (view.size() == 8) {
                             int best = -1; double bv = -1.0;
                             for (int k = 0; k < 8; ++k) { const double v = view[size_t(k)] - 0.01 * std::fabs(k - 3.5); if (v > bv) { bv = v; best = k; } }
-                            const double bearing = (g_fix_escape_sign ? -1.0 : 1.0) * (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;   // + = right, as the loops' bearings (the sector's azimuth is + = left: --fix-escape-sign)
-                            brain.set_ref_hold(bearing, int(g_stuck_escape_s * kBrainHz)); ++escapes; stop_event = "stop:escape";
+                            double bearing = (g_fix_escape_sign ? -1.0 : 1.0) * (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;   // + = right, as the loops' bearings (the sector's azimuth is + = left: --fix-escape-sign)
+                            if (stop_is_sit && bv < 0.3) {
+                                // §17.114 E1: nothing ahead is free within ~1.2 m (a corner, a wall faced): the way out is behind --
+                                // turn about toward the freer side of the view (sectors 0-3 on the right)
+                                double right = 0.0, left = 0.0;
+                                for (int k = 0; k < 4; ++k) { right += view[size_t(k)]; left += view[size_t(7 - k)]; }
+                                bearing = (right >= left ? 1.0 : -1.0) * 2.6 * (g_fix_escape_sign ? 1.0 : -1.0);
+                                ++sit_turnabouts; stop_event = "stop:turnabout";
+                            } else stop_event = "stop:escape";
+                            brain.set_ref_hold(bearing, int(g_stuck_escape_s * kBrainHz)); ++escapes;
                         }
                         stop_is_stuck = false;
                     }
+                    stop_is_sit = false;
                     if (imp_stop) {
                         // the impeded look's verdict: tall structure at the target and no small thing there = a wall
                         const bool wall = brain.cloud_target_tall() > 0 && brain.cloud_target_small() == 0;
@@ -2641,6 +2860,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 // the gaze error: where the walk is going (the seek target's body bearing while seek steers the reference;
                 // straight ahead otherwise), minus where the head points (its yaw joint from home), + = left
                 double want = gm_src > 0 ? gm_want : (brain.last_steer() == 3 ? -brain.seek_ego() : 0.0);
+                g_gmm_now = 0;
+                if (g_gaze_mover_memory && gm_src == 0 && stop_phase == StopPhase::None) {
+                    // §17.114 G1: on the walk the gaze wants the mover the brain holds -- chased, coasted after, or lost
+                    // within its memory (extrapolated) -- before the static target the walk is going to
+                    const double ge = brain.chase_gaze_ego();                    // + = right; the head yaw is + left
+                    if (std::isfinite(ge)) { want = std::clamp(-ge, -1.2, 1.2); g_gmm_now = 1; }
+                }
                 if (g_look_around > 0.0) {
                     // the sectors the cone covers now are fresh; the stalest within reach is the target when nothing else is
                     const double view = odom.yaw() + head_q[2];
@@ -2672,8 +2898,20 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                                          q[2] - kHomePose[2]);            // the left hip pitch: the stride clock
             if (driver == Driver::Brain) command.head = hcmd;
         }
+        if (g_neck_burst_s > 0.0 && g_translate > 0.0) {
+            // §17.113 N1, the causal test: a burst of the neck forward while a chase walks toward a mover ahead
+            ++neck_burst_since;
+            if (neck_burst_left > 0) --neck_burst_left;
+            const bool chasing = chase_on && (brain.chase_active() || brain.chase_coasting());
+            if (neck_burst_left > 0 && (!chasing || stop_phase != StopPhase::None)) neck_burst_left = 0;   // the chase or the walk ended
+            if (neck_burst_left == 0 && chasing && stop_phase == StopPhase::None && driver == Driver::Brain
+                && std::cos(brain.seek_ego()) > 0.0 && neck_burst_since >= int(g_neck_burst_gap_s * kBrainHz)) {
+                neck_burst_left = int(g_neck_burst_s * kBrainHz); neck_burst_since = 0; ++neck_bursts;
+            }
+        }
         std::array<double, 4> head_targets{};
         bool head_owns_joints = false;
+        if (stop_phase != StopPhase::Brain) head_hold_on = false;   // H2: the hold is taken afresh at each stand
         if (head && g_head_joints && driver == Driver::Brain) {
             const auto hcmd = head->last_command();
             for (int i = 0; i < 4; ++i) head_targets[size_t(i)] = kHomePose[size_t(5 + i)] + hcmd[size_t(i)];
@@ -2699,7 +2937,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 // the bird's neck: the walker's translation on top of the head brain's joints, rate-limited like a
                 // servo, centred at stops; the policy is told it (it was trained to carry a commanded head)
                 static double fore = 0.0;
-                const double want = stop_phase == StopPhase::None ? brain.head_fore_target() : 0.0;
+                g_fore_now = fore;
+                double want = stop_phase == StopPhase::None ? brain.head_fore_target() : 0.0;
+                if (neck_burst_left > 0 && stop_phase == StopPhase::None) want = g_translate * 1.10;   // §17.113 N1: the burst, the slide at its forward limit
                 fore += std::clamp(want - fore, -g_translate_rate / kBrainHz, g_translate_rate / kBrainHz);
                 head_targets[0] -= fore; head_targets[1] -= fore;
                 command.head[0] = -fore; command.head[1] = -fore;
@@ -2715,6 +2955,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         // from wherever the intent's steering left them, and its level loop starts with a large error; on the walk's
         // return the intent's command jumps back.  Both targets slew from the head's CURRENT position at a servo's
         // rate -- 9.5 of the six-motor arm's 11.7 falls a run came within 3 s of a stop's start.
+        if (g_kick_homing_now && head_owns_joints) for (int i = 0; i < 4; ++i) head_targets[size_t(i)] = kHomePose[size_t(5 + i)];   // --kick-head-home (slewed below if --head-slew)
         if (g_head_rate > 0.0) {
             static std::array<double, 4> slew_joint{}, slew_cmd{}; static bool slew_init = false, prev_owns = false;
             const auto qj = body.joint_positions();
@@ -2745,6 +2986,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         }
 
         if (down_rise_watch > 0) --down_rise_watch;
+        if (g_sit_k > 0.0) { sit_applied_vx = (driver != Driver::Brain) ? 0.0 : skill_active ? skill_push_vx : command.twist[0]; sit_applied_yaw = (driver != Driver::Brain || skill_active) ? 0.0 : command.twist[2]; }   // §17.114 S1
         std::array<double, kNumPolicyJoints> ctrl{};
         if (driver == Driver::Scaffold && skill_active && down_skill_running) {
             // the roll drives the joints while the body is down; the scaffold waits for the window to end
@@ -2792,6 +3034,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 const double phase = double(skill_total - skill_left) / kBrainHz / skill_phase_period;
                 sc.twist = {std::cos(2.0 * M_PI * phase), std::sin(2.0 * M_PI * phase), 0.0};
             }
+            if (skill_name == "sit") sc.twist = {skill_left > int(g_sit_rise_s * kBrainHz) ? 1.0 : 0.0, 0.0, 0.0};   // seated, then the rise
+            if (skill_name == "sit" && skill_left == 1 && sit_rise_extra < 75) {
+                // the rise ends on the legs' own joints: both knees back within 0.15 rad of the stand, at most 1.5 s longer
+                const auto jq = body.joint_positions();
+                if (std::fabs(jq[3] - kHomePose[3]) > 0.15 || std::fabs(jq[12] - kHomePose[12]) > 0.15) { ++sit_rise_extra; skill_left = 2; }
+            }
             const auto action = skill_policy->infer(build_observation(body, skill_last, sc));
             skill_last = action;
             for (int i = 0; i < kNumPolicyJoints; ++i) { ctrl[i] = kHomePose[i] + kStandingActionScale * action[i]; walk_targets[i] = ctrl[i]; }
@@ -2805,6 +3053,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             ctrl = stander->act(body);
             if (head_owns_joints && g_stop.keep_head)
                 for (int i = 0; i < 4; ++i) ctrl[5 + i] = head_targets[size_t(i)];
+            if (g_stop_head_hold && head_owns_joints && g_stop.keep_head) {
+                // §17.113 H2: the head's pitch and roll (and the neck) held where the walk left them at the hand-back -- the
+                // head brain's stale pitch, unapplied on the walk, otherwise pitches the head up the instant the stand begins
+                // and the duck goes over backwards; the yaw stays free for the stop's look
+                if (!head_hold_on) { const auto hq = body.joint_positions(); head_hold = {hq[5], hq[6], hq[8]}; head_hold_on = true; }
+                ctrl[5] = head_hold[0]; ctrl[6] = head_hold[1]; ctrl[8] = head_hold[2];
+            }
             walk_targets = ctrl;                 // the walker resumes from where the body is left
             ++stand_ticks;
         } else {
@@ -2963,6 +3218,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
             // the seek loop, if the graph has one (things phase T2): its need and the range left to its target
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
+            if (g_seek_gate_near > 0.0) std::printf(",\"sgk\":%d", brain.seek_gate_kept());   // §17.117 G1
+            if (g_detour_vx > 0.0) std::printf(",\"dt\":[%d,%d]", brain.detours(), brain.detour_clear());   // §17.117 D1
+            if (g_place_stall) { const auto sd = brain.seek_state(); if (sd.contains("approach_cost")) std::printf(",\"sac\":%.3f", sd["approach_cost"].get<double>()); }   // §17.116 S1
             if (g_log_com) { const auto cm = body.com_over_feet(); std::printf(",\"com\":[%.4f,%.4f,%.4f]", cm[0], cm[1], cm[2]); }
             if (train_on) std::printf(",\"train\":[%.4f,%.4f,%.4f,%.3f,%.3f,%d]", train_x, train_y, train_yaw, train_vx, train_vy, train_moving ? 1 : 0);
             // THE CHASE (stage 1): [chasing, sightings held, target x, y (odometry frame), its velocity, a mover seen this tick,
@@ -3020,9 +3278,20 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // the play loop, for the record: its bearing every tick, its state every 10 (2026-09-19, the orbit)
             { const auto pb = brain.play_bearing(); std::printf(",\"pb\":[%.3f,%.3f]", pb[0], pb[1]);
               if (t % 10 == 0) { const auto ps = brain.play_state();
-                  if (!ps.is_null()) std::printf(",\"pl\":[%d,%d,%d,%.2f]", ps.value("climbing", false) ? 1 : 0, ps.value("wandering", false) ? 1 : 0, ps.value("next_node", -1), ps.value("explore_dir", 0.0)); } }
+                  if (!ps.is_null()) std::printf(",\"pl\":[%d,%d,%d,%.2f]", ps.value("climbing", false) ? 1 : 0, ps.value("wandering", false) ? 1 : 0, ps.value("next_node", -1), ps.value("explore_dir", 0.0));
+                  if (!ps.is_null() && ps.contains("stall")) { const auto& st = ps["stall"]; std::printf(",\"pst\":[%.3f,%.3f,%d,%d]", st[0].get<double>(), st[1].get<double>(), st[2].get<int>(), st[3].get<int>()); } } }
             { const auto oc = brain.outcome_now();   // the outcome loop: [node, predicted, observed, surprise, samples]
               if (!oc.empty()) std::printf(",\"outc\":[%d,%.3f,%.3f,%.2f,%d,%d]", int(oc[0]), oc[1], oc[2], oc[3], int(oc[4]), oc.size() > 5 ? int(oc[5]) : 0); }
+            { const auto lk = brain.look_now();      // the look loop (§17.112): [need, prediction, in a stop, realized, predicted]
+              if (!lk.empty()) std::printf(",\"look\":[%.3f,%.3f,%d,%.3f,%.3f]", lk[0], lk[1], int(lk[2]), lk[3], lk[4]);
+              const auto amb = brain.ambush_now();         // §17.113 A1: [have, x, y, need, waiting] when the stalk loop is wired
+              if (!amb.empty() && amb[0] > 0.5) std::printf(",\"amb\":[%.3f,%.3f,%.3f,%d]", amb[1], amb[2], amb[3], int(amb[4]));
+              const auto mvp = brain.mover_pos_now();      // §17.113 A0: a confirmed mover sighting and its motion-map node
+              if (!mvp.empty()) std::printf(",\"mvp\":[%.4f,%.4f,%d,%d]", mvp[0], mvp[1], int(mvp[2]), int(mvp[3]));
+              const auto tb = brain.thing_belief_now();    // §17.113: [presence, confirming, refuting, since, have], when wired
+              if (!tb.empty()) std::printf(",\"thb\":[%.3f,%d,%d,%d,%d]", tb[0], int(tb[1]), int(tb[2]), int(tb[3]), int(tb[4]));
+              const auto lc = brain.look_commit_now();     // lever 4: [committed, the arbiter's gain for the look], when wired
+              if (!lc.empty()) std::printf(",\"lkc\":[%d,%d]", int(lc[0] > 0.5), int(lc[1] > 0.5)); }
             // live changes a client made through the inspector this tick: the run's record must show them
             {
                 const auto pe = brain.take_inspector_events();
@@ -3122,6 +3391,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 const auto hg = body.head_gravity(); const auto hw = body.head_gyro(); const auto hc = head->last_command();
                 std::printf(",\"head\":[%.4f,%.4f,%.4f,%.4f],\"hg\":[%.4f,%.4f,%.4f],\"hw\":[%.4f,%.4f,%.4f]",
                             hc[0], hc[1], hc[2], hc[3], hg[0], hg[1], hg[2], hw[0], hw[1], hw[2]);
+                if (g_translate > 0.0) std::printf(",\"fore\":%.4f", g_fore_now);
+                if (g_neck_burst_s > 0.0) std::printf(",\"nb\":%d", neck_burst_left > 0 ? 1 : 0);
+                if (g_gaze_mover_memory) std::printf(",\"gmm\":%d", g_gmm_now);
+                if (g_sit_k > 0.0) { const auto tk = brain.traverse_token(); std::printf(",\"trv\":[%.4f,%.4f,%d,%d,%.3f,%.3f]", sit_tle, sit_ema, int(tk[0]), int(tk[1]), tk[2], tk[3]); }
             }
             std::printf("}\n");
         }
@@ -3190,9 +3463,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
+        if (g_stop.by_look) std::fprintf(stderr, "  look stops: %d of %d started by the arbiter's look, %d ended when it lost the body\n", stops_byl, stops_started, stops_byl_lost);
+        if (g_neck_burst_s > 0.0) std::fprintf(stderr, "  neck bursts: %d (the slide at its forward limit for %.1f s in a chase, at most every %.1f s)\n", neck_bursts, g_neck_burst_s, g_neck_burst_gap_s);
+        if (g_dash) std::fprintf(stderr, "  dashes: %d leaned toward a mover, %d released by the lean hand-off, %d timed out\n", dashes, dash_released, dash_timeouts);
         if (chase_on) { const auto cf = brain.chase_cand_fates();
             std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase; candidates not chased: %d replaced (missed the gate), %d too fast, %d still, %d timed out; targets taken from the walk: %d; chases yielded near tall structure: %d, sightings dropped at a yielded place: %d; static targets yielded near tall structure: %d, sightings dropped there: %d; targets forgotten for no progress: %d\n",
-                         brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3], brain.walk_takes(), brain.chases_yielded(), brain.yield_drops(), brain.static_yielded(), brain.static_yield_drops(), brain.progress_forgets()); }
+                         brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3], brain.walk_takes(), brain.chases_yielded(), brain.yield_drops(), brain.static_yielded(), brain.static_yield_drops(), brain.progress_forgets());
+            if (brain.coasts_refused() >= 0)   // §17.118
+                std::fprintf(stderr, "  verified coast: %d chases ended as a thing that stopped -- no sighting confirmed their velocity\n", brain.coasts_refused()); }
         if (g_imp_s > 0.0) std::fprintf(stderr, "  impeded looks: %d (seek's range unclosed %.1f s); walls %d (forgotten, escaped), things %d (kept)\n",
                                         imp_n, g_imp_s, imp_wall, imp_thing);
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes; %d stalls fired by contact, %d seek targets dropped by them\n",
@@ -3218,6 +3496,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (sweep_on)
             std::fprintf(stderr, "  sweep: %d moves; the gaze grid covered %.0f %% of its cells per stop (%d stops); 'saccades' below count HOLD-long windows\n",
                          sweep_moves, 100.0 * sweep_cover_sum / std::max(1, sweep_cover_n), sweep_cover_n);
+        if (g_sit_k > 0.0) if (g_sit_escape) std::fprintf(stderr, "  sit then escape: %d turn-abouts\n", sit_turnabouts);
+        if (g_seek_gate_hyst > 0.0) std::fprintf(stderr, "  seek gate, sectors: %d switches\n", brain.gate_switches());
+        if (g_seek_gate_range > 0.0) std::fprintf(stderr, "  seek gate, range: %d sector-ticks erased as the target's own return\n", brain.seek_gate_ranged());
+        if (g_kick_head_home) std::fprintf(stderr, "  kick head home: %d kicks waited for the head, %d fired at the 1 s timeout\n", kick_home_waits, kick_home_timeouts);
+        if (g_detour_vx > 0.0) std::fprintf(stderr, "  detour: %d detours, %d ended by the ahead sector reading clear, %d repeats, %d reopened, %d stand-down ticks, %d forgets\n", brain.detours(), brain.detour_clear(), brain.detour_repeats(), brain.detour_reopens(), brain.stand_downs(), brain.detour_forgets());
+        if (g_sit_k > 0.0) std::fprintf(stderr, g_sit_progress ? "  sit on stall: %d sits (progress under %.2f of its own prediction for %.1f s; %.1f s seated)\n" : "  sit on surprise: %d sits (the traversal TLE above %.1f x its running mean for %.1f s; %.1f s seated)\n", sits, g_sit_k, g_sit_need_s, g_sit_hold_s);
+        if (sweep_on && g_saccade_speed > 0.0)
+            std::fprintf(stderr, "  saccade and fixate: %d fixations, mean %.2f s (saccades at %.2f rad/s)\n", fix_n, fix_len_sum / std::max(1, fix_n), g_saccade_speed);
         if (look_on || gaze_on)
             std::fprintf(stderr, "  look: %d saccades, %d holds extended by novelty, %d of %d stops ended by a quiet round; mean stop %.1f s; the head looked for %.1f s\n",
                          saccades, novel_holds, stops_bored, stop_len_n, stop_len_n ? stop_len_sum / stop_len_n : 0.0, look_ticks / kBrainHz);
@@ -3480,6 +3766,8 @@ int main(int argc, char** argv) {
             g_chase_gaze = std::stod(next("--chase-gaze"));
         } else if (a == "--chase-vx") {
             g_chase_vx = std::stod(next("--chase-vx"));
+        } else if (a == "--chase-vx-facing") {
+            g_chase_vx_facing = true;
         } else if (a == "--head-forward") {
             g_head_forward = std::stod(next("--head-forward"));
         } else if (a == "--body-pitch") {
@@ -3523,10 +3811,86 @@ int main(int argc, char** argv) {
             g_stop.on_lost = true;
         } else if (a == "--stop-on-chase") {
             g_stop.on_chase = true;
+        } else if (a == "--bam") {
+            // the XL330 m6 actuator model Pollen trains with, in place of the XML position actuators: [VIN [LAG_S]]
+            DuckBody::bam.on = true;
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) DuckBody::bam.vin = std::stod(next("--bam"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) DuckBody::bam.lag_s = std::stod(next("--bam"));
+        } else if (a == "--train-contacts") {
+            DuckBody::train_contacts = true;
+        } else if (a == "--bam-dump") {
+            DuckBody::bam.dump = next("--bam-dump");
+        } else if (a == "--kick-head-home") {
+            g_kick_head_home = true;
+        } else if (a == "--stop-walker-hold") {
+            g_stop_walker_hold = true;
+        } else if (a == "--escape-vx") {
+            g_escape_vx = std::stod(next("--escape-vx"));
+        } else if (a == "--escape-commit") {
+            g_escape_commit = true;
+        } else if (a == "--escape-authority") {
+            g_escape_authority = true;
+        } else if (a == "--sit-then-escape") {
+            g_sit_escape = true;
+        } else if (a == "--sit-settle") {
+            g_sit_settle = true;
+        } else if (a == "--place-stall") {
+            g_place_stall = true;
+        } else if (a == "--sit-on-stall") {
+            g_sit_progress = true; g_sit_k = std::stod(next("--sit-on-stall"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_sit_hold_s = std::stod(next("--sit-on-stall"));
+        } else if (a == "--sit-on-surprise") {
+            g_sit_k = std::stod(next("--sit-on-surprise"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_sit_hold_s = std::stod(next("--sit-on-surprise"));
+        } else if (a == "--stop-skill-settle") {
+            g_stop_skill_settle = true;
+        } else if (a == "--stop-saccade") {
+            g_saccade_speed = std::stod(next("--stop-saccade"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_fix_min_s = std::stod(next("--stop-saccade"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_fix_max_s = std::stod(next("--stop-saccade"));
+        } else if (a == "--gaze-mover-memory") {
+            g_gaze_mover_memory = true;
+        } else if (a == "--chase-yaw-range") {
+            g_chase_yaw_range = std::stod(next("--chase-yaw-range"));
+        } else if (a == "--neck-burst") {
+            g_neck_burst_s = std::stod(next("--neck-burst"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_neck_burst_gap_s = std::stod(next("--neck-burst"));
+        } else if (a == "--dash") {
+            g_dash = true;
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_dash_lean = std::stod(next("--dash"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_dash_release = std::stod(next("--dash"));
+        } else if (a == "--stop-head-hold") {
+            g_stop_head_hold = true;
+        } else if (a == "--impeded-not-chasing") {
+            g_imp_not_moving = true;
+        } else if (a == "--stop-by-look") {
+            g_stop.by_look = true;
         } else if (a == "--stop-on-arrive") {
             g_stop.on_arrive = true;
         } else if (a == "--stop-gaze-at-thing") {
             g_stop.gaze_at_thing = true;
+        } else if (a == "--detour-reopen") {
+            g_detour_reopen = std::stod(next("--detour-reopen"));
+        } else if (a == "--seek-gate-mid") {
+            g_seek_gate_mid = std::stod(next("--seek-gate-mid"));
+        } else if (a == "--seek-gate-hyst") {
+            g_seek_gate_hyst = std::stod(next("--seek-gate-hyst"));
+        } else if (a == "--seek-gate-range") {
+            g_seek_gate_range = std::stod(next("--seek-gate-range"));
+        } else if (a == "--detour-forget") {
+            g_detour_forget = std::stoi(next("--detour-forget"));
+        } else if (a == "--detour-back-s") {
+            g_detour_back_s = std::stod(next("--detour-back-s"));
+        } else if (a == "--detour-stand-down") {
+            g_detour_stand_down = true;
+        } else if (a == "--detour-commit") {
+            g_detour_commit = true;
+        } else if (a == "--detour") {
+            g_detour_vx = std::stod(next("--detour"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_detour_max_s = std::stod(next("--detour"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_detour_out_s = std::stod(next("--detour"));
+        } else if (a == "--seek-gate-near") {
+            g_seek_gate_near = std::stod(next("--seek-gate-near"));
         } else if (a == "--seek-gate-contact") {
             g_seek_gate_contact = std::stod(next("--seek-gate-contact"));
         } else if (a == "--head-home") {

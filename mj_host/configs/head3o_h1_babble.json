@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H1/3 with YAW LAST (head pitch, head roll, head yaw; neck at zero): so the level priors can be masked to the leading two motors (state_prior_motors 2) and stay out of yaw (2026-10-01, the learned gaze)",
-  "description": "H1/3 with YAW LAST (head pitch, head roll, head yaw; neck at zero): so the level priors can be masked to the leading two motors (state_prior_motors 2) and stay out of yaw (2026-10-01, the learned gaze)",
-  "launcher_rank": 0
+  "description": "H1/3 with YAW LAST (head pitch, head roll, head yaw; neck at zero): so the level priors can be masked to the leading two motors (state_prior_motors 2) and stay out of yaw (2026-10-01, the learned gaze)"
  },
  "description": "H1/3 with YAW LAST (head pitch, head roll, head yaw; neck at zero): so the level priors can be masked to the leading two motors (state_prior_motors 2) and stay out of yaw (2026-10-01, the learned gaze)",
  "modules": [

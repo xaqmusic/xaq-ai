@@ -176,7 +176,7 @@ the MicroDuck Brain" describes it.
 
 ## The resource push (2026-10-04) — resume here for the ARM measurements
 
-**2026-10-08: the Pi 5 is measured and the Radxa Zero 3W projected (design doc §17.112, `mj_host/tools/arm_bench/`).** On the
+**2026-10-08: the Pi 5 is measured and the Radxa Zero 3W projected (design doc §17.111b, `mj_host/tools/arm_bench/`).** On the
 A76 the three brains cost 2.9 % of a core (intent 523 µs a tick); on the A55 at 1.8 GHz, 11–26 % of one core, with the cloud map's clustering
 ticks reaching 15–61 ms on 0.8–2.9 % of ticks; ~5 MB of heap. Next: the same command against a real Radxa Zero 3W, then the
 clustering's spikes. The note below is the plan as it stood on 2026-10-04.

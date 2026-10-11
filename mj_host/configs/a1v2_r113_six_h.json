@@ -4,7 +4,6 @@
   "description": "a1v2_r113_six with load_slots 18 (the head's roll and pitch lead the sense, host --intent-head-sense) and the same priors -- the control for the level prior. NOTE the six config's 'tilt' prior on state 3, 4 is sensed vy and the vy command (the state is [pos, act, delta] per twist joint), kept as is: one lever at a time.",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

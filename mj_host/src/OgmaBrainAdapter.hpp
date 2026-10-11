@@ -92,6 +92,9 @@ public:
     // Freeze ONE MotorEPM module's learning for the rest of the run (W2: the joint brain's head module
     // while another brain owns the head — its commands are not applied, so it must not fit the pairing).
     void freeze_module(const std::string& id);
+    // §17.113 the dash: set the state prior's target on one sense slot (e.g. -12, the trunk's pitch g_x) in every
+    // MotorEPMv2 that carries a prior on it; returns how many modules took it
+    int set_prior_target(int slot, double value);
 
 private:
     void apply_freeze_state();

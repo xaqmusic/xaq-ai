@@ -276,6 +276,26 @@ void OgmaBrainAdapter::set_regime_learning(bool on) {
     apply_freeze_state();
 }
 
+int OgmaBrainAdapter::set_prior_target(int slot, double value) {
+    std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
+    int n = 0;
+    for (auto* module : instance_->modules()) {
+        if (std::string(module->type_name()) != "MotorEPMv2") continue;
+        const auto params = module->current_params();
+        auto ii = params.find("state_prior_indices"), it = params.find("state_prior_targets");
+        if (ii == params.end() || it == params.end()) continue;
+        const auto* idx = std::get_if<std::vector<double>>(&ii->second);
+        const auto* tgt = std::get_if<std::vector<double>>(&it->second);
+        if (!idx || !tgt || idx->size() != tgt->size()) continue;
+        std::vector<double> next = *tgt; bool hit = false;
+        for (size_t k = 0; k < idx->size(); ++k) if (int(std::lround((*idx)[k])) == slot) { next[k] = value; hit = true; }
+        if (!hit) continue;
+        tape_param(2, module, "state_prior_targets", ogma::ParamValue{next});
+        ++n;
+    }
+    return n;
+}
+
 void OgmaBrainAdapter::freeze_module(const std::string& id) {
     static const char* const kRates[] = {"model_lr", "ctrl_lr", "bias_lr", "sat_lr",
                                          "state_prior_lr", "state_prior_h_lr", "state_model_lr"};

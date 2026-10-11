@@ -4,7 +4,6 @@
   "description": "\u2605 BIRD's walker with the HEADING prior (state -6) at precision 3.0 against the speed and ToF priors' 1: when the ToF's near field fills, the heading reflex hands yaw back to the brain, whose yaw then points toward the reference only 40-50 % of the time with the target > 1 rad off (sweep z4) -- the orbit",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

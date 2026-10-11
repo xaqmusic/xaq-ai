@@ -35,6 +35,9 @@ namespace ogma {
 
 class BearingSeekLoop : public Module {
 public:
+    int static_promoted() const { return static_promoted_; }   // §17.113 M1
+    int released() const { return released_; }              // §17.113 T2
+    int release_refusals() const { return release_refusals_; }
     BearingSeekLoop();
     ~BearingSeekLoop() override;
 
@@ -70,6 +73,15 @@ private:
     std::string output_topic_  = "percept.seek_bearing";
     std::string value_topic_   = "reality.cognitive.seek_value";
     std::string range_topic_   = "reality.cognitive.seek_range";
+    std::string mind_topic_    = "";
+    std::string target_out_topic_ = "";            // §17.113: [have, x, y, set tick, chasing]
+    std::string release_topic_ = "";               // §17.113 T2: the thing belief's refutation
+    std::string mover_pos_topic_ = "";             // §17.113 A0: where confirmed movers were seen
+    std::string ambush_topic_ = "";                // §17.113 A1: the stalk loop's ambush place
+    int ambush_taken_ = 0, ambush_released_ = 0;
+    bool have_release_ = false; double release_x_ = 0.0, release_y_ = 0.0; uint64_t release_tick_ = 0;
+    int released_ = 0, release_refusals_ = 0;                 // §17.112 lever 1: [a mover in mind]
+    uint64_t    mind_from_ = 0; bool have_mind_ = false;
     double proximity_range_ = 2.5;    // the bearing's proximity is 1 - range / this (CloudMap max_range / things_range)
     float  min_conf_        = 0.02f;  // proximity above this = the thing is in view
     double arrive_m_        = 0.25;   // the remaining range at which the target counts as reached
@@ -174,6 +186,12 @@ private:
     // recovers by 1/chase_pull_recover_ticks per tick; the need while chasing is the pull.  A thing that keeps getting
     // away loses its hold, the way a known kind does.  1 = no decay.
     int    chase_permanence_ticks_ = 0;
+    // THE VERIFIED COAST (2026-10-11, §17.118, the operator: "the robot may also sense movement when it does not exist"):
+    // coast_needs_confirm -- a chase coasts (permanence) only after this many of its own predictions were fulfilled (a
+    // sighting where the candidate should be, after the chase began); a chase whose velocity no sighting ever confirmed
+    // ends as a thing that stopped (its last sighting a remembered place).  A static thing newly in view starts a chase
+    // and is never sighted as a mover again; a moving one is.  0 = off (every chase may coast).
+    int    coast_needs_confirm_ = 0, chase_confirms_ = 0, coasts_refused_ = 0;
     // PERMANENCE IN RECOGNITION (2026-09-29, after coasting regressed -- §17.61): chase_memory_ticks -- a lost mover is
     // kept in mind (its last predicted position and velocity, extrapolated) for this long WITHOUT driving the walk;
     // a single mover sighting within chase_gate_m of where it should now be re-acquires the chase at once, no
@@ -199,6 +217,15 @@ public:
     int static_yielded() const { return static_yielded_; }
     int static_yield_drops() const { return static_yield_drops_; }
     int progress_forgets() const { return progress_forgets_; }
+    // §17.116 S1, THE APPROACH'S COST (the operator, 2026-10-10: avoid the places the walk has been stuck in): the stuck
+    // places on stall_field_topic (PlayLoop: [x, y, excess]*, the walk's progress error over its mean, where it stalled)
+    // discount a held static target's need by the worst one near its straight approach -- the expected progress error on
+    // the way: need *= 1 - stall_cost * max_p(excess_p * (1 - d_p / stall_radius)+), d_p the place's distance from the
+    // segment body -> target.  Graded and never below the floor: the target is not refused (sweeps 33-35 refused it and
+    // lost a quarter of the walk's targets); the arbiter's precision race hands the walk to play by degrees.  0 = off.
+    std::string stall_field_topic_ = "";
+    double stall_cost_ = 0.0, stall_radius_ = 0.3, approach_cost_ = 0.0;
+    double approach_cost() const { return approach_cost_; }
     // the host's contact stall (§17.84, lever 1b): the target the body is pushing toward through a surface is dropped
     void forget_target() { if (have_target_ && !chasing_ && !coasting_) { have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++contact_forgets_; } }
     int contact_forgets() const { return contact_forgets_; }
@@ -228,6 +255,8 @@ private:
     // the candidate's recent sightings (tick, x, y), kept for chase_v_window_s: the velocity is the displacement across
     // this ring, long enough to average the centroid's jitter and short enough to see a thing that just stopped
     std::deque<std::array<double, 3>> sight_;
+    std::deque<std::array<double, 3>> static_ring_;   // §17.113 M1: a static target's recent fixes [tick, x, y]
+    bool static_motion_check_ = false; int static_promoted_ = 0;
     double chase_v_window_s_ = 0.8;
 public:
     double last_miss()  const { return last_miss_; }
@@ -249,6 +278,8 @@ private:
 public:
     int    chases_lost()    const { return chases_lost_; }
     int    chases_stopped() const { return chases_stopped_; }
+    int    coasts_refused() const { return coasts_refused_; }
+    int    coast_needs_confirm() const { return coast_needs_confirm_; }
     bool   chase_lost_now() const { return lost_now_; }
     // THE GAZE (2026-09-29, the operator: "the robot should be able to turn its head while it's walking to try to reacquire
     // the moving target"): the bearing (body frame, + = right) the head should turn to -- the chased or coasted target's,

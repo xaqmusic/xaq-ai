@@ -4,7 +4,6 @@
   "description": "the walk's DYNAMIC RANGE: the forward-speed target x min(cos(heading error), clamp(k x range / |heading error|, 0, 1)), k 2.1 -- turn before you arrive: far away the walk keeps its speed and curves in, near the thing it slows only as much as the remaining error needs. The range is a new walker sense (host --intent-range-sense: the seek target's distance / 2 m, state 10, grown on restore). k = 2 m x omega / (pi x 0.3 m/s): omega 1 rad/s (the calibrated yaw's delivered turn) gives 2.1, 0.3 rad/s (the walker's achieved turn at large errors) gives 0.64.",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

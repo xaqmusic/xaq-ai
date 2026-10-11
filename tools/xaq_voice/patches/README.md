@@ -14,6 +14,8 @@ as an artifact of a session worth the commit.
 |---|---|---|
 | `picrawler1.json` | corridor, `native_measured` | `motor_epm` as a **pink-noise** bass at 50.65 Hz through a resonant bandpass that `couple_R` opens and closes; `body_pose` a saw whose `ema_tle` drives pitch, amplitude and vowel morph at once, with the GNG life events chirping over it. Master runs a U→I vowel with a steep (curve 3.76) morph, so the mouth only opens near the top of the range. `body_pose_t` and `gain_evolver` are kept but switched off. |
 | `picrawler2.json` | corridor, `native_measured` | The same tuning with `motor_epm` as a **saw** at 57.88 Hz instead — the one voice changed, so the two files diff to a single oscillator. |
+| `picrawler3.json` | corridor | `picrawler2.json` with `body_pose_t` switched on as a pulse voice driven by `last_quant_error` instead of `last_tle`. |
+| `microduck1.json` | the MicroDuck intent brain (port 7400) | Five of the intent brain's eleven modules voiced: the walker (`motor_epm_intent`), play, `object_epm` and the outcome loop; the map, cloud, thing EPMs, seek and voter are kept but switched off. |
 
 Both quantise **off** and lean on `minmax` for the `body_pose` routes rather than the
 `median_mad` default, which is worth knowing: `minmax` tracks the running extremes, so it
