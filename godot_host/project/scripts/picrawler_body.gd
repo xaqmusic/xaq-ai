@@ -1621,6 +1621,7 @@ var _us_true: float = -1.0          # INSTRUMENT (god's-eye): nearest world surf
 var _us_last_slot: int = -1
 var _us_pings: int = 0
 var _us_hud: Label = null
+var _reflex_hud: Label = null                  # S3: avoid / intent / stuck / escape, live
 # ---- THE ROOM (gym "room"): a flat floor inside vertical walls, with boxes ----------
 @export var room_size: float = 3.0              # OGMA_PICRAWLER_ROOM_SIZE, metres inside the walls
 var _room_bodies: Array = []                    # the walls and boxes (StaticBody3D), for the contact instrument
@@ -7530,6 +7531,8 @@ func _step_one() -> void:
 		us_arr.append(_us_valid)
 		brain.publish_token(us_arr, "sense.range", "range")
 		_update_us_hud()
+		if tick_counter % 10 == 0 and DisplayServer.get_name() != "headless":
+			_update_reflex_hud()
 	if _gym_mode_active == "room":
 		_room_instruments_step()
 	# Beacon magnitude.  Published every tick from the cached capture (the capture itself is
@@ -10673,6 +10676,48 @@ func _update_us_hud() -> void:
 		bar, _us_range, "valid  " if _us_valid > 0.5 else "no echo", axis, _us_pings]
 	_us_hud.add_theme_color_override("font_color",
 		Color(0.95, 0.85, 0.45, 1.0) if _us_valid > 0.5 else Color(0.6, 0.6, 0.6, 1.0))
+
+# The REFLEX line (S3): what the loop modules are saying, read from their diagnostics every
+# 10 ticks.  Absent modules leave their fields out.  Windowed only; nothing here touches physics.
+func _update_reflex_hud() -> void:
+	if _reflex_hud == null:
+		var hud := get_tree().get_root().find_child("HUD", true, false)
+		if hud == null:
+			return
+		_reflex_hud = Label.new()
+		_reflex_hud.name = "ReflexLine"
+		_reflex_hud.add_theme_font_size_override("font_size", 13)
+		_reflex_hud.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+		_reflex_hud.position = Vector2(12, -64)
+		hud.add_child(_reflex_hud)
+	var metrics: Dictionary = brain.get_module_metrics()
+	var parts: PackedStringArray = PackedStringArray()
+	if metrics.has("avoid"):
+		var av: Dictionary = metrics["avoid"]
+		var v: float = float(av.get("value", 0.0))
+		parts.append("avoid %s %4.2f (%+.2f,%+.2f)" % ["ON " if v > 0.0 else "off", v, float(av.get("cx", 0.0)), float(av.get("cy", 0.0))])
+	if metrics.has("intent"):
+		var im: Dictionary = metrics["intent"]
+		parts.append("intent %s err %+5.1f° spd %+.2f%s" % ["LOOP" if im.get("active", false) else "hold",
+			rad_to_deg(float(im.get("err", 0.0))), float(im.get("speed", 1.0)), "  OVERRIDE" if im.get("override", false) else ""])
+	if metrics.has("stuck_sense"):
+		var ss: Dictionary = metrics["stuck_sense"]
+		var sc: float = float(ss.get("score", 0.0))
+		var n: int = 10
+		var filled: int = clampi(int(round(sc * float(n))), 0, n)
+		parts.append("stuck [%s] %.2f" % ["█".repeat(filled) + "░".repeat(n - filled), sc])
+	if metrics.has("escape"):
+		var es: Dictionary = metrics["escape"]
+		var names: PackedStringArray = PackedStringArray(["idle", "BACK", "TURN", "refract"])
+		var st: int = clampi(int(es.get("state", 0)), 0, 3)
+		parts.append("escape %s ep %d turn %+.0f°" % [names[st], int(es.get("episodes", 0)), float(es.get("turn_deg", 0.0))])
+	if parts.is_empty():
+		_reflex_hud.text = ""
+		return
+	_reflex_hud.text = "reflex  " + "   ".join(parts)
+	var esc_on: bool = metrics.has("escape") and int(metrics["escape"].get("state", 0)) in [1, 2]
+	_reflex_hud.add_theme_color_override("font_color",
+		Color(1.0, 0.55, 0.35, 1.0) if esc_on else Color(0.7, 0.9, 0.8, 1.0))
 
 # INSTRUMENTS for the room (god's-eye, never published): contact with a wall or box,
 # and floor coverage.  contact_monitor on the chassis reports contacts and changes no
