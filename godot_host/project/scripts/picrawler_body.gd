@@ -12219,6 +12219,25 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["odom_err"]  = snappedf(_odom_err_m, 0.001)
 	# The instrument-only EPMs over the new senses (the room preset): node counts and TLE,
 	# so a headless run can show each channel is being coarse-grained.  Absent when absent.
+	# S3's loop modules, when present: the proximity slots, the avoid loop, the intent bridge.
+	if metrics.has("prox_memory"):
+		var pm: Dictionary = metrics["prox_memory"]
+		line["prox_mx"] = snappedf(float(pm.get("minus_x", 0.0)), 0.001)
+		line["prox_ah"] = snappedf(float(pm.get("ahead", 0.0)), 0.001)
+		line["prox_px"] = snappedf(float(pm.get("plus_x", 0.0)), 0.001)
+		line["prox_tc"] = snappedf(float(pm.get("too_close", 0.0)), 0.001)
+		line["prox_pts"] = int(pm.get("points", 0))
+	if metrics.has("avoid"):
+		var av: Dictionary = metrics["avoid"]
+		line["avoid_cx"] = snappedf(float(av.get("cx", 0.0)), 0.001)
+		line["avoid_cy"] = snappedf(float(av.get("cy", 0.0)), 0.001)
+		line["avoid_val"] = snappedf(float(av.get("value", 0.0)), 0.001)
+	if metrics.has("intent"):
+		var im: Dictionary = metrics["intent"]
+		line["intent_active"] = 1 if im.get("active", false) else 0
+		line["intent_err"] = snappedf(float(im.get("err", 0.0)), 0.001)
+		line["intent_speed"] = snappedf(float(im.get("speed", 1.0)), 0.001)
+		line["intent_ref"] = snappedf(float(im.get("ref_yaw", 0.0)), 0.001)
 	for mid in ["epm_range", "epm_vision", "epm_place"]:
 		if metrics.has(mid):
 			var mm: Dictionary = metrics[mid]

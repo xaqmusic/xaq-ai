@@ -862,6 +862,16 @@ Dictionary OgmaBrain::get_module_metrics() const {
             }
         }
         // --- HeadingController (learned heading-following locomotor) ---
+        // S3 of the MicroDuck port: the small loop modules expose their diag_snapshot scalars
+        // as-is, so the body's JSONL can carry prox slots, the avoid bearing and the intent
+        // without a per-type block each (the keys are the modules' own diag names).
+        else if (type == "ProxMemory" || type == "TofAvoidLoop" || type == "BearingToIntent") {
+            const nlohmann::json dj = m->diag_snapshot();   // a named object: items() of a temporary dangles
+            for (auto const& [k, v] : dj.items()) {
+                if (v.is_boolean())     d[String(k.c_str())] = v.get<bool>();
+                else if (v.is_number()) d[String(k.c_str())] = v.get<double>();
+            }
+        }
         else if (type == "HeadingController") {
             if (auto const* hc = dynamic_cast<const ogma::HeadingController*>(m)) {
                 d["bearing"]      = double(hc->last_bearing());   // egocentric, 0=facing

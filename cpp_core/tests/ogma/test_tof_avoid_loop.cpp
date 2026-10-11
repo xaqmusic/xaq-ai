@@ -33,3 +33,13 @@ TEST(TofAvoidLoop, EmitBearingFalsePublishesTheNeedWithNoDirection) {
     auto val = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus.last_value("reality.cognitive.avoid_value"));
     ASSERT_TRUE(val); EXPECT_NEAR(val->values[0], 0.8f, 1e-6f);
 }
+TEST(TofAvoidLoop, SideMinMakesAFlatWallATieAndTurnsDecisively) {
+    // A flat wall head-on: the three slots nearly equal, side = 0.02 — legacy normalises that
+    // into "go ahead"; with side_min 0.1 it is a tie and the loop turns hard to the freer side.
+    Fix legacy; legacy.run(0, {0.88f, 0.89f, 0.90f, 0.0f});
+    EXPECT_LT(std::fabs(legacy.m.last_cx()), 0.2f * legacy.m.last_cy()) << "legacy: mostly ahead";
+    ogma::InProcessBus bus; ogma::TofAvoidLoop m; m.set_id("avoid"); m.on_setup(&bus, {{"side_min", 0.1}});
+    bus.begin_tick(0); bus.publish("reality.proprio.tof", pv({0.88f, 0.89f, 0.90f, 0.0f})); m.tick(0); bus.end_tick();
+    EXPECT_LT(m.last_cx(), 0.0f) << "the +X side (slot 2) is nearer: turn toward -X";
+    EXPECT_GT(std::fabs(m.last_cx()), 2.0f * std::fabs(m.last_cy())) << "a decisive turn, little forward";
+}

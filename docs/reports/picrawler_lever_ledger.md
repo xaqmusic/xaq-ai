@@ -7144,3 +7144,63 @@ small bearings and back off rather than pivot.
 
 **Open:** the stall signature (robot, walking into a wall), the reverse on the robot, the
 "stop as a stance" objective.
+
+---
+
+### ★★★ 2026-10-11 — S3a: THE AVOID LOOP DRIVES THE GAIT — WALL CONTACT 0.53 → 0.008, COVERAGE ×2, NO FALLS (n=6)
+
+*Plan §4 S3, form A, lever 1. Three loop modules on the S2 assembly, nothing learned:
+**ProxMemory** (new, generic): every valid ping of the single ultrasonic beam becomes a point in
+the odom frame, kept 3 s, re-expressed in the body frame each tick and binned by azimuth into
+the duck's four slots `[−X, ahead, +X, too_close]` plus an 8-sector view; **TofAvoidLoop** (the
+duck's, R28 — `REGRESSION` there, on a walker with a yaw deadband) bears away from the nearer
+side, silent below proximity 0.10, with a new `side_min` tie rule (a flat wall head-on fills
+the slots equally and the legacy rule normalised that into "go ahead"; default 0 keeps the
+duck's configs byte-identical); **BearingToIntent** (new, generic): the loop's bearing to
+`goal_bearing_topic`, a HELD heading reference while the loop is silent (the duck's
+IntentAdapter rule), and the speed to `speed_topic` shed as cos e with a 0.2 floor (the turn
+table's lesson: never pivot). Config `…__room_senses__s3a.json`, in the launcher. Unit tests:
+ProxMemory 6, BearingToIntent 6, TofAvoidLoop 5. Gain-0: the three deployed configs are
+byte-identical on body JSON (seed 1 × 6000). Verdict: **`WORKING`, LOUD** at n=6.*
+
+| metric (room, 6000 ticks, n=6) | baseline P-e·h0 | S3a | per seed (S3a) |
+|---|---|---|---|
+| first contact (tick) | 1210 ± 223 | three seeds never; 900 / 4260 / 4980 | −1 4980 −1 900 4260 −1 |
+| **wall_frac** | **0.531 ± 0.096** | **0.008 ± 0.013** | 0 .015 0 0 .031 0 |
+| contact episodes | 126 ± 21 | 3.7 ± 5.6 | 0 6 0 2 14 0 |
+| **coverage** (0.25 m cells) | **12.7 ± 1.8** | **27.2 ± 2.5** | 25 27 24 30 27 30 |
+| path (m) | 3.66 | 6.20 ± 0.37 | — |
+| net_disp / straight | 1.55 / 0.42 | 0.74 / 0.12 | — |
+| falls | 0 | **0** | — |
+| us_valid / confound rows | 0.94 / 5 | 0.47 / 26 | — |
+
+**What the body does.** It walks at the far wall as before; at proximity ≈ 0.5 (≈ 0.5 m) the
+loop bears away and the speed sheds to ≈ 0.7; it turns (yaw 1.2 rad in seed 1), holds the new
+heading when the loop goes quiet, and keeps walking. Over 6000 ticks it covers twice the
+floor the baseline did, on 1.7× the path, and touches a wall in three of six seeds for a few
+dozen ticks in all. Straightness falls because it turns — in a 3 m room that is the job, not a
+cost; the blind-metric pair (coverage up, path up, contacts down, 0 falls) says it is not a
+spinner.
+
+**§3.2 checks.** Not a tautology (the baseline has none of the three modules); live
+(`gb_msgs` = 6000 of 6000 ticks, the intent active in 38–53 % of diag rows, speed shed to
+0.35–0.57 at the turns, 30–40 remembered points on average); healthy baseline (walks, hits the wall, holds); faithful (this is the
+duck's reflex form as built, with the heading reference it had host-side); the arm loaded
+(the three receipts; `side_min` 0.1). The confound is now frequent — half the rows have no
+echo, because the body spends its time at angles to walls — and the loop still works
+because the memory carries the pings it got square-on. That is what the memory is for.
+
+**The duck's verdict does not transfer, in the direction the plan predicted.** R28's
+`REGRESSION` was a bearing loop on a walker whose yaw actuator had a deadband; on a body whose
+heading PD is loud, the same loop is loud. Recorded as the re-use context of R28.
+
+**What is left of S3.** Lever 2 (the stuck detector + escape by backing) now addresses the
+residual: the seeds that touched (6 and 14 episodes) did so where the beam had no echo (the
+glancing confound), and nothing yet reads "I am commanding forward and not moving". Form B
+(the learned priors on an intent-level MotorEPMv2) is **deferred by the plan's own gate** —
+"if A alone is loud, B is deferred with that context recorded": the context is a loud reflex
+form at n=6 in a 3 m room with fixed boxes; B's re-use context is a scenario where the
+reflex's fixed geometry fails (moving obstacles, the robot's real echo statistics, or the
+(d) test) or where avoidance must be shaped by what the body learns of its own turning.
+The (d) test (move the boxes mid-run) is owed; with a 3 s memory it tests the loop, not a
+map, and belongs with S4.

@@ -57,6 +57,12 @@ private:
     // slow heading regulator cannot avoid a wall at walking speed (measured: no side response
     // at 0.5-4 s); the reflex can, if nothing holds a direction against it.
     bool  emit_bearing_ = true;
+    // A flat wall seen head-on fills the three slots EQUALLY: side = right - left is ~0 but not
+    // zero, the tie rule never fires, and the normalised bearing points straight AHEAD at the
+    // wall (measured on the picrawler, S3a seed 1: cx -0.12 against prox 0.9).  Below side_min
+    // the side is a tie and the loop turns decisively toward the (weakly) freer side.  0 = the
+    // exact-zero legacy rule, byte-identical.
+    float side_min_ = 0.0f;
     float left_ = 0.0f, ahead_ = 0.0f, right_ = 0.0f, tooclose_ = 0.0f;
     bool  have_ = false;
     float cx_ = 0.0f, cy_ = 0.0f, value_ = 0.0f;

@@ -53,6 +53,8 @@ ParamSchema TofAvoidLoop::params_schema() const {
             ParamValue{std::string("reality.cognitive.avoid_value")}},
         {"floor", ParamMutability::HotMutable,
             "Nearest proximity below which the loop is silent (a zero bearing and value).", ParamValue{0.05}},
+        {"side_min", ParamMutability::HotMutable,
+            "|right - left| below this is a TIE: turn decisively toward the (weakly) freer side instead of normalising a near-zero side into 'go ahead' at a flat wall. 0 = exact-zero legacy rule (byte-identical).", ParamValue{0.0}},
         {"emit_bearing", ParamMutability::HotMutable,
             "true: publish the away-bearing. false: publish a ZERO bearing (the value/need unchanged) -- to a heading-reference consumer a winning loop with no bearing means RELEASE the reference so the fast proximity priors act unopposed.", ParamValue{true}},
     };
@@ -62,6 +64,7 @@ ParamMap TofAvoidLoop::current_params() const {
     ParamMap m;
     m["prox_topic"] = ParamValue{prox_topic_}; m["output_topic"] = ParamValue{output_topic_};
     m["value_topic"] = ParamValue{value_topic_}; m["floor"] = ParamValue{double(floor_)}; m["emit_bearing"] = ParamValue{emit_bearing_};
+    m["side_min"] = ParamValue{double(side_min_)};
     return m;
 }
 
@@ -73,12 +76,14 @@ void TofAvoidLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "value_topic",  [&](auto const& v){ value_topic_  = get_string(v,"value_topic"); });
     apply_param(params, "floor",        [&](auto const& v){ floor_        = float(get_double(v,"floor")); });
     apply_param(params, "emit_bearing", [&](auto const& v){ if (auto b = std::get_if<bool>(&v)) emit_bearing_ = *b; });
+    apply_param(params, "side_min",     [&](auto const& v){ side_min_     = float(get_double(v,"side_min")); });
     sub_ids_.push_back(bus_->subscribe(prox_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ handle_prox(p); }));
 }
 
 void TofAvoidLoop::on_param_change(std::string_view key, ParamValue const& value) {
     if (key == "floor") floor_ = float(get_double(value, "floor"));
+    else if (key == "side_min") side_min_ = float(get_double(value, "side_min"));
     else if (key == "emit_bearing") { if (auto b = std::get_if<bool>(&value)) emit_bearing_ = *b; }
     else throw std::invalid_argument("TofAvoidLoop: param '" + std::string(key) + "' is construction-only / unknown");
 }
@@ -100,7 +105,7 @@ void TofAvoidLoop::tick(uint64_t tick_id) {
         // side) and reduces the forward component; symmetric obstacles resolve to the freer side.
         const float side = right_ - left_;                  // > 0: the right is nearer → bear LEFT (cx < 0)
         float cx = -side;
-        if (std::fabs(side) < 1e-3f && ahead_ >= floor_) cx = (left_ <= right_) ? -1.0f : 1.0f;   // tie: turn toward the (weakly) freer side
+        if (std::fabs(side) < std::max(1e-3f, side_min_) && ahead_ >= floor_) cx = (left_ <= right_) ? -1.0f : 1.0f;   // tie: turn toward the (weakly) freer side
         float cy = 1.0f - ahead_;                            // free ahead → keep going; blocked ahead → turn in place
         const float n = std::sqrt(cx * cx + cy * cy);
         cx_ = n > 1e-6f ? nearest * cx / n : 0.0f;

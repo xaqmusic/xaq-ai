@@ -1,6 +1,6 @@
 # Porting the MicroDuck's autonomous layer to the PiCrawler
 
-**Status: S0 done (PR #39); S1 complete in the sim and verified at rest on the robot; S2 DONE 2026-10-11 (ledger "S2: THE SPEED SOCKET"): `speed_topic` and `goal_bearing_rezero_hold` on MotorEPMv2, the S2 config `…__room_senses__s2.json`, the speed table and the turn table measured. Open before S3: the stall signature on the robot, the walking odometry read, the camera mount, the separation study. S3 next.**
+**Status: S0 done; S1 complete in the sim, verified at rest on the robot; S2 done; S3a DONE 2026-10-11 (ledger "S3a: THE AVOID LOOP DRIVES THE GAIT"): form A lever 1 is `WORKING`, loud at n=6 — wall contact 0.53 → 0.008, coverage ×2, 0 falls. Form B deferred by the gate. Next: S3 lever 2 (stuck detector + escape by backing), then S4.**
 
 **What this decides.** How the exploration and wall-avoidance machinery built for the
 MicroDuck (branch `master`, `docs/plans-and-designs/microduck/`) becomes a level above the
@@ -228,7 +228,13 @@ clamp. Silent when no loop publishes.
 *Gate:* `speed 0` stands still with the belly up and the CPG running; `speed 1` is
 byte-identical to P-e·h0; the turn table from S1 reproduces through the socket.
 
-### S3. Wall avoidance, two forms, A/B'd in the room
+### S3. Wall avoidance, two forms, A/B'd in the room — form A lever 1 ✅ WORKING (2026-10-11)
+
+*ProxMemory → TofAvoidLoop (`side_min`) → BearingToIntent, config `…__room_senses__s3a.json`.
+Wall contact 0.53 → 0.008 of ticks, coverage 12.7 → 27.2 cells, path 3.7 → 6.2 m, 0 falls at
+n=6. Lever 2 (stuck + escape) is next; form B is deferred by the gate below, its re-use
+context recorded in the ledger.*
+
 
 **Form A, the reflex layer** (cheap; every module exists after S0):
 - A proximity-memory builder (new, small): the last 0.5 s of valid ranges stored in the
