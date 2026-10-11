@@ -8316,3 +8316,46 @@ start moved over the second around it; scoring only):**
 - **VM, the motion sensor vouches** (re-use of §17.103 M7 in today's stack; config `pvm`): MotionField between the cloud and the
   seek loop, a cloud sighting passing to the chase only with ray-traced motion evidence within 0.3 m in the last 0.6 s. M7 was
   `PARTIAL` (precision up, a third less chasing) before the slow train and the any-age follow.
+
+**Measured (n = 24 each, ST3's host args; the placebo `pp3`, the stack `pvmc` = VM + VC).** The chase's own record
+(`phantom_chase.py`), per run:
+
+| | ST3 `pghb` | placebo `pp3` | VC `pvc` | **VM `pvm`** | VM + VC `pvmc` |
+|---|---|---|---|---|---|
+| chases | 14.8 | 15.1 | 15.0 | 12.4 | 11.0 |
+| phantoms (share) | 8.3 (54 %) | 7.8 (51 %) | 8.2 (52 %) | **4.5 (37 %)** | 4.2 (38 %) |
+| phantom s (of it coasting) | 18.3 (10.2) | 14.3 (8.2) | **9.1 (3.3)** | 12.6 (8.5) | **2.5 (0.4)** |
+| real movers s · the train s | 44.5 · 42.1 | 53.4 · 49.6 | 41.2 · 40.2 | **52.8 · 49.5** | 40.9 · 40.0 |
+
+Paired against ST3: **VC** phantom s −9.2 [−15.2, −3.2], its coasting −6.9; real −3.3 (inside). **VM** phantoms −3.8
+[−5.4, −2.3], share −16.9 [−28.7, −5.1]; real +8.4 (inside; the placebo +8.9). The stack: phantom s −15.8 [−22.0, −9.7] —
+but against VM alone the real movers −11.9 [−25.2, +1.3] and the train −9.5. The cloud-candidate phantoms (decision 5) fall
+143 → 46 under the vouch; M1's (decision 7) stay (62 of 101). The heading on the real train is the same on every arm (median
+10°, > 90° on 6–7 % of updates).
+
+| vs placebo `pp3` | ST3 | VC | **VM** | VM + VC |
+|---|---|---|---|---|
+| boring % (25.2) | +0.7 | +0.9 | **−3.8*** | −2.4 |
+| skills touching % (17.4) | +5.1 | +5.9 | **+10.3*** | +4.1 |
+| stops at things % (66.8) | +3.8 | +0.9 | **+8.3*** | +2.3 |
+| walls / min (10.9) | −0.8 | +0.2 | −1.6 | **+3.8** |
+| moving train s · contacts | −3.4 · −0.9 | −3.9 · −0.9 | −1.8 · +0.4 | −7.9 · −0.4 |
+| interesting · outcomes observed % | +2.7 · +0.6 | −0.2 · −0.2 | +3.4 · −1.6 | +2.3 · −3.7 |
+| falls · skills | −0.5 · −0.5 | +0.3 · 0.0 | +0.2 · 0.0 | 0.0 · +1.8 |
+
+Traps, returns and the first minute (the green block: a skill at it 17/24, touched 11–12/24) tie on every arm.
+
+- **VM `WORKING`** — the false movers' starts fall by 46 % with the real chase intact, and what the duck does with its time
+  improves beyond the dice: less boring, more of its skills touching their thing, more of its stops at things (the phantom
+  chases had been pulling it off things). Preset **MV** (seed 7 from 140 s: the train chased from 156 s with the arrow along
+  the track; the red ball passed at 168–173 s with no false mover — in ST3 the arrow jumped to the green block there and slid
+  for 7 s). Config `a1v2_st3_vouch.json`.
+- **VC `WORKING` on its mechanism, `NULL` on the rest** — it halves the time on phantoms (the coasts are gone) and nothing
+  else moves.
+- **VM + VC `REGRESSION`** — under the vouch the chase's sightings are sparser, so real chases miss their confirmation and end
+  as stopped things: walls 10.9 → 14.7 a minute (across the seeds, not outliers), the train −8 s, the vouch's engagement gains
+  gone. Re-use: a confirmation counted from the vouched AND the unvouched sightings near the prediction (the vouch gates the
+  start, not the evidence), or VC on a stack without the vouch.
+- **Still open:** M1's promotions are now the largest phantom source (62 of 101 under VM: static targets whose fixes drift
+  while the body turns, 70 % phantom on every arm since M1); the coast's velocity overshoots the slow train (0.20 against
+  0.12 m/s on seed 7, 156 s); > 90° heading errors on 7 % of real updates.
