@@ -7034,3 +7034,36 @@ vocabulary bakes, nothing consumes.
 `ego_heading` / `odom` published from `BrainInputBuilder` via the same header), the camera's
 mount position, the separation study on the recorded senses, and the three actuator
 measurements (turn table, stall signature, reverse). Then S2, the speed socket.
+
+---
+
+### 2026-10-11 — S1 ROBOT HALF, FIRST PASS: THE ROOM PRESET'S SENSES RUN ON THE PI; ODOMETRY WAITS FOR ARMED SERVOS
+
+*Plan §4 S1, robot. Build: the merged tree (`7fcf4fc`) built natively on the Pi (`ogma_core`
+with the MicroDuck modules, ~45 min at `-j2`, no errors; `test_hw` passes). Host: `ogma_host
+--odom [--odom-scale] --vel-ego` (ogma::body::DeadReckon, the sim's integrator, on `stride_v`
+under the gyro's unwrapped yaw); the dash passes `--range --camera --odom --vel-ego` from a
+config's `body_env`, as the sim reads the same keys. Verdict: `IN_FLIGHT` — three of four
+channels verified live; odometry built, not yet observed on the robot.*
+
+**The read-only check** (`ogma_host --config …__room_senses.json --imu --brain-inputs --range
+--camera --odom --vel-ego`, 1500 ticks, no `--actuate`; benchd in bench mode; the senses
+service stopped for the run and restarted after). Nothing moved.
+
+| channel | on the robot |
+|---|---|
+| `sense.range` | up, 99 pings per 250 ticks ≈ 20 Hz, 0 timeouts |
+| `sense.camera` | up, 63 frames per 250 ticks ≈ 12.6 fps (15 target), mean luma 99 |
+| `epm_range` / `epm_vision` / `epm_place` | in the graph; the range vocabulary holds nodes within 150 ticks (probe on the control port) |
+| `odom`, `place_in`, `ego_heading`, `vel_ego` | **not observed**: they ride the brain-input path, and the builder withheld all 1500 ticks because every servo read 0 µs (benchd in bench mode, no pose set). The 0-µs guard is deliberate ("its angle is unknown"); the dash's run flow sets a pose first |
+| host tick cost, all senses on | wall p50 0.15–0.4 % of the 20 ms budget, p95 < 1 % (`host_cost`); 0 overruns in three of four runs. One run showed a 57-overrun burst between ticks 500 and 750 with p95 still < 1 %: a stall, not load — suspect the camera pipe's start. Re-measure in the dash flow |
+
+**What verifies the odometry:** any run with commanded servos — a held pose on the bench, or
+the room preset picked in the dash on the floor (which also exercises the integrator
+walking). The first-tick odom must read 0 and `place_in` [0, 0, 1, 0]; a walk's `odom.x`
+should grow at ~0.75–0.9 of the ground covered (the sim's read). Both are the operator's call
+because either arms the servos.
+
+**Also noted:** 45 sequence gaps in 1234 state-feed frames over 1500 ticks (189 ticks stale)
+with nothing else running — the feed's own cadence, to read beside the robot's known step rate
+before trusting any per-tick odometry number.
