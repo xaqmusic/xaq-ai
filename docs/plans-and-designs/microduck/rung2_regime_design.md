@@ -8359,3 +8359,14 @@ Traps, returns and the first minute (the green block: a skill at it 17/24, touch
 - **Still open:** M1's promotions are now the largest phantom source (62 of 101 under VM: static targets whose fixes drift
   while the body turns, 70 % phantom on every arm since M1); the coast's velocity overshoots the slow train (0.20 against
   0.12 m/s on seed 7, 156 s); > 90° heading errors on 7 % of real updates.
+
+**★ MV PROMOTED (the operator's eye, 2026-10-11): "MV is promoted."** The stack is now ★ E4 + ST3's navigation levers
+(§17.117: `--seek-gate-near 0.15 --detour 0.15 --detour-commit --detour-reopen 0.5 --detour-stand-down --detour-back-s 0.5
+--kick-head-home --seek-gate-range 0.15 --seek-gate-hyst 0.1`) on config `a1v2_st3_vouch.json` (ST3's brain + MotionField's
+vouch). Launcher first row. The open items above (M1's drifting fixes, the coast's overshoot, the real train's > 90° heading
+updates) are the chase's next levers.
+
+**The viewer's camera (same day, the operator: "the camera shakes with the walking motion ... right mouse drag does not work since
+the camera is tied to the robot's center").** The look-at point now eases toward the trunk (0.5 s of run time) and a right-drag
+pan is kept as an offset that rides with the duck; `O` recentres (`tools/duck_viewer/view.py` `CameraFollow`). The operator:
+"the camera works well."

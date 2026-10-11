@@ -1,6 +1,6 @@
 {
     "metadata": {
-        "name": "MV \u00b7 ST3's brain + the motion sensor vouches for a mover (\u00a717.118)",
+        "name": "\u2605 MV \u00b7 ST3's brain + the motion sensor vouches for a mover (\u00a717.118, promoted 2026-10-11)",
         "description": "\u00a717.118 (re-use of \u00a717.103 M7): MotionField between CloudMap and the seek loop; a cloud mover sighting reaches the chase only with ray-traced motion evidence (a return where a remembered ray just passed) within 0.3 m in the last 0.6 s. Run with ST3's host args.",
         "env_target": "microduck",
         "phase_tag": "things phase, O54",

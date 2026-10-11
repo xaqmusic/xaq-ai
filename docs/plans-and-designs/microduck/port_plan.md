@@ -20,6 +20,16 @@
 
 ## ▶ Resume here
 
+**2026-10-11: ★ MV promoted — navigation and telling what moves.** Since ★ M2: ★ L1 / ★ P2 (the saccade look, no pause),
+★ E4 (2026-10-10: sit on a stall, then look and walk out). Then design doc §17.116 (places: the place map never forgets; the
+memory levers NULL against a placebo arm — the lesson: on the duck, ±1 trap a run needs a placebo beside the base), §17.117
+(first-time traps met by perception on the approach: the turn-in-reverse detour, its stand-down at things, the reverse leg
+capped; the kick's head-pitch bug fixed; the approach's forward/back dither traced to the seek gate's sector choice and damped by
+range and hysteresis — ST3) and §17.118 (half of all chases were false movers since the chase began; MotionField's vouch cuts
+them by half with the real chase intact, and the walk spends more of its time at things). ★ MV = ST3 + the vouch, launcher first
+row. The viewer's camera now eases after the duck and keeps a pan. **Open:** M1's drifting static fixes (now the main false
+mover), the coast's velocity overshoot, ~2.3 fewer skills a run than ★ E4's placebo (since the detour family, §17.117).
+
 **2026-10-09 (late): the body under the chase.** The walking policy delivers ~45 % of its forward command in plain MuJoCo (0.155
 m/s at 0.35 on the open floor) and turns 0.6–1.1 rad/s while walking at yaw 1.0–1.5. BAM (Rhoban's XL330 m6, the model Pollen
 trains with) is ported (`--bam`) and validated, and changes neither: the XML actuator already had its stiffness. A1 (the ambush)
