@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2 control \u00b7 the head brain restored from H1, prior OFF (the walker's own head, gain 0)",
-  "description": "The A/B control for H2: the head brain's identified state restored from H1's standing babble (--load-head), no babble, no prior \u2014 the head brain outputs zero and the walker handles its head as in R30. motor_gain 0: the controller matrix starts as an identity on the position slots (y = the sensed head position), so an idle head brain holds the babble's last pose; gain 0 makes the command exactly zero \u2014 R30's own head \u2014 while the brain observes.",
-  "launcher_rank": 0
+  "description": "The A/B control for H2: the head brain's identified state restored from H1's standing babble (--load-head), no babble, no prior \u2014 the head brain outputs zero and the walker handles its head as in R30. motor_gain 0: the controller matrix starts as an identity on the position slots (y = the sensed head position), so an idle head brain holds the babble's last pose; gain 0 makes the command exactly zero \u2014 R30's own head \u2014 while the brain observes."
  },
  "description": "H2 control \u00b7 the head brain restored from H1, prior OFF (the walker's own head, gain 0)",
  "modules": [

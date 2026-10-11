@@ -4,7 +4,6 @@
   "description": "Ten-minutes phase S1b: T1 (small needs a seen top) + the line on a seen wall; run with host --tof-free-rays --stop-is-still.",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout — the level-2 body; alpha_stand rescues falls"
   ]

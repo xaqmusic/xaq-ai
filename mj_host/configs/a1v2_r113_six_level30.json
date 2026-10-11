@@ -4,7 +4,6 @@
   "description": "a1v2_r113_six_h + a prior on the head's attitude (state 9 roll, 10 pitch -> 0 = level) at precision 3.0 against the speed prior's 1: the speed prior leans the head (its tonic through head pitch's authority over forward speed), the level prior brings it home; where their weighted gradients balance is the trade. The lean should ride on acceleration, the head level at a steady pace.",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

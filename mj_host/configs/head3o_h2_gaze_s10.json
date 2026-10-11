@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/3 the learned gaze + the per-tick step 1.0",
-  "description": "H2/3 the learned gaze + the MODEL-IMPLIED STEP at gain 1.0 as its proportional term: each tick the least-squares command over the prior's rows of the identified model (level pitch, level roll, the gaze error; weighted by state_prior_weights) is added pre-tanh -- proportional, bounded by the model rather than grown by a descent; the gaze stays a pure reach in its descent, yaw last, the level priors' descent masked to pitch and roll",
-  "launcher_rank": 0
+  "description": "H2/3 the learned gaze + the MODEL-IMPLIED STEP at gain 1.0 as its proportional term: each tick the least-squares command over the prior's rows of the identified model (level pitch, level roll, the gaze error; weighted by state_prior_weights) is added pre-tanh -- proportional, bounded by the model rather than grown by a descent; the gaze stays a pure reach in its descent, yaw last, the level priors' descent masked to pitch and roll"
  },
  "description": "H2/3 the learned gaze + the MODEL-IMPLIED STEP at gain 1.0 as its proportional term: each tick the least-squares command over the prior's rows of the identified model (level pitch, level roll, the gaze error; weighted by state_prior_weights) is added pre-tanh -- proportional, bounded by the model rather than grown by a descent; the gaze stays a pure reach in its descent, yaw last, the level priors' descent masked to pitch and roll",
  "modules": [

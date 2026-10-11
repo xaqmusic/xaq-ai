@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/3 yaw last, NO gaze (the control)",
-  "description": "H2/3 yaw last, the gaze prior at weight 0: the CONTROL for the learned gaze -- the same head brain (three motors, level priors masked to pitch and roll, the yaw's hold released: the yaw sits home)",
-  "launcher_rank": 0
+  "description": "H2/3 yaw last, the gaze prior at weight 0: the CONTROL for the learned gaze -- the same head brain (three motors, level priors masked to pitch and roll, the yaw's hold released: the yaw sits home)"
  },
  "description": "H2/3 yaw last, the gaze prior at weight 0: the CONTROL for the learned gaze -- the same head brain (three motors, level priors masked to pitch and roll, the yaw's hold released: the yaw sits home)",
  "modules": [

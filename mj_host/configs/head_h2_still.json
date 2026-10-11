@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2 still \u00b7 the head brain restored from H1, prior: head gravity x,y -> 0 AND head gyro x,y -> 0",
-  "description": "H2b: level and still. As H2a plus load slots 15,16 = head gyro x,y (0.3 rad/s to unit), target 0.",
-  "launcher_rank": 0
+  "description": "H2b: level and still. As H2a plus load slots 15,16 = head gyro x,y (0.3 rad/s to unit), target 0."
  },
  "description": "H2 still \u00b7 the head brain restored from H1, prior: head gravity x,y -> 0 AND head gyro x,y -> 0",
  "modules": [

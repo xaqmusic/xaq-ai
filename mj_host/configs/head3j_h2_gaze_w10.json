@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/3 the learned gaze \u00b7 gaze precision 1.0",
-  "description": "H2/3 the LEARNED GAZE (2026-10-01): head2_h2_level_slow on three motors (head pitch, head yaw, head roll; neck held at zero), restored from head3j_gaze_h1_s2 (H1/3 at the joints with the gaze error fed), the model frozen as identified; priors: the head level (load slots 0, 1 = state 9, 10) and the GAZE ERROR (load slot 11 = state -1, the direction the walk is going minus the head's yaw; host --head-gaze-sense) -> 0 at precision 1.0. The head turns to look where the walk is going through the authority H1 found, not by a reflex.",
-  "launcher_rank": 0
+  "description": "H2/3 the LEARNED GAZE (2026-10-01): head2_h2_level_slow on three motors (head pitch, head yaw, head roll; neck held at zero), restored from head3j_gaze_h1_s2 (H1/3 at the joints with the gaze error fed), the model frozen as identified; priors: the head level (load slots 0, 1 = state 9, 10) and the GAZE ERROR (load slot 11 = state -1, the direction the walk is going minus the head's yaw; host --head-gaze-sense) -> 0 at precision 1.0. The head turns to look where the walk is going through the authority H1 found, not by a reflex."
  },
  "description": "H2/3 the LEARNED GAZE (2026-10-01): head2_h2_level_slow on three motors (head pitch, head yaw, head roll; neck held at zero), restored from head3j_gaze_h1_s2 (H1/3 at the joints with the gaze error fed), the model frozen as identified; priors: the head level (load slots 0, 1 = state 9, 10) and the GAZE ERROR (load slot 11 = state -1, the direction the walk is going minus the head's yaw; host --head-gaze-sense) -> 0 at precision 1.0. The head turns to look where the walk is going through the authority H1 found, not by a reflex.",
  "modules": [

@@ -4,7 +4,6 @@
   "description": "Ten-minutes phase S1: ★ TURN + small_needs_top -- a cluster is small only once a ray has passed over its top (needs host --tof-free-rays).",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout — the level-2 body; alpha_stand rescues falls"
   ]

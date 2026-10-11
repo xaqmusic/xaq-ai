@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/2 level \u00b7 restored from H1/2, prior: head roll, pitch -> 0 on two motors",
-  "description": "The head loop on TWO motors \u2014 head_pitch and head_roll \u2014 with neck_pitch and head_yaw held at zero (2026-09-10, after H2 on four motors wound every command to its rail: the two pitch joints are a redundant pair whose null space, neck up + head down, the sensor cannot see, and the prior's bias drifted into it). Load slots as head_h1: roll, pitch, down-shortfall | head gyro x,y,z | trunk gravity x,y | trunk gyro x,y,z | spare; with motor_dim 2 the load rows start at 6, so the level prior is state_prior_indices [6, 7]. H2: babble 0, state_prior on load slots 6,7 (roll, pitch) -> 0, gain 1, lr 0.1.",
-  "launcher_rank": 0
+  "description": "The head loop on TWO motors \u2014 head_pitch and head_roll \u2014 with neck_pitch and head_yaw held at zero (2026-09-10, after H2 on four motors wound every command to its rail: the two pitch joints are a redundant pair whose null space, neck up + head down, the sensor cannot see, and the prior's bias drifted into it). Load slots as head_h1: roll, pitch, down-shortfall | head gyro x,y,z | trunk gravity x,y | trunk gyro x,y,z | spare; with motor_dim 2 the load rows start at 6, so the level prior is state_prior_indices [6, 7]. H2: babble 0, state_prior on load slots 6,7 (roll, pitch) -> 0, gain 1, lr 0.1."
  },
  "description": "H2/2 level \u00b7 restored from H1/2, prior: head roll, pitch -> 0 on two motors",
  "modules": [

@@ -4,7 +4,6 @@
   "description": "\u2605 BIRD's walker with the HEADING prior as a pure reach (its feedback descent at weight 0, its tonic kept; precision 1.0): the walker's yaw row of C doubled in 300 s on large, step-like errors and the yaw limit-cycled at ~1 Hz (\u00a717.91) -- the gaze's cure (\u00a717.90) applied to the heading",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

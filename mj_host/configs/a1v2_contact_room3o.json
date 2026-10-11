@@ -4,7 +4,6 @@
   "description": "a1v2_contact_room6 on the twist only: the control identification for the translation arm, by the same recipe (600 s open, 600 s in the 2 m room).",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

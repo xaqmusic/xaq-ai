@@ -4,7 +4,6 @@
   "description": "\u2605 GAZE's walker on the linear yaw with the FORWARD-SPEED prior's target scaled by the heading error (state_prior_target_gated_by: 1 - |error| / its own running RMS) -- full speed asked for while the target is ahead, none once the error reaches its typical size: the walk slows and turns in place to face a thing instead of carrying its turn into the arrival, where the kick and peck fire straight ahead (\u00a717.92: the linear yaw arrived turning, the thing 61 deg off the nose at the skill against 41-46)",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

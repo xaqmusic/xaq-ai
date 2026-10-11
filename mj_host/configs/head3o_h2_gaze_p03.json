@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/3 the learned gaze + proportional 0.03",
-  "description": "H2/3 the learned gaze + a PROPORTIONAL term: the gaze prior's feedback (C) descent at weight 0.03 beside its tonic (a reach that can also earn a gain on its own error, now that the level tonic no longer drives yaw); yaw last, the level priors masked to pitch and roll, the yaw's hold released",
-  "launcher_rank": 0
+  "description": "H2/3 the learned gaze + a PROPORTIONAL term: the gaze prior's feedback (C) descent at weight 0.03 beside its tonic (a reach that can also earn a gain on its own error, now that the level tonic no longer drives yaw); yaw last, the level priors masked to pitch and roll, the yaw's hold released"
  },
  "description": "H2/3 the learned gaze + a PROPORTIONAL term: the gaze prior's feedback (C) descent at weight 0.03 beside its tonic (a reach that can also earn a gain on its own error, now that the level tonic no longer drives yaw); yaw last, the level priors masked to pitch and roll, the yaw's hold released",
  "modules": [

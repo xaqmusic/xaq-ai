@@ -4,7 +4,6 @@
   "description": "the walk that faces its thing, GEOMETRIC: the forward-speed target x max(0, cos(heading error))^1 -- the speed that closes on the target (walking at angle e off the nose closes at v cos e); fixed geometry instead of the self-tightening RMS form, which shuffled in place (the error's RMS shrank 65 -> 35 deg and halved the speed at 18 deg)",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

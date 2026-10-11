@@ -4,7 +4,6 @@
   "description": "a1v2_contact_room4t with 3 s babble pulses (babble_hold 150, from 300): for the walker identified on the LINEARIZED yaw motor (host --yaw-linearize: the yaw command a desired rate up to 1 rad/s), a full pulse turns the body at most ~3 rad, inside the heading sense's +-pi (\u00a717.91: at range 3 with 6 s pulses the heading authority identified with the wrong sign)",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

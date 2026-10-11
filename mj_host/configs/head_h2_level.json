@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2 level \u00b7 the head brain restored from H1, prior: head gravity x,y -> 0 (level)",
-  "description": "H2a: the level prior. Restored from H1 (--load-head), no babble; state_prior on load slots 12,13 = head roll, pitch, target 0 (the head level), gain 1, lr 0.1 as R22's twist prior.",
-  "launcher_rank": 0
+  "description": "H2a: the level prior. Restored from H1 (--load-head), no babble; state_prior on load slots 12,13 = head roll, pitch, target 0 (the head level), gain 1, lr 0.1 as R22's twist prior."
  },
  "description": "H2 level \u00b7 the head brain restored from H1, prior: head gravity x,y -> 0 (level)",
  "modules": [

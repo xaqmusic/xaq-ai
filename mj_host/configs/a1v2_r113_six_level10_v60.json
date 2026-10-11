@@ -4,7 +4,6 @@
   "description": "a1v2_r113_six_level10.json with the forward-speed prior's target at 0.6 of range instead of 0.75 (0.30 m/s): at 0.75 the vx command sits at its rail on half to two thirds of walking ticks while the walk reaches ~0.2 m/s, so the speed error never closes and the head (the only actuator left with authority over speed) carries it for good -- mid-ranging needs the slow actuator able to carry the steady load. A PROBE of the mechanism with a set target; the doctrine-clean form adapts the target from the body's own achieved speed.",
   "env_target": "microduck",
   "phase_tag": "things phase, O54",
-  "launcher_rank": 1107,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
   ]

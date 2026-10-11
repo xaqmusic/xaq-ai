@@ -1,8 +1,7 @@
 {
  "metadata": {
   "name": "H2/2 level, slow prior, model LEARNING \u00b7 the model keeps predicting while walking (model_lr 0.02, state_model_lr 0.05)",
-  "description": "F1 (2026-09-10, operator: be as predictive as possible, do not rely on the frozen model): as R33 but the model learns on (model_lr 0.02, state_model_lr 0.05, babble_owns_a 0). The earlier closed-loop drift happened with the fast prior at the rails; with the slow prior the rails are hit less. Judged on level, gyro, and the brain-frame difference against R33.",
-  "launcher_rank": 0
+  "description": "F1 (2026-09-10, operator: be as predictive as possible, do not rely on the frozen model): as R33 but the model learns on (model_lr 0.02, state_model_lr 0.05, babble_owns_a 0). The earlier closed-loop drift happened with the fast prior at the rails; with the slow prior the rails are hit less. Judged on level, gyro, and the brain-frame difference against R33."
  },
  "description": "H2/2 level, slow prior, model LEARNING \u00b7 the model keeps predicting while walking (model_lr 0.02, state_model_lr 0.05)",
  "modules": [
