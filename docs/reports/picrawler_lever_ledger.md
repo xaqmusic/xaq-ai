@@ -7067,3 +7067,16 @@ because either arms the servos.
 **Also noted:** 45 sequence gaps in 1234 state-feed frames over 1500 ticks (189 ticks stale)
 with nothing else running — the feed's own cadence, to read beside the robot's known step rate
 before trusting any per-tick odometry number.
+
+**Addendum, 2026-10-11 (the operator's call: the stand pose held on the bench).** With
+`pose_hold.py stand` feeding the deadman (12 servos armed, 0.22 A at 8.1 V on the bench
+supply), the same read-only run published **1500/1500 ticks, 0 withheld, 0 overruns**, 11 seq
+gaps in 1471 state-feed frames. The odometry at rest: `odom` stayed at |x|, |y| ≤ 0.1 mm and
+yaw drifted 0.0005 rad over 30 s (the gyro's converged bias); `vel_ego` equalled `stride_v`
+sample for sample (≤ 1 mm/s of noise); `upright` 0.9997. All three instrument EPMs baked
+their first nodes (range 2/2, camera 6 nodes 1 baked as the bench scene drifted, place 2/2).
+Verdict on the four channels: **`WORKING` as instruments on the robot.** What remains for
+the odometry is the walking read (the room preset from the dash, on battery): `odom.x` at
+~0.75–0.9 of ground covered, as in the sim. Noted in passing: in `stand` on the bench only
+`fl` and `rr` read FSR contact (≥ 200 counts) — the FSR threshold against this pose, to read
+before any consumer leans on four-foot contact.

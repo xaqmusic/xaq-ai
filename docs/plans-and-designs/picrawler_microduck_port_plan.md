@@ -1,6 +1,6 @@
 # Porting the MicroDuck's autonomous layer to the PiCrawler
 
-**Status: reviewed by the operator 2026-10-10; S0 done (master merged, PR #39). S1's SIM HALF IS COMPLETE (ledger 2026-10-10, two entries): the ultrasonic model, the room, the camera at the robot's format, dead-reckoned odometry, honest vel_ego, and the preset `…__nohomeo__room_senses.json` that assembles them instrument-only in the launcher. Open in S1: the robot half, the camera mount, the separation study, the actuator measurements.**
+**Status: reviewed by the operator 2026-10-10; S0 done (master merged, PR #39). S1's SIM HALF IS COMPLETE (ledger 2026-10-10, two entries): the ultrasonic model, the room, the camera at the robot's format, dead-reckoned odometry, honest vel_ego, and the preset `…__nohomeo__room_senses.json` that assembles them instrument-only in the launcher. The ROBOT HALF's first pass is done (ledger 2026-10-11): range, camera, odometry and honest vel_ego publish on the Pi from the same preset, verified at rest on the bench. Open in S1: the walking odometry read on the floor, the camera mount, the separation study, the actuator measurements.**
 
 **What this decides.** How the exploration and wall-avoidance machinery built for the
 MicroDuck (branch `master`, `docs/plans-and-designs/microduck/`) becomes a level above the
