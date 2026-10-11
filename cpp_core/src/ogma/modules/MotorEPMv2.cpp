@@ -810,6 +810,12 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"goal_bearing_topic", ParamMutability::ConstructionOnly,
          "L1 NAV SETPOINT. ProprioToken [vx,vy], an EGOCENTRIC unit vector (vy = forward) naming where the nav layer wants to go; atan2(vx,vy) becomes the heading PD's bearing error. Empty (default) = the PD holds the spawn bearing exactly as before = BYTE-IDENTICAL. Deliberately NOT nav_topic: nav_on gates the whole heading PD off (P and D) plus the forward facing gate, which discards the variance collapse the PD exists for.",
          ParamValue{std::string("")}},
+        {"speed_topic", ParamMutability::ConstructionOnly,
+         "S2 OF THE MICRODUCK PORT: THE SPEED SOCKET. ProprioToken [s], s in [-1, 1], scaling the FORWARD THRUST (the propulsion term of the hip1 stroke only; the steer differential and the heading hold are untouched, so turning stays authoritative at any speed). Empty (default) or never published = 1.0 = byte-identical. 0 = no propulsion (the gait's other terms still run: stepping in place is what to watch for). Negative = REVERSE: the stroke runs the other way. With goal_bearing_topic this completes the level-1 intent boundary the duck's loops drive: [bearing, speed] in, the gait out. Consumer check: speed_msgs.",
+         ParamValue{std::string("")}},
+        {"goal_bearing_rezero_hold", ParamMutability::HotMutable,
+         "With a goal_bearing message, re-zero the heading hold's integrator (heading_bearing_) so that if the loop goes silent the PD holds the heading the body HAS rather than the spawn's. The integrator clamps at +/-2 turns and the robot never sends events.reset, so an hour of right turns would otherwise rail it (port plan trap T4). 0 = legacy, byte-identical; 1 = on. No effect without goal_bearing messages.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"couple_prec_gain", ParamMutability::HotMutable,
          "PRECISION-WEIGHT the Kuramoto neighbour average by each neighbour's OWN prediction error: w_j = (amp_j/(tle_j+eps))^k, L1-normalised. 0 = the legacy uniform mean over the other legs (byte-identical). 1 = the LateralVoter's plain 1/(tle+eps) trust, one layer down: a leg pulls toward its neighbours in proportion to how well each of THEM predicts itself, so a flailing leg stops dragging the other three. NEGATIVE = the wrong-sign control arm (trust the leg that predicts itself WORST). k is a sharpness exponent, not a scale: the normalised weights are invariant to a common factor on the precisions, so nothing here is tuned to the residual's magnitude.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
@@ -1259,6 +1265,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["heading_trim_leak"] = heading_trim_leak_;
     m["c_pair_init"] = c_pair_init_;
     m["goal_bearing_topic"] = ParamValue{goal_bearing_topic_};
+    m["speed_topic"] = ParamValue{speed_topic_};
+    m["goal_bearing_rezero_hold"] = goal_bearing_rezero_hold_;
     m["couple_prec_gain"] = couple_prec_gain_;
     m["phase_joint"]      = int64_t(phase_joint_);
     m["rhythm_gains"]     = rhythm_gains_;
@@ -1464,6 +1472,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "heading_trim_leak", [&](auto const& v){ heading_trim_leak_ = get_double(v, "heading_trim_leak"); });
     apply_param(params, "c_pair_init", [&](auto const& v){ c_pair_init_ = get_double(v, "c_pair_init"); });
     apply_param(params, "goal_bearing_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) goal_bearing_topic_ = *p; });
+    apply_param(params, "speed_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) speed_topic_ = *p; });
+    apply_param(params, "goal_bearing_rezero_hold", [&](auto const& v){ goal_bearing_rezero_hold_ = get_double(v, "goal_bearing_rezero_hold"); });
     apply_param(params, "couple_prec_gain", [&](auto const& v){ couple_prec_gain_ = get_double(v, "couple_prec_gain"); });
     apply_param(params, "phase_joint",   [&](auto const& v){ phase_joint_   = int(get_int(v, "phase_joint")); });
     apply_param(params, "rhythm_gains",   [&](auto const& v){ rhythm_gains_   = get_double_vec(v, "rhythm_gains"); });
@@ -1783,6 +1793,10 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(goal_bearing_topic_, SubscriptionKind::Direct,
             [this](std::string_view, MessagePtr p){ handle_goal_bearing(p); }));
     }
+    if (!speed_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(speed_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_speed(p); }));
+    }
     if (!cpg_phase_topic_.empty())
         sub_ids_.push_back(bus_->subscribe(
             cpg_phase_topic_, SubscriptionKind::Direct,
@@ -1960,6 +1974,18 @@ void MotorEPMv2::handle_goal_bearing(MessagePtr payload) {
     gb_y_ = pt->values[1];
     gb_seen_ = true;
     ++gb_msgs_;
+    // The loop owns the heading now; the hold re-anchors to the body's current heading so a
+    // later silence holds THIS heading, not the spawn's.  Off by default (see the param).
+    if (goal_bearing_rezero_hold_ > 0.0) heading_bearing_ = 0.0f;
+}
+
+void MotorEPMv2::handle_speed(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt || pt->values.size() < 1) return;
+    speed_cmd_  = std::clamp(pt->values[0], -1.0f, 1.0f);
+    speed_seen_ = true;
+    ++speed_msgs_;
 }
 
 void MotorEPMv2::handle_nav(MessagePtr payload) {
@@ -5667,7 +5693,10 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // of contacting.  Gating advance to alignment tightens the spiral into a
             // hit.  A small floor keeps it from freezing (no new stall).  steer_eff
             // is NOT gated — turning stays authoritative when off-target.
-            float fwd = nav_on ? std::clamp(0.25f + 0.75f * tc_y_, 0.0f, 1.0f) : 1.0f;
+            // S2: the speed socket scales the same thrust.  Never published => the 1.0f
+            // literal => BYTE-IDENTICAL.  Negative = reverse (the stroke runs the other way).
+            float fwd = nav_on ? std::clamp(0.25f + 0.75f * tc_y_, 0.0f, 1.0f)
+                               : (speed_seen_ ? speed_cmd_ : 1.0f);
             // Skid-steer: the steer differential modulates each leg's stroke
             // MAGNITUDE per side (inside sgn), so left/right thrust DIFFERS → the
             // body yaws.  (Was `sgn*stroke + side*steer`: since stroke_signs == the
@@ -6460,6 +6489,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["heading_trim"] = double(heading_trim_);   // consumer check for the I term
     mod["goal_bearing_msgs"] = double(gb_msgs_);
     mod["goal_bearing_err"]  = gb_seen_ ? double(std::atan2(gb_x_, gb_y_) * 0.318309886f) : 0.0;
+    mod["speed_msgs"] = double(speed_msgs_);      // 0 with speed_topic set = publisher never fired
+    mod["speed_cmd"]  = speed_seen_ ? double(speed_cmd_) : 1.0;
     mod["couple_w_spr"]  = cw_n_ ? cw_spr_acc_ / double(cw_n_) : 0.0;
     mod["couple_w_mean"] = cw_n_ ? 1.0 : 0.0;   // 0 = never evaluated (k=0, or coupling off)
     // ★ INTRA-LEG COORDINATION (2026-08-03).  The operator observed, for the first time,
@@ -6855,6 +6886,8 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["panic_eff"]        = double(panic_) * panic_strength_;
     j["goal_bearing_msgs"] = double(gb_msgs_);
     j["goal_bearing_err"]   = gb_seen_ ? double(std::atan2(gb_x_, gb_y_) * 0.318309886f) : 0.0;
+    j["speed_msgs"]         = double(speed_msgs_);
+    j["speed_cmd"]          = speed_seen_ ? double(speed_cmd_) : 1.0;
     j["couple_w_spr"]     = cw_n_ ? cw_spr_acc_ / double(cw_n_) : 0.0;
     j["couple_w_mean"]    = cw_n_ ? 1.0 : 0.0;
     {

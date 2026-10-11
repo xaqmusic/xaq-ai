@@ -1658,6 +1658,14 @@ var _odom_err_m: float = 0.0                    # INSTRUMENT: |odom - truth| in 
 # ---- HONEST vel_ego (S1): stride_v in place of the world-velocity soft oracle ----------
 # The ledger named vel_ego as the one topic to swap to make PlayLoop / PlaceNav legal.
 @export var honest_vel_ego: bool = false        # OGMA_PICRAWLER_HONEST_VEL_EGO=1
+# ---- S2 SCAFFOLDS: a constant speed command and a constant body-relative goal bearing ----
+# Both are SCAFFOLDS, named as such: they stand in for the level-2 loops so the two sockets of
+# the level-1 intent boundary (speed_topic, goal_bearing_topic) can be measured before the
+# thing that will drive them exists.  A constant body-relative bearing of +45 deg means "keep
+# turning": the steady yaw rate it produces is the turn table's entry for that error.  Off
+# unless the env is set; the config must name the topics for either to reach the gait.
+@export var speed_cmd_scaffold: float = NAN      # OGMA_PICRAWLER_SPEED_CMD=<-1..1>
+@export var goal_bearing_scaffold_deg: float = NAN   # OGMA_PICRAWLER_GOAL_BEARING_DEG=<deg, + = to body +X>
 var _dbg_contact_swing: float = 0.0   # TRUE swing fraction from the foot-contact sensor
 var _dbg_fk_cmd_err: float = 0.0      # mean |commanded-FK − achieved-FK| foot height (m)
 var _dbg_fk_valid_err: float = 0.0    # mean |measured-FK − achieved-pose| = FK wiring check
@@ -3263,6 +3271,10 @@ func _ready() -> void:
 		print("PicrawlerBody: ODOM ON — reality.proprio.odom [x, y, yaw] + place_in [x/%.1f, y/%.1f, cos, sin] from stride_v and ego_heading" % [odom_scale_m, odom_scale_m])
 	if honest_vel_ego:
 		print("PicrawlerBody: HONEST vel_ego ON — [stride_v.x, stride_v.y] replaces the world-velocity soft oracle")
+	if not is_nan(speed_cmd_scaffold):
+		print("PicrawlerBody: S2 SCAFFOLD — constant speed command %.2f on reality.proprio.speed_cmd" % speed_cmd_scaffold)
+	if not is_nan(goal_bearing_scaffold_deg):
+		print("PicrawlerBody: S2 SCAFFOLD — constant body-relative goal bearing %.1f deg on reality.proprio.goal_bearing" % goal_bearing_scaffold_deg)
 	brain.register_source("Upright", "reality.proprio.upright",
 		"float32[1]: chassis up-vector alignment with gravity (1 = upright, 0 = on its side, -1 = inverted) from the IMU. Gates keyframe baking on posture validity (don't learn from a flipped body).", true)
 	# 2026-06-01 Stage 3.A — per-servo torque proprio. Normalized to [-1, 1]
@@ -3617,7 +3629,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
 			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
-			  "OGMA_PICRAWLER_HONEST_VEL_EGO"]:
+			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3658,6 +3670,8 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_ODOM":              publish_odom      = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ODOM_SCALE":        odom_scale_m      = maxf(0.1, v.to_float())
 			"OGMA_PICRAWLER_HONEST_VEL_EGO":    honest_vel_ego    = (v != "0" and v != "")
+			"OGMA_PICRAWLER_SPEED_CMD":         speed_cmd_scaffold = clampf(v.to_float(), -1.0, 1.0)
+			"OGMA_PICRAWLER_GOAL_BEARING_DEG":  goal_bearing_scaffold_deg = v.to_float()
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -6815,6 +6829,16 @@ func _step_one() -> void:
 		it.append(intent_fwd)
 		it.append(intent_yaw)
 		brain.publish_proprio(it, "motor_intent")
+	# ---- S2 SCAFFOLDS (see the state block): a constant speed, a constant body bearing ----
+	if not is_nan(speed_cmd_scaffold):
+		var sc := PackedFloat64Array()
+		sc.append(speed_cmd_scaffold)
+		brain.publish_proprio(sc, "speed_cmd")
+	if not is_nan(goal_bearing_scaffold_deg):
+		var gbs := PackedFloat64Array()
+		gbs.append(sin(deg_to_rad(goal_bearing_scaffold_deg)))   # vx: + = body +X
+		gbs.append(cos(deg_to_rad(goal_bearing_scaffold_deg)))   # vy: forward
+		brain.publish_proprio(gbs, "goal_bearing")
 	brain.publish_proprio(imu, "imu")
 
 	# ---- 2026-08-23 — TRUE 3-AXIS GYRO (a new sensor, not a new metric) -------------------

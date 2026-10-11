@@ -1,6 +1,6 @@
 # Porting the MicroDuck's autonomous layer to the PiCrawler
 
-**Status: reviewed by the operator 2026-10-10; S0 done (master merged, PR #39). S1's SIM HALF IS COMPLETE (ledger 2026-10-10, two entries): the ultrasonic model, the room, the camera at the robot's format, dead-reckoned odometry, honest vel_ego, and the preset `…__nohomeo__room_senses.json` that assembles them instrument-only in the launcher. The ROBOT HALF's first pass is done (ledger 2026-10-11): range, camera, odometry and honest vel_ego publish on the Pi from the same preset, verified at rest on the bench. Open in S1: the walking odometry read on the floor, the camera mount, the separation study, the actuator measurements.**
+**Status: S0 done (PR #39); S1 complete in the sim and verified at rest on the robot; S2 DONE 2026-10-11 (ledger "S2: THE SPEED SOCKET"): `speed_topic` and `goal_bearing_rezero_hold` on MotorEPMv2, the S2 config `…__room_senses__s2.json`, the speed table and the turn table measured. Open before S3: the stall signature on the robot, the walking odometry read, the camera mount, the separation study. S3 next.**
 
 **What this decides.** How the exploration and wall-avoidance machinery built for the
 MicroDuck (branch `master`, `docs/plans-and-designs/microduck/`) becomes a level above the
@@ -192,22 +192,29 @@ single beam cannot separate left from right, S5 (the camera) moves ahead of S3's
 form.
 
 **The actuator measurements** ("find the actuator first", the ledger's most repeated NULL):
-- The open-loop turn table: step `goal_bearing` to ±15°, ±45°, ±90°, ±180° and record the
-  yaw rate and settling time. The rectified differential loses about half the commanded
+- ✅ **Measured 2026-10-11** (`turntable.py`, ledger S2). The open-loop turn table: a constant
+  body-relative bearing at ±15°, ±45°, ±90°, 180°; yaw rate saturates at ≈ 11–13 °/s from
+  15°, 17–22 °/s turning in place with falls. The rectified differential loses about half the commanded
   turn authority at the rail (hip1 already at 56 % clip duty); this table is the
   PiCrawler's analogue of the duck's yaw calibration and sets the arbiter's reach constant.
 - The stall signature: walk into a wall; record `stroke` command, `stride_v.y`,
   `sense.servo_current` and the ultrasonic. The stuck detector's threshold is the body's
   own stall-length median, not a constant.
-- Does the gait reverse? `speed_topic` at −0.5: does the body back up, and at what current?
-  If not, the escape is a turn only, and the duck's "backing was the only exit" is the first
-  thing to re-test.
+- ✅ **Sim: yes** (`speedtable.py`, ledger S2): `speed_topic` −0.5 backs up 0.47 m in 3000
+  ticks, −1.0 backs up 1.28 m, belly up, 0 falls. The current it draws is the robot's half.
 
 *Gate:* separation shown for at least `ahead` vs free; the turn table and stall signature
 recorded in the ledger; the robot publishes all channels during a brain run with no
 overruns.
 
-### S2. The intent boundary on the gait
+### S2. The intent boundary on the gait — ✅ built and measured 2026-10-11
+
+*Two findings that shape S3: speed 0 is not a stop (the body drifts 0.28 m on 1.6 m of path and
+can fall: a stop is a stance objective, not a zero); and the yaw actuator saturates at
+≈ 11–13 °/s from 15° of error, 17–22 °/s only turning in place, where it falls (6 falls in 24
+runs at |e| ≥ 45°). Reverse works. Avoidance must turn by small bearings with speed shed, and
+back off rather than pivot.*
+
 
 One lever: **`speed_topic`** on MotorEPMv2, a 1-vector in [−1, 1] multiplying `fwd` (and
 the sign of the stroke if reverse exists). No message = 1.0 = byte-identical. With it the

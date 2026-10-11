@@ -7080,3 +7080,67 @@ the odometry is the walking read (the room preset from the dash, on battery): `o
 ~0.75–0.9 of ground covered, as in the sim. Noted in passing: in `stand` on the bench only
 `fl` and `rr` read FSR contact (≥ 200 counts) — the FSR threshold against this pose, to read
 before any consumer leans on four-foot contact.
+
+---
+
+### 2026-10-11 — S2: THE SPEED SOCKET OPENS THE INTENT BOUNDARY; THE SPEED TABLE AND THE TURN TABLE (n=3)
+
+*Plan §4 S2 and S1's actuator measurements. Lever: MotorEPMv2 `speed_topic` (ProprioToken [s],
+s ∈ [−1, 1], scaling the hip1 stroke's propulsion term only; the steer differential and the
+heading hold untouched) and `goal_bearing_rezero_hold` (a goal-bearing message re-zeroes the
+hold's integrator, so a later silence holds the body's heading, not the spawn's; trap T4).
+Gain-0: no message = the 1.0f literal; `rezero` default 0. The three deployed configs are
+byte-identical on body JSON (seed 1 × 6000). Unit tests (`test_state_prior`, the MotorEPMv2
+fixture): silent-equals-absent, half speed and reverse diverge, the consumer check, the
+re-zero off/on. Config `…__room_senses__s2.json` names both sockets; S2 scaffolds
+`OGMA_PICRAWLER_SPEED_CMD` / `OGMA_PICRAWLER_GOAL_BEARING_DEG` publish constants (named as
+scaffolds, standing in for S3's loops). Harnesses: `speedtable.py`, `turntable.py`. Verdict:
+`WORKING` on the channel (both sockets measured live and monotone); two signals for S3 below.*
+
+**The speed table** (room, 3000 ticks, n=3, displacement along the spawn heading):
+
+| speed | along (m) | path (m) | belly (m) | wall contact | falls |
+|---|---|---|---|---|---|
+| +1.0 | +1.10 ± 0.42 | 2.18 | 0.027 | 0.27 | 0 |
+| +0.5 | +0.78 ± 0.21 | 1.92 | 0.027 | 0.10 | 0 |
+| 0.0 | **+0.28 ± 0.06** | **1.58** | 0.027 | 0.00 | **1** |
+| −0.5 | −0.47 ± 0.42 | 1.98 | 0.027 | 0.00 | 0 |
+| −1.0 | −1.28 ± 0.05 | 2.49 | 0.028 | 0.06 | 0 |
+
+Monotone and nearly linear in the command, with an offset: **speed 0 is not standing still.**
+The propulsion term is gone but the gait's other terms (coupling, posture objectives, stance
+lift, explore noise) keep the legs cycling, and the body drifts 0.28 m forward on 1.6 m of
+path, with one fall in three seeds. **Reverse works**: the stroke runs the other way and the
+body backs up at the same rate it advances, belly up, 0 falls. That is the exit the duck
+measured as the only one (`--no-backing` REGRESSION), now available. *Signal for S3:* a "stop"
+is not speed 0 — it is a stance, and the stuck-stop needs a posture objective, not a zero.
+
+**The turn table** (arena, 2000 ticks, n=3, a constant body-relative bearing = keep turning;
++ = toward body +X):
+
+| error | yaw rate (°/s) | fwd_v | falls |
+|---|---|---|---|
+| 0° | +0.6 ± 2.4 | 0.041 | 0 |
+| +15° | +10.8 ± 7.5 | 0.029 | 0 |
+| +45° | +11.4 ± 4.7 | 0.032 | 0 |
+| +90° | +17.3 ± 8.0 | 0.001 | 0 |
+| +180° | +21.7 ± 3.0 | −0.017 | **3** |
+| −15° | −4.0 ± 2.3 | 0.032 | 0 |
+| −45° | −12.4 ± 2.9 | 0.009 | **2** |
+| −90° | −12.7 ± 3.6 | 0.014 | **1** |
+
+The yaw actuator saturates early, as the rectified differential predicted (hip1 at 56 % clip
+duty; with P = 7 in π-units a 25° error already rails the steer): **≈ 11–13 °/s from 15° up,
+≈ 17–22 °/s only at 90–180°, where the body is turning in place and falling.** Forward speed
+drains to zero past 45°. There is a handedness: +15° turns at 11 °/s, −15° at 4 °/s. *What
+this gives S3:* the arbiter's reach constant from ω ≈ 0.2 rad/s (the duck's `reach_k = 2 m·ω
+/ (π·v)` with v ≈ 0.05 m/s gives k ≈ 2.5 — a target 1 m away at 90° cannot be turned to in
+the time it takes to arrive), and a rule: **never hold a large bearing error for long** — the
+loops must command speed down while turning, which is exactly the duck's ★ TURN speed gate.
+
+**Six falls in 24 runs at |error| ≥ 45°** against 0 for P-e·h0 in the room: the loud number of
+this entry. Sustained turning in place is where this body tips. S3's avoidance must turn by
+small bearings and back off rather than pivot.
+
+**Open:** the stall signature (robot, walking into a wall), the reverse on the robot, the
+"stop as a stance" objective.

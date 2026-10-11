@@ -134,6 +134,7 @@ private:
     void handle_imu(MessagePtr payload);
     void handle_intent(MessagePtr payload);
     void handle_goal_bearing(MessagePtr payload);
+    void handle_speed(MessagePtr payload);
     void handle_nav(MessagePtr payload);
     void handle_height(MessagePtr payload);
     void handle_distress(MessagePtr payload);
@@ -289,6 +290,17 @@ private:
     float   gb_x_ = 0.0f, gb_y_ = 0.0f;
     bool    gb_seen_ = false;
     int64_t gb_msgs_ = 0;                          // consumer check: did it ever arrive?
+    // S2 of the MicroDuck port: the SPEED socket.  A ProprioToken [s], s in [-1, 1], scaling
+    // the forward thrust (the propulsion term only; steering stays authoritative).  No message
+    // = 1.0 = byte-identical.  Negative = reverse: the stroke runs the other way.
+    std::string speed_topic_;
+    float   speed_cmd_  = 1.0f;
+    bool    speed_seen_ = false;
+    int64_t speed_msgs_ = 0;                       // consumer check: did it ever arrive?
+    // When a loop sets the bearing, re-zero the hold's integrator so that if the loop goes
+    // silent the PD holds the heading the body HAS, not the spawn's (the integrator clamps
+    // at ±2 turns and the robot never sends events.reset).  0 = legacy (byte-identical).
+    double  goal_bearing_rezero_hold_ = 0.0;
     double  couple_prec_gain_ = 0.0;               // 0 = uniform mean (legacy, byte-identical)
     static constexpr float kCouplePrecEps = 1e-4f; // divide guard only; tle_ema runs ~0.24-0.28
     // Numerical guard on the weight RATIO, not a shaping constant: at |k| <= 2 over the

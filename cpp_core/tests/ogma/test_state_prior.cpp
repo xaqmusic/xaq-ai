@@ -1263,3 +1263,69 @@ TEST(StatePrior, TargetGateReachActsSentinelIdentical) {
     EXPECT_EQ(du, 0.0) << "no reach element: byte-identical";
     EXPECT_GT(dr, 1e-4) << "the reach gate acts";
 }
+
+// =============================================================================
+// S2 of the MicroDuck port: the SPEED socket and the heading-hold re-zero (MotorEPMv2).
+// =============================================================================
+// Same three-arm shape as the v1 goal-bearing test: A = speed 0.5 published, R = -1.0
+// (reverse), Z = topic configured but never published (must equal N), N = no speed_topic.
+TEST(SpeedSocket, ScalesThrustAndSilentIsByteIdentical) {
+    auto p = base_params();
+    p["stroke_gain"] = 1.0;                      // the thrust the socket scales
+    p["speed_topic"] = std::string("sp.speed");
+    auto pn = base_params();
+    pn["stroke_gain"] = 1.0;                     // identical minus the socket
+    Fixture A(p), R(p), Z(p), N(pn);
+    for (uint64_t t = 1; t <= 200; ++t) {
+        A.run_tick(t, wobble(t));
+        { auto tok = std::make_shared<ogma::ProprioToken>(); tok->values = Eigen::VectorXf(1); tok->values[0] = 0.5f;  A.bus.publish("sp.speed", tok); }
+        R.run_tick(t, wobble(t));
+        { auto tok = std::make_shared<ogma::ProprioToken>(); tok->values = Eigen::VectorXf(1); tok->values[0] = -1.0f; R.bus.publish("sp.speed", tok); }
+        Z.run_tick(t, wobble(t));
+        N.run_tick(t, wobble(t));
+    }
+    for (int j = 0; j < kMotors; ++j)
+        EXPECT_FLOAT_EQ(Z.accel(j), N.accel(j)) << "an unpublished speed_topic must be a perfect no-op (motor " << j << ")";
+    bool diverged = false, reversed = false;
+    for (int j = 0; j < kMotors; ++j) {
+        if (std::fabs(A.accel(j) - Z.accel(j)) > 1e-4f) diverged = true;
+        if (std::fabs(R.accel(j) - A.accel(j)) > 1e-4f) reversed = true;
+    }
+    EXPECT_TRUE(diverged) << "a live speed changed nothing — the socket is inert";
+    EXPECT_TRUE(reversed) << "reverse and half speed produced the same command";
+    EXPECT_GT(A.m.diag_snapshot()["speed_msgs"].get<double>(), 0.0);
+    EXPECT_EQ(Z.m.diag_snapshot()["speed_msgs"].get<double>(), 0.0);
+    EXPECT_NEAR(A.m.diag_snapshot()["speed_cmd"].get<double>(), 0.5, 1e-6);
+    EXPECT_NEAR(R.m.diag_snapshot()["speed_cmd"].get<double>(), -1.0, 1e-6);
+    EXPECT_NEAR(Z.m.diag_snapshot()["speed_cmd"].get<double>(), 1.0, 1e-6);
+}
+
+// goal_bearing_rezero_hold: spin the body (imu yaw rate) so the hold's integrator fills,
+// publish one goal bearing: off leaves the integrator alone (legacy), on zeroes it.
+TEST(SpeedSocket, GoalBearingRezeroHoldOffByDefaultOnZeroes) {
+    auto p = base_params();
+    p["goal_bearing_topic"] = std::string("sp.goalb");
+    auto pr = p;
+    pr["goal_bearing_rezero_hold"] = 1.0;
+    Fixture L(p), Rz(pr);
+    auto spin = [](Fixture& f, uint64_t t) {
+        f.run_tick(t, 0.0f);
+        auto imu = std::make_shared<ogma::ProprioToken>();
+        imu->values = Eigen::VectorXf(4); imu->values << 0.0f, 0.0f, 0.0f, 0.5f;   // yaw rate, pi-units
+        f.bus.publish("sp.imu", imu);
+    };
+    for (uint64_t t = 1; t <= 100; ++t) { spin(L, t); spin(Rz, t); }
+    const double hb_l = L.m.diag_snapshot()["heading_bearing"].get<double>();
+    const double hb_r = Rz.m.diag_snapshot()["heading_bearing"].get<double>();
+    ASSERT_GT(std::fabs(hb_l), 0.05) << "the integrator did not fill — the spin never reached it";
+    EXPECT_DOUBLE_EQ(hb_l, hb_r) << "both arms must integrate identically before the goal";
+    auto goal = [](Fixture& f) {
+        auto g = std::make_shared<ogma::ProprioToken>(); g->values = Eigen::VectorXf(2); g->values << 0.0f, 1.0f;
+        f.bus.publish("sp.goalb", g);
+    };
+    goal(L); goal(Rz);
+    L.run_tick(101, 0.0f); Rz.run_tick(101, 0.0f);
+    EXPECT_DOUBLE_EQ(L.m.diag_snapshot()["heading_bearing"].get<double>(), hb_l) << "off: the goal must not touch the integrator";
+    EXPECT_DOUBLE_EQ(Rz.m.diag_snapshot()["heading_bearing"].get<double>(), 0.0) << "on: the goal re-zeroes the integrator";
+    EXPECT_GT(Rz.m.diag_snapshot()["goal_bearing_msgs"].get<double>(), 0.0);
+}
