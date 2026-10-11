@@ -25,6 +25,10 @@ zoom, space to pause, and every one of MuJoCo's own viewer keys works. Ours:
     W   what stands between the camera and the duck fades to 15 % (on by default):
         an outer wall while the camera is on its far side, a table or chair while
         it blocks the line of sight — a parked camera no longer loses the moment
+    O   recentre: drop the right-drag pan offset
+
+The view follows the duck's trunk through a lerp (half a second), so the gait's bob does not
+shake it, and a right-drag pan is kept as an offset that rides along with the duck.
 
 The camera window renders the head camera from the same qpos the viewer draws, so it
 shows exactly the frame the host will publish once it renders (playroom plan C1); until
@@ -393,10 +397,11 @@ def draw_chase(scn, frame, mujoco, np):
 #
 # The HUD lives in the camera window, not the MuJoCo window: label geoms placed in the
 # free camera's frame lagged the mouse between syncs and flashed on every zoom (2026-09-10).
-UI = {"tof": False, "help": True, "cam": True, "fade": True, "cloud": False, "solo": None, "age": True, "chase": True}
+UI = {"tof": False, "help": True, "cam": True, "fade": True, "cloud": False, "solo": None, "age": True, "chase": True,
+      "recenter": False}
 HOTKEYS = ("V  ToF beams     C  this window     H  this text     W  fade what hides the duck\n"
            "P  clouds        N  next remembered place alone / all     A  age fading     M  chase markers\n"
-           "space  pause     drag  orbit     scroll  zoom     right-drag  pan")
+           "space  pause     drag  orbit     scroll  zoom     right-drag  pan (kept)     O  recentre on the duck")
 
 
 def key_callback(keycode):
@@ -416,6 +421,47 @@ def key_callback(keycode):
         UI["age"] = not UI["age"]
     elif keycode == ord("M"):
         UI["chase"] = not UI["chase"]
+    elif keycode == ord("O"):
+        UI["recenter"] = True           # the watch loop drops the pan offset
+
+
+class CameraFollow:
+    """The view follows the duck's trunk through a lerp, and keeps the operator's pan.
+
+    The look-at point was set to the trunk every frame (2026-10-11, the operator: "the camera shakes with the walking
+    motion ... horizontal translation (right mouse drag) does not work since the camera is tied to the robot's center").
+    Now a FOLLOW point eases toward the trunk with time constant TAU seconds of run time (the gait's bob, ~2 Hz, is
+    filtered out; a walk at 0.15 m/s trails by ~TAU x 0.15 m), and the look-at is the follow point plus an OFFSET: whatever
+    the mouse moved the look-at by since the last frame joins the offset, so a right-drag pan stays where it was put and
+    rides along with the duck.  A jump in run time (a seek, the start) snaps the follow point; `O` clears the offset.
+    """
+    TAU = 0.5
+    SNAP_S = 2.0
+
+    def __init__(self, np, tau=TAU):
+        self.np = np
+        self.tau = tau
+        self.follow = None
+        self.offset = np.zeros(3)
+        self.placed = None      # the look-at this class last set: a difference from it is the operator's pan
+        self.t = None
+
+    def recenter(self):
+        self.offset[:] = 0.0
+
+    def update(self, cam, target, t):
+        np = self.np
+        target = np.asarray(target, dtype=float)
+        if self.follow is None or self.t is None or not (0.0 <= t - self.t <= self.SNAP_S):
+            self.follow = target.copy()
+        else:
+            self.follow += (1.0 - math.exp(-(t - self.t) / self.tau)) * (target - self.follow)
+        self.t = t
+        if self.placed is not None:
+            self.offset += np.asarray(cam.lookat, dtype=float) - self.placed
+        self.placed = self.follow + self.offset
+        cam.lookat[:] = self.placed
+        return self.follow
 
 
 def free_camera_position(cam, np):
@@ -617,6 +663,7 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
     with mujoco.viewer.launch_passive(model, data, show_left_ui=False,
                                       show_right_ui=False, key_callback=key_callback) as viewer:
         viewer.cam.distance, viewer.cam.elevation, viewer.cam.azimuth = 0.9, -12, 130
+        follow = CameraFollow(np)
         started = time.perf_counter()
         n = 0
         last_drive = None
@@ -634,7 +681,10 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
                     continue                                          # fast-forward: draw 2 fps of it
             data.qpos[:] = frame["qpos"]
             mujoco.mj_forward(model, data)
-            viewer.cam.lookat[:] = (frame["x"], frame["y"], frame["z"])
+            with viewer.lock():                                       # the mouse moves the same camera
+                if UI["recenter"]:
+                    follow.recenter(); UI["recenter"] = False
+                follow.update(viewer.cam, (frame["x"], frame["y"], frame["z"]), frame["t"])
             fader.update(viewer.cam, data, (frame["x"], frame["y"], frame["z"]), UI["fade"])
             # a cloud the host filed on this tick joins the set we carry (replay accumulates
             # them as the run goes, so the room fills in as the duck visits it)
@@ -710,6 +760,7 @@ def record(frames, out_path, width=960, height=720, t_from=0.0, t_to=None, every
     np = need("numpy", "the status overlay")
     beams = _tof_beams(np)
     fader = WallFader(model, mujoco, np)
+    follow = CameraFollow(np)
     cloudview = CloudView()              # the cloud as the module holds it (or the filed union, on an old log)
     written = 0
     # STREAMED to the encoder, one frame at a time.  This used to collect every frame in a list and
@@ -729,7 +780,7 @@ def record(frames, out_path, width=960, height=720, t_from=0.0, t_to=None, every
             continue
         data.qpos[:] = frame["qpos"]
         mujoco.mj_forward(model, data)
-        camera.lookat[:] = (frame["x"], frame["y"], frame["z"])
+        follow.update(camera, (frame["x"], frame["y"], frame["z"]), t)   # the same eased follow as live
         fader.update(camera, data, (frame["x"], frame["y"], frame["z"]))
         renderer.update_scene(data, camera)
         draw_status(renderer.scene, frame, mujoco, np, reset=False)   # the same overlay as live

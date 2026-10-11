@@ -40,6 +40,12 @@ tools/duck_viewer/.venv/bin/python tools/duck_viewer/view.py replay RUN.jsonl --
 pause, and all its usual keys. `live` paces to the wall clock, because the host runs far faster
 than real time and a run that flashes past is not an observation.
 
+**The camera follows the duck through a lerp** (2026-10-11): the look-at point eases toward the
+trunk with a half-second time constant of run time, so the gait's bob no longer shakes the view,
+and a **right-drag pan is kept** as an offset from the duck that rides along with it (it was
+overwritten every frame before). `O` drops the offset and recentres. A jump in run time snaps the
+view to the duck. `record` uses the same follow.
+
 Three keys are ours, listed in the HUD under the brain-camera image (with the status line):
 
 | key | what | default |
@@ -47,6 +53,7 @@ Three keys are ours, listed in the HUD under the brain-camera image (with the st
 | `V` | the ToF's 64 beams from the head, coloured by class | off — they hide the head |
 | `C` | the **brain-camera window**: the head camera's frame at the brain's resolution (`--cam-res`, default `64x48`) and rate (12.5 Hz), scaled up without smoothing so each of the brain's pixels is a block; the status line and the keys are its HUD | on |
 | `H` | the HUD text | on |
+| `O` | **recentre** — drop the right-drag pan offset | — |
 | `W` | **fade what hides the duck** — an outer wall drops to 15 % opacity while the camera is on its far side; a table, chair or shelf drops to 15 % while a bundle of rays from the camera to the duck's trunk hits it first (the table top when looking down through it, a chair in the line of sight); a fade holds half a second past its last hit so a grazing ray does not flicker | on |
 
 **Watching a level-2 run: the first 600 s are the babble.** The duck pulses its twist in place
