@@ -63,7 +63,7 @@ if __name__ == "__main__":
     print(f"{'arm':14s} | " + " | ".join(f"{k:>15s}" for k in keys))
     for arg in sys.argv[1:]:
         label, d = arg.split("=", 1)
-        res = [r for r in (one(p) for p in sorted(glob.glob(os.path.join(d, "sa_*.log")))) if r]
+        res = [r for r in (one(p) for p in sorted(glob.glob(os.path.join(d, "*.log")))) if r]
         if not res: print(f"{label:14s} | (no per-tick rows)"); continue
         cells = []
         for k in keys:

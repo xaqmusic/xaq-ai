@@ -7655,3 +7655,53 @@ owns the reversals, never a new imposed smoother. The clean-stride and flicker n
 the metrics it must move.
 
 **Robot stack now:** `…__room_senses__s3a_stuckinst__hip2p030.json`.
+
+---
+
+### 2026-10-12 — THE NOISY STEP, INSTRUMENTED AND ABLATED: THE BRAIN'S RAW TARGETS REVERSE EVERY 2–5 TICKS, NO SINGLE TERM OWNS IT, THE EXPLORE NOISE IS THE CHEAP FIRST LEVER — AND THE SIM'S GAIT IS A SHUFFLE, NOT THE ROBOT'S FLICKER
+
+*Two instruments and one lesion study, after the operator's eye on the hip2 +0.3 run ("height
+better, steps still noisy, clean strides rare").*
+
+**The instrument on the robot.** `ogma_host --dump-actions` prints the brain's raw action
+targets every tick, before benchd's slew (the dash passes it from now on; `thrash.py` reads it
+beside the feed). Verified on the bench with the stand pose held, benchd in bench mode so the
+commands were not applied (open loop): **29 reversals per 70-tick stride per servo, 30 % of
+servo-ticks at the rail.** One reversal every 2.4 ticks — the 2026-10-02 finding, now a number
+on the robot. The closed-loop figure comes with the next floor run.
+
+**The lesion study in the sim** (P-e·h0 + hip2 +0.3, arena, 6000 ticks, n=6, one diagnostic
+row per tick, `stepnoise.py`; each term set to 0 as a TEST, never an operating mode):
+
+| arm | net_disp (m) | steps | falls | rev/stride hip1 | hip2 | knee | contact flicker /min | clean strides |
+|---|---|---|---|---|---|---|---|---|
+| base (hip2 +0.3) | 4.65 | 2.8 | 0 | 11.1 | 15.9 | 13.8 | 1.7 | 0 % |
+| coupling 0 (was 1.509) | 2.33 | 1.2 | 1 | 11.1 | 19.6 | 21.4 | 0.5 | — |
+| stroke 0 (was 1.2) | 1.07 | 1.0 | 0 | 14.1 | 16.4 | 15.0 | 1.2 | — |
+| stance_lift 0 (was 0.5) | 2.57 | 1.8 | 0 | 10.7 | 18.7 | 25.2 | 0.9 | — |
+| **explore noise 0 (was 0.05)** | **4.94** | **6.2** | 1 | **8.7** | **13.1** | 13.7 | 3.4 | 14 % |
+
+**What it says.** (1) The commanded targets reverse 11–16 times per stride per joint in the
+sim's base gait — every 4–5 ticks — and no lesion removes it: coupling, stroke and stance_lift
+each raise the reversals when removed (the remaining terms thrash more without them) while
+halving progress, so the thrash is the controller's output as a whole, not one term's. (2) The
+explore noise is the one term whose removal LOWERS the reversals (hip1 −22 %, hip2 −18 %) at no
+cost — net 4.94 against 4.65, twice the steps — with one fall in six (a signal to read on the
+robot, not a verdict). That makes `explore_noise 0` the cheap first lever:
+`…__hip2p030__explore0.json`, in the dash. (3) **The sim's gait is not the robot's.** In the sim
+the feet almost never leave the ground (swing bouts of 0.07 s, contact flicker 1–3 a minute,
+0 % clean strides): the body advances by scrubbing, and it still covers 4.65 m. On the robot
+the feet flicker 100–200 times a minute and the body goes nowhere. The thrash is common to
+both; what differs is the foot–ground contact — the sim's floor lets a scrubbing foot push,
+the carpet does not. That is the sim2real gap under the whole gait question, and no lever in
+the controller closes it from the sim side; it is a body-model fact (friction, compliance,
+the FSR's threshold as a stance test) to be measured and put into the sim before the sim can
+be trusted on stepping. The sim's shank-angle formula was retired this morning for the same
+reason: it measured its encoding.
+
+**Also:** per-tick diagnostics (`OGMA_PICRAWLER_DIAG_INTERVAL=1`) are an instrument that may
+cost determinism — the base arm's chassis_y read 74 mm at interval 1 against 64 mm at
+interval 60 on the same config and seeds. Checked on seed 1: the body's (x, z, yaw) are identical at
+the start, the middle and the last tick of both runs (100 of 115 common rows bit-equal, the rest
+transient), so the physics is the same and the 10 mm is in how the harness averages chassis_y
+over rows of different density — a harness fact to fix, not a body fact.
