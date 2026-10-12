@@ -7600,3 +7600,13 @@ stride mean (≈ 0), the belly ToF (27 / 20 mm median), the servo current (1.50 
 femur press holds the body up; the robot already stands 15–25 mm above the sim, so watch
 the rail), falls, and the operator's eye on the shank and the steps. The room A/B of the
 same stack with the taller stance is below.
+
+**Addendum — the taller stance on the reflex stack in the room (`…__s3a_stuckinst__hip2p030`,
+n=6 × 6000):** wall_frac **0.056 ± 0.050** against 0.008 for the stack at the spawn stance;
+contact episodes 30 against 3.7; coverage 22.2 against 27.2; net_disp 1.04 against 0.74;
+straight 0.18 against 0.12; **0 falls**; two seeds never touched a wall. The same shape as
+the plumb arm in the room and the 0.6 m scale: a faster, straighter body reaches the wall
+before the avoid loop, whose 1 m warning was fit to the sprawling gait, has turned it. The
+stance is the gait lever; the loop's lead must follow the body's speed and turning authority
+(S4's reach constant). For the robot run this means more wall touches than S3a had, with the
+belly, the feet and the current as the numbers that decide the stance.
