@@ -7420,3 +7420,57 @@ probe's snapshot calls holding the host's lock, not contention. Servo current me
 p95 2.98 A, max 3.40 A: the known regime, two HAT resets.
 
 **The robot stack stands:** `…__s3a_stuckinst.json` — S3a, the stuck sense as an instrument.
+
+---
+
+### 2026-10-12 — THE TIBIA-PLUMB LEVER, RE-RUN ON THE ROBOT'S BODY IN THE SIM: DISTANCE TIES, THE BELLY PAYS 9 mm, THE SHANK MOVES 4° — THE GEOMETRY CLOSURE HOLDS; THE ROBOT IS THE TEST
+
+*The operator's diagnosis (2026-10-12): on carpet the gait "swims" — the lower leg lands at an
+angle, slides, and the FSR stance set admits dragging feet; good steps are the ones with the
+shank perpendicular to the floor. That is the ledger's "get the tibia vertical" family
+(§ 2026-08, `tibia_plumb_gain`: +32 % distance on the cad body, held back only by belly
+clearance; the family closed on limb geometry — feet at 170 mm against a 166 mm reach). One
+lever, re-run on the body the robot actually is: `tibia_plumb_gain` 0.15 on P-e·h0
+(`…__nohomeo__plumb015.json`), arena, 12000 ticks, n=6; and on the robot stack in the room
+(`…__s3a_stuckinst__plumb015.json`, 6000 ticks, n=6). Both arms reached the arena's ramps
+(r ≈ 10 m) so `falls` there is a floor, not a count. Verdict in the sim: `NULL` on distance,
+`REGRESSION` on belly and on wall contact; the robot's context differs, see below.*
+
+| arena, P-e·h0 (measured_fsr body) | base | plumb 0.15 |
+|---|---|---|
+| net_disp (m) | 9.40 ± 0.91 | 9.73 ± 0.42 (tie) |
+| straight | 0.74 ± 0.05 | 0.77 ± 0.03 |
+| **belly clearance** (m) | **0.0299** | **0.0213** (−8.6 mm) |
+| belly minimum (m) | 0.0039 | 0.0015 |
+| **tib_off** (shank from vertical) | **47.0°** | **42.9°** (−4°: the lever acts) |
+| foot_r (mm, reach 166) | 167.4 | 168.6 |
+| planted / contact_duty | 3.89 / 0.83 | 3.88 / 0.85 |
+| falls | 0 | 0 |
+
+| room, robot stack | s3a_stuckinst | + plumb 0.15 |
+|---|---|---|
+| wall_frac | 0.008 ± 0.013 | **0.075 ± 0.030** |
+| contact episodes | 3.7 | 31.5 |
+| net_disp / straight | 0.74 / 0.12 | 1.05 / 0.18 |
+| coverage | 27.2 | 23.0 |
+| falls | 0 | 0 |
+
+**What it says.** On this body the +32 % does not reproduce (+3.5 %, inside the seed spread)
+and the belly cost does (−8.6 mm, the minimum down to 1.5 mm): the shank gets only 4° more
+vertical because the feet still plant at 168 mm on a 166 mm reach — the geometry closure of
+2026-08 stands on the FSR leg too. In the room the plumb gait is faster and straighter (net
++42 %, straight +50 %) and **hits the walls nine times as often**: the avoid loop's 1 m
+warning was fit to the slower gait, and a straighter body reaches the wall before the loop
+has turned it — the same lesson as the 0.6 m scale, from the other side: the loop's lead must
+follow the body's speed and turning authority (S4).
+
+**Why the robot is still the test, and what to read.** The sim's stance SAGS (the robot stands
+15–25 mm taller on its stiff servos, ledger 2026-10-04), which is why the sim's feet sit at
+the reach limit and the belly has no margin to give. On the robot the margin exists and the
+feet sit nearer, so a vertical shank is geometrically reachable there and the belly cost may
+not bind. The robot run reads, in order: the **feet-in-contact count** (run 3: 2.8 of 4; a
+clean stance set reads ~2–2.5 while walking), the **stride mean** (0.004 m/s; it should
+become a speed), the **belly ToF** in the feed (`tof_m`, against the 20–30 mm it holds now),
+falls, and the current. Not promotable from the sim; a robot-only re-use context, measured.
+Config: `…__room_senses__s3a_stuckinst__plumb015.json`, in the dash. Gain 0.15 only — the
+sim found 0.3 unstable on the cad body.
