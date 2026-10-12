@@ -373,6 +373,48 @@
           "required": false
         },
         {
+          "pattern": "{ambush_topic}",
+          "params": [
+            "ambush_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{mover_pos_topic}",
+          "params": [
+            "mover_pos_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{release_topic}",
+          "params": [
+            "release_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{target_out_topic}",
+          "params": [
+            "target_out_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{mind_topic}",
+          "params": [
+            "mind_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
           "pattern": "{pull_topic}",
           "params": [
             "pull_topic"
@@ -403,6 +445,15 @@
           "pattern": "{yield_topic}",
           "params": [
             "yield_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{stall_field_topic}",
+          "params": [
+            "stall_field_topic"
           ],
           "output": false,
           "payload": "ProprioToken",
@@ -729,6 +780,22 @@
           "pattern": "{change_topic}",
           "params": [
             "change_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{state_topic}",
+          "params": [
+            "state_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{presence_topic}",
+          "params": [
+            "presence_topic"
           ],
           "output": true,
           "payload": "ProprioToken"
@@ -1275,6 +1342,15 @@
           "payload": "ProprioToken"
         },
         {
+          "pattern": "arbiter.gain.look",
+          "params": [
+            "look_value_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken",
+          "dynamic": true
+        },
+        {
           "pattern": "{play_value_topic}",
           "params": [
             "play_value_topic"
@@ -1288,6 +1364,36 @@
           "pattern": "{vision_value_topic}",
           "params": [
             "vision_value_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{look_gain_topic}",
+          "params": [
+            "look_gain_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{look_hold_topic}",
+          "params": [
+            "look_hold_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{look_commit_topic}",
+          "params": [
+            "look_commit_topic"
           ],
           "output": false,
           "payload": "Unknown",
@@ -2428,6 +2534,134 @@
       "kinds_probed": {},
       "tolerated_missing": []
     },
+    "LookLoop": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "look",
+      "purpose": "The stop-and-look as a loop: per context, predicts whether a stop will pay (a seek target appears or a skill is requested) and hands the arbiter that need; during a stop, the chance a payoff is still to come",
+      "baseline": "mj_host/configs/a1v2_f5_look_commit.json",
+      "sockets": [
+        {
+          "pattern": "{state_topic}",
+          "params": [
+            "state_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{value_topic}",
+          "params": [
+            "value_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{context_topic}",
+          "params": [
+            "context_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{descriptor_topic}",
+          "params": [
+            "descriptor_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{place_topic}",
+          "params": [
+            "place_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{seek_value_topic}",
+          "params": [
+            "seek_value_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{outcome_need_topic}",
+          "params": [
+            "outcome_need_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{active_topic}",
+          "params": [
+            "active_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{driving_topic}",
+          "params": [
+            "driving_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{skill_topic}",
+          "params": [
+            "skill_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{commit_topic}",
+          "params": [
+            "commit_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{trust_topic}",
+          "params": [
+            "trust_topic"
+          ],
+          "output": true,
+          "payload": "RealityToken"
+        },
+        {
+          "pattern": "{hold_topic}",
+          "params": [
+            "hold_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "state_topic": "string",
+        "value_topic": "string"
+      },
+      "tolerated_missing": []
+    },
     "LoopCompetence": {
       "category": "predictor",
       "layer": 3,
@@ -2476,7 +2710,7 @@
       "layer": 1,
       "id_prefix": "motion",
       "purpose": "Always-on motion sensor over the ToF's rays: a return where a ray just passed through empty space; tracks with world velocity, optionally vouching for the cloud's mover",
-      "baseline": "mj_host/configs/a1v2_t10_vouch.json",
+      "baseline": "mj_host/configs/a1v2_st3_vouch.json",
       "sockets": [
         {
           "pattern": "{input_topic}",
@@ -3186,6 +3420,13 @@
         "objective_topics",
         "plan_topics",
         "velocity_objective_topics",
+        "state_prior_motors",
+        "state_prior_weights",
+        "state_prior_c_weights",
+        "state_prior_target_gated_by",
+        "state_prior_target_gate_cos",
+        "state_prior_target_gate_reach",
+        "state_prior_gated_by",
         "state_prior_calm_indices",
         "postural_gain_joints",
         "rhythm_gains",
@@ -3722,6 +3963,32 @@
           "pattern": "{play_value_topic}",
           "params": [
             "play_value_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{stall_topic}",
+          "params": [
+            "stall_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{stall_pose_topic}",
+          "params": [
+            "stall_pose_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{stall_field_topic}",
+          "params": [
+            "stall_field_topic"
           ],
           "output": true,
           "payload": "ProprioToken"
@@ -4642,6 +4909,15 @@
           "payload": "ProprioToken"
         },
         {
+          "pattern": "{target_topic}",
+          "params": [
+            "target_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
           "pattern": "{context_topic}",
           "params": [
             "context_topic"
@@ -4690,6 +4966,78 @@
       ],
       "fixed": [],
       "kinds_probed": {},
+      "tolerated_missing": []
+    },
+    "StalkLoop": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "stalk",
+      "purpose": "The hunter's ambush: learns the places a mover passes again, goes to one after a lost chase and waits as long as the place's own return predicts; P(a wait sees the mover) is the need it hands the seek loop",
+      "baseline": "mj_host/configs/a1v2_m2_ambush.json",
+      "sockets": [
+        {
+          "pattern": "{mover_pos_topic}",
+          "params": [
+            "mover_pos_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{map_topic}",
+          "params": [
+            "map_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{target_topic}",
+          "params": [
+            "target_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{mind_topic}",
+          "params": [
+            "mind_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{pose_topic}",
+          "params": [
+            "pose_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{ambush_topic}",
+          "params": [
+            "ambush_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "mover_pos_topic": "string",
+        "map_topic": "string",
+        "target_topic": "string",
+        "mind_topic": "string",
+        "pose_topic": "string",
+        "ambush_topic": "string"
+      },
       "tolerated_missing": []
     },
     "StuckEscapeReflex": {
@@ -4813,6 +5161,48 @@
         "premotor_ids": "list_string",
         "premotor_leg_assignment": "list_string",
         "premotor_policy_topics": "list_string"
+      },
+      "tolerated_missing": []
+    },
+    "ThingBelief": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "thing_belief",
+      "purpose": "Whether the thing the seek loop is sent to is still where the brain believes it is: the cloud's sightings at the target confirm, free rays through its footprint refute (passive in the ★ stacks)",
+      "baseline": "mj_host/configs/a1v2_lk2b_motion_m1.json",
+      "sockets": [
+        {
+          "pattern": "{target_topic}",
+          "params": [
+            "target_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{presence_topic}",
+          "params": [
+            "presence_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{belief_topic}",
+          "params": [
+            "belief_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "target_topic": "string",
+        "presence_topic": "string",
+        "belief_topic": "string"
       },
       "tolerated_missing": []
     },

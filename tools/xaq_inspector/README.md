@@ -129,8 +129,13 @@ Each module type registers a widget class in
 | `MotorEPMv2`    | `MotorEpmV2Inspector` — **self-model & priors** tab (the identified A as a heatmap, the state against each prior's target and precision, the output, motor TLE and the prior's error) + the gait dashboard tab (a legged body opens on it). |
 | `CloudMap`      | `CloudMapInspector` — plan view of the duck's ToF cloud (voxels by height band; clusters: small, *top unseen*, structure; the attended thing; the mover; toggle the free-space "top seen" layer) + counts over time. |
 | `BearingSeekLoop` | `BearingSeekInspector` — body-frame plan of the held target (by source), the chase candidate and its velocity, the remembered mover; every way a target starts and ends. |
-| `SkillOutcomeLoop` | `SkillOutcomeInspector` — the outcome table, kind × intent (n · mean ± spread; known / tried / never asked), need and surprise. |
+| `SkillOutcomeLoop` | `SkillOutcomeInspector` — the outcome table, kind × intent (n · mean ± spread; known / tried / never asked), need and surprise; with a context EPM wired, each context's pooled answered share (the pull). |
 | `LoopCompetence` | `LoopCompetenceInspector` — the Beta belief over a loop's success rate, competence, what is published, the gain it earns. |
+| `EFEArbiter`    | `EFEArbiterInspector` — the loops actually racing, under the names the arbiter publishes in its `policies` roster (the duck: seek, play, look; the Cell: klino, planner and any wired extras; rename a slot with `name_<slot>`): the winner and each racer's gain, the score race stacked pragmatic + epistemic, in `precision` mode each loop's trust from the voter, and the exploit↔explore balance under the preference's own name (`preference_name`). |
+| `MotionField`   | `MotionFieldInspector` — evidence points and tracks with velocity from the body, counts per cast, vouched and refused cloud movers. |
+| `LookLoop`      | `LookLoopInspector` — per context, the predicted chance a stop pays (yield) or the surprise it resolves; whether a stop is on and has paid; need and calibration. |
+| `StalkLoop`     | `StalkLoopInspector` — the passing places in the odometry frame (passes, return interval, P a wait sees the mover), the place chosen, idle / going / waiting. |
+| `ThingBelief`   | `ThingBeliefInspector` — the presence belief for the seek target, with the ticks it was seen there and seen empty. |
 | `JointSensorimotorBridge` | `JointBridgeInspector` — per motor position / command / change, and the sense slots now and as a rolling heat strip: exactly what a motor brain gets to feel. |
 | reflexes / detectors | `ReflexInspector` — auto-fields. |
 | (anything else) | `RawPayloadView` — pretty-printed JSON of the live snapshot. |

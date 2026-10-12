@@ -45,6 +45,9 @@ from .loop_competence_inspector    import LoopCompetenceInspector
 from .joint_bridge_inspector       import JointBridgeInspector
 from .motor_epm_v2_inspector       import MotorEpmV2Inspector
 from .motion_field_inspector       import MotionFieldInspector
+from .look_loop_inspector          import LookLoopInspector
+from .stalk_loop_inspector         import StalkLoopInspector
+from .thing_belief_inspector       import ThingBeliefInspector
 
 
 WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
@@ -109,6 +112,10 @@ WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
     "SkillOutcomeLoop":     SkillOutcomeInspector,
     "LoopCompetence":       LoopCompetenceInspector,
     "MotionField":          MotionFieldInspector,
+    # The duck's chase and stop loops (design doc §17.112-17.113): the look, the ambush, the target's presence.
+    "LookLoop":             LookLoopInspector,
+    "StalkLoop":            StalkLoopInspector,
+    "ThingBelief":          ThingBeliefInspector,
     "JointSensorimotorBridge": JointBridgeInspector,
     # Generic reflex / detector widget — auto-discovers fields from the
     # snapshot, so one ReflexInspector suffices for every reflex type

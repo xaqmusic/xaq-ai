@@ -18,6 +18,7 @@ struct ParamInfo {
     bool           hot = false;        // HotMutable (else ConstructionOnly)
     std::string    description;
     bool           required = false;   // no default in the schema
+    bool           tolerated = false;  // no default, but the palette's tolerated_missing lifted `required`
     nlohmann::json def;                // null when required
     nlohmann::json min, max;           // null when absent
     ParamKind      kind = ParamKind::String;

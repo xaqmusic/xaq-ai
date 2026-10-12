@@ -307,6 +307,14 @@ private:
     bool  look_active_ = false, look_committed_ = false;
     float margin_      = 0.0f;
 
+    // The roster's display names (diag only; the race never reads them).  Each slot's name is its override when set,
+    // else in precision mode the last segment of its trust key (reality.loop.seek -> "seek"), else the slot name; the
+    // preference precision's name is its override, else the last segment of hunger_topic.  The inspector draws the
+    // policies this roster says are racing, under these names.
+    std::string name_klino_ = "", name_planner_ = "", name_play_ = "", name_vision_ = "", name_look_ = "", preference_name_ = "";
+    std::string policy_name(int slot) const;
+    bool        policy_racing(int slot) const;
+
     std::mt19937 rng_{11};
 };
 

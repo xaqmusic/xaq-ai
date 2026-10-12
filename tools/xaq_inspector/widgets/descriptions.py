@@ -608,7 +608,10 @@ DOCS: dict[str, ModuleDoc] = {
             "not-hunger). Hungry → exploit the loop most likely to feed you; sated "
             "→ explore the one that would teach you most. The winner takes the whole "
             "motor bus (gain 1), losers get 0, with an adaptive margin so channels "
-            "don't chatter."
+            "don't chatter. On the MicroDuck it runs in <i>precision</i> mode: each "
+            "loop's score is the preference times how far the voter trusts that "
+            "loop's own predictions, and the race is between play (wander), vision "
+            "(on the duck, the seek loop) and the look (stop and look around)."
         ),
         formulas=(
             "<code>raw_klino = hunger·scent; &nbsp; raw_planner = plan_value</code><br>"
@@ -618,7 +621,10 @@ DOCS: dict[str, ModuleDoc] = {
             "<code>g_epist_klino = gate·z_spike_norm; &nbsp; g_epist_planner = gate·plan_novelty; &nbsp; g_epist_play = play_w·gate·play_value</code><br>"
             "<code>G<sub>x</sub> = g_prag<sub>x</sub> + g_epist<sub>x</sub></code> — total score per policy x<br>"
             "<code>keep incumbent unless v_challenger − v_incumbent &gt; margin; &nbsp; margin = k·std(gap)</code><br>"
-            "<code>winner gain = 1.0, all others = 0.0</code><br><br>"
+            "<code>winner gain = 1.0, all others = 0.0</code><br>"
+            "<b>precision mode</b>: <code>G<sub>x</sub> = preference · trust<sub>x</sub></code>, trust = the "
+            "LateralVoter's weight for loop x (hunger for klino, planner and vision; play's preference is 1 − hunger); "
+            "<code>G_look = look_w · (1 − max(hunger, mover in mind)) · look_need · trust_look</code><br><br>"
             "<b>Terms.</b> EFE = Expected Free Energy (here scored so higher value "
             "wins); L2 = second-level arbiter; g_prag / g_epist = pragmatic "
             "(exploit) / epistemic (explore) terms; reach = P(reach food | policy); "
@@ -1074,13 +1080,18 @@ DOCS["MotionField"] = ModuleDoc(
         "that space: a wall cannot do that, because a ray that reached past it went through it. A few such points "
         "close together are a <b>blob</b>; a blob seen again in the next cast, near where it was, is a <b>track</b> "
         "with a velocity. A track is published only after it has lasted a few casts (and, if set, travelled), and "
-        "edges the sensor has hit for a while are ignored as background. It sees only inside the sensor's 45° cone."
+        "edges the sensor has hit for a while are ignored as background. It sees only inside the sensor's 45° cone. "
+        "It can also <b>vouch</b> for the 3-D sketch's own idea of a mover: a thing that only just came into view looks "
+        "new to the sketch, but it puts no return where a ray just passed, so without this module's evidence near it "
+        "the sighting is refused (the ★ stacks run this way, with the module's own tracks unpublished)."
     ),
     formulas=(
         "<code>evidence: return p with a remembered ray r, |p − r| &lt; near_m, r continuing ≥ beyond_m past p</code><br>"
         "<code>blob: ≥ min_points evidence points within cluster_m, one cast</code>; "
         "<code>track: blobs within gate_m cast to cast; published after persist_casts</code><br>"
         "Background (bg_m): a return near a remembered return 1–10 s old is the static world, not motion.<br>"
+        "Vouch (vouch_m &gt; 0): the cloud's mover passes only with evidence within vouch_m of it in the last vouch_s, "
+        "or as the continuation of a vouched mover (within gate_m, inside drop_s).<br>"
         "Output: <code>[bearing x, bearing y, proximity, salience, casts, cast tick, world vx, world vy]</code>."
     ),
 )
@@ -1098,5 +1109,69 @@ DOCS["JointSensorimotorBridge"] = ModuleDoc(
     formulas=(
         "<code>out = [pos_j, act_j, Δpos_j for each joint in the group] ⊕ sense[0 … load_slots−1]</code><br>"
         "<code>Δpos_j = pos_j(t) − pos_j(t−1)</code> (from clean positions; optional coloured noise on position only)."
+    ),
+)
+
+
+# ------------------------------------------------------------------ the duck's look and chase loops (2026-10-12)
+DOCS["LookLoop"] = ModuleDoc(
+    title="Look loop — will stopping here to look around pay off?",
+    summary=(
+        "Standing still to look costs time, so the duck should stop where looking tends to pay. This loop learns where "
+        "that is. It splits the situation into a few <b>contexts</b> (how familiar this place is, how much the duck "
+        "wants to go somewhere, how much it wants to try a skill), and for each one it keeps a belief: how often a stop "
+        "here <b>paid</b>, meaning something worth walking to appeared, or a skill was asked for, while the duck stood. "
+        "That belief is the loop's <b>need</b>, and the arbiter weighs it against the other loops. During a stop that "
+        "has not paid yet, the need falls as the time a payoff usually takes runs out. In the older <i>surprise</i> "
+        "mode a stop instead pays in new things seen."
+    ),
+    formulas=(
+        "<b>yield mode</b> (the ★ stacks): per context c, a Beta belief <code>P(pays) ~ Beta(a_c, b_c)</code>; "
+        "a paid stop adds 1 to a_c, an unpaid one to b_c.<br>"
+        "Need before a stop: <code>a/(a+b) + optimism·sd</code>. "
+        "During one, unpaid at time τ: <code>P·S(τ) / (1 − P + P·S(τ))</code>, S = the learned share of payoffs later "
+        "than τ; 0 once it has paid.<br>"
+        "<b>surprise mode</b>: a stop delivers <code>∫ new_fraction dt</code> (the share of voxels touched in the last "
+        "second never seen before); need = <code>(mean_c + optimism·sd_c/√n_c) / running peak</code>.<br>"
+        "The arbiter's score: <code>G_look = weight · (1 − max(seek need, mover in mind)) · need · trust_look</code>."
+    ),
+)
+
+DOCS["StalkLoop"] = ModuleDoc(
+    title="Stalk loop — wait where the mover passes",
+    summary=(
+        "The duck is slower than the toy train, and a chase that loses it rarely finds it again by following. A hunter "
+        "with a slow body waits where the prey passes. This loop remembers where moving things were seen, grouped into "
+        "<b>passing places</b>, and how often the mover comes back through each one. After a lost chase, with nothing "
+        "else to do, it walks the duck to the best place and waits there for about as long as that place's own return "
+        "time. A wait that sees the mover makes that place more promising; a wait that does not makes it less so, and "
+        "enough failed waits make the duck lose interest without any timer."
+    ),
+    formulas=(
+        "Sightings further apart than pass_gap_ticks start a new <b>pass</b>; a place with ≥ min_passes passes is a "
+        "passing place.<br>"
+        "Return time: the median interval between its passes (the last 16).<br>"
+        "<code>P(a wait sees the mover) ~ Beta(a, b)</code>: a += 1 when a chase starts during the wait, b += 1 when the "
+        "wait outlasts the place's return time.<br>"
+        "Output to the seek loop: <code>[have, x, y, need = a/(a+b), waiting]</code>; the wait begins within arrive_m."
+    ),
+)
+
+DOCS["ThingBelief"] = ModuleDoc(
+    title="Thing belief — is the thing I'm walking to still there?",
+    summary=(
+        "When the duck sees something to walk to, it remembers a <i>place</i>. But things move: the train stops and "
+        "starts, and balls roll off after the duck's own kicks. This module keeps a belief about the <i>thing</i> "
+        "instead. Every moment the duck's 3-D sketch either sees a small thing at the target (evidence it is there) "
+        "or sees its distance rays pass clean through the spot where the thing should be (evidence it has gone). "
+        "A thing being chased counts as present. In the ★ stacks nothing acts on this belief yet; it is recorded so "
+        "it can be measured first."
+    ),
+    formulas=(
+        "Since the target was set: <code>presence = (1 + confirming) / (2 + confirming + refuting)</code> "
+        "(a Laplace estimate over ticks).<br>"
+        "Confirming tick: a small thing in the cloud at the target. Refuting tick: free-ray samples through the "
+        "target's footprint below the confirmed thing's top.<br>"
+        "Output: <code>[presence, confirming, refuting, ticks since set, have a target]</code>."
     ),
 )

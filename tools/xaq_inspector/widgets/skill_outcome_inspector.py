@@ -8,13 +8,17 @@ intents are all known loses its pull — habituation.  The surprise is an answer
 
 snapshot (diag_snapshot): requests, observed, unknown, pending, armed, misses, node (the kind now attended), need,
   surprise, nodes_known, peck_outcomes, push_outcomes, stats {"node:intent": {n, mean, sd}}, last {node, pred, obs,
-  surprise}, min_samples, kicked_node, tx/ty
+  surprise}, min_samples, kicked_node, tx/ty, pull, context, context_n, ctx_stats {"ctx": {n, ans}}
+
+With context_topic set (S3, the ★ stacks), each kind's cells are split by a context EPM's winner (near a wall line, near
+a tall column ...), and a context that has pooled enough outcomes lends its answered share to an uncertain cell: the
+readout lists each context's outcomes and answered share, the PULL the seek loop reads.
 
 Panels:
   * The outcome table: one row per kind, one column per intent — n, mean displacement ± spread; green = known,
     amber = tried, dark = never asked.  The attended kind's row is marked.
   * need and surprise over time.
-  * Readout: requests, answers seen, unknowns, the last answer.
+  * Readout: requests, answers seen, unknowns, the last answer; with a context, each context's answered share.
 """
 from __future__ import annotations
 
@@ -116,7 +120,21 @@ def _rows(s: dict):
         ("last answer", f"kind {int(last.get('node', -1))}: predicted {float(last.get('pred', 0)):.3f} m, "
                         f"saw {float(last.get('obs', 0)):.3f} m"),
         ("surprise", f"{float(last.get('surprise', 0)):.3f}"),
-    ]
+    ] + _context_rows(s)
+
+
+def _context_rows(s: dict):
+    """S3's context split (context_topic set): the context now, the pull, and each context's pooled answered share."""
+    n = int(num(s, "context_n"))
+    if n <= 0:
+        return []
+    rows = [("", ""), ("context now", f"{int(num(s, 'context'))} of {n}"), ("pull", f"{num(s, 'pull'):.3f}")]
+    cs = s.get("ctx_stats") or {}
+    for k in sorted(cs, key=lambda x: int(x) if str(x).lstrip("-").isdigit() else 0):
+        c = cs[k] or {}
+        cn, ca = int(c.get("n", 0)), int(c.get("ans", 0))
+        rows.append((f"context {k}", f"{cn} outcomes, {ca} answered  (share {(ca + 1) / (cn + 2):.2f})"))
+    return rows
 
 
 class SkillOutcomeInspector(QWidget):

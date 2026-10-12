@@ -24,7 +24,7 @@ brain_builder/tests/dryrun.sh               # r19/r25 construct, tick, and drive
 
 | panel | what it does |
 |---|---|
-| **Palette** | the 77 registered types by category, searchable; drag one onto the canvas (or right-click the canvas) |
+| **Palette** | the 80 registered types by category, searchable; drag one onto the canvas (or right-click the canvas) |
 | **Canvas** | nodes tinted by category, pins coloured by payload type, links by topic family. Drag output → input to wire. Delete a link to clear the param. Hover a pin for its topic and the manifest text; hover a red node for its setup error |
 | **Properties** | the selected module's params from its schema: bool / int / float / enum / string / list editors, a topic picker on socket params, filters (required / set / sockets / hot), reset-to-default, unknown keys flagged |
 | **Execution Order** | the modules array, which is the tick order; drag to reorder; "Sort topologically" previews a suggestion and names any cycle it kept |

@@ -33,7 +33,8 @@
       "name": "neck_pitch",
       "topic": "action.neck_pitch",
       "payload": "ActionOut",
-      "description": "neck pitch command, unit-scaled to the head range"
+      "description": "neck pitch command, unit-scaled to the head range; a graph that publishes nothing here leaves the joint at home (HeadAdapter keeps the last command, 0 at start)",
+      "optional": true
     },
     {
       "name": "head_pitch",
@@ -45,7 +46,8 @@
       "name": "head_yaw",
       "topic": "action.head_yaw",
       "payload": "ActionOut",
-      "description": "head yaw command (masked unless the config drives it)"
+      "description": "head yaw command (masked unless the config drives it); a graph that publishes nothing here leaves the joint at home (HeadAdapter keeps the last command, 0 at start)",
+      "optional": true
     },
     {
       "name": "head_roll",
