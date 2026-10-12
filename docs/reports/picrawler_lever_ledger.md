@@ -7610,3 +7610,48 @@ before the avoid loop, whose 1 m warning was fit to the sprawling gait, has turn
 stance is the gait lever; the loop's lead must follow the body's speed and turning authority
 (S4's reach constant). For the robot run this means more wall touches than S3a had, with the
 belly, the feet and the current as the numbers that decide the stance.
+
+---
+
+### ★★ 2026-10-12 — hip2 +0.3 ON THE ROBOT: THE STANCE REPRODUCES (BELLY 27 → 51 mm, CURRENT DOWN), THE STEPPING DOES NOT CHANGE — PROMOTED AS THE ROBOT'S POSTURE; THE NOISY STEP IS THE NEXT PROBLEM
+
+*The operator's run of `…__s3a_stuckinst__hip2p030.json` (carpet, 225 s, 2 HAT resets).
+Operator's eye: "the height is better but steps are still noisy; clean strides are still rare."
+Against run 3 (the spawn stance) and the plumb run, same floor:*
+
+| | run 3 | plumb 0.15 | **hip2 +0.3** |
+|---|---|---|---|
+| **belly ToF median / p05** | 27 / 9 mm | 20 / 5 mm | **51 / 32 mm** |
+| servo current median / p95 | 1.50 / 2.98 A | 1.71 / 2.94 A | **1.38** / 3.06 A |
+| hip2 (proprio, mean) | +0.019 | −0.035 | +0.183 |
+| feet in contact (FSR ≥ 200) | 2.80 | 2.73 | 2.77 |
+| stride forward mean / sd | −0.019 / 0.19 | +0.011 / 0.19 | −0.001 / 0.23 |
+| **clean strides** (a ≥ 0.25 s swing then a ≥ 0.25 s stance, all legs) | **24 %** (302/1246) | 26 % | **20 %** (212/1077) |
+| FSR contact transitions per minute per leg | 128–221 | 117–189 | 106–181 |
+| upright p05 | 0.964 | 0.962 | 0.973 |
+| HAT resets | 2 | 0 | 2 |
+
+**Verdict: `WORKING` on posture, `NULL` on the step — promoted as the robot's posture.** The sim
+predicted +23 mm of belly and the robot gave +24; the taller, less sprawled stance draws LESS
+current at the median (1.50 → 1.38 A: less torque holding a narrower base), tilts less, and
+costs nothing in falls. That is the operator's stance, measured, and it goes into the robot
+stack. But the stepping is untouched: the same 2.8 feet in the FSR stance set, the same
+zero-mean stride, the same one-in-four clean strides, the same FSR flicker — 100–200 contact
+transitions a minute per leg against the ~40 a clean 1.4 s gait would make, i.e. **each foot
+touches and lifts three to four times per stride.** That flicker is the "swimming" the operator
+sees, and it is what the stride estimate, the stance set and the odometry are all reading.
+
+**What the noisy step is.** The ledger's 2026-10-02 finding stands and is now the front: four
+imposed terms in MotorEPMv2 (coupling, stroke, `stance_lift`, explore noise) each drive the
+joint command to full slew with reversals every 1–2 ticks; benchd's slew (40 µs/tick) and the
+servo lag (α 0.2) smooth what reaches the servos, so the feed's `out` shows no reversals while
+the feet still skitter. Nothing on the robot records the brain's RAW action targets, so the
+thrash cannot yet be attributed per term there. **Next, in order:** (1) an instrument — the host
+logs its raw action targets (the values it sends benchd, before the slew) beside the applied
+pulses, and a thrash metric on them (reversals per stride, per joint); (2) in the sim, the four
+terms ablated one at a time as TESTS (never the operating mode) to attribute the reversals;
+(3) the lever that follows from (2) — most likely a learned, rate-aware form of whichever term
+owns the reversals, never a new imposed smoother. The clean-stride and flicker numbers above are
+the metrics it must move.
+
+**Robot stack now:** `…__room_senses__s3a_stuckinst__hip2p030.json`.
