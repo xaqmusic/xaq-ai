@@ -7561,3 +7561,42 @@ and the robot. The next dose is therefore `hip2_tuck_target` (the femur's rest, 
 P-e·h0 = the spawn pose) run both ways, −0.3 / +0.3 / +0.6, plumb off, to settle the sign on
 the body and read chassis_y, foot_r, belly, steps and falls. `stance_lift_hip2` (0.25 in
 P-e·h0) is the same press, gated to planted legs, and is the second knob of the pair.
+
+---
+
+### ★★ 2026-10-12 — THE FEMUR DOSE: hip2 +0.3 STANDS THE BODY 19 mm HIGHER WITH THE FEET 7 mm INSIDE THE REACH, BELLY +23 mm, 0 FALLS, DISTANCE TIES (n=6) — THE OPERATOR'S STANCE, FOUND
+
+*`hip2_tuck_target` on P-e·h0 (default −99 = the spawn pose), plumb off, −0.3 / +0.3 / +0.6, arena,
+6000 ticks, n=6 (`…__hip2m030 / p030 / p060.json`). Sign per the code: "+hip2 = press foot
+down". Verdict: **+0.3 `WORKING` on posture** (loud), distance tie, 0 falls — the promote-or-kill
+candidate for the robot; +0.6 `REGRESSION` (falls, half the distance); −0.3 `REGRESSION` (the
+body lies down — the direction the plumb reflex pushed).*
+
+| hip2 rest | chassis_y (mm) | belly (mm) | belly min | foot_r (mm, reach 166) | planted | net_disp (m) | straight | steps | falls |
+|---|---|---|---|---|---|---|---|---|---|
+| −0.3 | 30.4 | 10.4 | 0.0 | 169.4 | 3.86 | 5.20 | 0.81 | 22.5 | 0 |
+| base (spawn) | 44.9 | 28.8 | 6.0 | 167.7 | 3.97 | 5.07 | 0.78 | 8.8 | 0 |
+| **+0.3** | **64.1** | **52.2** | **21.6** | **160.8** | 3.99 | 4.65 ± 0.43 | 0.74 | 2.8 | **0** |
+| +0.6 | 80.8 | 74.8 | 37.9 | 148.5 | 3.98 | 2.93 ± 1.36 | 0.48 | 4.2 | 2 (one seed) |
+
+**What it says.** Pressing the femur down with the knee tucked is the stance the operator
+described: the chassis rises (45 → 64 mm), the feet come in from the reach limit (168 → 161
+mm), the belly has margin for the first time (minimum 22 mm against 6), four feet stay
+planted, nothing falls, and the body still travels (4.65 against 5.07, inside the seed spread).
+At +0.6 it stands 81 mm high on 148 mm feet and starts to tip (one seed twice) and crawl. The
+dose is monotone in height and the sweet spot is between the two; +0.3 is the arm that goes to
+the robot. −0.3 is the plumb reflex's direction, and it lies the body down the same way.
+
+**Two closures corrected.** (1) The "feet at 170 mm on a 166 mm reach" closure of 2026-08 was a
+posture, not a limb limit: at hip2 +0.3 the feet plant at 161 mm. (2) The plumb formula's
+"shank off-vertical" rises to 60° and 76° as the body stands up — the formula reads the knee's
+fold under a raised femur as sprawl. It measures its own encoding, not the posture, which is
+why the whole plumb family optimised toward a flatter body. Retire it as a posture metric;
+chassis_y, belly and foot_r are the honest three.
+
+**For the robot:** `…__s3a_stuckinst__hip2p030.json` (the reflex stack + hip2 +0.3), in the
+dash. Read, against run 3 and the plumb run: the feet-in-contact count (2.8 / 2.73), the
+stride mean (≈ 0), the belly ToF (27 / 20 mm median), the servo current (1.50 / 1.71 A — the
+femur press holds the body up; the robot already stands 15–25 mm above the sim, so watch
+the rail), falls, and the operator's eye on the shank and the steps. The room A/B of the
+same stack with the taller stance is below.
