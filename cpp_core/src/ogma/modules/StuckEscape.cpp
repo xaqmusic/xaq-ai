@@ -143,10 +143,15 @@ void StuckEscape::tick(uint64_t tick_id) {
         if (above_ >= confirm_ticks_) {
             // Choose the escape heading NOW, from the view: the freest sector, ties and an empty
             // view -> the fallback turn, alternating sides.  Sector k spans [-60 + 15k, -45 + 15k).
+            // The freest sector; among equally free sectors the one NEAREST STRAIGHT AHEAD
+            // (sectors 3 and 4), then alternating sides on exact ties.  Taking the first index
+            // made every escape turn -52 deg (sector 0) on the robot (16 of 16, 2026-10-12).
             int best = -1; float bestv = -1.0f; bool any_info = false;
+            auto nearer_ahead = [](int a, int b) { return std::fabs(a - 3.5) < std::fabs(b - 3.5); };
             for (int k = 0; k < 8; ++k) {
                 if (view_[k] < view_free_) any_info = true;
-                if (view_[k] > bestv + 1e-6f) { bestv = view_[k]; best = k; }
+                if (view_[k] > bestv + 1e-6f || (std::fabs(view_[k] - bestv) <= 1e-6f && best >= 0 && nearer_ahead(k, best)))
+                    { bestv = view_[k]; best = k; }
             }
             if (have_view_ && any_info && best >= 0 && bestv >= view_free_) {
                 turn_rad_ = (-60.0 + 15.0 * best + 7.5) * kDeg; chosen_sector_ = best;

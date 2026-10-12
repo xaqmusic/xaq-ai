@@ -7370,3 +7370,53 @@ come from the pulses, and it is closed below.
 level mount's −5° lobe reaches the floor at ~1 m, and a nose-down pitch of ~25° brings it
 nearer — but it cannot produce backing, and nothing in these runs recorded the beam. The
 next run does.
+
+---
+
+### 2026-10-12 — RUN 3, READ FROM THE BRAIN'S SIDE: EVERY ESCAPE FIRED ON A STRIDE MEAN ≤ 0 WHILE WALKING; THE AVOID LOOP NEVER RESTS IN A REAL ROOM; THE 0.6 m SCALE IS A REGRESSION IN THE SIM
+
+*The operator's third floor run (S3b, 240 s, 2 HAT resets) is the first with `brain_diag.jsonl`
+(1150 rows at 5 Hz) and the machine-cost fields. Logs: `~/xaq_robot_runs/dashrun_20261012_1659*`.*
+
+**The escape, directly observed.** 16 episodes in 230 s, every ~14 s; the body in BACK or TURN
+26 % of the time, reversing 10 % of the time (the pulse decoder agrees: 29 reverse windows,
+59 s). Before every one of the 16 triggers the stride's 2 s mean was **≤ 0** (−0.004 … −0.104
+m/s) against a peak-hold of 0.013–0.118, with the body walking. Range at the trigger: 1.5
+with no echo in 5 cases, 0.4–1.2 m valid in the rest, never under 0.3 m — not a floor return
+(`upright` p05 0.964 = 15°; past 25° in <2 % of samples). **The floor hypothesis is closed for
+the backing. The stride estimate is the cause.**
+
+**The stride estimate on carpet is not a speed sensor.** Per-sample forward −0.92 … +0.80 m/s,
+sd 0.19, **mean 0.004** at 5 Hz (−0.019 in the host's 1 Hz dumps, 118 of 224 negative); the 2 s
+EMA has mean 0.001 and sd 0.039. The body walked the whole run. The integrated odometry
+credits it with 1.75 m forward and −1.5 turns over 234 s, with 2.8 feet reading FSR contact on
+average (the threshold admits dragging feet into the stance set). Run 2 on another floor had
+a mean of 0.023. A stance-FK stride whose mean is 0–0.02 m/s with a 0.19 m/s sample spread
+cannot carry a stall sense, a speed sense or an odometry on this robot, whatever the sim says
+(there its spread is a tenth and its mean holds). This is the open problem under everything
+that reads progress on the robot: StuckSense, DeadReckon, place_in, and the honest `vel_ego`.
+Candidates, each a lever: a stance set from the FSR *shape* rather than one threshold; the
+range rate against a square wall as a speed calibration; optical flow from the camera; the
+IMU's own integration over a stride with a ZUPT at each planted foot.
+
+**The avoid loop never rests in a real room.** Active 100 % of the samples, median value 0.48,
+44 remembered points on average, the intent's error over 45° in 26 % of samples, mean speed
+0.60: at a 1 m proximity scale the robot's room always has something within reach, so the
+body never holds a heading and always walks slowed. That is the trigger range the operator
+asked about. **A/B in the sim room, S3a with `range_m` 0.6 and `floor` 0.15 (`…__s3a_near.json`,
+n=6): `REGRESSION`** — wall_frac 0.116 ± 0.074 against 0.008, contact episodes 56 against 3.7,
+coverage 27.7 (tie), 0 falls. A 0.5 m warning is not enough for a body that turns at 12 °/s.
+Re-use context: a scale set by the body's own turning authority (the arbiter's reach
+constant, S4) rather than a constant; or a room with nothing within a metre.
+
+**Fixed on the way:** every escape turned −52° (sector 0) — the tie-break took the first free
+sector; it now takes the free sector nearest straight ahead (test added). The escape stays
+deferred.
+
+**The machine's side, now recorded:** host process 6–10 % of one core at full load, 1-min load
+0.6–1.0 on four cores, RSS 12.6 MB, 36 → 42 °C over four minutes, tick p50 2–7 % of budget,
+0 overruns; **112 sequence gaps in 11558 frames (1 %)** — the 447 of the probe run were the
+probe's snapshot calls holding the host's lock, not contention. Servo current median 1.47 A,
+p95 2.98 A, max 3.40 A: the known regime, two HAT resets.
+
+**The robot stack stands:** `…__s3a_stuckinst.json` — S3a, the stuck sense as an instrument.

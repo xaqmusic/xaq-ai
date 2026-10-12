@@ -65,3 +65,9 @@ TEST(StuckEscape, SectorZeroIsTheMinusXSide) {
     for (uint64_t t = 0; t < 5; ++t) f.run(t, 0.9f, view);
     EXPECT_NEAR(f.m.chosen_turn_rad(), -52.5 * M_PI / 180.0, 1e-6) << "sector 0 = -52.5 deg, toward -X";
 }
+TEST(StuckEscape, AmongEquallyFreeSectorsTheOneNearestAheadWins) {
+    // Sectors 0, 3 and 6 free; the rest blocked.  Sector 3 (-7.5 deg) is nearest ahead, not sector 0.
+    Fix f; std::vector<float> view = {1.0f, 0.3f, 0.3f, 1.0f, 0.3f, 0.3f, 1.0f, 0.3f};
+    for (uint64_t t = 0; t < 5; ++t) f.run(t, 0.9f, view);
+    EXPECT_NEAR(f.m.chosen_turn_rad(), -7.5 * M_PI / 180.0, 1e-6);
+}
