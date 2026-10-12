@@ -326,6 +326,15 @@ int main(int argc, char** argv) {
                     if (!m) return {{"status","error"},{"message","unknown module: " + id}};
                     return {{"status","ok"}, {"module_id", id}, {"snapshot", m->snapshot_state()}};
                 }
+                if (verb == "module_diag") {
+                    // The module's DIAGNOSTIC view (what the inspector shows), not its persisted
+                    // state: the loop modules' live slots, bearings, scores.  The dash polls this
+                    // at 5 Hz into brain_diag.jsonl so a run is read from the brain's side.
+                    const std::string id = req.value("id", std::string());
+                    auto* m = instance->module(id);
+                    if (!m) return {{"status","error"},{"message","unknown module: " + id}};
+                    return {{"status","ok"}, {"module_id", id}, {"diag", m->diag_snapshot()}};
+                }
                 if (verb == "module_subscribe_diag") {
                     const std::string id    = req.value("id", std::string());
                     const std::string topic = req.value("topic", std::string());

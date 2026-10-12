@@ -7313,3 +7313,60 @@ when it does; falls, and the rail. The escape-only arm is the one to watch the e
 
 **Also:** the vision EPM's stale `encoder_res` parameter (ignored with a warning at load) is
 removed from the six configs that carried it; no behaviour change.
+
+---
+
+### 2026-10-12 — S3b ON THE ROBOT, TWO FLOOR RUNS: THE ESCAPE BACKS THE BODY UP EVERY 7–10 s ON OPEN FLOOR — THE STRIDE ESTIMATE IS NOISE AT CARPET SPEEDS (REGRESSION; S3a IS THE ROBOT STACK)
+
+*The operator ran S3b from the dash twice (carpet, "various environments"; battery; 416 s and
+290 s of brain time; 1 and 3 HAT resets, auto-recovered) and reported a tendency to walk
+backward, strongest in the second run with open floor ahead, and asked whether the
+rangefinder saw the floor on a nose-down pitch. Logs: `~/xaq_robot_runs/dashrun_20261012_0137*`
+and `_0145*` (feed, events, meta, the host log; audio left on the Pi).*
+
+**It was the escape, not the range trigger.** Nothing in S3b but the escape's BACK state can
+reverse the stroke: the avoid loop sheds speed to a floor of 0.2 while turning and never
+below it, and a pitched beam seeing the floor would read as "something ahead" — a turn, not
+a retreat. The commanded pulses in the 50 Hz feed say it directly. Decoding each leg's hip1
+sweep direction during its knee-lifted phase (the servo map, 1 s windows, three legs voting):
+
+| run | brain time | reverse episodes | reverse time | spacing |
+|---|---|---|---|---|
+| 1 (013732) | 416 s | 40+ (1–8 s each) | 91 s (22 %) | every 4–12 s |
+| 2 (014553) | 290 s | 31 (1–5 s each) | 38 s (13 %) | every 5–10 s |
+
+That spacing is the escape's own cycle — confirm 1 s + back 1.5 s + turn 2 s + refractory 3 s
+≈ 7.5 s — so the stall was confirming again almost as soon as it was allowed to.
+
+**Why the stall confirmed on open floor.** The sense is the stride forward estimate's 2 s mean
+against its own recent peak. On the robot the per-sample stride swings **−0.6 … +1.0 m/s
+around a mean of 0.023 m/s** (174 of 406 samples negative in run 1, 116 of 273 in run 2):
+the stance-leg kinematics read the body's rocking, carpet compliance and FSR threshold
+flicker as metres per second. A 2 s EMA of that has a ripple comparable to its mean, so it
+spends much of its time below a quarter of its own peak, and a body walking normally reads
+as stalled. In the sim the same channel separated 0.007 on the wall from 0.03 free; the
+robot's stride has no such separation at these speeds. **The stride estimate is not a
+progress observation on carpet**, and S3b's verdict on the robot is `REGRESSION`, for a
+reason the sim could not show: the sim's stride is too clean.
+
+**Not seen in these logs:** the range itself. The host dumps the brain inputs, not
+`sense.range`, and nothing on the robot recorded the loop modules' state (the avoid value,
+the intent's mode, the stall score, the escape's state). That gap is why the diagnosis had to
+come from the pulses, and it is closed below.
+
+**What changes.**
+1. **S3a is the robot's reflex stack.** Deployed as `…__room_senses__s3a_stuckinst.json`:
+   S3a with StuckSense present and NO escape — the stall score is an instrument on the robot
+   until it has a progress observation it can trust (the servo current on a snag, the range
+   rate when a wall is square ahead, or optical flow: each its own lever, measured first).
+2. **The dash records the loop modules' state** (`brain_diag.jsonl`, 5 Hz: proximity slots,
+   the avoid bearing and value, the intent's mode/error/speed, the stall score and its
+   internals, the escape's state) and the host's own range and stride samples, so the next
+   run is read from the brain's side, not reconstructed from the servos.
+3. The range-timeout rate on carpet is a number now: run 1, **1226 of 6973 pings had no
+   echo (18 %)**; run 2, see the host log. The confound is live on the robot at that rate.
+
+**On the operator's hypothesis** (the beam seeing the floor nose-down): not refuted — the
+level mount's −5° lobe reaches the floor at ~1 m, and a nose-down pitch of ~25° brings it
+nearer — but it cannot produce backing, and nothing in these runs recorded the beam. The
+next run does.

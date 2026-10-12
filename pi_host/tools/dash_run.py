@@ -248,6 +248,61 @@ class RobotIo:
     def host_exists(self) -> bool:
         return OGMA_HOST.exists()
 
+    # ---- the brain's own state: the loop modules' diagnostics, 5 Hz, from the host's control port
+    def start_brain_diag(self, path: Path, module_ids: list, port: int = 7400):
+        """Polls ogma_host's control port (`module_diag`) for the given module ids every 200 ms
+        and writes one JSON row per poll: {"t": monotonic s, "ticks": brain ticks, "mods": {id: diag}}.
+        Returns a handle with stop() -> rows.  Exists because two floor runs of S3b (2026-10-12)
+        had to be diagnosed from the servo pulses: nothing recorded what the loops were saying."""
+        if not module_ids:
+            return None
+        import socket
+        run = threading.Event(); run.set()
+        count = [0]
+        f = open(path, "w")
+
+        def loop():
+            sock = None; buf = b""
+            def call(verb, **kw):
+                nonlocal sock, buf
+                if sock is None:
+                    sock = socket.create_connection(("127.0.0.1", port), timeout=2.0); buf = b""
+                sock.sendall((json.dumps({"verb": verb, **kw}) + "\n").encode())
+                while b"\n" not in buf:
+                    c = sock.recv(65536)
+                    if not c:
+                        raise OSError("control socket closed")
+                    buf += c
+                line, _, buf = buf.partition(b"\n")
+                return json.loads(line.decode())
+            while run.is_set():
+                t0 = time.monotonic()
+                try:
+                    p = call("ping")
+                    row = {"t": round(t0, 3), "ticks": p.get("ticks"), "mods": {}}
+                    for mid in module_ids:
+                        r = call("module_diag", id=mid)
+                        if r.get("status") == "ok":
+                            row["mods"][mid] = r.get("diag", {})
+                    f.write(json.dumps(row) + "\n"); f.flush(); count[0] += 1
+                except (OSError, ValueError):
+                    if sock is not None:
+                        try: sock.close()
+                        except OSError: pass
+                    sock = None
+                time.sleep(max(0.0, 0.2 - (time.monotonic() - t0)))
+            if sock is not None:
+                try: sock.close()
+                except OSError: pass
+            f.close()
+        t = threading.Thread(target=loop, daemon=True); t.start()
+
+        class H:
+            def stop(self_inner) -> int:
+                run.clear(); t.join(3)
+                return count[0]
+        return H()
+
     def spawn_host(self, cfg: Path, log_path: Path, extra: tuple = ()):
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         lf = open(log_path, "w")
@@ -366,6 +421,7 @@ class RunController:
         self.rec_dir = LOG_DIR / f"dashrun_{stamp}"
         self._audio = None
         self._feed = None
+        self._bdiag = None
         self._inacap = None
 
     # ---- operator actions (UI thread) ----
@@ -558,6 +614,17 @@ class RunController:
         if self.cfg.host_flags:
             self._ev("senses from body_env: " + " ".join(self.cfg.host_flags))
         self._host = self.io.spawn_host(self.cfg.path, self.st.log_path, self.cfg.host_flags)
+        if self.record:
+            # The loop modules present in this config, by type: what the reflex layer is saying.
+            try:
+                mods = json.loads(self.cfg.path.read_text()).get("modules", [])
+                ids = [m["id"] for m in mods if m.get("type") in
+                       ("ProxMemory", "TofAvoidLoop", "BearingToIntent", "StuckSense", "StuckEscape")]
+            except (OSError, ValueError, KeyError):
+                ids = []
+            self._bdiag = self.io.start_brain_diag(self.rec_dir / "brain_diag.jsonl", ids)
+            if self._bdiag is not None:
+                self._ev("recording the loop modules' state: " + ", ".join(ids))
 
         def ready() -> bool:
             if self._host.poll() is not None:
@@ -675,6 +742,9 @@ class RunController:
             self._ev_rec("audio_stop")
         if self._feed is not None:
             frames = self._feed.stop(); self._feed = None
+        if self._bdiag is not None:
+            rows = self._bdiag.stop(); self._bdiag = None
+            self._ev(f"brain_diag.jsonl: {rows} rows")
         if self._inacap:
             self.io.bench.call("ina.capture", mode="off")
             self._ev_rec("ina_capture_stop", file=self._inacap)

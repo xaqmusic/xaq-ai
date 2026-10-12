@@ -127,6 +127,14 @@ class FakeRobot:
                 robot.log("audio_stop"); return 30.0
         return H()
 
+    def start_brain_diag(self, path, module_ids, port=7400):
+        self.log("bdiag_start")
+        robot = self
+        class H:
+            def stop(self_inner):
+                robot.log("bdiag_stop"); return 0
+        return H()
+
     def start_feed(self, path):
         self.log("feed_start")
         robot = self
