@@ -11,8 +11,6 @@ The core idea is that a competent agent can be assembled from few or many small
 inference loops — each responsible for one hidden feature of the world —
 coordinated by a shared, trust-weighted state bus and a policy selector.
 
-<img width="482" height="497" alt="inspector" src="https://github.com/user-attachments/assets/e21358e1-9723-4a2f-9985-696dc5302f9f" /> <img width="482" height="497" alt="picrawler3" src="https://github.com/user-attachments/assets/8b453783-1193-4d3c-8e5e-d1e746b3135a" />
-
 YouTube Playlist https://www.youtube.com/watch?v=862uRoQOtKk&list=PLRTI993J63iI&index=1
 
 ## Where it stands (October 2026)
@@ -51,6 +49,9 @@ board resets about once every 10 to 40 seconds.
 kick, and reach down to the floor. xaq-ai does not replace those. It sits above them
 as the part that decides what to do: where to look, where to walk, what to walk
 up to, and when to give up on something.
+
+<img width="1668" height="936" alt="Screenshot From 2026-10-11 19-39-02" src="https://github.com/user-attachments/assets/cd1a5211-b2aa-4712-a06f-b6570dec6075" />
+
 
 In simulation (MuJoCo, on Pollen's own model files), the duck is left alone in a
 4 m playroom with toys, furniture and a moving toy train. It sees through the
@@ -111,6 +112,14 @@ The cool thing about very hard problems that vex the greatest minds on this plan
 | **`tools/`** | The live [inspector](tools/xaq_inspector/README.md) (watch any module inside a running brain), the duck's launcher and viewer, and [xaq_voice](tools/xaq_voice/README.md), which turns the brain's prediction error into sound. |
 | **`python/xaq_core/`** | Shared substrate: the socket/ZeroMQ message bus, a torch predictor + episodic memory, export-parity checks, and the logging protocol. |
 | **`python/xaq/`** | The Python engine: EPM nodes, GNG, lateral voting, active inference / global workspace, motor & navigation, and a **generic STFT audio modality** so multi-modal fusion is demonstrable out of the box. |
+
+<img width="1854" height="1043" alt="Screenshot From 2026-10-11 19-42-28" src="https://github.com/user-attachments/assets/beb0a92b-2818-4027-bdc4-3264f7616888" />
+
+<img width="1751" height="1010" alt="Screenshot From 2026-10-11 19-40-13" src="https://github.com/user-attachments/assets/3f0c3c17-3811-4053-b3b6-9323c72c7f20" />
+
+
+
+<img width="482" height="497" alt="inspector" src="https://github.com/user-attachments/assets/e21358e1-9723-4a2f-9985-696dc5302f9f" /> <img width="482" height="497" alt="picrawler3" src="https://github.com/user-attachments/assets/8b453783-1193-4d3c-8e5e-d1e746b3135a" />
 
 ## A note on the name
 
