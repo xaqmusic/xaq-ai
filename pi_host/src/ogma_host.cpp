@@ -547,6 +547,23 @@ int main(int argc, char** argv) {
             "reality.audio.cochlear", "reality.video.retinal", "reality.proprio.range"};
 
         ogma::hw::TickBudget budget(a.hz, 25);
+        // The MACHINE's side of the cost (ResourceMonitor::HostStats): process CPU, memory,
+        // temperature, plus the 1-minute load, sampled ~1 Hz OFF the tick thread (reading /proc
+        // under the tick would make the instrument a cause of what it measures) and printed
+        // with each host_cost row.  Two floor runs of 2026-10-12 had the tick's own cost and
+        // nothing about the Pi, which left "is it contention?" unanswerable.
+        ogma::hw::HostStats host_stats;
+        std::mutex hs_mtx; ogma::hw::HostSample hs_last; double hs_load1 = 0.0;
+        std::atomic<bool> hs_run{true};
+        std::thread hs_thread([&]{
+            while (hs_run.load()) {
+                ogma::hw::HostSample smp = host_stats.sample();
+                double l1 = 0.0;
+                if (FILE* lf = std::fopen("/proc/loadavg", "r")) { if (std::fscanf(lf, "%lf", &l1) != 1) l1 = 0.0; std::fclose(lf); }
+                { std::lock_guard<std::mutex> lk(hs_mtx); hs_last = smp; hs_load1 = l1; }
+                for (int i = 0; i < 10 && hs_run.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        });
         const long period_ns = long(1e9 / a.hz);
         timespec next{};
         clock_gettime(CLOCK_MONOTONIC, &next);
@@ -1013,12 +1030,18 @@ int main(int argc, char** argv) {
                             "\"mic_windows\":%llu,\"mic_delivered\":%llu,"
                             "\"mic_peak\":%.4f,\"mic_xruns\":%llu,"
                             "\"cam_frames\":%llu,\"cam_mean\":%.1f,"
-                            "\"range_pings\":%llu,\"range_timeouts\":%llu}\n",
+                            "\"range_pings\":%llu,\"range_timeouts\":%llu,"
+                            "\"proc_cpu_pct\":%.1f,\"load1\":%.2f,\"rss_mb\":%.1f,\"mem_avail_mb\":%.0f,\"cpu_temp_c\":%.1f}\n",
                             ticks, s.budget_ms, s.wall_p50, s.wall_p95, s.wall_max, s.cpu_p50, overruns,
                             (unsigned long long)mic.windows(), (unsigned long long)mic.delivered(),
                             double(mic.peak()), (unsigned long long)mic.xruns(),
                             (unsigned long long)cam.frames(), double(cam.mean_level()),
-                            (unsigned long long)rangefinder.pings(), (unsigned long long)rangefinder.timeouts());
+                            (unsigned long long)rangefinder.pings(), (unsigned long long)rangefinder.timeouts(),
+                            [&]{ std::lock_guard<std::mutex> lk(hs_mtx); return hs_last.proc_cpu_pct; }(),
+                            [&]{ std::lock_guard<std::mutex> lk(hs_mtx); return hs_load1; }(),
+                            [&]{ std::lock_guard<std::mutex> lk(hs_mtx); return hs_last.rss_mb; }(),
+                            [&]{ std::lock_guard<std::mutex> lk(hs_mtx); return hs_last.mem_avail_mb; }(),
+                            [&]{ std::lock_guard<std::mutex> lk(hs_mtx); return hs_last.cpu_temp_c; }());
                 for (auto const& t : epm_topics) {
                     auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(
                         instance->bus()->last_value(t));
@@ -1036,6 +1059,7 @@ int main(int argc, char** argv) {
                              imu_sh.reads, imu_sh.errors);
         // A channel that died mid-run must SAY so.  "0 windows" is indistinguishable
         // from a silent room, a lens cap, and an empty corridor unless the error shows.
+        hs_run = false; if (hs_thread.joinable()) hs_thread.join();
         mic.stop(); cam.stop(); rangefinder.stop();
         if (vid_pub) zmq_close(vid_pub);
         if (state_sub) zmq_close(state_sub);
