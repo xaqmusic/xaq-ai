@@ -7524,3 +7524,40 @@ read from the feed's `out` pulses, which are benchd's slew-limited output (0.000
 20 µs per servo-tick in both runs); it is the brain's raw command, before the slew. That is
 the gait's own open problem, separate from the stance geometry, and the ledger already names
 its four sources.
+
+---
+
+### 2026-10-12 — THE KNEE-TUCK DOSE (WITH PLUMB 0.15): LESS TUCK IS A FLATTER, WIDER SPRAWL — THE CHASSIS SINKS 45 → 27 mm AND THE FEET GO OUT; STANDING HIGHER IS THE FEMUR'S JOB (REGRESSION, MONOTONE)
+
+*The operator's hypothesis after the plumb run: the chassis must be allowed to stand higher, and
+"true chassis height is an IK problem — hip2 and the knee must work together". Dose:
+`knee_tuck_target` 0.85 (P-e·h0) → 0.75 → 0.65 → 0.55 with `tibia_plumb_gain` 0.15, arena,
+6000 ticks, n=6 (`…__plumb015__tuck0xx.json`). Verdict: `REGRESSION`, monotone in the dose.*
+
+| knee tuck (+ plumb) | chassis_y (mm) | belly (mm) | belly min | foot_r (mm, reach 166) | shank formula | net_disp (m) | steps / 6000 |
+|---|---|---|---|---|---|---|---|
+| base 0.85, no plumb | **44.9** | 28.8 | 6.0 | 167.7 | 46° | 5.07 | 8.8 |
+| 0.85 | 37.8 | 20.2 | 2.2 | 168.7 | 43° | 5.30 | 5.0 |
+| 0.75 | 32.3 | 13.5 | 0.8 | 171.3 | 37° | 4.03 | 1.5 |
+| 0.65 | 28.9 | 9.0 | 0.2 | 172.7 | 32° | 3.71 | 0.5 |
+| 0.55 | **26.7** | 6.1 | 0.0 | 173.3 | 28° | 3.59 | 0.5 |
+
+Falls 0 and 4.0 feet planted throughout: the body does not fall, it lies down.
+
+**The direction was wrong, and the geometry says why.** Opening the knee extends the shank
+OUTWARD and down from a femur that rests near horizontal: the feet move out (168 → 173 mm,
+further past the 166 mm reach), the chassis descends toward the floor, the belly goes to zero,
+and the gait stops stepping. The controller's "shank off-vertical" formula reads more and more
+plumb as this happens, so that number is measuring the formula, not the posture — it is the
+sprawl flattening, not the leg standing up. The ledger's closure ("feet plant at 170 mm against
+a 166 mm reach") is a consequence of the body sitting LOW and WIDE, not a limit of the limb.
+
+**The operator's IK point, made concrete by the sign convention in the code** (MotorEPMv2 Rule 5:
+"+hip2 = press foot down"; `stance_lift_hip2`: "on a planted foot hip2 PLUS presses the foot
+down and raises the chassis"): standing higher with the feet nearer the hips is the FEMUR
+pressing down with the knee tucked, hip2 positive. The plumb reflex pulled hip2 NEGATIVE on the
+robot (−0.035) to satisfy its formula, which is exactly the belly cost it paid in both the sim
+and the robot. The next dose is therefore `hip2_tuck_target` (the femur's rest, off in
+P-e·h0 = the spawn pose) run both ways, −0.3 / +0.3 / +0.6, plumb off, to settle the sign on
+the body and read chassis_y, foot_r, belly, steps and falls. `stance_lift_hip2` (0.25 in
+P-e·h0) is the same press, gated to planted legs, and is the second knob of the pair.
