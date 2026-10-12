@@ -7474,3 +7474,51 @@ become a speed), the **belly ToF** in the feed (`tof_m`, against the 20–30 mm 
 falls, and the current. Not promotable from the sim; a robot-only re-use context, measured.
 Config: `…__room_senses__s3a_stuckinst__plumb015.json`, in the dash. Gain 0.15 only — the
 sim found 0.3 unstable on the cad body.
+
+---
+
+### 2026-10-12 — THE PLUMB LEVER ON THE ROBOT: THE SHANK MOVES THE SAME 4.5° IT MOVED IN THE SIM, THE BELLY PAYS 7 mm, THE STANCE SET AND THE STRIDE DO NOT MOVE — THE KNEE TUCK IS WHAT PINS THE SHANK
+
+*The operator's run of `…__s3a_stuckinst__plumb015.json` (carpet, 215 s, 0 HAT resets; a first
+134 s run ended by hand). Operator's eye: "the tibia was slightly more vertical but not all the
+way; occasionally a few good steps, but the run is dominated by noisy movements"; and the
+question whether the chassis must be allowed to stand higher. Against run 3 (the same gait
+without the lever, same floor):*
+
+| | run 3 | plumb 0.15 |
+|---|---|---|
+| shank off-vertical (from the commanded joints, the plumb formula) | 47.1° | **42.6°** |
+| hip2 (proprio units, mean) | +0.019 | −0.035 (the reflex pulls it) |
+| knee (proprio units, mean) | 0.825 | 0.822 (unchanged: the tuck target holds it) |
+| feet in contact (FSR ≥ 200) | 2.80 | 2.73 |
+| stride forward, mean / sd | −0.019 / 0.19 | +0.011 / 0.19 |
+| odometry, 215 s | 1.75 m | 1.36 m |
+| **belly ToF, median / p05** | **27 / 9 mm** | **20 / 5 mm** |
+| servo current, median | 1.50 A | 1.71 A |
+| avoid loop active / speed mean | 1.00 / 0.60 | 0.98 / 0.79 |
+
+**Verdict: `NULL` on the stance set and the stride, `REGRESSION` on belly (−7 mm, p05 5 mm)
+and current (+0.2 A).** The sim predicted all three numbers: −4° on the shank, −8.6 mm on the
+belly, a distance tie. The robot's taller stance did not buy the margin hoped for.
+
+**Why the shank stops at 43°, and the operator is right about height.** The plumb reflex acts
+through hip2 only. The knee is held at `knee_tuck_target` 0.85 of its range by the postural
+spring (`postural_gain` 1.078) — the "spider stance, knees tucked, chassis suspended below"
+promoted for belly-up on the cad body — so the foot's radius is set by the knee and the hip2
+can only tilt the shank a few degrees before it runs out of geometry (feet at 168 mm on a
+166 mm reach, the closure of 2026-08). A vertical shank needs the feet NEARER the hips, which
+is LESS knee tuck, which stands the chassis HIGHER — exactly the operator's "allowed to stand
+higher". There is no height limit as such in P-e·h0 (the height homeostat is off, "h0"); the
+height is the posture the tuck target and the spring produce. So the lever that reaches the
+operator's stance is the pair `knee_tuck_target` (down from 0.85) with the plumb gain, read
+against belly, falls, stride and current — a body fact already in the ledger (§2284: at tuck
+0.7 and `postural_gain` 0.7 the body stands differently) and the re-use context the geometry
+closure asked for ("a lever that moves foot placement by some route other than hip2, knee or
+stride" — or the knee itself, deliberately). Next lever, sim first.
+
+**The noise the operator sees** is the known command thrash (ledger 2026-10-02: four imposed
+terms each drive the joint command to full slew with reversals every 1–2 ticks). It cannot be
+read from the feed's `out` pulses, which are benchd's slew-limited output (0.000 reversals ≥
+20 µs per servo-tick in both runs); it is the brain's raw command, before the slew. That is
+the gait's own open problem, separate from the stance geometry, and the ledger already names
+its four sources.
