@@ -113,6 +113,11 @@ struct Args {
     bool   odom       = false;
     bool   vel_ego    = false;
     double odom_scale = 2.0;
+    // The brain's RAW action targets, one row per tick, BEFORE benchd's slew: the servo thrash
+    // the ledger names (2026-10-02) cannot be read from the feed's applied pulses, which are
+    // slew-limited (0 reversals in three floor runs while the feet skittered 100-200 contact
+    // transitions a minute).  {"kind":"actions","tick":t,"u":[12],"us":[12]}.
+    bool   dump_actions = false;
 };
 
 void usage() {
@@ -124,6 +129,7 @@ void usage() {
         "  --brain-inputs needs --imu and benchd started with --state-pub 5592; --dump-inputs N prints them\n"
         "  --actuate tcp://127.0.0.1:5594 publishes the brain's actions to benchd (--cmd-port 5594); needs --brain-inputs\n"
         "  --odom [--odom-scale 2.0] publishes ego_heading / odom / place_in (dead-reckoned); --vel-ego publishes vel_ego\n"
+        "  --dump-actions prints the brain's raw action targets every tick (u and target us, before benchd's slew)\n"
         "    from stride_v; both need --brain-inputs and are what the sim's OGMA_PICRAWLER_ODOM / _HONEST_VEL_EGO publish\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
         "  topics: sense.audio (RawAudioFrame) sense.camera (RawImageFrame) sense.range (ProprioToken)\n"
@@ -169,6 +175,7 @@ int main(int argc, char** argv) {
         else if (v == "--odom")                        a.odom = true;
         else if (v == "--vel-ego")                     a.vel_ego = true;
         else if (v == "--odom-scale" && i + 1 < argc)  a.odom_scale = std::atof(argv[++i]);
+        else if (v == "--dump-actions")                a.dump_actions = true;
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
@@ -961,6 +968,10 @@ int main(int argc, char** argv) {
                         const nlohmann::json c = {{"seq", ++act_seq}, {"tick", long(tid)}, {"us", us}};
                         const std::string msg = "cmd " + c.dump();
                         if (zmq_send(cmd_pub, msg.data(), msg.size(), ZMQ_DONTWAIT) >= 0) ++act_sent; else ++act_dropped;
+                        if (a.dump_actions) {
+                            const nlohmann::json row = {{"kind", "actions"}, {"tick", long(tid)}, {"u", act_u}, {"us", us}};
+                            std::printf("%s\n", row.dump().c_str());
+                        }
                     }
                 }
             }

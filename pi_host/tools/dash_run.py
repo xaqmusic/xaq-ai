@@ -311,7 +311,7 @@ class RobotIo:
         return subprocess.Popen(
             [str(OGMA_HOST), "--config", str(cfg), "--imu", "--brain-inputs",
              "--actuate", f"tcp://127.0.0.1:{CMD_PORT}", "--listen", "0.0.0.0", "--rt",
-             "--dump-inputs", "50", *extra],
+             "--dump-inputs", "50", "--dump-actions", *extra],
             cwd=str(REPO), stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
             start_new_session=True)
 
