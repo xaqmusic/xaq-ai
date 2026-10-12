@@ -7509,7 +7509,9 @@ can only tilt the shank a few degrees before it runs out of geometry (feet at 16
 166 mm reach, the closure of 2026-08). A vertical shank needs the feet NEARER the hips, which
 is LESS knee tuck, which stands the chassis HIGHER — exactly the operator's "allowed to stand
 higher". There is no height limit as such in P-e·h0 (the height homeostat is off, "h0"); the
-height is the posture the tuck target and the spring produce. So the lever that reaches the
+height is CONSTRUCTED, not held (§2284: without an active lift term this body sinks to 29 mm and
+stops stepping) — in P-e·h0 by `stance_lift_gain` 0.5 on the planted legs, against the knee
+tuck 0.85 and the postural spring. Standing higher is a dose on that pair. So the lever that reaches the
 operator's stance is the pair `knee_tuck_target` (down from 0.85) with the plumb gain, read
 against belly, falls, stride and current — a body fact already in the ledger (§2284: at tuck
 0.7 and `postural_gain` 0.7 the body stands differently) and the re-use context the geometry
