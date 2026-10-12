@@ -516,7 +516,6 @@
         "encoder_kind": "jl",
         "input_topic": "sense.camera",
         "projection_dim": 64,
-        "encoder_res": 32,
         "baking_threshold": 50,
         "min_insertion_error": 0.02,
         "subtract_descending_prediction": false

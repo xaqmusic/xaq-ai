@@ -7275,3 +7275,41 @@ fails on terrain. Lever 2's scripted escape is `DEFERRED` to that. The stack rem
 outright, with its own speed, negative for backing) and `sense.servo_current` from the sim's
 power model (`OGMA_PICRAWLER_PUBLISH_CURRENT`, opt-in) are built and gain-0, for the
 current channel of the sense on the robot.
+
+---
+
+### 2026-10-12 — S3b DEPLOYED TO THE ROBOT: THE REFLEX GRAPH LOADS AND RUNS ON THE PI, VERIFIED AT REST; THE FLOOR RUN IS THE OPERATOR'S
+
+*The operator's rule: the hardware keeps pace with the sim at each phase. The Pi is at `6cb9aca`
+(fast-forward, 8 objects rebuilt, no errors). Read-only check with the stand pose held on the
+bench (`pose_hold.py stand`, 0.21 A at 8.0 V), the S3b config, every sense flag the dash passes,
+no `--actuate`, 1500 ticks. Verdict: `IN_FLIGHT` — the graph is live on the robot; behaviour is
+the floor run.*
+
+| what | on the robot |
+|---|---|
+| the graph | all 17 modules load: P-e·h0's nine, the three instrument EPMs, ProxMemory, TofAvoidLoop, BearingToIntent, StuckSense, StuckEscape |
+| brain inputs | 1468/1500 ticks published, 0 overruns |
+| the proximity memory | 537 pings in 30 s, points held from the live beam (a bench object at 0.17–0.42 m) |
+| the avoid loop | ahead 0.83, sides 0 — it sees the object |
+| the intent bridge | 1422 bearings consumed, reference set (the body cannot turn to it: held) |
+| the stuck sense | 0 measurements, score 0 — a standing body has never walked, so it has no stall (the floor gate working as designed) |
+| the escape | 0 episodes |
+| host tick cost | wall p50 1.5 % of the 20 ms budget, p95 2.2 % (was 0.3 % with the senses alone) |
+| the dash | lists S3b and the escape-only arm as robot-faithful, with `--range --camera --odom --odom-scale 2.0 --vel-ego` |
+
+**Watch item for the floor:** the state feed showed **447 sequence gaps in 1013 frames** (32
+ticks withheld as stale) against 11 in 1471 in the stand run of 2026-10-11 with the same
+sensors on. Nothing in benchd's journal. Either the heavier graph plus the camera process
+contend on the Pi's four cores, or the probe's snapshot calls held the host's lock; the floor
+run has no probe and the dash records the feed, so it will say. If the gaps recur, the odom
+and the stall channel read them as pauses.
+
+**How it is run:** `picrawler-dash`, pick "S3b · the avoid loop + the stuck sense and the
+escape", battery, the 10 s countdown, SPACE. A boxed-off floor with a wall the beam can see
+square-on. What to watch, in order: the body turning away before contact (S3a's behaviour,
+measured in the sim); whether the stall ever confirms on carpet and what the escape does
+when it does; falls, and the rail. The escape-only arm is the one to watch the escape itself.
+
+**Also:** the vision EPM's stale `encoder_res` parameter (ignored with a warning at load) is
+removed from the six configs that carried it; no behaviour change.
