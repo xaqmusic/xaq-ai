@@ -17,6 +17,7 @@
 #include "ogma/modules/MotorBus.hpp"
 #include "ogma/InProcessBus.hpp"
 #include "ogma/Topics.hpp"
+#include <nlohmann/json.hpp>
 #include <unordered_map>
 
 #include <cmath>
@@ -1000,4 +1001,40 @@ TEST(EFEArbiter, ACommittedLookYieldsOnlyToTheSeek) {
     EXPECT_EQ(run(false, 0.0f), 2) << "uncommitted: play (0.3) beats the sunk look (0.5·0.4 = 0.2)";
     EXPECT_EQ(run(true, 0.0f), 4)  << "committed: the look keeps the body against play";
     EXPECT_EQ(run(true, 0.9f), 3)  << "but a payoff (the seek need) takes it back";
+}
+
+// 2026-10-12: the roster the inspector draws -- each slot's display name and whether it races.  On the duck's
+// precision race the vision slot is the seek loop (named from its trust key), klino and planner have no EPM under
+// the voter and do not race, and the preference precision is the seek need (named from hunger_topic).
+TEST(EFEArbiter, RosterNamesTheLoopsActuallyRacing) {
+    ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")},
+                        {"hunger_topic", std::string("reality.cognitive.seek_value")},
+                        {"play_weight", 1.0}, {"play_value_topic", std::string("reality.cognitive.play_value")},
+                        {"vision_weight", 1.0}, {"vision_value_topic", std::string("reality.cognitive.seek_value")},
+                        {"trust_key_vision", std::string("reality.loop.seek")}, {"look_value_topic", std::string("reality.cognitive.look")},
+                        {"name_look", std::string("stop and look")}};
+    Fix f(p);
+    f.bus.begin_tick(0);
+    f.bus.publish("consensus.1", trust_token({{"reality.loop.seek", 0.4f}, {"reality.loop.play", 0.3f}, {"reality.loop.look", 0.4f}}));
+    f.arb.tick(0);
+    f.bus.end_tick();
+    auto s = f.arb.diag_snapshot();
+    ASSERT_TRUE(s.contains("policies"));
+    auto const& r = s["policies"];
+    ASSERT_EQ(r.size(), 5u);
+    EXPECT_EQ(r[0]["name"], "klino");  EXPECT_FALSE(r[0]["racing"].get<bool>());
+    EXPECT_EQ(r[1]["name"], "planner"); EXPECT_FALSE(r[1]["racing"].get<bool>());
+    EXPECT_EQ(r[2]["name"], "play");   EXPECT_TRUE(r[2]["racing"].get<bool>());
+    EXPECT_EQ(r[3]["slot"], "vision"); EXPECT_EQ(r[3]["name"], "seek"); EXPECT_TRUE(r[3]["racing"].get<bool>());
+    EXPECT_EQ(r[4]["name"], "stop and look") << "an explicit name overrides the trust key's";
+    EXPECT_EQ(s["preference_name"], "seek_value");
+
+    // the Cell's efe race: klino and planner always race, under their slot names; the preference is hunger
+    Fix cell(ogma::ParamMap{{"scoring_mode", std::string("efe")}});
+    cell.run(0, 0.5f, 0.1f, 0.1f);
+    auto c = cell.arb.diag_snapshot();
+    EXPECT_EQ(c["policies"][0]["name"], "klino");  EXPECT_TRUE(c["policies"][0]["racing"].get<bool>());
+    EXPECT_EQ(c["policies"][1]["name"], "planner"); EXPECT_TRUE(c["policies"][1]["racing"].get<bool>());
+    EXPECT_FALSE(c["policies"][2]["racing"].get<bool>());
+    EXPECT_EQ(c["preference_name"], "hunger");
 }

@@ -237,7 +237,7 @@ Catalogue Catalogue::build(std::string const& palette_path) {
                 if (spec.max_value) p.max = param_to_json(*spec.max_value);
                 if (kinds.contains(p.key) && kinds[p.key].is_string())
                     p.kind = kind_from_name(kinds[p.key].get<std::string>(), p.kind);
-                if (p.required && tolerated.count(p.key)) p.required = false;   // the module has a fallback
+                if (p.required && tolerated.count(p.key)) { p.required = false; p.tolerated = true; }   // the module has a fallback
                 if (p.kind == ParamKind::String) p.enum_values = parse_enum(p.description);
                 t.params.push_back(std::move(p));
             }

@@ -107,6 +107,12 @@ ParamSchema EFEArbiter::params_schema() const {
         {"gap_std_alpha", ParamMutability::HotMutable, "EMA rate of the running mean/variance of the value gap (the hysteresis scale).", ParamValue{0.02}},
         {"force_policy",  ParamMutability::HotMutable, "ABLATION: '' = live EFE arbiter; 'klino'/'planner' = always that policy; 'shuffle' = random winner each tick (rng seeded by master_seed, varied by tick).", ParamValue{std::string("")}},
         {"master_seed",   ParamMutability::ConstructionOnly, "RNG seed (shuffle control).", ParamValue{int64_t{11}}},
+        {"name_klino",   ParamMutability::ConstructionOnly, "Display name of policy slot 0 (diag and inspector only). Empty = in precision mode the last segment of trust_key_klino, else 'klino'.", ParamValue{std::string("")}},
+        {"name_planner", ParamMutability::ConstructionOnly, "Display name of policy slot 1 (diag and inspector only). Empty = in precision mode the last segment of trust_key_planner, else 'planner'.", ParamValue{std::string("")}},
+        {"name_play",    ParamMutability::ConstructionOnly, "Display name of policy slot 2 (diag and inspector only). Empty = in precision mode the last segment of trust_key_play, else 'play'.", ParamValue{std::string("")}},
+        {"name_vision",  ParamMutability::ConstructionOnly, "Display name of policy slot 3 (diag and inspector only). Empty = in precision mode the last segment of trust_key_vision (the duck: 'seek'), else 'vision'.", ParamValue{std::string("")}},
+        {"name_look",    ParamMutability::ConstructionOnly, "Display name of policy slot 4 (diag and inspector only). Empty = in precision mode the last segment of trust_key_look, else 'look'.", ParamValue{std::string("")}},
+        {"preference_name", ParamMutability::ConstructionOnly, "Display name of the preference precision (diag and inspector only). Empty = the last segment of hunger_topic ('hunger' on the Cell, 'seek_value' on the duck).", ParamValue{std::string("")}},
     };
 }
 
@@ -145,6 +151,8 @@ ParamMap EFEArbiter::current_params() const {
     m["gap_std_alpha"] = ParamValue{double(gap_std_alpha_)};
     m["force_policy"]  = ParamValue{force_policy_};
     m["master_seed"]   = ParamValue{int64_t(master_seed_)};
+    m["name_klino"] = ParamValue{name_klino_}; m["name_planner"] = ParamValue{name_planner_}; m["name_play"] = ParamValue{name_play_};
+    m["name_vision"] = ParamValue{name_vision_}; m["name_look"] = ParamValue{name_look_}; m["preference_name"] = ParamValue{preference_name_};
     return m;
 }
 
@@ -218,6 +226,12 @@ void EFEArbiter::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "gap_std_alpha", [&](auto const& v){ gap_std_alpha_ = float(get_double(v,"gap_std_alpha")); });
     apply_param(params, "force_policy",  [&](auto const& v){ force_policy_  = get_string(v,"force_policy"); });
     apply_param(params, "master_seed",   [&](auto const& v){ master_seed_   = uint64_t(get_int(v,"master_seed")); });
+    apply_param(params, "name_klino",      [&](auto const& v){ name_klino_      = get_string(v,"name_klino"); });
+    apply_param(params, "name_planner",    [&](auto const& v){ name_planner_    = get_string(v,"name_planner"); });
+    apply_param(params, "name_play",       [&](auto const& v){ name_play_       = get_string(v,"name_play"); });
+    apply_param(params, "name_vision",     [&](auto const& v){ name_vision_     = get_string(v,"name_vision"); });
+    apply_param(params, "name_look",       [&](auto const& v){ name_look_       = get_string(v,"name_look"); });
+    apply_param(params, "preference_name", [&](auto const& v){ preference_name_ = get_string(v,"preference_name"); });
 
     rng_.seed(master_seed_);
 
@@ -636,8 +650,43 @@ void EFEArbiter::tick(uint64_t tick_id) {
     if (look_active_) pub(look_gain_topic_, gain_look_);                    // §17.112
 }
 
+namespace {
+std::string last_segment(std::string const& topic) {
+    auto p = topic.rfind('.');
+    return p == std::string::npos ? topic : topic.substr(p + 1);
+}
+}  // namespace
+
+std::string EFEArbiter::policy_name(int slot) const {
+    static char const* const kSlots[5] = { "klino", "planner", "play", "vision", "look" };
+    std::string const* over[5] = { &name_klino_, &name_planner_, &name_play_, &name_vision_, &name_look_ };
+    std::string const* key[5]  = { &trust_key_klino_, &trust_key_planner_, &trust_key_play_, &trust_key_vision_, &trust_key_look_ };
+    if (!over[slot]->empty()) return *over[slot];
+    if (scoring_mode_ == "precision" && !key[slot]->empty()) return last_segment(*key[slot]);
+    return kSlots[slot];
+}
+
+bool EFEArbiter::policy_racing(int slot) const {
+    switch (slot) {
+        // the base pair always race in efe / value_race; in precision mode a loop the voter never reported has
+        // trust 0 and cannot win (the duck: no klino or planner EPM under consensus.1)
+        case 0: return scoring_mode_ != "precision" || trust_.count(trust_key_klino_) > 0;
+        case 1: return scoring_mode_ != "precision" || trust_.count(trust_key_planner_) > 0;
+        case 2: return play_active_;
+        case 3: return vision_active_;
+        case 4: return look_active_;
+    }
+    return false;
+}
+
 nlohmann::json EFEArbiter::diag_snapshot() const {
+    static char const* const kSlots[5] = { "klino", "planner", "play", "vision", "look" };
+    nlohmann::json policies = nlohmann::json::array();
+    for (int i = 0; i < 5; ++i)   // in winner-index order
+        policies.push_back({{"slot", kSlots[i]}, {"name", policy_name(i)}, {"racing", policy_racing(i)}});
     return nlohmann::json{
+        {"policies", policies},            // the roster: [{slot, name, racing}] in winner-index order
+        {"preference_name", preference_name_.empty() ? last_segment(hunger_topic_) : preference_name_},
         {"scoring_mode", scoring_mode_},   // "value_race" (legacy) | "efe" (explicit-EFE precision scoring)
         {"raw_klino", raw_klino_},
         {"raw_planner", raw_planner_},     // planner's food-route value (0 while exploring)

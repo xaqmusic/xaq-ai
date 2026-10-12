@@ -104,7 +104,7 @@ nlohmann::ordered_json gen_palette(Catalogue const& cat,
             src = baselines[t.type].second;
         } else {
             nlohmann::json defaults = nlohmann::json::object();
-            for (auto const& p : t.params) if (!p.required) defaults[p.key] = p.def;
+            for (auto const& p : t.params) if (!p.required && !p.tolerated) defaults[p.key] = p.def;
             src = "defaults";
             if (t.baseline_params.is_object()) {
                 for (auto const& [k, v] : t.baseline_params.items()) defaults[k] = v;
@@ -298,7 +298,9 @@ nlohmann::ordered_json gen_palette(Catalogue const& cat,
         // Schema-required params the constructing baseline does not set: the
         // module has a fallback, so the builder must not demand them.
         auto tolerated = nlohmann::ordered_json::array();
-        for (auto const& p : t.params) if (p.required && !bp.count(p.key)) tolerated.push_back(p.key);
+        // (p.tolerated: the schema requires it but the palette already lifted that -- still required by the
+        // schema, so it stays in the list; reading only `required` emptied the list on every other run)
+        for (auto const& p : t.params) if ((p.required || p.tolerated) && !bp.count(p.key)) tolerated.push_back(p.key);
         entry["sockets"]           = std::move(sj);
         entry["fixed"]             = std::move(fj);
         entry["kinds_probed"]      = std::move(kinds_probed);

@@ -78,6 +78,22 @@
       "payload": "ProprioToken",
       "dims": 4,
       "description": "the ToF summary [left, ahead, right, too-close] for an avoidance loop"
+    },
+    {
+      "name": "progress",
+      "topic": "reality.proprio.progress",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "the walk's progress error toward the place it is heading [error, valid] (--place-stall, which needs --sit-on-stall; §17.116 M1)",
+      "optional": true
+    },
+    {
+      "name": "traverse_in",
+      "topic": "reality.proprio.traverse_in",
+      "payload": "ProprioToken",
+      "dims": 3,
+      "description": "the traversal EPM's input [commanded forward speed, commanded turn, sensed forward speed], each in the walker's units and averaged over ~1 s, so only a block that lasts reads 'commanded, not moving' (--sit-on-stall / --sit-on-surprise; §17.114)",
+      "optional": true
     }
   ],
   "sinks": [
@@ -219,6 +235,54 @@
       "topic": "reality.cognitive.outcome_need",
       "payload": "ProprioToken",
       "description": "the outcome loop's renewed target [need, x, y]: the host's thing bearing"
+    },
+    {
+      "name": "look_gain",
+      "topic": "arbiter.gain.look",
+      "payload": "ProprioToken",
+      "description": "the arbiter's gain for the look: above 0.5 the host starts a stop, at or below it ends one the look began (--stop-by-look; §17.112)"
+    },
+    {
+      "name": "look",
+      "topic": "reality.cognitive.look",
+      "payload": "ProprioToken",
+      "description": "the look loop's value [need, prediction, in a stop, realized, predicted]: logged"
+    },
+    {
+      "name": "look_commit",
+      "topic": "reality.cognitive.look_commit",
+      "payload": "ProprioToken",
+      "description": "the look loop's commitment to a stop it took [committed]: logged with the look's gain"
+    },
+    {
+      "name": "traverse",
+      "topic": "reality.proprio.traverse",
+      "payload": "RealityToken",
+      "description": "the traversal EPM over traverse_in: its TLE against its running mean (--sit-on-surprise), or its input's sensed-against-commanded progress (--sit-on-stall, the ★ stacks), decides when the duck sits (§17.114)"
+    },
+    {
+      "name": "thing_belief",
+      "topic": "reality.cognitive.thing_belief",
+      "payload": "ProprioToken",
+      "description": "ThingBelief's [presence, confirming, refuting, since, have] for the seek target: logged"
+    },
+    {
+      "name": "ambush",
+      "topic": "reality.cognitive.ambush",
+      "payload": "ProprioToken",
+      "description": "the stalk loop's [have, x, y, need, waiting]: logged while it has a passing place"
+    },
+    {
+      "name": "mover_pos",
+      "topic": "reality.proprio.mover_pos",
+      "payload": "ProprioToken",
+      "description": "the seek loop's confirmed mover sighting [x/2, y/2]: logged once per sighting, with the motion map's node"
+    },
+    {
+      "name": "motion_map",
+      "topic": "reality.cognitive.motion_map",
+      "payload": "RealityToken",
+      "description": "the motion map EPM over mover sightings: its winner and node count are logged with each sighting"
     }
   ],
   "events": [
