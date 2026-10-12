@@ -46,11 +46,16 @@ XL330 model with Coulomb, Stribeck and load-dependent friction — lives in the 
 XML is the plain `position` actuator (`kp=0.55`, `kv=0`, `forcerange=±0.96`,
 `ctrlrange=±10`), with `damping=0.053 frictionloss=0.0048 armature=0.0018` on the joint.
 
+*Corrected 2026-10-09 (design doc, the BAM entry):* the stall below was the walking network of
+2026-08-31. The current `alpha_walking` (fetched at `3954496`) walks on this actuator, at ~45 % of
+its forward command (0.155 m/s at 0.35), and a C++ port of BAM (`--bam`) changes that little: the
+XML `kp=0.55` already equals BAM's firmware loop gain. The 2026-08-31 measurement:
+
 That difference is measurable and it matters. The shipped standing policy holds this model at
 0.47° of tilt, but the walking policy stalls: it commands a 0.224 rad stride, the joints
 deliver 0.118 rad with 0.213 rad of tracking error, and the robot travels 9 mm in 15 s. At
-five times the stiffness the same policy walks 1.595 m. **Posture work is sound on this
-actuator; no locomotion claim is** — see the port plan's BAM spec.
+five times the stiffness the same policy walks 1.595 m. (At the time: "posture work is sound on this
+actuator; no locomotion claim is." Superseded by the correction above.)
 
 **No passive standing equilibrium.** Holding the `STAND` keyframe's own `ctrl` topples the
 robot to 81° at every noise level including zero, with the actuators peaking at 0.13 N·m

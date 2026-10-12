@@ -5,7 +5,7 @@
 **Can a robot learn to stand up, and to catch itself when pushed, without anyone telling
 it what standing is?**
 
-The robot is Pollen Robotics' Open Duck Mini, a 1.5 kg bipedal walker with a head that
+The robot is Pollen Robotics' Microduck, an 800 g bipedal walker with a head that
 weighs more than a third of it, simulated in MuJoCo. It has no passive standing pose: hold
 its servos still and it topples within a second, like a broom balanced on a fingertip.
 Pollen ships a trained neural-network policy that stands and walks it. We did not use that
@@ -49,7 +49,7 @@ cost the robot its ability to stand at all.
 
 ### The system in brief
 
-A simulated Open Duck Mini stands on a flat floor in MuJoCo, Pollen's own model files
+A simulated Microduck stands on a flat floor in MuJoCo, Pollen's own model files
 loaded unmodified. A host program runs the physics at 50 brain ticks per second, feeds the
 brain what the robot's sensors would report, and applies the brain's joint commands as
 servo targets. The same host runs the **recovery harness**: a fall detector that reads

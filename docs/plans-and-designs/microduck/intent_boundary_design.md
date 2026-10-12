@@ -1,6 +1,11 @@
 # The intent boundary — design for review (2026-09-03)
 
-**Status: DRAFT for the operator's review. Nothing here is built.**
+**Status 2026-10-11: the in-host half is built; the robot client is not.** Phases 1–2 run in
+simulation (`ogma_mjhost --level2`: the intent brain above the walker and skills, a head brain,
+a stop brain; see `rung2_regime_design.md` §17). Phase 3 (`ogma_duckd`) and the C ABI of §4 are
+not written. Upstream: the velocities-and-currents change (§6) merged as #260 on 2026-09-23; the
+design document (§6, third bullet) is PR #381, open. *Original status (2026-09-03): DRAFT for the
+operator's review, nothing built.*
 
 **What this decides.** How the brain that stands and catches (R19,
 [`microduck_standing_report.md`](../../reports/microduck_standing_report.md)) becomes the
@@ -45,8 +50,8 @@ The brain's sensory and active states at the intent boundary, read from `duck-ip
 | | channel | what carries it |
 |---|---|---|
 | sensory | joints, targets, gravity, gyro, dead-reckoned odometry, the active policy name, safety and loop state | `robot.state` (subscribe) |
-| sensory | joint velocities and currents | `robot.state`, **after the prepared upstream change** (§6) |
-| sensory | classified trunk-frame obstacle points (Empty / TooClose / Floor / Hit) | `tof.stream` |
+| sensory | joint velocities and currents | `robot.state` (merged as #260, §6) |
+| sensory | raw ToF ranges with per-zone status (`TofFrame{distance_mm, status}`); the Empty / TooClose / Floor / Hit classification is Pollen's `Reprojector`, a library the client links | `tof.stream` |
 | sensory | health, mode, remote-session flag | `robot.health`, `robot.mode` |
 | sensory (later) | ambient sound events, voice tags, nearby ducks by id, RSSI, hand distance | already in the daemon, "logged, no consumer" |
 | active | a twist (vx, vy, vyaw) | `robot.move` |
@@ -154,8 +159,8 @@ shell is cross-compiled in our CI with their target triple; nothing of this ente
 
 ## 6. Dependencies on Pollen, and what we ask of them
 
-- **Joint velocities and currents on `robot.state`** — prepared, tested, unsubmitted
-  (`state-velocities-currents`). The level-2 brain wants both; the level-1 reflex wants current
+- **Joint velocities and currents on `robot.state`** — **merged 2026-09-23** as
+  pollen-robotics/microduck#260. The level-2 brain wants both; the level-1 reflex wants current
   as the load observation the picrawler never had.
 - **A way to run a client against a simulated robot.** Their `FakeIo` exercises the loop, not a
   body. Whether that is a MuJoCo backend for `robotd` or a sim harness that speaks their

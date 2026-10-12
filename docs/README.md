@@ -4,6 +4,18 @@
 > rewrite rule, the A/B protocol, the build recipe, the vocabulary). The docs below are the
 > *why*; CLAUDE.md is the *how, right now*.
 
+- **The Microduck** (Pollen Robotics' bipedal robot, in simulation): start at
+  [`../mj_host/README.md`](../mj_host/README.md) — getting it running, how the brain sits above
+  Pollen's policies, and the gaps on the way to hardware. Then
+  [reports/microduck_standing_report.md](reports/microduck_standing_report.md) (learning to
+  stand and catch a shove),
+  [reports/microduck_pollen_architecture_report.md](reports/microduck_pollen_architecture_report.md)
+  (how Pollen's runtime works), and the working record:
+  [plans-and-designs/microduck/port_plan.md](plans-and-designs/microduck/port_plan.md) ("Resume
+  here") and [plans-and-designs/microduck/rung2_regime_design.md](plans-and-designs/microduck/rung2_regime_design.md).
+- **The PiCrawler on hardware:** [plans-and-designs/picrawler_sim2real_port.md](plans-and-designs/picrawler_sim2real_port.md)
+  — the brain trained in simulation walks the real robot (2026-10-04); servo power is the
+  current limit. [`../pi_host/README.md`](../pi_host/README.md) is the code on the robot.
 - **[reports/picrawler_lever_ledger.md](reports/picrawler_lever_ledger.md)** — **the
   promoted-vs-refuted ledger for the live picrawler work. Read it before proposing a
   lever**; most plausible ideas have already been built and falsified, and each verdict is
