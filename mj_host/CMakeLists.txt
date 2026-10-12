@@ -17,10 +17,11 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Linking ogma_core costs a few minutes on a cold build and buys nothing until S1.
-# Off by default so `--load-only` (gate G1) stays a seconds-long edit/build loop;
-# S1 turns it on and keeps it on.
-option(MJ_HOST_WITH_BRAIN "Link ogma_core into the host (needed from phase S1)" OFF)
+# On by default (2026-10-11): the brain adapters (IntentAdapter, HeadAdapter,
+# OgmaBrainAdapter, BrainTape) always compile and include ogma_core's headers, so
+# with this off the host does not build at all. It was off in S0, when the host
+# had no brain and `--load-only` was a seconds-long edit/build loop.
+option(MJ_HOST_WITH_BRAIN "Link ogma_core into the host (required: the brain adapters always compile)" ON)
 
 include(FetchContent)
 

@@ -11,10 +11,82 @@ The core idea is that a competent agent can be assembled from few or many small
 inference loops — each responsible for one hidden feature of the world —
 coordinated by a shared, trust-weighted state bus and a policy selector.
 
-<img width="482" height="497" alt="inspector" src="https://github.com/user-attachments/assets/e21358e1-9723-4a2f-9985-696dc5302f9f" /> <img width="482" height="497" alt="picrawler3" src="https://github.com/user-attachments/assets/8b453783-1193-4d3c-8e5e-d1e746b3135a" />
+YouTube Playlist https://www.youtube.com/watch?v=862uRoQOtKk&list=PLRTI993J63iI&index=1
+
+## Where it stands (October 2026)
+
+Two robots carry the work now. Both run the same brain code, and neither is
+trained with a reward.
+
+### The PiCrawler: A quadruped that learns how to walk
+
+The Sunfounder PiCrawler is a small 12-servo quadruped on a Raspberry Pi 5. In simulation
+(Godot) the brain learned a walking coordination based on its own body dynamics.  The hard parts turned out to be senses rather than policies: 
+it climbed a hump only after it was given a belly rangefinder, and it held a heading
+once it could integrate its own yaw.  Modifications and sensors then needed to be made
+to the PiCrawler hardware to match the required senses needed in sim. 
+
 <img width="262" height="146" alt="picrawler_rooty" src="https://github.com/user-attachments/assets/4e3a5f84-8197-40f8-ba36-9faaba5679d4" />
 
-YouTube Playlist https://www.youtube.com/watch?v=862uRoQOtKk&list=PLRTI993J63iI&index=1
+In October 2026 that brain, with its gains frozen from simulation and fed only
+what the physical robot can measure (its own servo commands, an IMU, force
+sensors in its feet, a belly time-of-flight sensor), walked the real robot, with
+a gait that looks like the simulated one. The current limit is power, not the
+brain: fast moves draw more current than the servo board can supply, and the
+board resets about once every 10 to 40 seconds.
+
+- [docs/reports/picrawler_gait_loop_findings.md](docs/reports/picrawler_gait_loop_findings.md):
+  the emergent, self-rescuing gait.
+- [docs/reports/picrawler_lever_ledger.md](docs/reports/picrawler_lever_ledger.md):
+  every change tried, what was kept, what was refuted, and in what context.
+- [docs/plans-and-designs/picrawler_sim2real_port.md](docs/plans-and-designs/picrawler_sim2real_port.md)
+  and [pi_host/](pi_host/README.md): the hardware port and the code that runs on the robot.
+
+### The Microduck: ten minutes of fun in a playroom
+
+[Microduck](https://github.com/pollen-robotics/microduck) is Pollen Robotics'
+25 cm, 800 g two-legged robot. Pollen ships trained neural networks that walk it,
+kick, and reach down to the floor. xaq-ai does not replace those. It sits above them
+as the part that decides what to do: where to look, where to walk, what to walk
+up to, and when to give up on something.
+
+<img width="1668" height="936" alt="Screenshot From 2026-10-11 19-39-02" src="https://github.com/user-attachments/assets/cd1a5211-b2aa-4712-a06f-b6570dec6075" />
+
+
+In simulation (MuJoCo, on Pollen's own model files), the duck is left alone in a
+4 m playroom with toys, furniture and a moving toy train. It sees through the
+8×8 depth sensor in its head, builds its own map of what is there, tells small
+things from walls, walks over to them, kicks and pecks them, chases the train,
+looks around at parts of the room it hasn't seen, and when it gets stuck it sits,
+looks, and walks out. Behaviour is scored by how much of a ten-minute run is
+spent doing something interesting versus staring at a wall, over 24 seeded runs
+per candidate, and nothing is promoted until it has also been watched.
+
+Earlier, the same approach learned to stand with no standing policy at all: it
+babbles each joint, learns what each one does to its balance, and ends up
+catching a 2 N shove 35 times out of 36
+([the standing report](docs/reports/microduck_standing_report.md)).
+
+- The design, proposed to Pollen: [pollen-robotics/microduck#381](https://github.com/pollen-robotics/microduck/pull/381),
+  with narrated videos of [the proposal and a demo](https://youtu.be/W2jMf6EhW0k)
+  and of [the interpretability and debugging tools](https://youtu.be/F9kEaafD-vo),
+  and a companion walkthrough, [Inside the MicroDuck Brain](https://claude.ai/artifact/Dirv1ZWg62pjQVM3SCvkzh).
+- How Pollen's runtime works, from the outside in:
+  [docs/reports/microduck_pollen_architecture_report.md](docs/reports/microduck_pollen_architecture_report.md).
+- The working record: [the port plan](docs/plans-and-designs/microduck/port_plan.md) (start at "Resume here").
+
+Simulation only so far.  A proper planning and object permanance loop is in progress and two
+things it uses (moving the head directly, standing still during a stop) are not
+yet part of Pollen's public API.
+
+### Where it started: the Cell
+
+Before either robot, a simulated single-celled forager was used to test the
+method itself, and the report on it overturns two of its own headline claims
+once they are properly powered. That discipline is what both robots are built
+under ([the Cell report](docs/reports/cell_markov_blanket_loops_report.md)).
+
+  <img width="1172" height="403" alt="cel1" src="https://github.com/user-attachments/assets/1a554b9d-d21b-44c1-9e40-676e2f03c795" />
 
 ## Why?
 
@@ -32,10 +104,22 @@ The cool thing about very hard problems that vex the greatest minds on this plan
 
 | Layer | What it is |
 |---|---|
-| **`cpp_core/`** | The C++ cognitive runtime: an in-process message bus, EPM (Episodic Predictive Module) nodes, a Growing Neural Gas topology, a Lateral Voter (Hebbian cross-modal consensus), homeostatic drive, active-inference policy selection, and motor/navigation modules. |
-| **`godot_host/`** | A Godot 4.6 GDExtension that embodies the runtime in simulated worlds — **the Cell**, a single-celled forager used as a falsification testbed (see the report below), and **the PiCrawler**, a simulated quadruped and the current most active line of development (see [docs/reports/picrawler_lever_ledger.md](docs/reports/picrawler_lever_ledger.md)). |
+| **`cpp_core/`** | The C++ cognitive runtime: an in-process message bus, EPM (Episodic Predictive Module) nodes, a Growing Neural Gas topology, a Lateral Voter (Hebbian cross-modal consensus), homeostatic drive, active-inference policy selection, and motor/navigation modules. Every host below runs this same core. |
+| **`mj_host/`** | The **Microduck** host: MuJoCo physics on Pollen's unmodified model files, Pollen's trained policies run through ONNX Runtime, and the brain above them. `./mj_host/run.sh gates` is its health check. See [mj_host/README.md](mj_host/README.md). |
+| **`godot_host/`** | A Godot 4.6 GDExtension that embodies the runtime in simulated worlds: **the PiCrawler** quadruped and **the Cell**, a single-celled forager used as a falsification testbed. |
+| **`pi_host/`** | The **PiCrawler** hardware host on a Raspberry Pi 5: the servo driver and its safety envelope, the bench daemon, and the path that lets a brain drive the real robot. See [pi_host/README.md](pi_host/README.md). |
+| **`brain_builder/`** | A graphical editor for wiring a brain: every module type on a palette, each body's sensors and motors as nodes, drag-to-wire, validate, dry-run. See [brain_builder/README.md](brain_builder/README.md). |
+| **`tools/`** | The live [inspector](tools/xaq_inspector/README.md) (watch any module inside a running brain), the duck's launcher and viewer, and [xaq_voice](tools/xaq_voice/README.md), which turns the brain's prediction error into sound. |
 | **`python/xaq_core/`** | Shared substrate: the socket/ZeroMQ message bus, a torch predictor + episodic memory, export-parity checks, and the logging protocol. |
 | **`python/xaq/`** | The Python engine: EPM nodes, GNG, lateral voting, active inference / global workspace, motor & navigation, and a **generic STFT audio modality** so multi-modal fusion is demonstrable out of the box. |
+
+<img width="1854" height="1043" alt="Screenshot From 2026-10-11 19-42-28" src="https://github.com/user-attachments/assets/beb0a92b-2818-4027-bdc4-3264f7616888" />
+
+<img width="1751" height="1010" alt="Screenshot From 2026-10-11 19-40-13" src="https://github.com/user-attachments/assets/3f0c3c17-3811-4053-b3b6-9323c72c7f20" />
+
+
+
+<img width="482" height="497" alt="inspector" src="https://github.com/user-attachments/assets/e21358e1-9723-4a2f-9985-696dc5302f9f" /> <img width="482" height="497" alt="picrawler3" src="https://github.com/user-attachments/assets/8b453783-1193-4d3c-8e5e-d1e746b3135a" />
 
 ## A note on the name
 
@@ -48,22 +132,21 @@ See [docs/NAMING.md](docs/NAMING.md).
 
 ## Start here
 
+- **[docs/brain_building_doctrine.md](docs/brain_building_doctrine.md)** — the
+  method: how to compose predictive loops into an agent without fooling
+  yourself. A living document, and the thing every result below is tested under.
+- **[docs/glossary.md](docs/glossary.md)** — plain-language definitions of the
+  whole vocabulary, if active inference is new to you.
+- **The Microduck** — [the standing report](docs/reports/microduck_standing_report.md),
+  then the [design proposed to Pollen](https://github.com/pollen-robotics/microduck/pull/381).
+- **The PiCrawler** — [the gait findings](docs/reports/picrawler_gait_loop_findings.md),
+  then [the lever ledger](docs/reports/picrawler_lever_ledger.md).
 - **[docs/reports/cell_markov_blanket_loops_report.md](docs/reports/cell_markov_blanket_loops_report.md)** —
   *The Cell Navigator: A Falsification Testbed for Markov-Blanket-Loop Active
-  Inference.* An evidence report whose contribution is a **discipline** for
-  building embodied agents — one that overturns two of its own headline claims
-  once they are properly powered.
-- **[docs/brain_building_doctrine.md](docs/brain_building_doctrine.md)** — the
-  method the report tests: how to compose predictive loops without fooling
-  yourself.  This is a living document.
-- **[docs/reports/picrawler_lever_ledger.md](docs/reports/picrawler_lever_ledger.md)** —
-  the PiCrawler quadruped gait work: what's promoted, what's refuted (and in what
-  context), and why. The current most active line of development, run under the
-  same falsification discipline as the Cell.
+  Inference.* The report whose contribution is the discipline itself, including
+  the two headline claims it overturns.
 - **[docs/](docs/)** — full documentation index, including
   [research summaries](docs/research-summaries/) of the papers xaq builds on.
-
-  <img width="1172" height="403" alt="cel1" src="https://github.com/user-attachments/assets/1a554b9d-d21b-44c1-9e40-676e2f03c795" />
 
 
 ## Where we are going
@@ -84,8 +167,9 @@ This project is in very early stages (started at the beginning of 2026) so there
 
 > First time in this repo? [AGENTS.md](AGENTS.md#build--test-quick) has the full
 > first-time setup — including system prerequisites the snippets below assume
-> are already installed — and [CLAUDE.md](CLAUDE.md#4-build--run-picrawler) covers
-> actually *running* the Godot host (the `.so` below only gets built, not launched).
+> are already installed — [CLAUDE.md](CLAUDE.md#4-build--run-picrawler) covers
+> actually *running* the Godot host (the `.so` below only gets built, not launched),
+> and [mj_host/README.md](mj_host/README.md) covers the Microduck host.
 
 **C++ runtime** (needs CMake ≥ 3.14, a C++17 compiler, and ZeroMQ's **dev**
 package — e.g. `libzmq3-dev` on Debian/Ubuntu; the ZeroMQ runtime library alone
@@ -103,6 +187,23 @@ committed — it is regenerated from source on every clone; building it does
 ```sh
 cmake -S godot_host -B godot_host/build
 cmake --build godot_host/build -j     # produces + installs project/addons/ami_ogma/*.so
+```
+
+**Microduck host** (fetches MuJoCo and ONNX Runtime, each pinned by version and
+checksum; Pollen's model files are vendored in `mj_host/models/microduck/`, and
+their trained policies are downloaded on first run):
+
+```sh
+./mj_host/run.sh build
+./mj_host/run.sh gates                # every gate; non-zero exit on any failure
+./mj_host/run.sh watch --secs 30      # a live window
+```
+
+**PiCrawler hardware host** (builds natively on the Raspberry Pi 5; see
+[pi_host/README.md](pi_host/README.md) before running anything that moves a servo):
+
+```sh
+cmake -S pi_host -B pi_host/build && cmake --build pi_host/build -j2
 ```
 
 **Python engine:**

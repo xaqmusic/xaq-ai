@@ -1,6 +1,13 @@
 > **LIVING DOC — the single reference for the Microduck project.** Started 2026-08-30 on branch
 > `microduck`, cut from `master` — **merged into `master` (R19–R25); duck work now lands on `master` branches.** Update it in place — do not fork a second port doc.
 >
+> **Status 2026-10-11:** the host runs three brains above Pollen's shipped policies (walker, stand,
+> kicks, roll, sit/stand, ground pick) in a playroom with a moving train; ★ MV is the promoted
+> stack ("▶ Resume here" below). Upstream: #260 (velocities and currents on `robot.state`) merged
+> 2026-09-23; #381 (the brain's design document) open since 2026-10-07. Still simulation only:
+> no robot client (B2) and no hardware. The phase list below carries a dated status line on each
+> phase; the paragraph that follows is the 2026-08-31 status, kept as history.
+>
 > **Status 2026-08-31: S0, S1 and the A2 harness are done; A1 runs, ties a random walk, and
 > all three cheap lever families (reflex, sensor, conditioning/gain) are measured null —
 > the objective-socket decision is what remains.** All four gates that can
@@ -263,16 +270,21 @@ stands, and this was checked against `duck-ipc-proto/src/lib.rs` rather than ass
 |---|---|---|---|
 | joint position | 15 | ✔ `Sensors.positions`, measured | ✔ `robot.state.joints`, measured |
 | joint **target** | 15 | ✔ | ✔ `robot.state.targets` — tracking error for free |
-| joint **velocity** | 15 | ✔ `Sensors.velocities` | ✘ **not published** |
-| joint **current** | 15 | ✔ `Sensors.currents_ma` | ✘ **not published** |
+| joint **velocity** | 15 | ✔ `Sensors.velocities` | ✔ `robot.state.velocities` (since #260, merged 2026-09-23) |
+| joint **current** | 15 | ✔ `Sensors.currents_ma` | ✔ `robot.state.currents_ma` (since #260) |
 | projected gravity | 3 | ✔ | ✔ `robot.state.safety.gravity` |
-| gyro | 3 | ✔ `ImuData.gyro` | ✘ (quat only, via `theremin`/none) |
+| gyro | 3 | ✔ `ImuData.gyro` | ✔ `robot.state.imu{gyro, quat}` (proto v24) |
+| accelerometer | 3 | ✘ the IMU board's 20-byte block carries it; the loop reads only the first 12 (gyro + quaternion), `duck-control/src/imu.rs` | ✘ **not published** — ★ MV's intent brain reads one in sim |
 | contact odometry | 4 | ✔ in-loop struct | ✔ `robot.state.odom` — position + yaw |
 | ToF depth | 8×8 | ✔ | ✔ `tof.stream` → `TofFrame{distance_mm, status}` |
 | battery volts | 1 | ✔ `SlowSensors.volts` | ✔ `robot.health.battery`, ~1 Hz poll |
 | servo temperature | 15 / hottest | ✔ per-joint | ✔ `robot.health.motors`, hottest only |
 | which policy drove | 1 | ✔ | ✔ `robot.state.policy` — `walk`/`stand`/`held` |
 | **intent clipping** | — | — | ✔ `robot.state.move.limited_by` |
+
+*2026-10-11: the paragraph below is the 2026-08-31 reading; #260 closed it, and upstream main
+(`dec725c`, 2026-10-07) also carries `imu` and the camera and ToF poses (`frames`). What the wire
+still lacks for ★ MV: the accelerometer, a head IMU, and a joint-level head intent.*
 
 **Track B loses velocity and load, and that is the honest cost of standing outside the loop.**
 Velocity can be differenced from `joints` at 50 Hz. Load cannot be recovered at all: it exists
@@ -616,7 +628,7 @@ first; after that the tracks are independent and can run in either order, or tog
 - **MuJoCo pinned to 3.12.0** — the official prebuilt, by version *and* SHA-256. This closes
   open decision 1. Prebuilt over source: the source build pulls its own dependency tree for no
   benefit, and the release binary is what `microduck_rl`'s own CPU path runs against.
-- `ogma_core` sits behind `-DMJ_HOST_WITH_BRAIN=ON`, **off by default**, so the S0 loop stays a
+- *(2026-10-11: now ON by default — the host does not compile without it.)* `ogma_core` sits behind `-DMJ_HOST_WITH_BRAIN=ON`, **off by default**, so the S0 loop stays a
   seconds-long build. S1 turns it on and leaves it on.
 
 **`--load-only` is gate G1 with its working shown**, and it exits non-zero on failure so it
@@ -722,7 +734,15 @@ the observation path is a reader.
 This is the gain-0 guard for the whole port: a host that runs the body correctly with no brain
 in it is the baseline every later phase is measured against.
 
-### S2 — the sensory surface · *shared* · **NOT STARTED**
+### S2 — the sensory surface · *shared* · **BUILT, in a different shape (status 2026-10-11)**
+
+*2026-10-11:* the surface exists, but not as the one-topic-per-channel table below. Each brain's
+adapter (`mj_host/src/IntentAdapter.cpp`, `HeadAdapter.cpp`, `OgmaBrainAdapter.cpp`) publishes its
+own `reality.proprio.*` slots: gravity, gyro, the accelerometer, body velocity from contact
+odometry, odometry pose and heading, joint positions, and the ToF as both proximity slots and the
+point cast `CloudMap` and `MotionField` read (`src/Tof.*`, a port of Pollen's `Reprojector`; slot
+table in `la1_fact_sheet.md` §5.3). `register_source` lines were not written, and **G6 was never
+written** (no test asserts the published set). The original plan, kept for reference:
 
 Publish, as `reality.proprio.<name>`:
 
@@ -1180,7 +1200,13 @@ running throughout. This body's lack of a passive equilibrium, shown rather than
 ⚠ A stub run says the **harness** works and says nothing about the substrate. No number from it
 is a baseline.
 
-### B1 — intent-mode host, and the first drive · *Track B* · **NOT STARTED**
+### B1 — intent-mode host, and the first drive · *Track B* · **BUILT as `--level2` (status 2026-10-11)**
+
+*2026-10-11:* built as `ogma_mjhost --level2`: the walker and the skill policies run inside the
+host as `robotd` runs them, and the intent brain supplies the twist and skill requests. The first
+drive was not the one proposed below; the behaviour that grew from it is recorded in
+`rung2_regime_design.md` §17 and the phase pages (cloud, things, chase, ten-minutes). **G7 was
+never written.** The original plan, kept for reference:
 
 `--intent-mode`: load `alpha_walking.onnx` + `alpha_stand.onnx` inside `mj_host`, build the
 61-D observation from `mjData`, and let the brain's action topics supply the command block.
@@ -1197,7 +1223,14 @@ Ask the authority question first, as always: does the twist the brain emits actu
 quantity the drive cares about? `corr(commanded twist, Δnovelty)` on a random-walk trace, before
 any lever.
 
-### B2 — `ogma_duckd`, against the simulator · *Track B* · **NOT STARTED**
+### B2 — `ogma_duckd`, against the simulator · *Track B* · **NOT STARTED (status 2026-10-11)**
+
+*2026-10-11:* still not started; the brains run in-process in `mj_host`. The construction was
+decided 2026-09-03 (`intent_boundary_design.md` §4: a Rust shell on `duck-ipc-proto` around
+ogma_core through a small C ABI), and PR #381 §9 names "the daemon as a packaged client on a
+developer board" as the first step. The nearest thing to the seam today is `BrainTape`
+(`--record-brains`), which records every host→brain call. The gaps a client would meet are tabled
+in `mj_host/README.md` §"Toward the real robot".
 
 Split the brain out of the host and into a daemon that speaks JSON-RPC over unix sockets,
 with `mj_host` serving the `robotd` side of the contract. The daemon does not know whether it
@@ -1207,14 +1240,20 @@ Shape it like `padd`: subscribe, own nothing, time-bound every call, treat a clo
 normal answer. Their `architecture.md` §2.4 is the specification, and following it exactly is
 what makes the contribution reviewable by its own authors.
 
-### B3 — the offer · *Track B* · **NOT STARTED**
+### B3 — the offer · *Track B* · **STEPS 1–2 DONE, step 3 not started (status 2026-10-11)**
+
+*2026-10-11:* step 1 became PR #381, the design document for the autonomous brain (opened
+2026-10-07, open, no review yet). Step 2 was submitted as
+[pollen-robotics/microduck#260](https://github.com/pollen-robotics/microduck/pull/260) and
+**merged 2026-09-23**. Step 3 waits on B2.
 
 Three artefacts, in this order:
 
 1. **The gap analysis**, written for Pollen: what `autonomous_behavior.md` plans, what the
    substrate does instead, and what is measurably better rather than merely different
    (§"The gap we fill").
-2. **`robot.state` gains velocities and currents** — ✅ **WRITTEN 2026-08-31, not submitted.**
+2. **`robot.state` gains velocities and currents** — ✅ **WRITTEN 2026-08-31; MERGED upstream
+   2026-09-23 as #260.** (The paragraph below is the 2026-08-31 record.)
    Branch `state-velocities-currents` in the local clone; **nothing pushed, no fork, no PR** —
    that is the operator's call to make.
 
@@ -1254,7 +1293,14 @@ Three artefacts, in this order:
 **Nothing here is offered until it works in sim.** An unproven contribution to someone else's
 robot is a cost transferred to them.
 
-### S3 — harness parity · *shared* · **NOT STARTED**
+### S3 — harness parity · *shared* · **DONE ON THE DUCK'S OWN TERMS (status 2026-10-11)**
+
+*2026-10-11:* the duck got its own runners and metric set rather than parity with `seedavg.py`:
+`mj_host/tools/l2_sweep.py` / `preset_sweep.py` (an n-seed sweep of a launcher preset with its
+exact argv), and the metrics of the ten-minutes phase (`ten_minutes.py`: boring / interesting time
+with contingency as the blind-metric complement; `fx_study.py`, `places.py`, `phantom_chase.py`,
+`first_minute.py`), with a placebo arm as the standing control (design doc §17.116). The
+`OGMA_*` environment contract was not built; the host takes flags. The original plan:
 
 `seedavg.py` currently shells `godot4` with picrawler env vars. Give `mj_host` the same
 contract — `OGMA_SEED`, `OGMA_INSPECTOR_PORT`, `OGMA_*_CONFIG`, `OGMA_*_MAX_STEPS`, JSONL on
@@ -1268,6 +1314,11 @@ tired" have no `net_z`. Expect this phase to be mostly the blind-metric question
 not mostly plumbing.
 
 ### Hardware · **DEFERRED for both tracks, and out of scope for this branch**
+
+*2026-10-11:* still deferred; no hardware code exists. Two things moved: the brains' compute was
+measured on a Raspberry Pi 5 and projected for the Radxa Zero 3W (design doc §17.111b,
+`mj_host/tools/arm_bench`), and ★ MV writes the head joints directly (`--head-joints`), which on
+the robot needs a joint-level head intent `robotd` does not have (PR #381 §4, open question 1).
 
 Recorded so the shape stays visible. **The two tracks need very different things, and the
 asymmetry is the reason Track B goes first on real hardware:**
@@ -1285,7 +1336,16 @@ never blocks on us, and stale intents expire rather than latch.
 
 ## SPEC — actuator fidelity: the BAM question
 
-**Status: spec only, nothing built.** Written now so the decision is deliberate rather than
+**Status 2026-10-11: option 2 BUILT (2026-10-09), and the locomotion reading below is corrected.**
+Host `--bam [VIN [LAG_S]]` ports Rhoban's BAM (the XL330 m6 model, as `microduck_rl` pins it) and is
+validated against Rhoban's own classes (`mj_host/tools/bam/bam_reference.py`). The delta is none
+that matters: the XML actuator's kp 0.55 already equals BAM's firmware loop gain, and the current
+walker (`alpha_walking` at `3954496`) walks on either, delivering ~45 % of its forward command
+(0.155 m/s at 0.35 on the XML actuator, 0.131 on BAM). The 2026-08-31 "steps in place" measurement
+was of the earlier walking network. Promoted configs were not re-measured on BAM. Design doc,
+the BAM entry before T1 (2026-10-09). The original spec follows.
+
+*Original status (2026-08-31): spec only, nothing built.* Written now so the decision is deliberate rather than
 discovered at the first transfer test.
 
 Pollen's sim2real recipe rests on BAM — a measured, voltage-controlled model of the XL330 with
