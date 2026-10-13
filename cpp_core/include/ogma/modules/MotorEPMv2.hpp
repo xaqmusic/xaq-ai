@@ -521,6 +521,123 @@ private:
     std::string          contact_topic_;
     std::vector<float>   foot_contact_;
     bool                 have_contact_ = false;
+
+    // ---- LEG-PHASE SOCKETS (gait audit 2026-10-12; the LoadPhaseGait module) ----
+    // A per-leg phase published by another module (ProprioToken [cos, sin, swing, load]),
+    // consumed at three sites, each behind its own gain-0 guard: the stroke's phase
+    // (leg_phase_stroke), the stance/swing state (leg_phase_swing) and a phase-shaped
+    // lift on hip2/knee (leg_phase_lift_*).  Empty topics = nothing subscribed = byte-identical.
+    std::vector<std::string> leg_phase_topics_;
+    double leg_phase_stroke_    = 0.0;
+    double leg_phase_offset_    = -1.5707963267948966;   // sin(phi - pi/2) = -cos phi: foot forward at touchdown (phi = pi)
+    double leg_phase_swing_     = 0.0;
+    double leg_phase_lift_hip2_ = 0.0;
+    double leg_phase_lift_knee_ = 0.0;
+    // LEVEL REFLEX on planted legs (operator 2026-10-13: "the robot should be reducing the
+    // error of keeping its chassis level").  The error is the chassis attitude against
+    // level (the tilt token: sin pitch, sin roll); the owning term lives on STANCE legs only
+    // (a swing leg cannot lever the chassis), gated by the stance state in_swing_ (the
+    // load-held phase when leg_phase_swing is on).  The low corner's femur presses down
+    // (hip2 +), which raises that corner.  Sign is measured, not argued: the negative gain
+    // is the wrong-sign control and must raise tilt_sd.  0 = byte-identical.
+    double level_gain_ = 0.0;
+    // The knee half of the same reflex (operator 2026-10-13: "all planted legs will be
+    // responsible for maintaining the altitude of the chassis corner where they connect").
+    // A planted leg raises its corner with the femur AND the shank -- the stance press lifts
+    // the chassis with knee + and hip2 + together -- so the corner error drives both.
+    double level_knee_gain_ = 0.0;
+    // STROKE GATED BY THE LEVEL ERROR (2026-10-13).  The fall anatomy on the load-held
+    // phase: no fall has two legs airborne; each is a ~75-tick tilt ramp with a 1.3-1.9 rad
+    // hip1 sweep on one planted leg and 0.2-0.3 m/s of sideways velocity in the half second
+    // before -- a sprawled planted leg's full sweep shoves the chassis over.  The hip2 level
+    // reflex above had no authority over it (null at both signs).  So the term that causes
+    // the tilt is the one the level error gates: amp *= max(0, 1 - k * |tilt|), |tilt| =
+    // sqrt(sin^2 pitch + sin^2 roll).  A body that is off level withholds its push and lets
+    // the posture spring and the load-held stance recover it; level, the stroke is untouched.
+    double stroke_level_gain_ = 0.0;
+    double stroke_level_floor_ = 0.0;   // the gate never scales the stroke below this fraction
+    // 1 = the level gate scales the STEER differential too (the room, 2026-10-13: the avoid
+    // loop's turns put a steer of ~1 on a bearing error of 0.15 x gain 7, so one side's hip
+    // sweeps the full clipped range every stride -- the fall anatomy -- and a gate that spares
+    // the steer cannot catch it).  A turn is a push; an off-level body withholds both.
+    double stroke_level_steer_ = 0.0;
+    // LEVEL GATE REFERENCED TO THE RUNNING ATTITUDE (2026-10-13, the operator's ramp).  With
+    // the gate on absolute tilt a side slope is a permanent error and the push is withheld for
+    // good.  tau > 0: the gate reads |tilt - EMA(tilt)| with alpha = 1/tau, so a slope becomes
+    // the new normal within tau ticks and only transients withhold the push.  0 = absolute
+    // (byte-identical).
+    double stroke_level_ref_tau_ = 0.0;
+    float  tilt_p_ref_ = 0.0f, tilt_r_ref_ = 0.0f;
+    // PER-LEG REST-LENGTH INTEGRATOR on planted legs (the operator's rule, 2026-10-13: "all
+    // planted legs will be responsible for maintaining the altitude of the chassis corner where
+    // they connect").  The corner error e (front/left projection of pitch and roll, absolute
+    // gravity) integrates SLOWLY into that leg's own offset on hip2 and knee (both +: raise the
+    // corner), bounded by level_int_max, planted legs only, frozen while not upright, zeroed on a
+    // reset.  Uphill legs shorten, downhill legs lengthen, a leg that sits low presses more; the
+    // shared rest pose becomes a per-leg one the terrain and the body write.  Quasi-static by
+    // construction (the proportional corner reflex was NULL on the dynamic tip).  0 = off.
+    double level_int_gain_ = 0.0;
+    double level_int_max_  = 0.3;
+    std::vector<float> level_off_;      // per-leg offset, command units
+    // STRIDE-CENTRE HOMEOSTAT (2026-10-13).  The load rule slows a leg most at its lift-off
+    // point, so every stroke dwells at its back and all four hips trail neutral by the same
+    // 0.04-0.09 rad (measured; not learned: identical with the controller off).  That moves the
+    // body back over its feet, loads the rear hips, and they sag.  Per leg: a slow EMA of the
+    // achieved hip1 (the leg's state index 0), integrated into an offset on the hip command
+    // that drives the time-average to neutral.  The heading hold's learned trim, per leg.
+    double stride_center_gain_ = 0.0;   // per tick on the EMA; 0 = off
+    double stride_center_tau_  = 200.0; // EMA ticks (longer than a stride)
+    double stride_center_max_  = 0.3;
+    std::vector<float> sc_ema_, sc_off_;
+    // SAG-RELATIVE LIFT (2026-10-13).  The swing lift bottoms at the same absolute femur
+    // angle on every leg, so a leg whose femur sags under load in stance (command minus
+    // achieved: rear 0.15 rad, front 0.09) lifts less and its foot scrubs instead of rising.
+    // Per leg: a slow EMA of the hip2 sag while planted; in swing the femur is lifted by gain
+    // times that sag on top of the phase-shaped lift.  SIM FORM: it reads the achieved joint,
+    // which the robot's hobby servos do not report; the robot form must come from the foot
+    // sensor.  0 = off.
+    double lift_relative_gain_ = 0.0;
+    double lift_relative_tau_  = 200.0;
+    std::vector<float> sag_ema_;
+    // 1 = the integrated offset is APPLIED only while the leg is planted (the corner altitude
+    // is a stance property; a swing leg lifts from the shared rest).  Measured 2026-10-13: with
+    // the offset applied in swing too, the right rear's +0.13 offset cancelled its swing lift
+    // (femur excursion -0.08 -> -0.01) and the foot never cleared.  0 = applied always.
+    double level_int_planted_only_ = 0.0;
+    // THE COMMANDED-FK CORNER SENSOR (2026-10-13).  Under honest inputs the joints are the
+    // servo model, so sag is invisible; the corner altitude IS observable from the commanded
+    // forward kinematics rotated by the IMU (feet_topic = reality.proprio.feet_y_gravity_cmd_imu
+    // with the body's CMD_FK_SOURCE=1: each foot's height under gravity relative to the chassis,
+    // from the command and the attitude, both of which the robot has).  Depth d_i = -foot_y.
+    //   level_int_src 1: the integrator's corner error is e_i = mean_planted(d) - d_i (metres):
+    //     a planted foot shallower than the others sits under a LOW corner -> lengthen.
+    //   swing_clear_*: a swing leg's commanded clearance c_i = mean_planted(d) - d_i, read near
+    //     mid-swing (sin phi > 0.7), scales that leg's phase lift toward swing_clear_m:
+    //     scale_i += gain * (target - c_i), in [1, swing_clear_max].  A foot that would not
+    //     clear by the command lifts further next time.  0 = off, byte-identical.
+    double level_int_src_   = 0.0;
+    double swing_clear_m_    = 0.0;    // target clearance (m); 0 = off
+    double swing_clear_gain_ = 0.0;
+    double swing_clear_max_  = 3.0;
+    std::vector<float> lift_scale_, corner_err_, clear_ema_;
+    float planted_depth_mean() const {   // mean commanded depth of the planted feet, this tick
+        float s = 0.0f; int n = 0;
+        for (int i = 0; i < n_legs_ && i < int(foot_y_.size()) && i < int(in_swing_.size()); ++i)
+            if (!in_swing_[i]) { s += -foot_y_[size_t(i)]; ++n; }
+        return n ? s / float(n) : 0.0f;
+    }
+    double stroke_level_ema_ = 1.0;     // report-only: mean gate
+    bool   tilt_seen_  = false;
+    int64_t level_ticks_ = 0; double level_acc_ = 0.0;
+    std::vector<float>   ext_cos_, ext_sin_, ext_swing_, ext_load_;
+    std::vector<uint8_t> ext_seen_;
+    int64_t ext_stroke_ticks_ = 0, ext_swing_ticks_ = 0; double ext_lift_acc_ = 0.0; int64_t ext_lift_n_ = 0;
+    void handle_leg_phase(int leg, MessagePtr payload);
+    bool ext_all_seen() const {
+        if (int(ext_seen_.size()) != n_legs_) return false;
+        for (auto s : ext_seen_) if (!s) return false;
+        return true;
+    }
     void handle_contact(MessagePtr payload);
     // 2026-07-26 — let `contact_topic` be subscribed WITHOUT letting it drive in_swing_.
     // Wiring true contact as the swing gate is separately REFUTED (net_z 3.76→2.37: the

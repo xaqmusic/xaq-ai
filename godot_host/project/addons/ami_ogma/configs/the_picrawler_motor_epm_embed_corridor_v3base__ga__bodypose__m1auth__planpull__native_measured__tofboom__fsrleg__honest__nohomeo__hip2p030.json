@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "P-e·h0 + hip2 rest +0.3 (the femur dose: which way stands the body higher? 2026-10-12)",
-    "description": "hip2_tuck_target +0.3 on P-e·h0 (default -99 = the spawn pose), plumb OFF. The knee-tuck dose went the wrong way (less tuck = a flatter, wider sprawl: chassis 45 -> 27 mm, feet 168 -> 173 mm). Standing higher with the feet nearer needs the femur, with the knee tucked. Sign settled empirically: read chassis_y, foot_r, belly, steps, falls.",
+    "name": "BENCH \u00b7 P-e\u00b7h0 + hip2 +0.3 (sim)",
+    "description": "P-e\u00b7h0 + hip2 rest +0.3 (the femur dose: which way stands the body higher? 2026-10-12). hip2_tuck_target +0.3 on P-e\u00b7h0 (default -99 = the spawn pose), plumb OFF. The knee-tuck dose went the wrong way (less tuck = a flatter, wider sprawl: chassis 45 -> 27 mm, feet 168 -> 173 mm). Standing higher with the feet nearer needs the femur, with the knee tucked. Sign settled empirically: read chassis_y, foot_r, belly, steps, falls.",
     "env_target": "picrawler",
     "gym_mode": "arena",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -29,7 +29,7 @@
       "height_homeostat",
       "panic"
     ],
-    "note": "Provenance: E3a settle (registered rule picked settle_s3 [0.3075, 0.9197, 0.8516]) -> E3b fix020_s2 endpoint promoted 2026-08-27 by the registered frozen-validation rule (~/xaq_runs/twobodyE3c_20260827/). Ledger 2026-08-27 E3 entry; plan doc §3-E3.",
+    "note": "Provenance: E3a settle (registered rule picked settle_s3 [0.3075, 0.9197, 0.8516]) -> E3b fix020_s2 endpoint promoted 2026-08-27 by the registered frozen-validation rule (~/xaq_runs/twobodyE3c_20260827/). Ledger 2026-08-27 E3 entry; plan doc \u00a73-E3.",
     "body": "measured_fsr",
     "gym_difficulty": 0.3,
     "body_env": {

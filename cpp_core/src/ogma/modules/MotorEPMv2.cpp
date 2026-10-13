@@ -91,6 +91,9 @@ std::vector<TopicSpec> MotorEPMv2::input_topics() const {
     if (!contact_topic_.empty())
         v.emplace_back(contact_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
+    for (auto const& t : leg_phase_topics_)
+        v.emplace_back(t, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
     if (!torque_topic_.empty())
         v.emplace_back(torque_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
@@ -983,6 +986,107 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"contact_topic", ParamMutability::ConstructionOnly,
          "TRUE per-leg ground-contact topic (reality.proprio.foot_contact) — the physics touch flag, and the sensor a REAL picrawler has (a foot switch). When set, a leg is in SWING iff it is not touching: a MEASUREMENT, with none of the chatter or latching the height proxy suffers. When empty, MotorEPM falls back to INFERRING contact from foot height vs that foot's own moving average, which measured 40.3 % 'swinging' while the feet were genuinely down 99.3 % of the time — and every consumer of the swing state (stance_lift, all Cruse rules) gated on that error. This topic was already being published every tick and was simply never wired. Empty = legacy inference (byte-identical).",
          ParamValue{std::string("")}, std::nullopt, std::nullopt},
+        {"leg_phase_topics", ParamMutability::ConstructionOnly,
+         "LEG-PHASE SOCKET (gait audit 2026-10-12). One ProprioToken topic per leg, [cos phi, sin phi, swing (1/0), load share], "
+         "from a module that owns a per-leg phase the leg's own LOAD holds (LoadPhaseGait: dphi = omega - sigma N cos phi). "
+         "Subscribing alone changes nothing; the three consumers below each have their own gain-0 guard. Empty = byte-identical.",
+         ParamValue{std::vector<std::string>{}}, std::nullopt, std::nullopt},
+        {"leg_phase_stroke", ParamMutability::HotMutable,
+         "1 = the power stroke rides the EXTERNAL leg phase (sin(phi + leg_phase_offset)) instead of L.phase, the atan2 readout "
+         "of the knee it drives (retrograde 2 ticks in 3; the coupling closes a loop on its own output). The phase is an "
+         "integrator held by load, so it is monotone and knows contact by construction. 0 = byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"leg_phase_offset", ParamMutability::HotMutable,
+         "Stroke offset on the external phase (radians). The phase's convention: swing in (0, pi), touchdown at pi, stance in "
+         "(pi, 2pi). -pi/2 makes the hip target -cos phi: fully forward at touchdown, sweeping back through stance. "
+         "The hip's sign convention per leg is stroke_signs, as before.",
+         ParamValue{-1.5707963267948966}, std::nullopt, std::nullopt},
+        {"leg_phase_swing", ParamMutability::HotMutable,
+         "1 = the stance/swing state every gated term reads (stance_lift, its hip2 half, the Cruse rules) is the external "
+         "phase's swing flag, not the foot-height detector (measured to read body ATTITUDE: FK of a servo target array brain "
+         "mode never writes). 0 = byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"leg_phase_lift_hip2", ParamMutability::HotMutable,
+         "Phase-shaped swing lift, femur half: y[hip2] += gain * max(0, sin phi). Negative = femur up (the swing_tuck sign). "
+         "Smooth by construction (no gate edge). 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"level_gain", ParamMutability::HotMutable,
+         "LEVEL REFLEX ON PLANTED LEGS. y[hip2] += gain * (front * sin pitch + left * sin roll) on legs in STANCE only "
+         "(in_swing_ = 0; with leg_phase_swing on, that is the load-held phase's stance half). The error it descends is the "
+         "chassis attitude against level, read from tilt_topic (the fused accelerometer on the robot, the modelled one in the "
+         "sim with HONEST_UPRIGHT + PUBLISH_TILT). Differs from the refuted balance_gain in exactly the gate: that term pressed "
+         "every leg, swing legs included, with god's-eye tilt. Negative = the wrong-sign control. 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"level_knee_gain", ParamMutability::HotMutable,
+         "The KNEE half of level_gain: y[knee] += gain * (front * sin pitch + left * sin roll) on planted legs (knee + = fold "
+         "= raise the corner, the stance press's sign). With level_gain this is the whole-leg corner-altitude reflex the "
+         "operator asked for. 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"stroke_level_gain", ParamMutability::HotMutable,
+         "STROKE GATED BY THE LEVEL ERROR. The hip stroke amplitude is scaled by max(floor, 1 - gain * |tilt|), |tilt| = "
+         "sqrt(sin^2 pitch + sin^2 roll) from tilt_topic. Measured (2026-10-13): on the load-held phase every fall is a slow "
+         "tilt ramp driven by one planted leg's 1.3-1.9 rad hip sweep, and a hip2 level reflex cannot catch it; withholding "
+         "the push while the chassis is off level removes the cause rather than fighting the effect. The STEER half of the "
+         "stroke (the heading hold) is not gated. 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"stroke_level_steer", ParamMutability::HotMutable,
+         "1 = the level gate also scales the steer differential (the heading hold / nav turn) on the hip stroke; 0 = the steer "
+         "keeps full authority (the arena form). In the walled room the turns commanded by the avoid loop drive one side's hip "
+         "through its full range every stride and the body tips about ten times per 12 000 ticks; a turn is a push. "
+         "0 = byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"stroke_level_ref_tau", ParamMutability::HotMutable,
+         "LEVEL GATE REFERENCE. 0 = the gate reads absolute tilt (a side slope withholds the push for good). tau > 0 (ticks) = "
+         "the gate reads the DEVIATION of the tilt from its own running mean (alpha = 1/tau): a slope becomes the new normal "
+         "within tau ticks and only transients withhold the push. Try 150-400. 0 = byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"level_int_gain", ParamMutability::HotMutable,
+         "PER-LEG REST-LENGTH INTEGRATOR on planted legs. Each planted leg integrates its corner error e = front*sin pitch + "
+         "left*sin roll into its OWN offset on hip2 and knee (both +, raise the corner): off += gain * e per tick, |off| <= "
+         "level_int_max, frozen while not upright (upright < 0.5), zeroed on a reset. The operator's rule: planted legs hold the "
+         "altitude of their corner. A terrain-written per-leg rest pose; quasi-static. Try 0.001-0.005. 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"level_int_planted_only", ParamMutability::HotMutable,
+         "1 = the per-leg integrated offset is applied only while that leg is planted; in swing the leg lifts from the shared "
+         "rest pose. 0 = applied in swing too (measured to cancel the swing lift on a leg with a large positive offset).",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"stride_center_gain", ParamMutability::HotMutable,
+         "STRIDE-CENTRE HOMEOSTAT, per leg: off -= gain * EMA(achieved hip1) per tick, |off| <= stride_center_max, applied to the "
+         "hip command, so each hip's time-average returns to neutral. The load-held phase dwells at lift-off and leaves every "
+         "hip trailing by ~0.06 rad (measured, not learned), which loads the rear. Try 0.001-0.003. 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"stride_center_tau", ParamMutability::HotMutable, "EMA length (ticks) of the achieved hip1 the centre homeostat reads; longer than a stride.", ParamValue{200.0}, std::nullopt, std::nullopt},
+        {"stride_center_max", ParamMutability::HotMutable, "Bound on the per-leg centre offset (command units).", ParamValue{0.3}, std::nullopt, std::nullopt},
+        {"lift_relative_gain", ParamMutability::HotMutable,
+         "SAG-RELATIVE LIFT (sim form): per leg, EMA of the femur's stance sag (hip2 command minus achieved, while planted); in "
+         "swing y[hip2] -= gain * sag * max(0, sin phi) on top of leg_phase_lift_hip2, so a femur that sags under load lifts "
+         "further and its foot still clears. 1 = compensate the full sag. Reads the achieved joint: the robot form must come "
+         "from the foot sensor. 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"lift_relative_tau", ParamMutability::HotMutable, "EMA length (ticks) of the stance sag.", ParamValue{200.0}, std::nullopt, std::nullopt},
+        {"level_int_src", ParamMutability::HotMutable,
+         "The corner error the per-leg integrator reads. 0 = front/left projection of pitch and roll (tilt_topic). 1 = THE "
+         "COMMANDED-FK CORNER SENSOR: e_i = mean over planted feet of commanded depth under gravity minus this foot's (metres, "
+         "from feet_topic = feet_y_gravity_cmd_imu with the body's CMD_FK_SOURCE=1), so level_int_gain is per metre per tick "
+         "(try 0.02-0.05). A planted foot shallower than the others sits under a low corner and lengthens.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"swing_clear_m", ParamMutability::HotMutable,
+         "SWING CLEARANCE from the commanded-FK corner sensor: target height (m) of a swing foot above the planted feet's "
+         "plane, read near mid-swing. Each leg's phase lift is scaled toward it (scale in [1, swing_clear_max]), so a foot "
+         "whose command would not clear lifts further. Needs leg_phase_lift_* and the commanded FK. 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"swing_clear_gain", ParamMutability::HotMutable, "Per mid-swing tick: scale += gain * (swing_clear_m - clearance).", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"swing_clear_max", ParamMutability::HotMutable, "Upper bound on the per-leg lift scale.", ParamValue{3.0}, std::nullopt, std::nullopt},
+        {"level_int_max", ParamMutability::HotMutable,
+         "Bound on each leg's integrated offset (command units; the stance press is 0.5).",
+         ParamValue{0.3}, std::nullopt, std::nullopt},
+        {"stroke_level_floor", ParamMutability::HotMutable,
+         "The least fraction of the stroke the level gate leaves (0 = it may stop the push entirely).",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"leg_phase_lift_knee", ParamMutability::HotMutable,
+         "Phase-shaped swing lift, shank half: y[knee] += gain * max(0, sin phi). Positive = fold (the swing_tuck sign). "
+         "0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
         {"feet_topic", ParamMutability::ConstructionOnly,
          "4-D per-leg foot-height ProprioToken topic for Cruse stance/swing detection. The body publishes reality.proprio.feet_y every tick.",
          std::nullopt, std::nullopt, std::nullopt},
@@ -1308,6 +1412,30 @@ ParamMap MotorEPMv2::current_params() const {
     m["cruse_rule5_gain"]   = cruse_rule5_gain_;
     m["feet_topic"]         = feet_topic_;
     m["contact_topic"]      = contact_topic_;
+    m["leg_phase_topics"]   = leg_phase_topics_;
+    m["leg_phase_stroke"]   = leg_phase_stroke_;
+    m["leg_phase_offset"]   = leg_phase_offset_;
+    m["leg_phase_swing"]    = leg_phase_swing_;
+    m["leg_phase_lift_hip2"] = leg_phase_lift_hip2_;
+    m["leg_phase_lift_knee"] = leg_phase_lift_knee_;
+    m["level_gain"]          = level_gain_;
+    m["level_knee_gain"]     = level_knee_gain_;
+    m["stroke_level_gain"]   = stroke_level_gain_;
+    m["stroke_level_floor"]  = stroke_level_floor_;
+    m["stroke_level_steer"]  = stroke_level_steer_;
+    m["stroke_level_ref_tau"] = stroke_level_ref_tau_;
+    m["level_int_gain"]      = level_int_gain_;
+    m["level_int_max"]       = level_int_max_;
+    m["level_int_src"]       = level_int_src_;
+    m["swing_clear_m"]       = swing_clear_m_;
+    m["swing_clear_gain"]    = swing_clear_gain_;
+    m["swing_clear_max"]     = swing_clear_max_;
+    m["stride_center_gain"]  = stride_center_gain_;
+    m["stride_center_tau"]   = stride_center_tau_;
+    m["stride_center_max"]   = stride_center_max_;
+    m["lift_relative_gain"]  = lift_relative_gain_;
+    m["lift_relative_tau"]   = lift_relative_tau_;
+    m["level_int_planted_only"] = level_int_planted_only_;
     m["torque_topic"]       = torque_topic_;
     m["contact_instrument_only"] = contact_instrument_only_;
     m["gait_align_diag"]    = gait_align_diag_;
@@ -1532,6 +1660,30 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "feet_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) feet_topic_ = *p; });
     apply_param(params, "upright_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) upright_topic_ = *p; });
     apply_param(params, "contact_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) contact_topic_ = *p; });
+    apply_param(params, "leg_phase_topics", [&](auto const& v){ if (auto p = std::get_if<std::vector<std::string>>(&v)) leg_phase_topics_ = *p; });
+    apply_param(params, "leg_phase_stroke",    [&](auto const& v){ leg_phase_stroke_    = get_double(v, "leg_phase_stroke"); });
+    apply_param(params, "leg_phase_offset",    [&](auto const& v){ leg_phase_offset_    = get_double(v, "leg_phase_offset"); });
+    apply_param(params, "leg_phase_swing",     [&](auto const& v){ leg_phase_swing_     = get_double(v, "leg_phase_swing"); });
+    apply_param(params, "leg_phase_lift_hip2", [&](auto const& v){ leg_phase_lift_hip2_ = get_double(v, "leg_phase_lift_hip2"); });
+    apply_param(params, "leg_phase_lift_knee", [&](auto const& v){ leg_phase_lift_knee_ = get_double(v, "leg_phase_lift_knee"); });
+    apply_param(params, "level_gain",          [&](auto const& v){ level_gain_          = get_double(v, "level_gain"); });
+    apply_param(params, "level_knee_gain",     [&](auto const& v){ level_knee_gain_     = get_double(v, "level_knee_gain"); });
+    apply_param(params, "stroke_level_gain",   [&](auto const& v){ stroke_level_gain_   = get_double(v, "stroke_level_gain"); });
+    apply_param(params, "stroke_level_floor",  [&](auto const& v){ stroke_level_floor_  = get_double(v, "stroke_level_floor"); });
+    apply_param(params, "stroke_level_steer",  [&](auto const& v){ stroke_level_steer_  = get_double(v, "stroke_level_steer"); });
+    apply_param(params, "stroke_level_ref_tau", [&](auto const& v){ stroke_level_ref_tau_ = get_double(v, "stroke_level_ref_tau"); });
+    apply_param(params, "level_int_gain",      [&](auto const& v){ level_int_gain_      = get_double(v, "level_int_gain"); });
+    apply_param(params, "level_int_max",       [&](auto const& v){ level_int_max_       = get_double(v, "level_int_max"); });
+    apply_param(params, "level_int_src",       [&](auto const& v){ level_int_src_       = get_double(v, "level_int_src"); });
+    apply_param(params, "swing_clear_m",       [&](auto const& v){ swing_clear_m_       = get_double(v, "swing_clear_m"); });
+    apply_param(params, "swing_clear_gain",    [&](auto const& v){ swing_clear_gain_    = get_double(v, "swing_clear_gain"); });
+    apply_param(params, "swing_clear_max",     [&](auto const& v){ swing_clear_max_     = get_double(v, "swing_clear_max"); });
+    apply_param(params, "stride_center_gain",  [&](auto const& v){ stride_center_gain_  = get_double(v, "stride_center_gain"); });
+    apply_param(params, "stride_center_tau",   [&](auto const& v){ stride_center_tau_   = std::max(1.0, get_double(v, "stride_center_tau")); });
+    apply_param(params, "stride_center_max",   [&](auto const& v){ stride_center_max_   = get_double(v, "stride_center_max"); });
+    apply_param(params, "lift_relative_gain",  [&](auto const& v){ lift_relative_gain_  = get_double(v, "lift_relative_gain"); });
+    apply_param(params, "lift_relative_tau",   [&](auto const& v){ lift_relative_tau_   = std::max(1.0, get_double(v, "lift_relative_tau")); });
+    apply_param(params, "level_int_planted_only", [&](auto const& v){ level_int_planted_only_ = get_double(v, "level_int_planted_only"); });
     apply_param(params, "torque_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) torque_topic_ = *p; });
     apply_param(params, "contact_instrument_only", [&](auto const& v){ contact_instrument_only_ = get_double(v, "contact_instrument_only"); });
     apply_param(params, "gait_align_diag", [&](auto const& v){ gait_align_diag_ = get_double(v, "gait_align_diag"); });
@@ -1717,6 +1869,17 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
             contact_topic_, SubscriptionKind::Direct,
             [this](std::string_view /*topic*/, MessagePtr p){ handle_contact(p); }));
     }
+    if (!leg_phase_topics_.empty()) {
+        if (int(leg_phase_topics_.size()) != n_legs_)
+            throw std::invalid_argument("MotorEPMv2: leg_phase_topics length must equal n_legs");
+        ext_cos_.assign(size_t(n_legs_), 1.0f); ext_sin_.assign(size_t(n_legs_), 0.0f);
+        ext_swing_.assign(size_t(n_legs_), 0.0f); ext_load_.assign(size_t(n_legs_), 0.0f);
+        ext_seen_.assign(size_t(n_legs_), 0);
+        for (int leg = 0; leg < n_legs_; ++leg)
+            sub_ids_.push_back(bus_->subscribe(
+                leg_phase_topics_[size_t(leg)], SubscriptionKind::Direct,
+                [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_leg_phase(leg, p); }));
+    }
     if (!torque_topic_.empty()) {
         sub_ids_.push_back(bus_->subscribe(
             torque_topic_, SubscriptionKind::Direct,
@@ -1835,6 +1998,10 @@ void MotorEPMv2::handle_event(std::string_view topic, MessagePtr payload) {
         ticks_since_reset_   = 0;
         reset_hit_this_tick_ = true;
         heading_bearing_ = 0.0f;   // respawn = new bearing origin (dead-reckoning restart)
+        for (auto& o : level_off_) o = 0.0f;   // respawn = the terrain-written rest pose is void
+        for (auto& o : sc_off_) o = 0.0f;
+        for (auto& o : lift_scale_) o = 1.0f;
+        for (auto& o : sc_ema_) o = 0.0f;
         // respawn = fresh stall clock (don't count the post-reset settle as "stuck")
         stuck_ticks_ = 0; stuck_boost_ = 0.0f; fwd_progress_ema_ = 0.0f;
         // respawn = fresh commit clock + cold flow EMAs (levers C/D)
@@ -1933,6 +2100,12 @@ void MotorEPMv2::handle_tilt(MessagePtr payload) {
     if (!pt || pt->values.size() < 4) return;
     tilt_pitch_ = pt->values[0];   // sin(pitch) — signed fore-aft tilt
     tilt_roll_  = pt->values[2];   // sin(roll)  — signed left-right tilt
+    tilt_seen_  = true;
+    if (stroke_level_ref_tau_ > 0.0) {
+        const float a = 1.0f / float(stroke_level_ref_tau_);
+        tilt_p_ref_ += a * (tilt_pitch_ - tilt_p_ref_);
+        tilt_r_ref_ += a * (tilt_roll_  - tilt_r_ref_);
+    }
     // The cos components were RECEIVED and DISCARDED, which left this module unable to
     // distinguish upright from inverted at all — sin(180°) == sin(0°) == 0.  Their product
     // is ~basis.y.y: +1 upright, 0 on its side, −1 on its back.  Accelerometer-derived, so
@@ -2119,6 +2292,18 @@ void MotorEPMv2::handle_feet(MessagePtr payload) {
 // from foot HEIGHT relative to that foot's own moving average, which measured 40.3 %
 // "swinging" while the feet were genuinely down 99.3 % of the time.  Every consumer of
 // in_swing_ (stance_lift, all the Cruse rules) was gating on that error.
+// LEG-PHASE SOCKET: one token per leg from the module that owns the load-held phase.
+void MotorEPMv2::handle_leg_phase(int leg, MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt || pt->values.size() < 3 || leg < 0 || leg >= int(ext_seen_.size())) return;
+    ext_cos_[size_t(leg)]   = pt->values[0];
+    ext_sin_[size_t(leg)]   = pt->values[1];
+    ext_swing_[size_t(leg)] = pt->values[2];
+    ext_load_[size_t(leg)]  = pt->values.size() > 3 ? pt->values[3] : 0.0f;
+    ext_seen_[size_t(leg)]  = 1;
+}
+
 void MotorEPMv2::handle_contact(MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
@@ -2741,6 +2926,31 @@ void MotorEPMv2::update_cruse_state() {
     // `contact_instrument_only` splits the subscription from the gate: the diagnostic
     // needs ground truth on the bus while the control path keeps the incumbent detector
     // (wiring contact as the gate is separately refuted — that consumer wanted phase).
+    // LEG-PHASE path (leg_phase_swing): the stance/swing state IS the external phase's
+    // half-cycle.  The phase is held in stance by the leg's own load, so this gate is
+    // contact-referenced without an EMA, a deadband or a self-reference; and because it is
+    // a phase, a consumer that "wanted phase, not contact" (the refutation on the raw flag)
+    // gets exactly that.
+    if (leg_phase_swing_ > 0.0 && ext_all_seen()) {
+        if (int(in_swing_.size()) != n_legs_) {
+            in_swing_.assign(n_legs_, 0);
+            ticks_since_plant_.assign(n_legs_, 1000);
+        }
+        int n_sw = 0;
+        for (int i = 0; i < n_legs_; ++i) {
+            const bool sw = ext_swing_[size_t(i)] > 0.5f;
+            if (in_swing_[i] && !sw) ticks_since_plant_[i] = 0;   // touchdown (by the phase)
+            else ticks_since_plant_[i] += 1;
+            in_swing_[i] = sw ? 1 : 0;
+            if (sw) ++n_sw;
+        }
+        ++ext_swing_ticks_;
+        swing_frac_ema_ = (1.0f - kSwingFracAlpha) * swing_frac_ema_
+                        + kSwingFracAlpha * (float(n_sw) / float(std::max(1, n_legs_)));
+        cruse_bias_mean_ = cruse_bias_n_ ? (cruse_bias_acc_ / float(cruse_bias_n_)) : 0.0f;
+        cruse_bias_acc_ = 0.0f; cruse_bias_n_ = 0;
+        return;
+    }
     if (have_contact_ && contact_instrument_only_ <= 0.0 && int(foot_contact_.size()) == n_legs_) {
         if (int(in_swing_.size()) != n_legs_) {
             in_swing_.assign(n_legs_, 0);
@@ -2980,6 +3190,29 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "height_windup_guard") height_windup_guard_ = get_double(value, "height_windup_guard");
     else if (key == "height_lift_knee") height_lift_knee_ = get_double(value, "height_lift_knee");
     else if (key == "stance_lift_hip2") stance_lift_hip2_ = get_double(value, "stance_lift_hip2");
+    else if (key == "leg_phase_stroke")    leg_phase_stroke_    = get_double(value, "leg_phase_stroke");
+    else if (key == "leg_phase_offset")    leg_phase_offset_    = get_double(value, "leg_phase_offset");
+    else if (key == "leg_phase_swing")     leg_phase_swing_     = get_double(value, "leg_phase_swing");
+    else if (key == "leg_phase_lift_hip2") leg_phase_lift_hip2_ = get_double(value, "leg_phase_lift_hip2");
+    else if (key == "leg_phase_lift_knee") leg_phase_lift_knee_ = get_double(value, "leg_phase_lift_knee");
+    else if (key == "level_gain")          level_gain_          = get_double(value, "level_gain");
+    else if (key == "level_knee_gain")     level_knee_gain_     = get_double(value, "level_knee_gain");
+    else if (key == "stroke_level_gain")   stroke_level_gain_   = get_double(value, "stroke_level_gain");
+    else if (key == "stroke_level_floor")  stroke_level_floor_  = get_double(value, "stroke_level_floor");
+    else if (key == "stroke_level_steer")  stroke_level_steer_  = get_double(value, "stroke_level_steer");
+    else if (key == "stroke_level_ref_tau") stroke_level_ref_tau_ = get_double(value, "stroke_level_ref_tau");
+    else if (key == "level_int_gain")      level_int_gain_      = get_double(value, "level_int_gain");
+    else if (key == "level_int_max")       level_int_max_       = get_double(value, "level_int_max");
+    else if (key == "level_int_src")       level_int_src_       = get_double(value, "level_int_src");
+    else if (key == "swing_clear_m")       swing_clear_m_       = get_double(value, "swing_clear_m");
+    else if (key == "swing_clear_gain")    swing_clear_gain_    = get_double(value, "swing_clear_gain");
+    else if (key == "swing_clear_max")     swing_clear_max_     = get_double(value, "swing_clear_max");
+    else if (key == "stride_center_gain")  stride_center_gain_  = get_double(value, "stride_center_gain");
+    else if (key == "stride_center_tau")   stride_center_tau_   = std::max(1.0, get_double(value, "stride_center_tau"));
+    else if (key == "stride_center_max")   stride_center_max_   = get_double(value, "stride_center_max");
+    else if (key == "lift_relative_gain")  lift_relative_gain_  = get_double(value, "lift_relative_gain");
+    else if (key == "lift_relative_tau")   lift_relative_tau_   = std::max(1.0, get_double(value, "lift_relative_tau"));
+    else if (key == "level_int_planted_only") level_int_planted_only_ = get_double(value, "level_int_planted_only");
     else if (key == "support_select_gain") support_select_gain_ = get_double(value, "support_select_gain");
     else if (key == "panic_on") panic_on_ = get_double(value, "panic_on");
     else if (key == "panic_off") panic_off_ = get_double(value, "panic_off");
@@ -5415,6 +5648,89 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                    && int(in_swing_.size()) == n_legs_ && in_swing_[leg]) {
             sr_was_stance_[leg] = false;             // swing: arm the next bout's reset
         }
+        // LEG-PHASE LIFT (leg_phase_lift_*): a swing lift shaped by the external phase,
+        // max(0, sin phi) -- zero at liftoff and touchdown, peak mid-swing.  The existing lift
+        // is the withdrawal of the stance press plus the contact-gated swing tuck, both of
+        // which switch at an edge; this one is smooth and cannot act on a loaded leg, because
+        // a loaded leg's phase is held in stance (sin < 0).
+        if (!warmup && (leg_phase_lift_hip2_ != 0.0 || leg_phase_lift_knee_ != 0.0) && m >= 3
+            && leg < int(ext_seen_.size()) && ext_seen_[size_t(leg)]) {
+            const float lift = std::max(0.0f, ext_sin_[size_t(leg)]);
+            // SWING CLEARANCE (swing_clear_*; see the header): the commanded-FK clearance of
+            // this swing foot above the planted plane scales its lift toward the target.
+            float lscale = 1.0f;
+            if (swing_clear_m_ > 0.0 && swing_clear_gain_ > 0.0 && int(foot_y_.size()) == n_legs_
+                && int(in_swing_.size()) == n_legs_) {
+                if (int(lift_scale_.size()) != n_legs_) { lift_scale_.assign(size_t(n_legs_), 1.0f); clear_ema_.assign(size_t(n_legs_), 0.0f); }
+                if (!warmup && ext_sin_[size_t(leg)] > 0.7f) {
+                    const float c = planted_depth_mean() - (-foot_y_[size_t(leg)]);   // m above the planted plane
+                    clear_ema_[size_t(leg)] += 0.05f * (c - clear_ema_[size_t(leg)]);
+                    lift_scale_[size_t(leg)] = std::clamp(lift_scale_[size_t(leg)] + float(swing_clear_gain_) * (float(swing_clear_m_) - c),
+                                                          1.0f, float(swing_clear_max_));
+                }
+                lscale = lift_scale_[size_t(leg)];
+            }
+            y[1]     += float(leg_phase_lift_hip2_) * lift * lscale;
+            y[m - 1] += float(leg_phase_lift_knee_) * lift * lscale;
+            ext_lift_acc_ += double(lift); ++ext_lift_n_;
+        }
+        // LEVEL REFLEX on planted legs (level_gain; see the header note).  front = FL,FR
+        // (0,1); left = FL,RL (0,2) -- the same corner map balance_gain used, with the
+        // gate that term lacked.
+        if (!warmup && (level_gain_ != 0.0 || level_knee_gain_ != 0.0) && m >= 2 && tilt_seen_
+            && int(in_swing_.size()) == n_legs_ && !in_swing_[leg]) {
+            const float front = (leg == 0 || leg == 1) ? 1.0f : -1.0f;
+            const float left  = (leg == 0 || leg == 2) ? 1.0f : -1.0f;
+            const float e = front * tilt_pitch_ + left * tilt_roll_;
+            y[1]     += float(level_gain_) * e;
+            y[m - 1] += float(level_knee_gain_) * e;
+            level_acc_ += double(std::fabs(e)); ++level_ticks_;
+        }
+        // PER-LEG REST-LENGTH INTEGRATOR (level_int_gain; see the header note).
+        if (level_int_gain_ > 0.0 && m >= 2 && tilt_seen_ && int(in_swing_.size()) == n_legs_) {
+            if (int(level_off_.size()) != n_legs_) level_off_.assign(size_t(n_legs_), 0.0f);
+            if (!warmup && !in_swing_[leg] && upright_ >= 0.5f) {
+                float e;
+                if (level_int_src_ > 0.5 && int(foot_y_.size()) == n_legs_) {
+                    e = planted_depth_mean() - (-foot_y_[size_t(leg)]);   // metres: shallower = low corner
+                } else {
+                    const float front = (leg == 0 || leg == 1) ? 1.0f : -1.0f;
+                    const float left  = (leg == 0 || leg == 2) ? 1.0f : -1.0f;
+                    e = front * tilt_pitch_ + left * tilt_roll_;
+                }
+                if (int(corner_err_.size()) != n_legs_) corner_err_.assign(size_t(n_legs_), 0.0f);
+                corner_err_[size_t(leg)] = e;
+                level_off_[size_t(leg)] = std::clamp(level_off_[size_t(leg)] + float(level_int_gain_) * e,
+                                                     -float(level_int_max_), float(level_int_max_));
+            }
+            if (level_int_planted_only_ <= 0.0 || !in_swing_[leg]) {
+                y[1]     += level_off_[size_t(leg)];
+                y[m - 1] += level_off_[size_t(leg)];
+            }
+        }
+        // STRIDE-CENTRE HOMEOSTAT (stride_center_gain; see the header note).
+        if (stride_center_gain_ > 0.0 && m >= 1 && n >= 1) {
+            if (int(sc_ema_.size()) != n_legs_) { sc_ema_.assign(size_t(n_legs_), 0.0f); sc_off_.assign(size_t(n_legs_), 0.0f); }
+            if (!warmup) {
+                const float a = 1.0f / float(stride_center_tau_);
+                sc_ema_[size_t(leg)] += a * (L.x[0] - sc_ema_[size_t(leg)]);
+                sc_off_[size_t(leg)] = std::clamp(sc_off_[size_t(leg)] - float(stride_center_gain_) * sc_ema_[size_t(leg)],
+                                                  -float(stride_center_max_), float(stride_center_max_));
+            }
+            y[0] += sc_off_[size_t(leg)];
+        }
+        // SAG-RELATIVE LIFT (lift_relative_gain; sim form, see the header note).
+        if (lift_relative_gain_ > 0.0 && m >= 2 && n >= 3 * m && int(in_swing_.size()) == n_legs_
+            && leg < int(ext_seen_.size()) && ext_seen_[size_t(leg)]) {
+            if (int(sag_ema_.size()) != n_legs_) sag_ema_.assign(size_t(n_legs_), 0.0f);
+            if (!warmup && !in_swing_[leg] && L.prev_y.size() > 1) {
+                const float a = 1.0f / float(lift_relative_tau_);
+                const float sag = L.prev_y[1] - L.x[3];          // hip2 command minus achieved, planted
+                sag_ema_[size_t(leg)] += a * (sag - sag_ema_[size_t(leg)]);
+            }
+            const float lift = std::max(0.0f, ext_sin_[size_t(leg)]);
+            y[1] -= float(lift_relative_gain_) * std::max(0.0f, sag_ema_[size_t(leg)]) * lift;
+        }
         // TIBIA-PLUMB — hip2 nulls the shank's deviation from vertical, so the knee's
         // gait drive TRANSLATES the foot instead of arcing it.  See the header.  Applied to
         // every leg, stance and swing alike: it is a postural constraint, not a phase gate.
@@ -5713,8 +6029,20 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // this same skid-steer channel, and gating a heading controller by leg load
             // would corrupt it.  gate ≡ 1 when the lever is off ⇒ byte-identical.
             const float load_gate = (int(stroke_gate_.size()) == n_legs_) ? stroke_gate_[leg] : 1.0f;
-            float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd * load_gate
-                                + side * steer_eff);
+            // LEVEL GATE on the propulsion term only (stroke_level_gain; see the header).
+            // Steer keeps full authority: the heading hold is a promoted controller on
+            // this channel.  level_mult == 1 at gain 0, so the product is byte-identical.
+            float level_mult = 1.0f;
+            if (stroke_level_gain_ > 0.0 && tilt_seen_) {
+                const float dp = (stroke_level_ref_tau_ > 0.0) ? tilt_pitch_ - tilt_p_ref_ : tilt_pitch_;
+                const float dr = (stroke_level_ref_tau_ > 0.0) ? tilt_roll_  - tilt_r_ref_ : tilt_roll_;
+                const float tmag = std::sqrt(dp * dp + dr * dr);
+                level_mult = std::max(float(stroke_level_floor_), 1.0f - float(stroke_level_gain_) * tmag);
+                if (leg == 0) stroke_level_ema_ += 0.01 * (double(level_mult) - stroke_level_ema_);
+            }
+            const float steer_mult = (stroke_level_steer_ > 0.0) ? level_mult : 1.0f;
+            float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd * load_gate * level_mult
+                                + side * steer_eff * steer_mult);
             // STROKE-TO-STEP LOCK.  The ONLY consumer of L.step_phase: coupling, the
             // amplitude homeostat and prop-credit all keep the legacy L.phase, so this is
             // one lever on one consumer (`phase_joint` moved all six at once, which is
@@ -5722,9 +6050,18 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // blend — at stroke_phase_src == 0 this selects L.phase and the expression is
             // the legacy one character for character, so the gain-0 guard holds by
             // construction rather than by floating-point luck.
-            const float stroke_ph = (stroke_phase_src_ > 0.0 && L.step_locked)
-                                  ? L.step_phase : L.phase;
-            y[0] += (1.0f - pe) * amp * std::sin(stroke_ph + float(stroke_phase_));
+            float stroke_ph  = (stroke_phase_src_ > 0.0 && L.step_locked)
+                             ? L.step_phase : L.phase;
+            float stroke_off = float(stroke_phase_);
+            // LEG-PHASE SOCKET (leg_phase_stroke): the stroke rides the load-held external
+            // phase.  Its own offset, because that phase is referenced to touchdown (pi)
+            // while L.phase's reference is wherever the knee's atan2 puts it.
+            if (leg_phase_stroke_ > 0.0 && leg < int(ext_seen_.size()) && ext_seen_[size_t(leg)]) {
+                stroke_ph  = std::atan2(ext_sin_[size_t(leg)], ext_cos_[size_t(leg)]);
+                stroke_off = float(leg_phase_offset_);
+                ++ext_stroke_ticks_;
+            }
+            y[0] += (1.0f - pe) * amp * std::sin(stroke_ph + stroke_off);
         }
         // --- Per-leg propulsive-credit homeostat (functional L/R propulsion balance).
         // Credit = the hip1 motion component phase-aligned with the fore-aft power
@@ -6514,6 +6851,23 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
         mod["obj_legs"]   = oc;
     }
     mod["swing_tuck_frac"] = swing_tuck_frac_;
+    mod["leg_phase_on"]           = !leg_phase_topics_.empty() && ext_all_seen();
+    mod["leg_phase_stroke_ticks"] = ext_stroke_ticks_;
+    mod["leg_phase_swing_ticks"]  = ext_swing_ticks_;
+    mod["leg_phase_lift_mean"]    = ext_lift_n_ ? float(ext_lift_acc_ / double(ext_lift_n_)) : 0.0f;
+    mod["level_ticks"]            = level_ticks_;
+    mod["level_err_mean"]         = level_ticks_ ? float(level_acc_ / double(level_ticks_)) : 0.0f;
+    mod["stroke_level_mean"]      = float(stroke_level_ema_);
+    mod["level_off"]              = level_off_;
+    mod["sc_off"]                 = sc_off_;
+    mod["corner_err"]             = corner_err_;
+    mod["lift_scale"]             = lift_scale_;
+    mod["clear_ema"]              = clear_ema_;
+    mod["foot_y_cmd"]             = foot_y_;
+    mod["sag"]                    = sag_ema_;
+    mod["tilt_p_ref"]             = tilt_p_ref_;
+    mod["tilt_pitch"]             = tilt_pitch_;
+    mod["tilt_roll"]              = tilt_roll_;
     mod["tibia_off_mean"]  = ga_tib_n_ ? (ga_tib_acc_ / double(ga_tib_n_)) : 0.0;
     // ---- 2026-08-02 Phase-0 instruments (report-only; see
     //      docs/reports/playful_machine_source_analysis.md §4) --------------------
@@ -6942,6 +7296,24 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["tibia_off_mean"]      = ga_tib_n_ ? float(ga_tib_acc_ / double(ga_tib_n_)) : 0.0f;   // mean |shank off vertical|, radians
     j["swing_tuck_active"]   = ((swing_tuck_hip2_ != 0.0 || swing_tuck_knee_ != 0.0) && have_contact_);
     j["swing_tuck_frac"]     = swing_tuck_frac_;
+    j["leg_phase_on"]        = !leg_phase_topics_.empty() && ext_all_seen();
+    j["leg_phase_stroke_ticks"] = ext_stroke_ticks_;
+    j["leg_phase_swing_ticks"]  = ext_swing_ticks_;
+    j["leg_phase_lift_mean"] = ext_lift_n_ ? float(ext_lift_acc_ / double(ext_lift_n_)) : 0.0f;
+    j["level_ticks"]         = level_ticks_;
+    j["level_err_mean"]      = level_ticks_ ? float(level_acc_ / double(level_ticks_)) : 0.0f;
+    j["stroke_level_mean"]   = float(stroke_level_ema_);
+    j["level_off"]           = level_off_;
+    j["sc_off"]              = sc_off_;
+    j["corner_err"]          = corner_err_;
+    j["lift_scale"]          = lift_scale_;
+    j["clear_ema"]           = clear_ema_;
+    j["foot_y_cmd"]          = foot_y_;
+    j["sag"]                 = sag_ema_;
+    j["tilt_p_ref"]          = tilt_p_ref_;
+    j["tilt_r_ref"]          = tilt_r_ref_;
+    j["tilt_pitch"]          = tilt_pitch_;
+    j["tilt_roll"]           = tilt_roll_;
     {
         const double ap = ga_yaw_allplant_n_ ? ga_yaw_allplant_ / double(ga_yaw_allplant_n_) : 0.0;
         const double sw = ga_yaw_anyswing_n_ ? ga_yaw_anyswing_ / double(ga_yaw_anyswing_n_) : 0.0;

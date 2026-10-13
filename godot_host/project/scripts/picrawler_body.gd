@@ -1672,6 +1672,7 @@ var _odom_err_m: float = 0.0                    # INSTRUMENT: |odom - truth| in 
 @export var publish_current: bool = false        # OGMA_PICRAWLER_PUBLISH_CURRENT=1
 @export var goal_bearing_scaffold_deg: float = NAN   # OGMA_PICRAWLER_GOAL_BEARING_DEG=<deg, + = to body +X>
 var _dbg_contact_swing: float = 0.0   # TRUE swing fraction from the foot-contact sensor
+var _last_foot_contact: PackedFloat64Array = PackedFloat64Array()   # per-leg physics contact, for the log
 var _dbg_fk_cmd_err: float = 0.0      # mean |commanded-FK − achieved-FK| foot height (m)
 var _dbg_fk_valid_err: float = 0.0    # mean |measured-FK − achieved-pose| = FK wiring check
 var _dbg_att_err_acc: float = 0.0     # accel-only attitude error vs exact (deg)
@@ -7503,6 +7504,7 @@ func _step_one() -> void:
 	for i in range(4):
 		foot_contact_arr.append(1.0 if not _lowers[i].get_colliding_bodies().is_empty() else 0.0)
 	brain.publish_proprio(foot_contact_arr, "foot_contact")
+	_last_foot_contact = foot_contact_arr
 	# Cache the TRUE swing fraction (legs touching nothing) for the diag line.  This is
 	# the ground truth for "is the foot on the ground".  It is NOT interchangeable with
 	# the two proxies that have been used as if it were: `feet_y < stance_y_threshold` is
@@ -12302,6 +12304,28 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["stuck_obs"] = snappedf(float(ss.get("observed", 0.0)), 0.0001)
 		line["stuck_vf"] = snappedf(float(ss.get("vfwd", 0.0)), 0.0001)
 		line["stuck_cmd"] = snappedf(float(ss.get("speed_cmd", 0.0)), 0.001)
+	if metrics.has("load_phase"):
+		# LoadPhaseGait (gait audit 2026-10-12): the load-held per-leg phase's own instruments.
+		var lp: Dictionary = metrics["load_phase"]
+		line["lp_td"]    = snappedf(float(lp.get("td_plv", 0.0)), 0.001)      # phase at touchdown, PLV
+		line["lp_lo"]    = snappedf(float(lp.get("lo_plv", 0.0)), 0.001)      # phase at liftoff, PLV
+		line["lp_il"]    = snappedf(float(lp.get("interleg_plv", 0.0)), 0.001) # pairs at constant relative phase
+		line["lp_retro"] = snappedf(float(lp.get("retro", 0.0)), 0.001)
+		line["lp_agree"] = snappedf(float(lp.get("agree", 0.0)), 0.001)       # phase swing/stance vs the contact flag
+		line["lp_sw"]    = snappedf(float(lp.get("swing_frac", 0.0)), 0.001)
+		line["lp_w"]     = snappedf(float(lp.get("omega_rel", 0.0)), 0.001)   # mean rate / free rate
+		line["lp_load"]  = snappedf(float(lp.get("load_mean", 0.0)), 0.001)
+		line["lp_td_n"]  = int(lp.get("touchdowns", 0))
+		var _lps = lp.get("share", [])
+		if _lps is Array and _lps.size() == 4:
+			var _sa := PackedFloat64Array()
+			for _v in _lps: _sa.append(snappedf(float(_v), 0.01))
+			line["lp_sh"] = _sa
+		var _lpp = lp.get("phase", [])
+		if _lpp is Array and _lpp.size() == 4:
+			var _pa := PackedFloat64Array()
+			for _v in _lpp: _pa.append(snappedf(float(_v), 0.01))
+			line["lp_ph"] = _pa
 	if metrics.has("escape"):
 		var es: Dictionary = metrics["escape"]
 		line["esc_state"] = int(es.get("state", 0))
@@ -12319,6 +12343,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# which any duty-factor claim must be checked, and which disagrees with BOTH proxies
 	# previously used for it (see where it is computed).
 	line["contact_swing"] = snappedf(_dbg_contact_swing, 0.001)
+	# Per-leg TRUE contact (the physics flag, FL FR RL RR) — the only honest per-leg airborne
+	# read.  feet_y is a shank-angle approximation and under-reports swing (ledger 2026-07-25,
+	# and again 2026-10-13: the rear legs "never lifted" by feet_y while this flag said 11-31 %).
+	if _last_foot_contact.size() == 4:
+		var _ca := PackedFloat64Array()
+		for _v in _last_foot_contact: _ca.append(float(_v))
+		line["con"] = _ca
 	# Servo tracking error in foot-height metres = the information hobby servos do NOT
 	# report. If this is large, commanded-angle FK is a materially different signal.
 	line["fk_cmd_err"] = snappedf(_dbg_fk_cmd_err, 0.00001)
@@ -12826,6 +12857,28 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["yaw_anyswing"] = snappedf(float(_mm.get("yaw_anyswing", 0.0)), 0.00001)
 			line["yaw_swing_excess"] = snappedf(float(_mm.get("yaw_swing_excess", 0.0)), 0.00001)
 			line["swing_tuck_frac"] = snappedf(float(_mm.get("swing_tuck_frac", 0.0)), 0.001)
+			# LEG-PHASE sockets (gait audit 2026-10-12): did the external phase land, and fire?
+			line["lp_on"]     = 1 if _mm.get("leg_phase_on", false) else 0
+			line["lp_stroke"] = int(_mm.get("leg_phase_stroke_ticks", 0))
+			line["lp_swing"]  = int(_mm.get("leg_phase_swing_ticks", 0))
+			line["lp_lift"]   = snappedf(float(_mm.get("leg_phase_lift_mean", 0.0)), 0.001)
+			line["lv_ticks"]  = int(_mm.get("level_ticks", 0))
+			line["lv_err"]    = snappedf(float(_mm.get("level_err_mean", 0.0)), 0.0001)
+			line["sl_mult"]   = snappedf(float(_mm.get("stroke_level_mean", 1.0)), 0.001)
+			line["tilt_p"]    = snappedf(float(_mm.get("tilt_pitch", 0.0)), 0.001)
+			line["tilt_r"]    = snappedf(float(_mm.get("tilt_roll", 0.0)), 0.001)
+			var _lo = _mm.get("level_off", [])
+			if _lo is Array and _lo.size() == 4:
+				var _la := PackedFloat64Array()
+				for _v in _lo: _la.append(snappedf(float(_v), 0.001))
+				line["lv_off"] = _la
+			line["tilt_pref"] = snappedf(float(_mm.get("tilt_p_ref", 0.0)), 0.001)
+			for _key in ["sc_off", "sag", "corner_err", "lift_scale", "clear_ema", "foot_y_cmd"]:
+				var _arr = _mm.get(_key, [])
+				if _arr is Array and _arr.size() == 4:
+					var _pa2 := PackedFloat64Array()
+					for _v in _arr: _pa2.append(snappedf(float(_v), 0.001))
+					line["lv_" + _key] = _pa2
 			# Mean |shank off vertical| as the CONTROLLER sees it (radians). The collector
 			# also reconstructs this from hip2/knee; they should agree.
 			line["tib_off_ctl"] = snappedf(float(_mm.get("tibia_off_mean", 0.0)), 0.0001)

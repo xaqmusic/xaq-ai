@@ -65,3 +65,6 @@ godot_host/project/addons/ami_ogma/configs/e3b_*.json
 docs/operational/local_env.md
 # MuJoCo drops this wherever it is run from
 MUJOCO_LOG.TXT
+
+# local x86 build of the pi_host tests (pi_host/build_local)
+pi_host/build_local/

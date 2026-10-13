@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "THE ROBOT'S REFLEX CONFIG + hip2 rest +0.3 (the stand-higher stance, 2026-10-12)",
-    "description": "s3a_stuckinst with ONE lever: hip2_tuck_target +0.3 — the femur presses down with the knee tucked, the stance the operator described. Sim (arena, n=6): chassis 45 -> 64 mm, belly 29 -> 52 mm, feet 168 -> 161 mm (inside the reach), 0 falls, distance ties. On the robot read: feet in contact (2.8 / 2.73), stride mean (~0), belly ToF (27 / 20 mm), servo current (1.50 / 1.71 A — the press holds the body up: watch the rail), falls.",
+    "name": "BENCH \u00b7 ROBOT STACK (reflexes + hip2 +0.3)",
+    "description": "THE ROBOT'S REFLEX CONFIG + hip2 rest +0.3 (the stand-higher stance, 2026-10-12). s3a_stuckinst with ONE lever: hip2_tuck_target +0.3 \u2014 the femur presses down with the knee tucked, the stance the operator described. Sim (arena, n=6): chassis 45 -> 64 mm, belly 29 -> 52 mm, feet 168 -> 161 mm (inside the reach), 0 falls, distance ties. On the robot read: feet in contact (2.8 / 2.73), stride mean (~0), belly ToF (27 / 20 mm), servo current (1.50 / 1.71 A \u2014 the press holds the body up: watch the rail), falls.",
     "env_target": "picrawler",
     "gym_mode": "room",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -29,7 +29,7 @@
       "height_homeostat",
       "panic"
     ],
-    "note": "Provenance: E3a settle (registered rule picked settle_s3 [0.3075, 0.9197, 0.8516]) -> E3b fix020_s2 endpoint promoted 2026-08-27 by the registered frozen-validation rule (~/xaq_runs/twobodyE3c_20260827/). Ledger 2026-08-27 E3 entry; plan doc §3-E3.",
+    "note": "Provenance: E3a settle (registered rule picked settle_s3 [0.3075, 0.9197, 0.8516]) -> E3b fix020_s2 endpoint promoted 2026-08-27 by the registered frozen-validation rule (~/xaq_runs/twobodyE3c_20260827/). Ledger 2026-08-27 E3 entry; plan doc \u00a73-E3.",
     "body": "measured_fsr",
     "gym_difficulty": 0.3,
     "body_env": {

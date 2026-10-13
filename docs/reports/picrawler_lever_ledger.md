@@ -7705,3 +7705,474 @@ interval 60 on the same config and seeds. Checked on seed 1: the body's (x, z, y
 the start, the middle and the last tick of both runs (100 of 115 common rows bit-equal, the rest
 transient), so the physics is the same and the 10 mm is in how the harness averages chassis_y
 over rows of different density — a harness fact to fix, not a body fact.
+
+### ★★★ 2026-10-12 — THE LOAD-HELD PER-LEG PHASE (LoadPhaseGait, Owaki's Tegotae rule): STEPS ×17, CLEAN STRIDES 0 → 38 %, HIP REVERSALS ÷2.5, DISTANCE +35 %; THE FREE-CLOCK CONTROL COLLAPSES; THE COST IS WOBBLE AND ~1 FALL PER RUN (`WORKING`, signal, n=6)
+
+*The lever the gait mechanism audit proposed
+([`picrawler_gait_mechanism_audit_2026-10-12.md`](picrawler_gait_mechanism_audit_2026-10-12.md)),
+built and measured the same day. Operator direction: "proceed autonomous until you have a
+signal of efficacy."*
+
+**The mechanism.** A new module, `LoadPhaseGait` (`cpp_core/src/ogma/modules/LoadPhaseGait.cpp`),
+owns one phase per leg: `dφ_i = ω (1 − σ_r · N_i · cos φ_i)`, ω = 2π/70 ticks, N_i = foot i's
+SHARE of the published foot load (`reality.proprio.foot_load`; the contact flags when no load is
+published). Swing is φ ∈ (0, π), touchdown at π, stance (π, 2π). A loaded leg is pulled toward
+mid-stance and does not lift; an unloaded leg runs free. No inter-leg phase is prescribed. It
+publishes `rhythm.leg.<leg>` = [cos φ, sin φ, swing, N]. MotorEPMv2 gained three sockets, each
+behind its own gain-0 guard: `leg_phase_stroke` (the hip stroke rides the external phase,
+offset `leg_phase_offset` −π/2, so the hip target is −cos φ: forward at touchdown), `leg_phase_swing`
+(the stance/swing state every gated term reads is the phase's half-cycle, not the attitude
+detector) and `leg_phase_lift_hip2/knee` (y += gain · max(0, sin φ): a smooth swing lift).
+`coupling_gain` 0 in the lever arms. Unit tests: `cpp_core/tests/ogma/test_load_phase_gait.cpp` (7).
+
+**Protocol.** P-e·h0 + hip2 +0.3 (the lesion study's base), arena, difficulty 0.3, n=6 × 6000 ticks,
+seeds 1–6, `OGMA_PICRAWLER_DIAG_INTERVAL=1` in every arm, `arenaavg.py` + `stepnoise.py` + the
+module's own instruments in the log (`lp_*`). Gain-0 guard: the SHADOW arm (module present and
+publishing, every socket 0) is **byte-identical to the base on all 6 seeds, all 6000 rows** (x, z,
+yaw, the three joint arrays). Consumer check: `lp_on` 1, `lp_stroke` = 4 legs × every post-warmup
+tick, `lp_swing` every tick, `lp_lift` mean 0.26. Structure control: `lpg_free` = the same with
+σ_r = 0 (a free clock, no load coupling — the open-loop sequencer of 2026-07-20).
+
+| arm | net_disp (m) | straight | steps | clean strides | rev/stride hip1 / hip2 / knee | swing / stance (s) | step_cv_real | tilt_sd | falls | bellyc / min (mm) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (hip2 +0.3) | 4.65 ± 0.43 | 0.28 | 2.8 | 0 % | 11.1 / 15.9 / 13.8 | 0.07 / 40.6 | 0.75 | 0.057 | **0** | 52 / 13 |
+| shadow | 4.65 ± 0.43 | 0.28 | 2.8 | 0 % | identical | identical | 0.75 | 0.057 | 0 | identical |
+| **lpg** (σ_r 2, lift −0.3 / +0.2) | **6.26 ± 1.69** | 0.31 | **47.7** | **38 %** | **4.4 / 9.7 / 11.4** | **0.24 / 1.5** | **0.64** | 0.242 | 1.17 | 45 / 3 |
+| lpg_free (σ_r 0, control) | 0.64 ± 0.67 | 0.03 | 35.3 | 22 % | 4.7 / 15.6 / 20.4 | 0.13 / 2.3 | 0.73 | 0.503 | **6.5** | 53 / 2 |
+| lpg_nolift | 4.96 ± 2.05 | 0.24 | 26.5 | 29 % | 4.4 / 11.5 / 12.3 | 0.20 / 2.5 | 0.67 | 0.251 | 1.5 | 52 / 2 |
+
+Dose arms (same protocol):
+
+| arm | net_disp | steps | clean | rev hip1 / hip2 / knee | swing (s) | falls | lp_il | lp_retro | lp_w |
+|---|---|---|---|---|---|---|---|---|---|
+| lpg (σ_r 2) | 6.26 | 47.7 | 38 % | 4.4 / 9.7 / 11.4 | 0.24 | 1.17 | 0.63 | 0.009 | 0.79 |
+| σ_r 1.5 | 4.21 ± 1.98 | 40.7 | 31 % | 4.3 / 9.4 / 10.5 | 0.18 | 1.33 | 0.84 | 0.000 | 0.87 |
+| σ_r 3 | 5.14 ± 1.48 | 24.8 | 35 % | 9.8 / 15.9 / 22.2 | 0.20 | 1.33 | 0.40 | **0.102** | 0.59 |
+| lift ×0.5 (−0.15 / +0.1) | 5.80 ± 1.36 | 38.2 | 29 % | 4.3 / 10.6 / 11.9 | 0.21 | **0.50** | 0.73 | 0.005 | 0.82 |
+| lift ×2 (−0.6 / +0.4) | 6.08 ± 2.40 | 67.5 | **58 %** | 6.0 / 10.6 / 14.8 | **0.32** | 1.33 | 0.68 | 0.006 | 0.79 |
+
+**What it says.**
+1. **The step is loud** (CLAUDE.md §3.3: proto-gait steps). Real swings go from 0.07 s bouts on a
+   body that sat in stance for 40 s at a stretch to 0.24 s swings every 1.5 s of stance; strides
+   per run 6 → 70; clean strides from none to 38 % (58 % at double lift); the stride period
+   settles at 89 ticks (= 70 / `lp_w` 0.79: the load slows the free clock by a fifth). The
+   inter-touchdown CV falls 0.75 → 0.64, the second lever ever to move it and the first to do so
+   while distance rises.
+2. **The thrash halves at its source.** Hip1 reversals per stride 11.1 → 4.4 and hip2 15.9 → 9.7
+   with the stroke on a monotone phase (`lp_retro` 0.9 % of leg-ticks against the knee readout's
+   65 %). The knee's 13.8 → 11.4 is the smaller move because the posture spring, the stance
+   press and the HK term still write to it every tick; that is the next place to look.
+3. **The load coupling is the mechanism, not the clock.** The free clock (σ_r 0) steps as often
+   (35/run) and goes nowhere (0.64 m, straight 0.03, 6.5 falls, tilt_sd 0.50): the 2026-07-20
+   flopping fish reproduced as a control. Holding a loaded leg in stance is what turns the same
+   stepping into transport and support.
+4. **Over-holding over-reaches.** At σ_r 3 the phase runs backwards 10 % of leg-ticks, the
+   stride slows to 0.59 of the free rate, steps halve and the reversals return to the base's;
+   σ_r 1.5–2 is the band. The lift dose trades clean strides (29 → 38 → 58 %) against stability
+   (falls 0.5 → 1.2 → 1.3) and chassis height (76 → 75 → 66 mm).
+5. **Inter-leg coordination is now measurable and non-null.** `lp_il` (pairs holding a constant
+   relative phase, EMA over ~100 ticks) reads 0.63–0.84 in the lever arms against an EMA null of
+   ~0.1; the free clock's 1.00 is four identical clocks, trivially locked. Which gait the four
+   phases settle into (walk order vs diagonal pairs) is unread: the per-pair relative phases are
+   in `diag_snapshot` but not yet mirrored to the log.
+
+**Costs, stated.** Falls 0 → 1.2 per 6000 ticks (0.5 at half lift), tilt_sd ×4, belly minimum to
+zero on 4/6 seeds (brief touches during the wobble; the mean clearance holds at 45 mm vs 52), and
+`straight` is unmoved at 0.3. Two of the six lever seeds crossed the arena's 8 m safe radius, so
+their `falls` are not trustworthy; the four inside read 1, 2, 0, 2. A body that now swings a leg
+every 1.8 s is being stabilised by a posture spring, a stance press and a heading hold that were
+tuned on a body that never did; the wobble is the base's gains, not yet a verdict on the lever.
+
+**Verdict: `WORKING` (signal, n=6, one body, one gym, 6000 ticks).** Loud enough to promote the
+direction, not a finding. Handed to the operator for UI observation (§3 rule 5) before any
+promotion: configs `…__hip2p030__lpg.json` (sim arm) and
+`…__room_senses__s3a_stuckinst__hip2p030__lpg.json` (the robot stack + lever, in the launcher and
+the dash), with the dose arms beside them.
+
+**Next, in order.** (a) The operator's eye on the sim arm and the robot stack arm. (b) Re-settle
+the base's stabilisers on the stepping body: `postural_gain`, `stance_lift_gain`, the heading
+hold's D term — one at a time, judged on falls and tilt with the step metrics held. (c) Mirror the
+per-pair relative phases and read which gait the legs choose, and whether it changes with
+`period_ticks` (Owaki's walk→trot transition is the operator's "trot or one leg at a time"
+question, as a measurement). (d) The knee's remaining reversals: attribute them with the same
+lesion method (posture spring, press, HK) now that the phase is clean. (e) The robot: the FSR
+publishes `foot_load` already; `thrash.py` is the instrument; the first floor run is the
+operator's. (f) Long runs (≥ 100 k ticks) before any stability claim (the 2026-10-02 lesson).
+
+**Files.** `cpp_core/{include/ogma/modules,src/ogma/modules}/LoadPhaseGait.{hpp,cpp}`,
+`cpp_core/tests/ogma/test_load_phase_gait.cpp`, `cpp_core/CMakeLists.txt`,
+`cpp_core/src/ogma/ModuleRegistry.cpp`, `MotorEPMv2.{hpp,cpp}` (the three sockets + diag),
+`godot_host/src/OgmaBrain.cpp` (diag mirror), `picrawler_body.gd` (`lp_*` log fields),
+`launcher.gd` (two entries), eight configs under `configs/…__hip2p030__lpg*.json` and the robot
+stack `…__s3a_stuckinst__hip2p030__lpg.json`.
+
+### ★★★ 2026-10-13 — ON THE LOAD-HELD PHASE THE FALLS ARE THE HIP SWEEP: THE STROKE GATED BY THE LEVEL ERROR (`WORKING`, signal) AND A SHORTER STROKE (`WORKING`, signal) REMOVE THEM; THE CORNER-ALTITUDE REFLEX ON PLANTED LEGS IS `NULL`
+
+*Operator UI observation on the lever (2026-10-13): "the hip one range of motion can cause the
+chassis to tilt and tip overs to happen. However, the stride is confident and the leg movement
+is much smoother. The robot should be reducing the error of keeping its chassis level." Then:
+"all planted legs will be responsible for maintaining the altitude of the chassis corner where
+they connect to keep level."*
+
+**Protocol.** Base = `…__hip2p030__lpg` (the 2026-10-12 lever: LoadPhaseGait σ_r 2, stroke and
+stance gate on the load-held phase, lift −0.3/+0.2, coupling 0). Arena, difficulty 0.3, n=6,
+seeds 1–6, per-tick diag. First batch 6000 ticks; the rest **4500 ticks**, because the stroke
+arms reached the arena's 8 m safe radius at 6000 (two lever seeds already had). The tilt token
+(`reality.proprio.tilt`, honest: the modelled accelerometer's up vector, `PUBLISH_TILT=1`) is
+subscribed in every attitude arm; **publishing it with every gain 0 reproduces the lever to the
+digit** (`lpg_tilt0` = `lpg` on all metrics), so the token is a clean control.
+
+**1. The fall anatomy (new instrument, `falls.py`: the half second before each tilt ramp).**
+Across 10 falls on the lever: **none has two legs airborne** (one has one leg up); each is a
+65–120-tick tilt ramp (one stride) with the feet nominally down, a **1.3–1.9 rad hip1 sweep on
+one planted leg** in the preceding half second (the others 0.5–1.0), sideways velocity
+0.2–0.3 m/s, chassis 59–72 mm. The monotone phase lets the stroke complete the full ±1.2 (clipped
+±1) sweep every stride, which the retrograde knee readout never did; a sprawled planted leg's
+full sweep shoves the chassis sideways and over. The operator's eye, as a trace.
+
+**2. Corner-altitude reflex on planted legs (`level_gain`, `level_knee_gain`).**
+`y[hip2] += g·e`, `y[knee] += g·e`, `e = front·sin pitch + left·sin roll` (front = FL,FR; left =
+FL,RL), planted legs only (the load-held phase's stance half). Consumer verified (`lv_ticks` ≈
+10 000/run, mean |e| 0.13 → 0.08 under the reflex). The femur-only form first, then the whole leg:
+
+| arm (4500 unless noted) | net_disp | straight | falls | tilt_sd | steps | rev hip1 |
+|---|---|---|---|---|---|---|
+| lpg (6000) | 6.26 | 0.31 | 1.17 | 0.242 | 47.7 | 4.4 |
+| hip2 only +0.5 (6000) | 4.49 | 0.23 | 1.17 | 0.221 | 43.7 | 4.6 |
+| hip2 only +1.0 (6000) | 5.23 | 0.26 | 1.50 | 0.405 | 54.8 | 5.0 |
+| hip2 only −0.5 (6000, wrong sign) | 4.85 | 0.24 | 1.33 | 0.287 | 60.2 | 5.2 |
+| **lpg (4500)** | 4.94 ± 1.26 | 0.33 | 1.00 | 0.242 | 37.2 | 4.1 |
+| hip2+knee 0.5 | 5.27 | 0.33 | 1.00 | 0.207 | 38.8 | 4.1 |
+| hip2+knee 0.75 | 4.61 | 0.29 | 0.83 | 0.201 | 37.7 | 3.8 |
+| hip2+knee **1.0** | 5.10 | 0.33 | **0.33** | 0.161 | 40.5 | 3.7 |
+| hip2+knee 1.5 | 4.76 | 0.30 | 1.00 | 0.222 | 36.5 | 4.4 |
+| hip2+knee 2.0 | 4.66 | 0.28 | 1.33 | 0.279 | 40.0 | 4.1 |
+| hip2+knee −1.0 (wrong sign) | 3.21 | **0.18** | 0.83 | 0.203 | 29.7 | **7.2** |
+| stroke 0.7 + hip2+knee 1.0 | 5.89 | 0.43 | 0.50 | 0.190 | 38.3 | 4.6 |
+| stroke 0.9 + hip2+knee 1.0 | 6.92 | 0.47 | 0.67 | 0.160 | 39.2 | 4.6 |
+
+**Verdict `NULL` (n=6).** The dose is non-monotone (0.75 → 0.83 falls, 1.0 → 0.33, 1.5 → 1.00),
+so the one good point is not a mechanism's; stacked on the shorter strokes it RAISES their falls
+(0.17 → 0.50, 0.33 → 0.67); and the wrong sign degrades straightness, reversals and step
+regularity, which proves the term has authority — it can make the body worse, and the right sign
+does not make it better. Mechanism, from the anatomy: the leg whose sweep is tipping the body is
+itself planted, so pressing the low corners harder presses THAT leg harder too; the reflex acts
+on the effect while the cause continues. Re-use context: a corner-altitude error that enters the
+STANCE PRESS (redistributing a fixed press by corner, so a leg that is shoving cannot be pressed
+up more) or that reaches the leg's length through the learned model (the duck's state-prior
+pattern, which needs attitude in the leg's state vector) — both untested.
+
+**3. The hip range, as a dose (`stroke_gain`, the operator's observation):**
+
+| stroke_gain (4500) | net_disp | straight | falls | tilt_sd | steps | clean strides | swing s |
+|---|---|---|---|---|---|---|---|
+| 1.2 (lpg) | 4.94 ± 1.26 | 0.33 | 1.00 | 0.242 | 37.2 | 40 % | 0.24 |
+| 1.05 | 5.89 | 0.40 | 0.33 | 0.215 | 44.3 | 40 % | 0.23 |
+| 0.9 | 7.48 ± 1.00 | 0.51 | 0.33 | 0.135 | 50.0 | 44 % | 0.23 |
+| **0.7** | **7.60 ± 1.68** | **0.55** | **0.17** | **0.101** | 40.7 | 38 % | 0.24 |
+| 0.5 | 6.27 | 0.55 | **0.00** | 0.068 | 23.3 | 21 % | 0.17 |
+
+**`WORKING` (signal).** Monotone on tilt and falls down to 0.5; distance and straightness peak
+at 0.7–0.9 (the full stroke was costing transport, not buying it — at 1.2 the hip sits at the
+clamp 42 % of its cycle); at 0.5 the stepping thins (steps 23, clean 21 %). The "shorter stride"
+row of §6 (2026-07) had this as PARTIAL on the old phase; on a monotone phase it is loud.
+
+**4. The stroke gated by the level error (`stroke_level_gain`): amp × max(floor, 1 − g·|tilt|),
+|tilt| = √(sin²p + sin²r), propulsion term only (the heading-hold steer keeps full authority).**
+The planted legs withhold their push while the chassis is off level and push fully when it is.
+
+| arm (4500) | net_disp | straight | falls | tilt_sd | steps | clean | chassis | mean gate |
+|---|---|---|---|---|---|---|---|---|
+| lpg | 4.94 | 0.33 | 1.00 | 0.242 | 37.2 | 40 % | 74 mm | 1.00 |
+| gain 1 | 6.87 | 0.45 | 0.50 | 0.169 | 41.3 | 39 % | 73 | — |
+| gain 2 | 5.85 | 0.43 | 0.50 | 0.137 | 45.8 | 47 % | 75 | 0.31 (s1) |
+| **gain 4** | **6.79 ± 0.63** | **0.50** | **0.17** | **0.079** | **47.7** | 34 % | **78** | 0.38 (s1) |
+| gain 2 + stroke 0.9 | 7.20 | 0.49 | **0.00** | 0.101 | 41.5 | 31 % | 79 | — |
+| **stroke 0.5 (the matched-mean control)** | 6.27 | 0.55 | 0.00 | 0.068 | **23.3** | **21 %** | 74 | const |
+
+**`WORKING` (signal), and the control says what the gate adds.** At gain 4 the mean gate is
+~0.4, i.e. on average the same amplitude as a constant stroke of 0.5; against that matched
+constant it keeps **twice the steps (48 vs 23) and the clean strides (34 vs 21 %)** at equal
+falls and tilt, with the chassis 4 mm higher. The gate withholds the push only when the chassis
+is off level and gives the full stroke back when it is, which a constant cannot do. This is the
+rewrite rule's shape: the error (attitude vs level) gates the term that produces it, on the
+state that makes the gate valid. It is the arm offered for the operator's next observation,
+as the sim arm `…__hip2p030__lpg_sl4.json` and the robot stack
+`…__room_senses__s3a_stuckinst__hip2p030__lpg_sl4.json`; the shorter constant stroke (0.7) is
+the plain alternative, and both can stack (gain 2 + 0.9: 0 falls, 7.2 m).
+
+**Caveats.** 4500-tick runs, one body, one gym; falls on a stepping body are a 100 k-tick
+question (2026-10-02). The step metrics under the gate are read at ~0.4 mean amplitude, so a
+later re-settle of the lift and the hold (σ_r) on the gated stroke is expected. `lp_il` (pairs
+at constant relative phase) sits 0.6–0.75 in every lever arm; which gait that is remains
+unread (the per-leg phases are now in the log as `lp_ph`).
+
+**Files.** `MotorEPMv2.{hpp,cpp}`: `level_gain`, `level_knee_gain`, `stroke_level_gain`,
+`stroke_level_floor` (+ `lv_*`, `sl_mult`, `tilt_p/r`, `lp_ph` in the body log; the generic
+loop-module diag mirror in `OgmaBrain.cpp` now passes per-leg arrays). Configs
+`…__hip2p030__lpg_{tilt0,lv05,lvm05,lv1,lvk05,lvk075,lvk1,lvk15,lvk2,lvkm1,sl1,sl2,sl4,sl2_st09,st05,st07,st09,st105,st07_lvk1,st09_lvk1}.json`;
+the robot stack `…__s3a_stuckinst__hip2p030__lpg_sl4.json`. Instrument `~/xaq_runs/lpg_20261013/falls.py`.
+
+### ★★★ 2026-10-13 — IN THE ROOM THE LEVER FALLS TEN TIMES PER RUN, AND THE CAUSE IS THE TURN: the avoid loop's steer rides the hip stroke; gating push AND steer by the level error, with a 0.7 stroke, brings it to 0.33 (`WORKING`, signal) — the robot-stack candidate
+
+**Protocol.** The robot stack (`…__room_senses__s3a_stuckinst__hip2p030`: ProxMemory → TofAvoidLoop
+→ BearingToIntent on the speed and goal-bearing sockets, StuckSense as an instrument), room 3 m,
+n=6 × 12 000 ticks, `roomavg.py`; one arm re-run at per-tick diag for the anatomy.
+
+| arm (room, 12 000) | falls | coverage (cells) | wall_frac | episodes | net_disp |
+|---|---|---|---|---|---|
+| ROBOT STACK (benchmark) | **0.00** | 37.7 ± 7.4 | 0.047 | 51 | 1.11 |
+| + LPG | **10.17 ± 2.3** | 46.0 | 0.036 | 24 | 0.39 |
+| + LPG + level gate 4 on the push only | 9.17 ± 5.6 | 37.8 | 0.053 | 29 | 0.46 |
+| + LPG + stroke 0.7, no gate | 4.67 ± 2.3 | 41.2 | **0.218** | 71 | 0.53 |
+| + LPG + level gate 4 on push AND steer | 2.50 ± 2.5 | **51.0 ± 3.2** | **0.023** | 18 | 0.66 |
+| **+ LPG + gate on both + stroke 0.7** | **0.33 ± 0.8** (5/6 seeds 0) | 42.5 ± 3.3 | 0.043 | 25 | 0.63 |
+
+**The anatomy (per-tick, 59 falls).** Not at the walls (0/61 within 0.3 m of one), not late (spread
+over the quarters), ramp median 76 ticks as in the arena. **Before a fall the bearing error averages
+0.33 against 0.15 overall; 41 of 59 falls happen above 0.2, where only a quarter of all ticks
+sit.** The heading hold (gain 7 on the bearing error in units of π) folds a steer of ~1 into the hip
+stroke as a left/right differential, so during a commanded turn one side's hip sweeps the full
+clipped range every stride — the arena's fall anatomy, now produced on demand by the avoid loop.
+In the arena the hold has no goal and the error is near zero, which is why 2026-10-12 never saw it.
+The push-only gate spared the steer by design (so the promoted heading hold kept its authority),
+and the room measured that choice: it does nothing there (9.2). A turn is a push.
+
+**Verdicts.** `stroke_level_steer` = 1 (the gate scales the steer differential too): `WORKING`
+(signal) — falls ÷4, the best coverage of any arm and the least wall contact. Stacked with the
+0.7 stroke: falls 0.33, coverage above the benchmark's, wall contact at the benchmark's, five seeds
+of six without a fall over 12 000 ticks. Stroke 0.7 ALONE in the room is a `REGRESSION` on walls
+(0.22): the shorter stroke without the gate turns too little to clear them. The candidate for the
+operator's eye and the robot is `…__s3a_stuckinst__hip2p030__lpg_sl4s_st07.json` ("ROBOT STACK +
+LPG + gate (both) + stroke 0.7" in the launcher), with `…__lpg_sl4s.json` as the gate-only form.
+
+**Open.** The remaining 0.33 is not yet the benchmark's 0 — but the benchmark does not step (2.8
+steps per 6000 in the arena); the candidate steps ~40 times per 4500 with the room's turns. The
+steer's authority is now shared with the level gate, so turning while tilted is withheld; whether
+the avoid loop's lead (1 m) still fits this gait is S4's reach-constant question. Long runs and the
+robot floor run next; the hold strength σ_r and the lift were tuned before the gate and may
+re-settle.
+
+### ★★★ 2026-10-13 — TERRAIN AND THE LOW CORNER: the per-leg corner integrator levels the roll and halves the pitch (`WORKING`, signal); the absolute level gate stalls on a slope (diagnosis); the gait's lean is physics the brain cannot see, not a sign — four geometry checks, two refuted levers, and the sensor the corner rule needs
+
+*Operator (sim, corridor): "it was not able to adapt to that difference in elevation between the
+left side and the right side"; "the right rear leg holds its corner of the chassis lower than the
+rest … reproduced on flat ground"; "every leg is equal so asymmetry should not be a normal outcome."*
+
+**Protocol.** Base = the candidate's sim twin `…__hip2p030__lpg_cand` (LPG, gate 4 on push and
+steer, stroke 0.7). Arena n=6 × 4500 (flat ground, per-leg read: `perleg.py`), corridor n=6 ×
+6000 at difficulty 0.3 (ramp and 30° walls; `seedavg.py`), per-tick diag throughout; one traced
+run (`OGMA_PICRAWLER_TRACE`) and one no-brain hold (`babble_scale 0`, every servo at the same
+command for the whole run).
+
+**1. What the new module learns: nothing.** `LoadPhaseGait` has three constants (period, hold
+strength, load floor) and four phase states; every socket in the motor layer is a constant. The
+learned parts underneath are unchanged (per-leg forward model and HK controller, the keyframe
+map, the amplitude homeostat, the heading trim). Two ratchets explained the slope: the level
+gate's reference is absolute gravity, so a steady lean withholds the push for good (at gain 4
+and floor 0 a 14° lean stops the stroke); and the posture spring pins all four legs to one rest
+pose, so no leg can hold its corner. Both are mine.
+
+**2. The gate referenced to the running attitude (`stroke_level_ref_tau` 300): `REGRESSION`
+on flat ground** — steps 18 → 45 but tilt_sd 0.044 → 0.131 and net 6.0 → 5.5. It revealed a
+confound in the candidate: the steady 7° standing pitch had been shortening the stroke through
+the absolute gate (mean gate ~0.7 while "level"), so part of the candidate's calm is a shorter
+stroke. Kept off; re-use: with the lean itself removed (below).
+
+**3. The per-leg rest-length integrator on planted legs (`level_int_gain`, the operator's
+rule): `WORKING` (signal).** Each planted leg integrates its corner error (front/left projection
+of pitch and roll, absolute) into its own hip2 + knee offset, bounded ±0.3, frozen when not
+upright, zeroed on reset; `level_int_planted_only` 1 applies it only while planted (with it
+applied in swing too the right rear's +0.13 offset cancelled its swing lift).
+
+| arm | sin pitch | sin roll | offsets FL/FR/RL/RR | arena net / falls | corridor net_z / straight / falls |
+|---|---|---|---|---|---|
+| candidate | −0.068 | −0.028 | — | 6.02 / 0 | 5.16 ± 0.47 / 0.35 / 0 |
+| + integrator 0.002 | −0.041 | −0.001 | −0.06 / −0.02 / +0.03 / +0.09 | 6.34 / 0 | 5.73 ± 0.36 / 0.37 / 0 |
+| + integrator 0.005 | −0.034 | +0.003 | −0.07 / −0.04 / +0.03 / +0.13 | 6.21 / 0 | — |
+| + 0.005 planted-only | −0.041 | −0.005 | −0.08 / −0.03 / +0.03 / +0.12 | 6.38 / 0 | **5.72 ± 0.65 / 0.38 / 0** |
+| benchmark (old gait) | n/a | n/a | — | — | 4.23 ± 0.32 / 0.26 / 0 |
+
+The roll is levelled and the pitch halved, at no cost on flat ground, and the corridor gains
+11 % over the candidate (35 % over the benchmark) with zero falls. The largest positive offset
+lands on the right rear, where the operator saw the low corner. The pitch is only halved
+because the rear legs sit near full reach (feet at 160 mm of 166) and can only be levelled by
+shortening the front, which the integrator does slowly.
+
+**4. The asymmetry audit: no sign or geometry mistake found.** (i) Hinge axes are built per
+leg from that leg's heading (`_build_leg`: hip2 axis = up × heading, hip1 axis = up), so "+"
+presses every femur down and yaws every hip the same way; the four headings are exact ±45°
+mirrors. (ii) Stroke direction, measured: every foot moves backward while loaded (−1.3 to
+−2.0 mm/tick) and forward in swing (+1.7 to +2.7), with the left/right mirror the sign array
+encodes. (iii) Hip means, sign-corrected: all four trail neutral by 0.04–0.09 rad, identical
+with the learned controller off. (iv) The body file is one value per link. (v) The no-brain
+hold stands within 0.7° of level with a diagonal 60/40 load split (FR+RL heavier) and the
+right rear foot 3 mm deepest. The gait's lean (pitch −0.05 to −0.09 in every seed) is present
+from the first quarter and never grows: not a ratchet.
+
+**5. Where the lean comes from, and why the rear feet do not rise.** Trace, per leg: all four
+femurs are commanded to the same lift bottom and reach it (achieved 0.06); all four feet
+UNLOAD in their swing (contact 0.02 vs 0.35 planted); the front feet rise 28/16 mm, the rear
+9/1 mm. The difference is the stance femur angle: front 0.23/0.16 rad, rear 0.135/0.134 under
+near-identical commands — the rear femurs sag ~0.04 rad more under load (the sim's weak
+position motor), the nose comes up, and from a lower hip the same absolute lift bottom clears
+nothing: the rear feet scrub forward on the floor, unloaded. Lesions (learning off, lift ×2,
+posture spring ×0.5) leave the lean and the non-rising rear unchanged: structural.
+
+**6. Two levers on that mechanism, both refuted in context.** (a) `stride_center_gain` 0.002
+(per-leg homeostat driving the hip's time-average to neutral): it acted (offsets +0.12 to
++0.19, all forward) and the pitch did not move; distance fell (arena 6.38 → 5.40, corridor
+5.72 → 4.68). The "trailing stroke loads the rear" hypothesis is refuted. `REGRESSION`.
+(b) `lift_relative_gain` (lift the femur by its measured stance sag): the measured sag was
+0.00–0.02 — **under honest joints the brain's joint state is the servo model's output, not the
+physics angle**, because the real servos report nothing. The brain cannot see sag, in the sim
+or on the robot. `DEAD_CODE` on measurement, not on the idea.
+
+**7. The sensor the corner rule needs.** The corner altitude is unobservable from joints
+under honest inputs. It is observable from the commanded forward kinematics rotated by the
+IMU (`feet_y_gravity_cmd_imu` with `OGMA_PICRAWLER_CMD_FK_SOURCE=1`; the zero-pose form is
+what the robot host publishes today): each foot's height under gravity from the command and
+the attitude, both of which the robot has. With it, a planted leg's corner error becomes that
+foot's commanded depth relative to the others' (the integrator's input), and a swing leg's
+clearance becomes readable, so a lift can be lengthened until the commanded foot clears — the
+robot form of lever 6(b). That is the next build; the pitch/roll corner map stays as its
+fallback.
+
+**Files.** `MotorEPMv2`: `stroke_level_ref_tau`, `level_int_gain/_max/_planted_only`,
+`stride_center_gain/_tau/_max`, `lift_relative_gain/_tau` (+ `lv_off`, `lv_sc_off`, `lv_sag`,
+`lp_sh`, `tilt_pref` in the log). Configs `…__hip2p030__lpg_cand*.json`, `…__hold0.json`, the
+robot stack `…__lpg_sl4s_st07_int.json`. Instruments: `~/xaq_runs/lpg_20261013/perleg.py`,
+the hold-and-trace protocol. Launcher: the integrator candidate added beside the candidate.
+
+> **AMENDMENT (2026-10-13, later) to §5 and §7 above — the "rear feet do not rise" reading was
+> the proxy, and the ledger had already recorded this trap (2026-07-25).** The per-leg foot height
+> used for it (`feet_y`) is the shank centre minus half the shank: a shank-angle approximation,
+> and the rear shanks sit more sprawled. The physics contact flag, per leg (the attribution trace,
+> seed 1, the candidate): airborne FL 33 %, FR 19 %, RL 31 %, RR 11 %, lift-offs 31/38/57/25 in
+> 3000 ticks. **The rear legs lift.** The true asymmetry is right/left — the right side airborne
+> about half as often as the left, the right rear least — which is the roll the attitude integrator
+> removes, not a rear-leg lift deficit. §5's mechanism for "the rear foot scrubs" is therefore
+> withdrawn as stated; the stance-femur sag difference it measured is real but small. The
+> swing-clearance socket (`swing_clear_*`, the commanded-FK swing foot vs the planted plane) was
+> built against the proxy's picture; its first read (clearance alone, arena n=6: net 5.87, 0
+> falls, steps 24; corridor net_z 5.08, a tie with the candidate) is recorded as `NULL` pending a
+> re-read on the true per-leg contact, which the body log now carries (`con`). The commanded-FK
+> source for the PLANTED corner error (`level_int_src` 1) is a `REGRESSION` for a measured reason:
+> among planted feet the commanded depth cannot differ in reality, so a deeper commanded foot is
+> that leg's sag, not a higher corner, and the integrator ran the right rear the wrong way (pitch
+> −0.07 → −0.12, corridor net_z 5.7 → 1.9). The attitude map stays the planted corner's source.
+> Publishing the commanded FK with nothing consuming it is byte-identical to the candidate (`fk0`).
+
+### ★★ 2026-10-13 — THE COMMANDED-FK SWING CLEARANCE on the attitude integrator: corridor net_z 5.16 → 6.30 (`WORKING`, signal, sim-only); and the flat-ground validation BY TRUE CONTACT — every leg lifts more under the lever than under the benchmark, the right rear least
+
+**Protocol.** Candidate's sim twin + the attitude corner integrator (planted-only, 0.005) +
+`swing_clear_m` 0.025 / 0.040, `swing_clear_gain` 0.05, `swing_clear_max` 3, body
+`CMD_FK_SOURCE=1`. Corridor n=6 × 6000 (difficulty 0.3), arena n=6 × 4500. The body log now
+carries the per-leg physics contact (`con`); every per-leg airborne figure below is from it.
+
+| corridor arm | net_z | straight | falls | tilt_sd | true airborne FL/FR/RL/RR |
+|---|---|---|---|---|---|
+| benchmark (old gait) | 4.23 ± 0.32 | 0.26 | 0 | 0.062 | (proxy only) |
+| candidate | 5.16 ± 0.47 | 0.35 | 0 | 0.053 | (proxy only) |
+| + attitude integrator | 5.72 ± 0.65 | 0.38 | 0 | 0.048 | (proxy only) |
+| + integrator + clearance 25 mm | 5.71 ± 0.94 | 0.39 | 0 | 0.052 | 0.26 / 0.27 / 0.17 / 0.15 |
+| **+ integrator + clearance 40 mm** | **6.30 ± 0.70** | **0.43** | 0 | 0.052 | — |
+| clearance alone (no integrator) | 5.08 ± 0.49 | 0.36 | 0 | 0.058 | — |
+
+**`WORKING` (signal).** The clearance only pays on the levelled body (alone it ties the
+candidate); on the integrator it adds 10 % at 40 mm, with straightness up and no falls. The
+lever reads the commanded foot's height under gravity against the planted feet's commanded
+plane near mid-swing and scales that leg's phase lift toward the target; both inputs are the
+command and the attitude, so the robot can produce them — **but the robot host publishes only
+the zero-pose FK today** (`feet_y_gravity_zero_pose`, BrainInputs.hpp), so this arm is
+sim-only until the host computes the commanded FK. Sim arm `…__lpg_cand_intclr40.json` in the
+launcher as "EXP · LPG candidate + integrator + swing clearance (sim)".
+
+**Flat ground, by the physics contact (arena n=6 × 4500).**
+
+| arm | net_disp | falls | true airborne FL/FR/RL/RR | lift-offs/run | median swing (s) |
+|---|---|---|---|---|---|
+| benchmark | 3.52 | 0 | 0.23 / 0.12 / 0.26 / 0.21 | 129 / 107 / 111 / 64 | 0.12 / 0.07 / 0.14 / 0.20 |
+| candidate | 6.02 | 0 | 0.31 / 0.22 / 0.32 / 0.14 | 53 / 74 / 91 / 50 | **0.53** / 0.24 / 0.18 / 0.17 |
+| + integrator | 6.38 | 0 | 0.28 / 0.23 / 0.24 / 0.15 | 59 / 73 / 92 / 52 | 0.39 / 0.27 / 0.16 / 0.19 |
+| + integrator + clearance 40 | 6.38 | 0 | 0.29 / 0.23 / 0.26 / 0.17 | 58 / 71 / 90 / 52 | 0.46 / 0.27 / 0.19 / 0.22 |
+
+**What it says, and two instrument corrections.** (1) Under the lever every leg is airborne
+MORE than under the benchmark (0.14–0.32 vs 0.12–0.26), with fewer and longer swings (the
+benchmark's 64–129 lift-offs of 0.07–0.20 s are its flicker). (2) The earlier reading that
+the candidate "barely steps on flat ground" (steps 18 → 5–9) was `arenaavg`'s `steps`, which
+counts the feet_y proxy past a threshold; by true contact the stepping is intact. Both `steps`
+and the per-leg `air`/`rise` from feet_y are now known proxies: read `con`. (3) The residual
+asymmetry is the right rear: airborne 0.14–0.17 against 0.23–0.32 elsewhere, the shortest
+swings, and the lowest femur in every arm; the integrator and the clearance each move it a
+point or two. Its cause is open; the body/sign audit above cleared the geometry.
+
+**Next.** The robot host's commanded FK (so the clearance can run on hardware and the
+corner sensor is the same object in both); the right rear's short swing as its own question
+(its load share, its phase dwell, the diagonal 60/40 split at the hold); long runs; the floor
+run with `thrash.py` and the FSR flicker as the honest step count on the robot.
+
+### 2026-10-13 — THE COMMANDED FK ON THE ROBOT HOST: `ogma_host --cmd-fk` publishes `feet_y_gravity_cmd_imu` from the commanded pose, the sim's CMD_FK_SOURCE=1, so the corner sensor is one object on both sides (built, unit-tested, NOT yet run on the Pi)
+
+**What changed.** `pi_host/include/ogma/hw/BrainInputs.hpp`: `feet_y_gravity_cmd_fk(body, cmd, up)`
+= the shared `fk_leg` on the commanded hinge angles (from the pulse on the line, which benchd has
+already slewed — the sim's `_eff_target`), `rest_inv` of the lower segment's origin, then the
+shared `feet_y_gravity` with its half-shank offset along the fused up: line for line the sim's
+`feet_y_gravity_cmd_imu` branch at `cmd_fk_source == 1`. `BrainInputBuilder::set_cmd_fk`; off =
+the zero-pose form, byte-identical to P-e as validated. `ogma_host --cmd-fk`; `dash_run.py` maps
+body_env `OGMA_PICRAWLER_CMD_FK_SOURCE=1` to it, as it maps the S1 senses. Test
+(`test_brain_inputs.cpp`): at all-zero angles the commanded form equals the zero-pose form to
+1e-6 on every leg; a femur lifted as the swing lift commands it (hip2 −0.3) raises that foot's
+reading by more than 5 mm and no other's; pitched nose-down the front still reads above the rear.
+The whole host suite passes on the x86 build; the Pi build and the floor run are the operator's.
+
+**Why it matters.** Until now the corner sensor existed only in the sim; every lever on it was
+sim-only. With this the integrator's swing-clearance arm can run on hardware from the same config
+(`…__s3a_stuckinst__hip2p030__lpg_sl4s_st07_intclr.json`, in the launcher and the dash).
+
+**The operator's concern, recorded as the next question for the robot (2026-10-13): "I am
+concerned about the robot's lack of balance and tendency to fall on obstacles. The previous gait
+was noisy and inefficient but it handled uneven terrain well."** The sim says the lever's
+terrain transport is higher than the benchmark's (corridor 6.30 vs 4.23 m, 0 falls both) — but
+the sim's foot is the open sim2real gap (2026-10-12), the robot's falls on obstacles have not
+been counted under either gait, and the benchmark's terrain tolerance is the bar. The honest
+test is the same obstacle course under both configs on the robot, falls and FSR flicker counted,
+before any promotion. ⚠ The reflex stack's protections the old gait leaned on (the stance press,
+the swing tuck, the rear landing sequence) are all still live under the lever; what changed is
+the timing substrate and the gate on the push.
+
+### 2026-10-13 — THE OPERATOR'S TERRAIN OBSERVATION (sim, corridor), recorded as the design brief for the next lever: reach to contact before the push, push only what the chassis needs, and a learned swing length
+
+*Operator: "when the robot encounters an object in the corridor such as a speed hump or pyramid,
+the first leg to encounter a surface higher than the previous flat surface will press down the
+same amount as the previous steps thus raising that corner (usually a front corner) so high, the
+opposite leg cannot touch the ground. the robot attempts to stride forward but the hip1 movements
+can pitch the robot over. if the robot learns to keep its chassis level even on rough terrain,
+then each leg can reach down before the stroke, make contact with the ground, then push and swing
+only the amount needed to move the robot forward and keep the chassis level as possible. also,
+shorter swings could help with the instability (also should be a learned param)."*
+
+**Read against the mechanism as built.** The load-held phase ends a swing by TIME (touchdown
+at phase π) and the stance press is a constant: a foot that lands early on a hump is pressed by
+the same amount from a higher floor, and a foot over a dip is pushed in the air. Nothing seeks
+the ground. The planted-leg integrator corrects the corner afterwards, slowly, through the
+attitude; the operator's brief asks for the correction BEFORE the push, per leg, from contact:
+
+1. **Reach to contact.** The swing ends when the FOOT SENSOR reports contact, not when the
+   phase says so: the leg descends (femur down, shank out) through the end of swing until the
+   FSR loads, and that leg length becomes its stance length. The load-held phase already has
+   the sensor; what changes is that touchdown becomes an EVENT the phase waits for (hold at
+   phase π until contact, or advance the descent until contact) rather than a time.
+2. **Push only what the chassis needs.** The stance press on a leg whose corner is already
+   high (its commanded-FK depth below the planted plane, or its corner error negative) is
+   withheld, and the stroke on a leg whose corner is low is shortened — the corner error
+   gating the per-leg press and push, the way the level error already gates the whole stroke.
+3. **A learned swing length.** The hip stroke amplitude per leg adapted from the body's own
+   outcome (tilt during that leg's stroke, or the corner error it produced), bounded, not a
+   constant: shorter where the body rocks, longer where it does not.
+
+Each is one lever with a gain-0 guard and its own control; (1) first, because it supplies the
+state (2) and (3) gate on. The sim's corridor humps are the test; the robot's obstacle course is
+the bar (the operator's concern, previous entry). Deferred behind the robot run of the current
+stack, by the operator's call ("it may be a good time to test the current config on the real
+robot").
