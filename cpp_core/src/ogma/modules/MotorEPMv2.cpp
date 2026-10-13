@@ -1087,6 +1087,12 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"stroke_level_floor", ParamMutability::HotMutable,
          "The least fraction of the stroke the level gate leaves (0 = it may stop the push entirely).",
          ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"swing_gate_src", ParamMutability::HotMutable,
+         "What the contact-gated terms (swing_tuck, the rear landing sequence) read as 'airborne'. 0 = the raw foot-contact "
+         "flag (byte-identical). 1 = the stance/swing state (the load-held phase's swing half under leg_phase_swing): on the "
+         "robot the raw flag flickers at the FSR threshold and every flicker toggles a bias (2026-10-13: 30-45 command "
+         "reversals a stride on hip2/knee against the sim's 6-20).",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
         {"leg_phase_lift_knee", ParamMutability::HotMutable,
          "Phase-shaped swing lift, shank half: y[knee] += gain * max(0, sin phi). Positive = fold (the swing_tuck sign). "
          "0 = off, byte-identical.",
@@ -1422,6 +1428,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_swing"]    = leg_phase_swing_;
     m["leg_phase_lift_hip2"] = leg_phase_lift_hip2_;
     m["leg_phase_lift_knee"] = leg_phase_lift_knee_;
+    m["swing_gate_src"]      = swing_gate_src_;
     m["level_gain"]          = level_gain_;
     m["level_knee_gain"]     = level_knee_gain_;
     m["stroke_level_gain"]   = stroke_level_gain_;
@@ -1671,6 +1678,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "leg_phase_swing",     [&](auto const& v){ leg_phase_swing_     = get_double(v, "leg_phase_swing"); });
     apply_param(params, "leg_phase_lift_hip2", [&](auto const& v){ leg_phase_lift_hip2_ = get_double(v, "leg_phase_lift_hip2"); });
     apply_param(params, "leg_phase_lift_knee", [&](auto const& v){ leg_phase_lift_knee_ = get_double(v, "leg_phase_lift_knee"); });
+    apply_param(params, "swing_gate_src",      [&](auto const& v){ swing_gate_src_      = get_double(v, "swing_gate_src"); });
     apply_param(params, "level_gain",          [&](auto const& v){ level_gain_          = get_double(v, "level_gain"); });
     apply_param(params, "level_knee_gain",     [&](auto const& v){ level_knee_gain_     = get_double(v, "level_knee_gain"); });
     apply_param(params, "stroke_level_gain",   [&](auto const& v){ stroke_level_gain_   = get_double(v, "stroke_level_gain"); });
@@ -3201,6 +3209,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "leg_phase_swing")     leg_phase_swing_     = get_double(value, "leg_phase_swing");
     else if (key == "leg_phase_lift_hip2") leg_phase_lift_hip2_ = get_double(value, "leg_phase_lift_hip2");
     else if (key == "leg_phase_lift_knee") leg_phase_lift_knee_ = get_double(value, "leg_phase_lift_knee");
+    else if (key == "swing_gate_src")      swing_gate_src_      = get_double(value, "swing_gate_src");
     else if (key == "level_gain")          level_gain_          = get_double(value, "level_gain");
     else if (key == "level_knee_gain")     level_knee_gain_     = get_double(value, "level_knee_gain");
     else if (key == "stroke_level_gain")   stroke_level_gain_   = get_double(value, "stroke_level_gain");
@@ -5754,7 +5763,9 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         if (!warmup && (swing_tuck_hip2_ != 0.0 || swing_tuck_knee_ != 0.0) && m >= 3
             && have_contact_ && int(foot_contact_.size()) == n_legs_) {
             ++swing_tuck_ticks_;
-            const bool airborne = foot_contact_[leg] <= 0.5f;
+            const bool airborne = (swing_gate_src_ > 0.5 && int(in_swing_.size()) == n_legs_)
+                                ? (in_swing_[leg] != 0)            // the phase's swing state
+                                : (foot_contact_[leg] <= 0.5f);    // the raw flag (legacy)
             // SWING-DESCENT bookkeeping (self-scaled swing age; see the header note).
             // Runs when EITHER descent half is live — the knee-only arm
             // (swing_descend_knee > 0, hip2 press 0) needs the age tracker too.

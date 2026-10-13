@@ -533,6 +533,14 @@ private:
     double leg_phase_swing_     = 0.0;
     double leg_phase_lift_hip2_ = 0.0;
     double leg_phase_lift_knee_ = 0.0;
+    // AIRBORNE SOURCE for the contact-gated terms (robot runs 2026-10-13).  The swing tuck
+    // and the rear landing gate on the raw foot-contact flag; on the robot that flag flickers
+    // at the FSR threshold (hundreds of transitions a minute), and every flicker switches a
+    // bias on or off -- the config-independent 30-45 reversals a stride the robot shows on
+    // hip2 and knee against the sim's 6-20.  1 = those terms read the load-held phase's
+    // swing state (in_swing_ under leg_phase_swing) instead: a contact-referenced, flicker-
+    // free gate.  0 = the raw flag, byte-identical.
+    double swing_gate_src_ = 0.0;
     // LEVEL REFLEX on planted legs (operator 2026-10-13: "the robot should be reducing the
     // error of keeping its chassis level").  The error is the chassis attitude against
     // level (the tilt token: sin pitch, sin roll); the owning term lives on STANCE legs only

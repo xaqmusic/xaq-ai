@@ -8229,3 +8229,46 @@ in range (the dash's meta).
 and the benchmark at the same avoid range `…__r03`. Instrument: the host's per-tick diag now
 mirrors LoadPhaseGait (phases, shares, references, lock) and MotorEPMv2's leg-phase / gate /
 integrator fields, so the next run's shares are read from the module, not reconstructed.
+
+### ★★★ 2026-10-13 (evening) — SECOND ROBOT RUNS: the normalised shares even out (0.20–0.30), the avoid range at 30 cm gives straight walking, and the SMOOTHED GATE is the operator's clear winner — "deliberate foot placement and stepping"; what remains is the servo roughness, and the raw command reverses 30–45× a stride on every joint in every config, the benchmark included
+
+*Operator, four runs in the suggested order: "config 1 (BENCH avoid 30 cm): the robot attempting
+to walk straight, no turning behavior away from walls. 2 (norm + gate): better stepping but a
+lot of small servo reversals making the movements noisy. 3 (norm + SMOOTHED gate): much improved
+and deliberate foot placement and stepping; servos still not smooth like the sim. 4 (+ integrator):
+noisier than 3 but ended up walking straight after some flailing. The smoothed gate is a clear
+winner if we can smooth out the servo motion."*
+
+**Read from the module (the dash's per-tick diag now carries it):** shares FL/FR/RL/RR 0.24–0.29 /
+0.23–0.29 / 0.21–0.28 / 0.19–0.30 in every lever arm (the raw read was 0.5 / 0.05 the run before);
+the per-foot references the normalisation found: RL 0.6–1.1, RR 0.04–0.06 — a 15–20× spread in
+sensor sensitivity under one curve. The gate sits at 0.55–0.75 with sd 0.04–0.08 (steady), the
+tilt |pitch| 0.04–0.12, phase swing fraction 0.39–0.43, lock at touchdown 0.32–0.50, inter-leg
+0.26–0.49, the phase running backwards 5–10 % of leg-ticks (load spikes). `WORKING` (operator's
+eye + the module's own read) for `load_norm_tau` 500 and `stroke_level_smooth` 0.1; the avoid
+range 0.3 m is the test condition and stays for forward measurements.
+
+**The remaining roughness, measured (raw action dump, reversals per 70-tick stride per joint):**
+
+| arm | hip1 FL/FR/RL/RR | hip2 | knee |
+|---|---|---|---|
+| benchmark (old gait, avoid 30 cm) | 25 / 28 / 31 / 28 | 42 / 46 / 39 / 46 | 33 / 35 / 36 / 34 |
+| norm + gate | 31 / 35 / 34 / 31 | 40 / 39 / 38 / 41 | 38 / 45 / 43 / 41 |
+| norm + smoothed gate (the winner, two runs) | 36–43 | 37–47 | 37–44 |
+| + integrator | 35 / 40 / 40 / 35 | 42 / 43 / 42 / 45 | 38 / 44 / 46 / 43 |
+| **the sim's candidate, same read** | **13 / 13 / 13 / 14** | **6 / 9 / 14 / 9** | **9 / 12 / 20 / 18** |
+
+Three times the sim, on every joint, in every config including the benchmark: the source is
+robot-wide, in the inputs the robot shares, not in any lever. Two robot-only inputs reach the
+command every tick: the FOOT-CONTACT FLAG (the swing tuck and the rear landing gate on it raw,
+and it transitions 70–216 times a minute per foot at the 200-count threshold — roughly half the
+gait's own touchdowns and lift-offs, half flicker; hysteresis 300/120 with a 3-frame debounce
+halves it) and the GYRO in the heading hold's damping term. The sim's contact flag is clean and
+its gyro is noiseless.
+
+**Arms for the next run** (launcher + dash, on the winner): `…__lpgn_r03_sm_pg` — the tuck and
+the rear landing gated on the phase's swing state (`swing_gate_src` 1), so no flickering flag
+reaches the command; `…_pg_e0` — plus the explore noise off (the ledger's cheap reversal lever);
+`…_pg_d0` — a TEST lesion of the heading hold's yaw-rate damping, to read the gyro's share of
+the hip1 reversals. The honest sensor-side form (contact hysteresis at the host) follows if the
+phase gate alone does not close the gap.
