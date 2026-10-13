@@ -212,6 +212,24 @@ inline std::array<float, 4> feet_y_gravity_zero_pose(const BodyCalib& b, const o
     return out;
 }
 
+// `feet_y_gravity_cmd_imu` from the COMMANDED pose — the sim's CMD_FK_SOURCE=1 form
+// (picrawler_body.gd: foot_b = rest_inv * _fk_leg(i, d1, d2, d3)[2].origin on the slew-limited
+// targets, then feet_y_gravity along the fused up).  `cmd` is hinge_angles_from_us of the
+// pulse on the line, which IS the slewed target here (benchd slews before it writes).  Same
+// shared fk_leg and same half-shank offset as the zero-pose form, so the two differ only by
+// the angles: at all-zero angles this equals feet_y_gravity_zero_pose exactly (tested).
+// Gait audit 2026-10-13: the corner sensor the planted-leg rule and the swing clearance read.
+inline std::array<float, 4> feet_y_gravity_cmd_fk(const BodyCalib& b, const std::array<double, 12>& cmd,
+                                                  const ogma::body::Vec3f& up) {
+    std::array<float, 4> out{};
+    for (int i = 0; i < 4; ++i) {
+        const ogma::body::LegPose p = ogma::body::fk_leg(b.anchors[size_t(i)], cmd[size_t(i * 3 + 0)],
+                                                         cmd[size_t(i * 3 + 1)], cmd[size_t(i * 3 + 2)], 0.0);
+        out[size_t(i)] = float(ogma::body::feet_y_gravity(b.rest_inv(p.lower.origin), up, b.l3));
+    }
+    return out;
+}
+
 // ---- foot sensors ----------------------------------------------------------------------
 // The FSRs sit on HAT ADC A0-A3 = PHYSICAL FL, FR, RL, RR (foot_cal_sweep.py / foot_tap_test.py).
 // The sim's legs are mirrored, so in SIM order: fl <- A1, fr <- A0, rl <- A3, rr <- A2.
@@ -351,6 +369,12 @@ public:
 
         // 5. The zero-pose swing-detector input and the fused upright.
         t.feet_y_gravity_cmd_imu = feet_y_gravity_zero_pose(body_, up);
+        // 5. The swing-detector / corner-sensor input and the fused upright.  Zero pose by
+        //    default (parity with P-e as validated); the commanded FK when the config asks
+        //    for it (CMD_FK_SOURCE=1 -> --cmd-fk), which is what the corner integrator and the
+        //    swing clearance read in the sim.
+        t.feet_y_gravity_cmd_imu = cmd_fk_ ? feet_y_gravity_cmd_fk(body_, cmd, up)
+                                           : feet_y_gravity_zero_pose(body_, up);
         t.upright = up.y;
 
         // 6. Foot sensors.  A failed read holds the last good values and says so.
@@ -394,7 +418,9 @@ public:
     }
 
     // place_in's x/y normaliser (the room's half-size plus a margin; the sim's odom_scale_m).
-    void set_odom_scale(double s) { odom_scale_ = s > 0.1 ? s : 0.1; }
+    void set_cmd_fk(bool on) { cmd_fk_ = on; }
+    bool cmd_fk() const { return cmd_fk_; }
+        void set_odom_scale(double s) { odom_scale_ = s > 0.1 ? s : 0.1; }
     // Re-anchor the odom frame at the current pose (the sim does this on a hard reset).
     void reset_odom() { odom_.reset(); yaw_anchor_ = yaw_unwrapped_; }
 
@@ -411,6 +437,7 @@ private:
     ServoMapping map_;
     FsrModel     fsr_;
     double       us_per_rad_;
+    bool         cmd_fk_ = false;
     ogma::body::ServoForwardModel   lag_;
     ogma::body::StrideV             sv_;
     ogma::body::DistressAccumulator dist_;

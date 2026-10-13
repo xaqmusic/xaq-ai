@@ -89,7 +89,7 @@ class ConfigEntry:
     # S1 of the MicroDuck port: the senses the config switches on in the sim, as ogma_host
     # flags, so one config publishes the same channels on both.  body_env
     # OGMA_PICRAWLER_ULTRASONIC -> --range, _CAMERA_ROBOT -> --camera, _ODOM -> --odom
-    # (--odom-scale from _ODOM_SCALE), _HONEST_VEL_EGO -> --vel-ego.
+    # (--odom-scale from _ODOM_SCALE), _HONEST_VEL_EGO -> --vel-ego, _CMD_FK_SOURCE -> --cmd-fk.
     host_flags: tuple = ()
 
 
@@ -131,6 +131,8 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
             flags += ["--odom", "--odom-scale", str(be.get("OGMA_PICRAWLER_ODOM_SCALE", "2.0"))]
         if str(be.get("OGMA_PICRAWLER_HONEST_VEL_EGO", "")) == "1":
             flags.append("--vel-ego")
+        if str(be.get("OGMA_PICRAWLER_CMD_FK_SOURCE", "")) == "1":
+            flags.append("--cmd-fk")           # the commanded-FK corner sensor (gait audit 2026-10-13)
         out.append(ConfigEntry(file=f, path=p, name=str(md.get("name", f)),
                                faithful=str(be.get("OGMA_PICRAWLER_HONEST_JOINTS", "")) == "1",
                                phase=str(md.get("phase_tag", "")), speed_rad_s=spd,

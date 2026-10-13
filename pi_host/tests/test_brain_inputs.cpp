@@ -99,6 +99,28 @@ TEST(BrainBodyCalib, ZeroPoseFootHeightAtLevelIsTheClosedForm) {
     EXPECT_GT(fp[1], fp[3]);
 }
 
+TEST(BrainBodyCalib, CommandedFkAtZeroIsTheZeroPoseAndALiftedFemurRaisesItsFoot) {
+    // The commanded-FK corner sensor (gait audit 2026-10-13).  At all-zero angles it must
+    // equal the zero-pose form exactly (same anchors, same FK, same half-shank offset); a
+    // femur lifted the way the brain's swing lift commands it (hip2 negative) must raise that
+    // foot's reading and no other's.
+    const BodyCalib b = real_body();
+    ASSERT_TRUE(b.ok) << b.why;
+    const Vec3f up(0.0f, 1.0f, 0.0f);
+    std::array<double, 12> zero{};
+    const auto z0 = feet_y_gravity_zero_pose(b, up);
+    const auto c0 = feet_y_gravity_cmd_fk(b, zero, up);
+    for (int i = 0; i < 4; ++i) EXPECT_NEAR(c0[size_t(i)], z0[size_t(i)], 1e-6) << "leg " << i;
+    std::array<double, 12> lift = zero;
+    lift[size_t(2 * 3 + 1)] = -0.3;                       // RL femur up
+    const auto c1 = feet_y_gravity_cmd_fk(b, lift, up);
+    EXPECT_GT(c1[2], c0[2] + 0.005) << "a lifted femur raises its foot by more than 5 mm";
+    for (int i : {0, 1, 3}) EXPECT_NEAR(c1[size_t(i)], c0[size_t(i)], 1e-6) << "leg " << i << " untouched";
+    // The attitude still enters: pitched nose-down the front reads higher than the rear.
+    const auto cp = feet_y_gravity_cmd_fk(b, zero, Vec3f(0.0f, 0.9950f, 0.0998f));
+    EXPECT_GT(cp[0], cp[2]);
+}
+
 TEST(BrainJoints, NormalisationMatchesTheSimAndIsJointMajor) {
     const BodyCalib b = real_body();
     ASSERT_TRUE(b.ok) << b.why;

@@ -118,6 +118,10 @@ struct Args {
     // slew-limited (0 reversals in three floor runs while the feet skittered 100-200 contact
     // transitions a minute).  {"kind":"actions","tick":t,"u":[12],"us":[12]}.
     bool   dump_actions = false;
+    // The commanded-FK form of feet_y_gravity_cmd_imu (the sim's CMD_FK_SOURCE=1): the corner
+    // sensor the planted-leg integrator and the swing clearance read.  Off = the zero-pose
+    // form, as P-e was validated.  The dash passes it from body_env OGMA_PICRAWLER_CMD_FK_SOURCE.
+    bool   cmd_fk       = false;
 };
 
 void usage() {
@@ -130,6 +134,7 @@ void usage() {
         "  --actuate tcp://127.0.0.1:5594 publishes the brain's actions to benchd (--cmd-port 5594); needs --brain-inputs\n"
         "  --odom [--odom-scale 2.0] publishes ego_heading / odom / place_in (dead-reckoned); --vel-ego publishes vel_ego\n"
         "  --dump-actions prints the brain's raw action targets every tick (u and target us, before benchd's slew)\n"
+        "  --cmd-fk publishes feet_y_gravity_cmd_imu from the COMMANDED pose (the sim's CMD_FK_SOURCE=1) instead of the zero pose\n"
         "    from stride_v; both need --brain-inputs and are what the sim's OGMA_PICRAWLER_ODOM / _HONEST_VEL_EGO publish\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
         "  topics: sense.audio (RawAudioFrame) sense.camera (RawImageFrame) sense.range (ProprioToken)\n"
@@ -176,6 +181,7 @@ int main(int argc, char** argv) {
         else if (v == "--vel-ego")                     a.vel_ego = true;
         else if (v == "--odom-scale" && i + 1 < argc)  a.odom_scale = std::atof(argv[++i]);
         else if (v == "--dump-actions")                a.dump_actions = true;
+        else if (v == "--cmd-fk")                      a.cmd_fk = true;
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
@@ -484,6 +490,8 @@ int main(int argc, char** argv) {
             builder = std::make_unique<ogma::hw::brain::BrainInputBuilder>(
                 std::move(body), std::move(map), fsr, calib.servo_us_per_rad);
             builder->set_odom_scale(a.odom_scale);
+            builder->set_cmd_fk(a.cmd_fk);
+            if (a.cmd_fk) std::printf("ogma_host: feet_y_gravity_cmd_imu from the COMMANDED pose (--cmd-fk)\n");
             if (a.odom || a.vel_ego)
                 std::printf("ogma_host: S1 senses — odom %s (place_in scale %.1f m), vel_ego %s\n",
                             a.odom ? "ON" : "off", a.odom_scale, a.vel_ego ? "ON (stride_v)" : "off");
