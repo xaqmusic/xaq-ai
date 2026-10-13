@@ -81,7 +81,11 @@ ParamSchema LoadPhaseGait::params_schema() const {
          "record rejected, kept as the structure control.", ParamValue{2.0}},
         {"load_floor", ParamMutability::HotMutable,
          "A share below this reads as 0 (sensor noise on an unloaded foot).", ParamValue{0.02}},
-        {"seed", ParamMutability::ConstructionOnly, "Seed for the legs' random starting phases.", ParamValue{int64_t{1234}}},
+        {"seed", ParamMutability::ConstructionOnly, "Seed for the legs' random starting phases.", ParamValue{int64_t{1234}}},        {"load_norm_tau", ParamMutability::HotMutable,
+         "PER-FOOT SELF-NORMALISATION of the load before the shares: each foot's load is divided by its own running "
+         "reference (EMA over tau ticks of its load while touching). The robot's FSRs differ 3x in sensitivity under one "
+         "curve (RL 0.5 share, RR 0.05 measured 2026-10-13), which held one leg and freed another. Try 300-1000. 0 = raw.",
+         ParamValue{0.0}},
         {"init_phase", ParamMutability::ConstructionOnly,
          "Optional explicit starting phases (radians, one per leg). Empty = seeded random, as on Owaki's robot.",
          ParamValue{std::vector<double>{}}},
@@ -93,7 +97,7 @@ ParamMap LoadPhaseGait::current_params() const {
     m["contact_topic"] = ParamValue{contact_topic_}; m["load_topic"] = ParamValue{load_topic_};
     m["output_topics"] = ParamValue{output_topics_}; m["n_legs"] = ParamValue{int64_t(n_legs_)};
     m["period_ticks"] = ParamValue{period_ticks_}; m["sigma_ratio"] = ParamValue{sigma_ratio_};
-    m["load_floor"] = ParamValue{load_floor_}; m["seed"] = ParamValue{seed_};
+    m["load_floor"] = ParamValue{load_floor_}; m["seed"] = ParamValue{seed_};    m["load_floor"] = ParamValue{load_floor_}; m["seed"] = ParamValue{seed_}; m["load_norm_tau"] = ParamValue{load_norm_tau_};
     m["init_phase"] = ParamValue{init_phase_};
     return m;
 }
@@ -107,7 +111,8 @@ void LoadPhaseGait::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "n_legs",        [&](auto const& v){ n_legs_        = std::max(1, int(get_double(v, "n_legs"))); });
     apply_param(params, "period_ticks",  [&](auto const& v){ period_ticks_  = std::max(2.0, get_double(v, "period_ticks")); });
     apply_param(params, "sigma_ratio",   [&](auto const& v){ sigma_ratio_   = get_double(v, "sigma_ratio"); });
-    apply_param(params, "load_floor",    [&](auto const& v){ load_floor_    = get_double(v, "load_floor"); });
+    apply_param(params, "load_floor",    [&](auto const& v){ load_floor_    = get_double(v, "load_floor"); });    apply_param(params, "load_floor",    [&](auto const& v){ load_floor_    = get_double(v, "load_floor"); });
+    apply_param(params, "load_norm_tau", [&](auto const& v){ load_norm_tau_ = get_double(v, "load_norm_tau"); });
     apply_param(params, "seed",          [&](auto const& v){ seed_          = int64_t(get_double(v, "seed")); });
     apply_param(params, "init_phase",    [&](auto const& v){ init_phase_    = get_double_vec(v, "init_phase"); });
     if (int(output_topics_.size()) != n_legs_)
@@ -120,6 +125,7 @@ void LoadPhaseGait::on_setup(Bus* bus, ParamMap const& params) {
     contact_.assign(n, 1.0f); load_.assign(n, 0.0f); prev_contact_.assign(n, 1);
     td_c_.assign(n, 0.0f); td_s_.assign(n, 0.0f); lo_c_.assign(n, 0.0f); lo_s_.assign(n, 0.0f);
     td_n_.assign(n, 0); lo_n_.assign(n, 0);
+    load_ref_.assign(n, 0.0f);
     const size_t np = n * (n - 1) / 2;
     pair_c_.assign(np, 0.0f); pair_s_.assign(np, 0.0f);
     if (!init_phase_.empty()) {
@@ -141,7 +147,8 @@ void LoadPhaseGait::on_param_change(std::string_view key, ParamValue const& valu
     const std::string k(key);
     if      (k == "period_ticks") period_ticks_ = std::max(2.0, get_double(value, k));
     else if (k == "sigma_ratio")  sigma_ratio_  = get_double(value, k);
-    else if (k == "load_floor")   load_floor_   = get_double(value, k);
+    else if (k == "load_floor")   load_floor_   = get_double(value, k);    else if (k == "load_floor")   load_floor_   = get_double(value, k);
+    else if (k == "load_norm_tau") load_norm_tau_ = get_double(value, k);
     else throw std::invalid_argument("LoadPhaseGait: param '" + k + "' is construction-only / unknown");
 }
 
@@ -168,7 +175,15 @@ void LoadPhaseGait::tick(uint64_t tick_id) {
     // ---- load shares: f_i / sum f, or c_i / n_touching ----
     float total = 0.0f;
     for (size_t i = 0; i < n; ++i) {
-        const float v = have_load_ ? load_[i] : (contact_[i] > 0.5f ? 1.0f : 0.0f);
+        float v = have_load_ ? load_[i] : (contact_[i] > 0.5f ? 1.0f : 0.0f);
+        if (have_load_ && load_norm_tau_ > 0.0) {
+            // the foot's own reference: its load while touching, seeded on the first touch
+            if (contact_[i] > 0.5f && v > 0.0f) {
+                if (load_ref_[i] <= 0.0f) load_ref_[i] = v;
+                else load_ref_[i] += (1.0f / float(load_norm_tau_)) * (v - load_ref_[i]);
+            }
+            v = (load_ref_[i] > 1e-6f) ? v / load_ref_[i] : 0.0f;
+        }
         share_[i] = v; total += v;
     }
     for (size_t i = 0; i < n; ++i) {
@@ -259,7 +274,7 @@ nlohmann::json LoadPhaseGait::diag_snapshot() const {
         {"swing_frac", swing_ema_},           // fraction of leg-ticks the phase says swing
         {"agree", agree_ema_},                // phase's swing/stance vs the contact flag
         {"omega_rel", weff / float(n) / omega},  // mean effective rate / free rate
-        {"load_mean", nmean / float(n)},
+        {"load_mean", nmean / float(n)},        {"load_ref", load_ref_},
         {"touchdowns", touchdowns_}, {"ticks", ticks_},
         {"have_load", have_load_}, {"have_contact", have_contact_}};
 }

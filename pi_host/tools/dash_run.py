@@ -284,6 +284,12 @@ class RobotIo:
                     row = {"t": round(t0, 3), "ticks": p.get("ticks"), "mods": {}}
                     for mid in module_ids:
                         r = call("module_diag", id=mid)
+                        # MotorEPMv2's diag is hundreds of keys; keep the gait-lever slice
+                        # (leg phase, level gate, corner integrator, clearance, attitude).
+                        if isinstance(r, dict) and mid == "motor_epm" and isinstance(r.get("diag"), dict):
+                            keep = ("leg_phase", "level", "stroke_level", "tilt", "corner_err",
+                                    "lift_scale", "clear_ema", "foot_y_cmd", "sc_off", "sag", "swing_frac")
+                            r = dict(r, diag={k: v for k, v in r["diag"].items() if k.startswith(keep)})
                         if r.get("status") == "ok":
                             row["mods"][mid] = r.get("diag", {})
                     f.write(json.dumps(row) + "\n"); f.flush(); count[0] += 1
@@ -621,7 +627,8 @@ class RunController:
             try:
                 mods = json.loads(self.cfg.path.read_text()).get("modules", [])
                 ids = [m["id"] for m in mods if m.get("type") in
-                       ("ProxMemory", "TofAvoidLoop", "BearingToIntent", "StuckSense", "StuckEscape")]
+                       ("ProxMemory", "TofAvoidLoop", "BearingToIntent", "StuckSense", "StuckEscape",
+                        "LoadPhaseGait", "MotorEPMv2")]   # 2026-10-13: the gait levers' own state, read from the module
             except (OSError, ValueError, KeyError):
                 ids = []
             self._bdiag = self.io.start_brain_diag(self.rec_dir / "brain_diag.jsonl", ids)

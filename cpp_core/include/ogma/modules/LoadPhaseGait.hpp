@@ -75,6 +75,15 @@ private:
     double period_ticks_ = 70.0;   // omega = 2pi / period (the body's measured stride, ledger 2026-07-20)
     double sigma_ratio_  = 2.0;    // sigma / omega.  0 = free clock (the structure control)
     double load_floor_   = 0.02;   // a foot force below this fraction of the body's load is "no load"
+    // PER-FOOT SELF-NORMALISATION (robot runs 2026-10-13).  The robot's four FSRs share one
+    // counts-to-grams curve and differ 3x in sensitivity (rear-left 2200-2400 counts at
+    // rest, rear-right 530-850): the raw shares read RL 0.5, RR 0.05, so the rule held one
+    // leg and freed another -- "one pair does the work".  tau > 0: each foot's load is
+    // divided by its OWN running reference (EMA of its load while touching, tau ticks)
+    // before the shares are formed, so a stiff sensor and a weak one carry the same weight.
+    // Adapts to the sensor rather than calibrating it (CLAUDE.md s5.5).  0 = raw shares.
+    double load_norm_tau_ = 0.0;
+    std::vector<float> load_ref_;
     int64_t seed_        = 1234;   // the legs start at random phases, as on Owaki's robot
     std::vector<double> init_phase_;   // optional explicit start phases (radians); empty = seeded random
 

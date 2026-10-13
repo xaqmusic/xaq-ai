@@ -1029,6 +1029,10 @@ ParamSchema MotorEPMv2::params_schema() const {
          "the push while the chassis is off level removes the cause rather than fighting the effect. The STEER half of the "
          "stroke (the heading hold) is not gated. 0 = off, byte-identical.",
          ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"stroke_level_smooth", ParamMutability::HotMutable,
+         "EMA weight per tick on the |tilt| the level gate reads (0.1 = ~10 ticks). On the robot the fused tilt is noisy "
+         "and a per-tick gate turned it into ~30 command reversals a stride (the sim: 13). 0 = raw, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
         {"stroke_level_steer", ParamMutability::HotMutable,
          "1 = the level gate also scales the steer differential (the heading hold / nav turn) on the hip stroke; 0 = the steer "
          "keeps full authority (the arena form). In the walled room the turns commanded by the avoid loop drive one side's hip "
@@ -1423,6 +1427,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["stroke_level_gain"]   = stroke_level_gain_;
     m["stroke_level_floor"]  = stroke_level_floor_;
     m["stroke_level_steer"]  = stroke_level_steer_;
+    m["stroke_level_smooth"] = stroke_level_smooth_;
     m["stroke_level_ref_tau"] = stroke_level_ref_tau_;
     m["level_int_gain"]      = level_int_gain_;
     m["level_int_max"]       = level_int_max_;
@@ -1671,6 +1676,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "stroke_level_gain",   [&](auto const& v){ stroke_level_gain_   = get_double(v, "stroke_level_gain"); });
     apply_param(params, "stroke_level_floor",  [&](auto const& v){ stroke_level_floor_  = get_double(v, "stroke_level_floor"); });
     apply_param(params, "stroke_level_steer",  [&](auto const& v){ stroke_level_steer_  = get_double(v, "stroke_level_steer"); });
+    apply_param(params, "stroke_level_smooth", [&](auto const& v){ stroke_level_smooth_ = get_double(v, "stroke_level_smooth"); });
     apply_param(params, "stroke_level_ref_tau", [&](auto const& v){ stroke_level_ref_tau_ = get_double(v, "stroke_level_ref_tau"); });
     apply_param(params, "level_int_gain",      [&](auto const& v){ level_int_gain_      = get_double(v, "level_int_gain"); });
     apply_param(params, "level_int_max",       [&](auto const& v){ level_int_max_       = get_double(v, "level_int_max"); });
@@ -3200,6 +3206,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "stroke_level_gain")   stroke_level_gain_   = get_double(value, "stroke_level_gain");
     else if (key == "stroke_level_floor")  stroke_level_floor_  = get_double(value, "stroke_level_floor");
     else if (key == "stroke_level_steer")  stroke_level_steer_  = get_double(value, "stroke_level_steer");
+    else if (key == "stroke_level_smooth") stroke_level_smooth_ = get_double(value, "stroke_level_smooth");
     else if (key == "stroke_level_ref_tau") stroke_level_ref_tau_ = get_double(value, "stroke_level_ref_tau");
     else if (key == "level_int_gain")      level_int_gain_      = get_double(value, "level_int_gain");
     else if (key == "level_int_max")       level_int_max_       = get_double(value, "level_int_max");
@@ -6036,7 +6043,11 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             if (stroke_level_gain_ > 0.0 && tilt_seen_) {
                 const float dp = (stroke_level_ref_tau_ > 0.0) ? tilt_pitch_ - tilt_p_ref_ : tilt_pitch_;
                 const float dr = (stroke_level_ref_tau_ > 0.0) ? tilt_roll_  - tilt_r_ref_ : tilt_roll_;
-                const float tmag = std::sqrt(dp * dp + dr * dr);
+                float tmag = std::sqrt(dp * dp + dr * dr);
+                if (stroke_level_smooth_ > 0.0) {
+                    if (leg == 0) tilt_mag_ema_ += float(stroke_level_smooth_) * (tmag - tilt_mag_ema_);
+                    tmag = tilt_mag_ema_;
+                }
                 level_mult = std::max(float(stroke_level_floor_), 1.0f - float(stroke_level_gain_) * tmag);
                 if (leg == 0) stroke_level_ema_ += 0.01 * (double(level_mult) - stroke_level_ema_);
             }

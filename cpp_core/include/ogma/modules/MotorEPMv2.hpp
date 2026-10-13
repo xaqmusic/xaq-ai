@@ -561,6 +561,12 @@ private:
     // sweeps the full clipped range every stride -- the fall anatomy -- and a gate that spares
     // the steer cannot catch it).  A turn is a push; an off-level body withholds both.
     double stroke_level_steer_ = 0.0;
+    // SMOOTHED GATE (robot runs 2026-10-13).  On the robot the brain's raw hip command reversed
+    // ~30 times a stride against the sim's 13 under the same config; the gate multiplies the
+    // stroke by the fused tilt every tick, and that signal is noisy on hardware.  alpha > 0:
+    // the gate reads an EMA of |tilt| (alpha per tick) instead of the raw magnitude.  0 = raw.
+    double stroke_level_smooth_ = 0.0;
+    float  tilt_mag_ema_ = 0.0f;
     // LEVEL GATE REFERENCED TO THE RUNNING ATTITUDE (2026-10-13, the operator's ramp).  With
     // the gate on absolute tilt a side slope is a permanent error and the push is withheld for
     // good.  tau > 0: the gate reads |tilt - EMA(tilt)| with alpha = 1/tau, so a slope becomes

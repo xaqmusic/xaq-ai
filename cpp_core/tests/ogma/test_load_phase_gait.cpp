@@ -86,3 +86,17 @@ TEST(LoadPhaseGait, TheTouchdownInstrumentReadsOneWhenContactLandsAtOnePhase) {
     EXPECT_NEAR(d["retro"].get<float>(), 0.0f, 1e-6f) << "a free clock never runs backwards";
     EXPECT_GT(d["interleg_plv"].get<float>(), 0.98f) << "four identical free clocks hold a constant relative phase";
 }
+
+TEST(LoadPhaseGait, PerFootNormalisationMakesAStiffSensorAndAWeakOneCarryEqualShares) {
+    // The robot's FSRs under one curve (2026-10-13): one foot reads 3x another at the same
+    // true load.  Raw shares hold the stiff foot (0.75) and free the weak one; normalised by
+    // each foot's own running reference they read 0.5 each.
+    Fix raw({{"load_topic", std::string("reality.proprio.foot_load")}, {"init_phase", std::vector<double>{1.5 * kPi, 1.5 * kPi, 0.0, 0.0}}});
+    Fix nrm({{"load_topic", std::string("reality.proprio.foot_load")}, {"load_norm_tau", 20.0}, {"init_phase", std::vector<double>{1.5 * kPi, 1.5 * kPi, 0.0, 0.0}}});
+    for (uint64_t t = 0; t < 300; ++t) { raw.run(t, {1, 1, 0, 0}, {3.0f, 1.0f, 0.0f, 0.0f}); nrm.run(t, {1, 1, 0, 0}, {3.0f, 1.0f, 0.0f, 0.0f}); }
+    EXPECT_NEAR(raw.m.share(0), 0.75f, 1e-4f); EXPECT_NEAR(raw.m.share(1), 0.25f, 1e-4f);
+    EXPECT_NEAR(nrm.m.share(0), 0.5f, 1e-3f);  EXPECT_NEAR(nrm.m.share(1), 0.5f, 1e-3f);
+    // A real change of load still reads: foot 0 now carries twice its reference.
+    nrm.run(300, {1, 1, 0, 0}, {6.0f, 1.0f, 0.0f, 0.0f});
+    EXPECT_GT(nrm.m.share(0), 0.6f);
+}

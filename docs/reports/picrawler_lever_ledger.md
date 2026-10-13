@@ -8176,3 +8176,56 @@ state (2) and (3) gate on. The sim's corridor humps are the test; the robot's ob
 the bar (the operator's concern, previous entry). Deferred behind the robot run of the current
 stack, by the operator's call ("it may be a good time to test the current config on the real
 robot").
+
+### ★★★ 2026-10-13 — FIRST ROBOT RUNS OF THE LEVER: one pair works, the body circles, few forward steps — read from the feed: the FSR shares were RL 0.5 / RR 0.05 under one curve (the rule held one leg and freed another), the avoid loop steered 95 % of the run at ~1.0 m, and the raw hip command reversed 30× a stride against the sim's 13
+
+*Operator, four floor runs (`…__lpg_sl4s_st07` ×2, `…_int`, `…_intclr`, 134–295 s each): "a
+tendency for one side or one pair of the legs to do more work than the other pair … front left
+and front right, and the robot would turn in circles … in other cases front right and rear left.
+I did not see the robot taking steps in a forward direction often. The range to the closest
+obstacle was ~150 cm so there should be no reason for the robot to turn away."*
+
+**1. The load shares the rule saw** (feed FSR counts → the one shared curve → shares, sim leg
+order; the host did not log the module's own shares — instrument gap, closed below):
+
+| run | FSR mean counts FL/FR/RL/RR | contact frac (≥200) | **load share** FL/FR/RL/RR |
+|---|---|---|---|
+| gate + 0.7 (295 s) | 1569 / 1324 / 2205 / 835 | 0.79 / 0.71 / 0.78 / 0.64 | 0.27 / 0.12 / **0.51** / **0.07** |
+| gate + 0.7 (148 s) | 1050 / 818 / 1363 / 565 | 0.51 / 0.47 / 0.52 / 0.42 | 0.20 / 0.08 / **0.31** / **0.05** |
+| + integrator | 1826 / 1558 / 2408 / 847 | 0.92 / 0.83 / 0.88 / 0.70 | 0.23 / 0.15 / **0.55** / **0.04** |
+| + integrator + clearance | 1867 / 1881 / 2429 / 526 | 0.94 / 0.91 / 0.89 / 0.49 | 0.23 / 0.20 / **0.52** / **0.03** |
+
+The rear-left FSR reads ~3× the rear-right's at the same stance (2200–2400 vs 530–850 counts)
+and one counts-to-grams curve serves all four, so the rule read rear-left as carrying half the
+body and rear-right as carrying nothing: a share above ½ is HELD at its fixed point (never
+lifts), a share near 0 runs free. One leg pinned, its diagonal partner flapping — the operator's
+"one pair does the work". In the sim the physics shares read 0.25 each, which is why it never
+showed. The rear-right also fails the 200-count contact threshold half the time at 526 counts.
+**Lever: per-foot self-normalisation** (`load_norm_tau` 500 on LoadPhaseGait: each foot's load
+÷ its own running reference while touching), the §5.5 form — adapt to the sensor rather than
+calibrate it. Unit-tested: a 3× stiffer sensor reads the same share once warm, and a real
+doubling still reads.
+
+**2. The avoid loop was steering the whole run.** `avoid.value` mean 0.47–0.62, active 93–97 %
+of diag rows, |intent err| 0.63–0.82, speed cut to 0.63–0.77, with the ultrasonic's last range
+0.97–1.11 m — inside ProxMemory's `range_m` 1.0, so a wall at a metre populated the proximity
+slots continuously and the heading hold turned the body all run. Not the gait. **Test condition:
+`range_m` 0.3** (the operator: "the robot is able to turn in place well so the reflex can kick
+in at 30 cm"), on the lever arms AND the benchmark, so forward walking is measured clean.
+
+**3. The raw hip command reverses ~30× a stride on the robot (all four legs, 26–34) against
+13 in the sim under the same config** (the attribution trace's raw actions; the earlier sim
+figure of 4.4 was the ACHIEVED joint, smoothed by the servo — not like with like). The sim
+lever halves the raw thrash from the old ~29; the robot does not. Robot-side suspect: the level
+gate multiplies the stroke by the fused tilt every tick, and that signal is noisy on hardware.
+**Lever: `stroke_level_smooth`** 0.1 (the gate on a ~10-tick EMA of |tilt|), one arm.
+
+**Also seen:** stroke sd and hip2 means are symmetric across legs in the command, so the
+asymmetry entered through the shares, not the command. Belly 20–50 mm, 0 HAT resets, current
+in range (the dash's meta).
+
+**Arms for the next floor run** (launcher + dash): `…__lpgn_r03_sl4s_st07` (normalised shares
++ avoid 0.3 m), `…__lpgn_r03_sl4s_sm_st07` (+ the smoothed gate), `…__lpgn_r03_sl4s_st07_int`,
+and the benchmark at the same avoid range `…__r03`. Instrument: the host's per-tick diag now
+mirrors LoadPhaseGait (phases, shares, references, lock) and MotorEPMv2's leg-phase / gate /
+integrator fields, so the next run's shares are read from the module, not reconstructed.
