@@ -8272,3 +8272,59 @@ reaches the command; `…_pg_e0` — plus the explore noise off (the ledger's ch
 `…_pg_d0` — a TEST lesion of the heading hold's yaw-rate damping, to read the gyro's share of
 the hip1 reversals. The honest sensor-side form (contact hysteresis at the host) follows if the
 phase gate alone does not close the gap.
+
+### ★★★ 2026-10-15 — THIRD ROBOT RUNS: THE THRASH WAS THE EXPLORATION NOISE — with it off three legs drop to the sim's 3–9 reversals a stride and the HAT resets stop; the contact flag and the gyro were not it; the front-right leg keeps reversing (12–37) with the noise off; the heading-damping lesion was the fastest, best-turning run; and "no navigation away from walls" is the 30 cm memory meeting glancing walls
+
+*Operator, five runs: (1) phase-gated tuck: "stepping is slow and I am still seeing jitter; 82 s to
+the end of the carpet; 2 HAT resets". (2) + noise off, twice: "looks more smooth; a few instances
+where the supporting legs would drop the chassis a bit but the belly did not impact the floor;
+navigation away from walls was not as good; 72 s". (3) + heading D off (the lesion), twice: "62 s;
+more jittery than 2 but more confident steps; turned away from the wall at 30 cm; the gait became
+more confident toward the end; the tipover was the robot hung up on a curtain, unable to back up,
+the thrash caused it".*
+
+**Raw command reversals per 70-tick stride (the brain's targets, before the slew):**
+
+| arm | hip1 FL/FR/RL/RR | hip2 | knee | HAT resets | shares |
+|---|---|---|---|---|---|
+| winner (13th, smoothed gate) | 36 / 40 / 41 / 39 | 37 / 40 / 39 / 43 | 37 / 41 / 43 / 39 | 0 | 0.27 / 0.28 / 0.24 / 0.20 |
+| + phase-gated tuck (`swing_gate_src` 1) | 39 / 46 / 44 / 44 | 43 / 39 / 42 / 45 | 40 / 43 / 46 / 43 | 2 | 0.30 / 0.25 / 0.24 / 0.21 |
+| **+ noise off (`explore_noise` 0), run 1** | **7 / 29 / 8 / 7** | **4 / 12 / 8 / 10** | **9 / 37 / 9 / 9** | 0 | 0.28 / 0.24 / 0.25 / 0.22 |
+| + noise off, run 2 | 6 / 12 / 4 / 5 | 4 / 9 / 4 / 7 | 5 / 19 / 4 / 5 | 0 | 0.32 / 0.24 / 0.23 / 0.22 |
+| + heading D off (lesion), run 1 | 38 / 45 / 44 / 40 | 43 / 38 / 40 / 43 | 36 / 42 / 44 / 41 | 0 | 0.28 / 0.25 / 0.25 / 0.22 |
+| + heading D off, run 2 (431 s) | 36 / 43 / 41 / 40 | 42 / 42 / 40 / 44 | 34 / 38 / 39 / 36 | 0 | 0.23 / 0.21 / 0.26 / 0.21 |
+| the sim's candidate, same read | 13 / 13 / 13 / 14 | 6 / 9 / 14 / 9 | 9 / 12 / 20 / 18 | | 0.25 each |
+
+**Verdicts.** `swing_gate_src` 1: `NULL` on the reversals (the flag was not the source; kept, it is
+the cleaner gate). The gyro: `NULL` on the reversals. **`explore_noise` 0: `WORKING` (loud):** three
+legs go to the sim's level or below, the HAT resets stop (the thrash was the current), the
+operator sees it as smoother. The white noise at σ 0.05, redrawn every tick with a step near the
+slew cap, was three quarters of the robot's command reversals; on the robot it costs more than in
+the sim because the servo passes it through. Its role for the gait on the robot is not
+exploration; it is noise.
+
+**The front-right leg.** With the noise off, FR still reverses 12–37 a stride on hip1 and knee
+while the other three sit at 3–9. Not the shares (0.24), not the stroke sign (RR shares it and
+is quiet). The per-leg learned controller is the suspect: the homeokinetic rule drives each
+leg's loop gain toward the edge, and without the noise to mask it FR's loop may be self-
+exciting at the tick rate. Lesion arm `…_e0_nl` (noise off + the learned controller off); the
+dash's diag now carries the per-leg loop state (`hk_share`, `clip_*`, `pre_*`) to read it.
+
+**The heading-damping lesion.** The D term (`heading_hold_gain` 0.3 on the gyro's yaw rate)
+changed nothing in the command and its removal gave the fastest run (62 s vs 72 and 82), the
+turn at 30 cm, and "more confident steps". It was a promoted term on the old gait (the variance
+collapse of 2026-08-04); on this gait, with the stroke and the steer gated and the body slower,
+the damping reads as stiffness. Combined arm `…_e0d0` (noise off + D off).
+
+**"Not as good at navigating away from walls" with the noise off — the ultrasonic, not the
+gait.** On the two noise-off runs the beam saw a surface inside 0.35 m on 25 and 4 readings of
+~1 100 (brief dips to 0.19–0.30 m) and the avoid loop fired on 2 of them; on the long D-off run,
+366 readings and 329 firings. A body that walks straight meets a wall at a glancing angle, sees
+it late, and the 0.3 m memory leaves no lead; the noisy gait wandered and met walls head-on.
+Arm `…_r05_…_e0d0`: the memory at 0.5 m, under the ~1.0 m floor return that steered the first
+runs. The 30 cm setting remains the clean forward-measurement condition.
+
+**Also:** the tipover was a curtain the robot could not back out of; the stuck escape was
+deferred on 2026-10-12 (the stride estimate is noise on carpet) and stays deferred. The speed
+to the carpet's end (82 / 72 / 62 s) is the operator's own stride instrument until the odometry is
+read back from the host (it is published; the dash does not yet log it).
