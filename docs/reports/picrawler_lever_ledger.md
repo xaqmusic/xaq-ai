@@ -8328,3 +8328,53 @@ runs. The 30 cm setting remains the clean forward-measurement condition.
 deferred on 2026-10-12 (the stride estimate is noise on carpet) and stays deferred. The speed
 to the carpet's end (82 / 72 / 62 s) is the operator's own stride instrument until the odometry is
 read back from the host (it is published; the dash does not yet log it).
+
+### ★★ 2026-10-15 (afternoon) — FOURTH ROBOT RUNS: the noise-off + damping-off arm walks "slow and purposeful"; the 50 cm memory turns the body before it scrapes; FR's residual thrash IS its homeokinetic loop (3 a stride with the controller off); the gate sits at 0.55 on the robot's STANDING lean, which halves every stroke — and the crab-walk was the floor, not the sunbeam
+
+*Operator: (1) noise off + D off: "68 s to the edge of the carpet; gait begins slow and
+purposeful and low noise; turn away from the wall was successful". (2) + avoid 50 cm: "59 s; the
+longer reflex range helped the robot turn away from the wall earlier and did not result in
+scraping legs against the wall; in both runs the legs moved faster and more 'confident' when
+turning or when other reflexes are engaged — why? In the last 30 s the robot began to crab-walk
+sideways; it had entered a sunbeam and the vision EPM grew a lot of nodes." (3) noise off + the
+learned controller off: "70 s; overall performance is lackluster".*
+
+| arm | raw reversals/stride hip1 FL/FR/RL/RR | knee | gate mean | HK share of the command | time to the carpet's edge |
+|---|---|---|---|---|---|
+| noise off + D off | 8 / 9 / 9 / 6 | 12 / 21 / 14 / 12 | 0.55 | 0.31 | 68 s |
+| + avoid 0.5 m | 7 / **16** / 9 / 7 | 9 / **21** / 11 / 9 | 0.55 | 0.29 | 59 s |
+| + learned controller off (lesion) | 3 / 3 / 3 / 3 | 6 / 6 / 8 / 8 | 0.52 | 0.02 | 70 s |
+
+**Four readings.**
+1. **FR's residual is the learned loop.** With the controller off every joint of every leg sits
+   at 3–8 reversals a stride; with it on, FR's hip and knee run at 16–21 while the other three
+   sit at 7–12. The homeokinetic share of the command is 0.3 on this gait (0.11 on the old one):
+   the layer is louder here, and FR's loop is at its edge. Removing the layer costs the gait its
+   participation ("lackluster", 70 s). Lever: lower the loop gain, not the layer —
+   `motor_gain` 3 → 2 (`…_mg2`, a TEST arm).
+2. **The gate sits at 0.55 while walking straight.** |pitch| 0.07–0.09 and |roll| 0.08 are the
+   robot's STANDING lean (the same nose-up stance the sim has), and the gate reads absolute
+   gravity, so the stroke is permanently withheld to about half: the slow gait. Turning adds the
+   steer differential to the amplitude, which is why the legs look "confident" whenever a reflex
+   engages — the body is briefly allowed a full stroke. Lever: the gate on the deviation from a
+   ~6 s running attitude (`stroke_level_ref_tau` 300, `…_ref300`), so only transients withhold
+   the push. The sim read it as more steps and more wobble; the robot is the test.
+3. **The crab-walk was the floor.** Odometry (the host logs it every 50 ticks): over the run the
+   body made +0.033 m/s forward with 0.001 lateral; in the last 30 s, −0.031 forward (backward)
+   and −0.041 lateral, with the strokes unchanged and the raw load shares shifting FL 0.16 →
+   0.11, FR 0.23 → 0.30. The vision EPM has no consumer and the host's CPU stayed under 5 %
+   (p50 2.7 → 4.6 %, tick budget 20 ms untouched). A sunbeam on the floor is the end of the
+   carpet: on a slick surface the loaded feet slide, so the net push comes from whichever feet
+   grip — the sim2real foot problem (2026-10-12), now seen on the robot as a lateral drift. The
+   grippy sole is the hardware lever; the stance press on a sliding foot is the brain's.
+4. **The 50 cm memory** turns the body before contact and costs nothing to the forward
+   measurement; it stays. The floor return at ~1 m that caused the first circling is still out.
+
+**Instrument note.** The dash already passes `--dump-inputs 50`, so odometry, body-frame
+velocity, stride estimate and raw loads are in every host log at 1 Hz — the speed and the net
+displacement no longer need a stopwatch. The raw FSR shares in those rows (RL 0.56–0.58, RR
+0.03) show the per-foot spread the normalisation absorbs; RR's reference of 0.05 is
+noise-dominated and that foot's share is the least trustworthy of the four.
+
+**Arms on the dash:** `…_r05_e0d0_ref300` (the gate on the running attitude) and
+`…_r05_e0d0_mg2` (loop gain 3 → 2, TEST), both on the 50 cm noise-off D-off base.

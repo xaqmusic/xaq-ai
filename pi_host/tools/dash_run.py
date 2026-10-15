@@ -129,7 +129,6 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
             flags.append("--camera")
         if str(be.get("OGMA_PICRAWLER_ODOM", "")) == "1":
             flags += ["--odom", "--odom-scale", str(be.get("OGMA_PICRAWLER_ODOM_SCALE", "2.0"))]
-            flags += ["--dump-inputs", "10"]    # 2026-10-15: odom/stride/imu rows every 10 ticks in the host log, so speed and net displacement are read back without a stopwatch
         if str(be.get("OGMA_PICRAWLER_HONEST_VEL_EGO", "")) == "1":
             flags.append("--vel-ego")
         if str(be.get("OGMA_PICRAWLER_CMD_FK_SOURCE", "")) == "1":
