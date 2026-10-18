@@ -8562,3 +8562,29 @@ the combined score, not the channel the gate read).
 **Re-use context for the 1 s window:** a rangefinder with jitter well under the per-window
 closing (a ToF at 1 cm sigma would resolve 3 cm per second), or a body walking ten times
 faster.
+
+### 2026-10-18 (late) — THE PUSH GATES ARE SUSPENDED (DEFERRED) UNTIL THE SERVO RAIL HAS ITS HARDWARE FIX; the 10 s range gate worked on the approach and then LATCHED
+
+*The sg3 run (82 s, cut short on a low battery: 6.7 V under load with dips to 6.0 V from the first
+stride). On the approach to a surface the gate stayed at 0 while the body walked at 3–5 cm/s and
+the range closed at the expected rate (the coin flip of sg2 resolved); when the range stopped
+closing at 0.57 m the gate rose over six seconds, as designed, and the stride channel agreed.
+Then it latched: push withheld to 2–30 %, so no closing, so the deficit stayed, until the surface
+left the beam 20 s later. Its onset was partly geometry (the beam swept the wall at a yaw rate
+just under the turning threshold). And the throttling did not throttle: the current during the
+latched phase (1.29 A mean, 3.3 A peaks) matched walking exactly — the gait kept lifting and
+swinging; only the push amplitude shrank. A gate on the push cannot protect the rail or the
+battery on this body.*
+
+**Verdict: DEFERRED, all three push gates** (stride stall REGRESSION, current REGRESSION, range
+PARTIAL-then-latch). Operator's call: suspended until the rail has its hardware fix (bulk
+capacitor on the HAT's 3.3 V rail or a separate servo supply, the 2026-10-05 finding), and the
+Pi's own supply holds on a low pack. Their configs stay on disk and out of the launcher.
+**Re-use context:** with the rail fixed, if a stall protection is still wanted, the range gate
+needs its release — the expectation taken from the push actually applied (the motor module
+publishing its effective stroke), so a withheld push expects no closing, the deficit falls, and
+the body probes again: push, test, fade, retry at the window's timescale. Not built.
+
+**Promoted and in the launcher:** the three benchmarks (the original mechanism) and the
+LoadPhaseGait stack's best in each world — sim `…__lpg_sl4s_st07_int` ("PROMOTED · LPG stack
+(sim)"), robot `…__lpgn_r05_e0d0_ref300` ("PROMOTED · ROBOT · LPG + running-attitude gate").
