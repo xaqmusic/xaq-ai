@@ -8378,3 +8378,49 @@ noise-dominated and that foot's share is the least trustworthy of the four.
 
 **Arms on the dash:** `…_r05_e0d0_ref300` (the gate on the running attitude) and
 `…_r05_e0d0_mg2` (loop gain 3 → 2, TEST), both on the 50 cm noise-off D-off base.
+
+### ★★★ 2026-10-18 — THE RUNNING-ATTITUDE GATE ON THE ROBOT: +40 % forward speed and FR's thrash halved; the run ended with two HAT brownouts at 3 A peaks and the Pi dropping out on a stall — the stall protection the gait lacked, and a battery lower than on the 13th
+
+*Operator: "I did a run on the new running attitude config but the robot got stuck. After that
+brownout I cannot reach the robot via ssh." The Pi had rebooted; its journal is volatile, so
+the previous boot left no record. Everything below is from the run's own feed, the brain's
+diag and action dump, and the INA capture, all of which the host kept writing to the end.*
+
+**The gait, before it died** (`…_r05_e0d0_ref300`, `stroke_level_ref_tau` 300, 184 s):
+
+| | gate mean | stroke sd (hip) | forward speed (odom) | net over run | raw reversals/stride FR hip1 / hip2 / knee | servo current mean / p95 |
+|---|---|---|---|---|---|---|
+| previous winner (noise off, D off, 50 cm) | 0.55 | 0.17 | 0.026 m/s | 3.16 m / 253 s | 16 / 10 / 21 | 1.34 / 2.54 A |
+| **the gate on the running attitude** | 0.64 | 0.22 | **0.037 m/s** | 2.81 m / 184 s | **9 / 6 / 9** | 1.10 / 2.39 A |
+
+`WORKING` (signal, one run): a larger stroke, 40 % more forward speed at LESS mean current, and
+the front-right's residual thrash halved, so part of what read as FR's learned loop was the
+absolute gate multiplying the standing lean tick by tick on that leg. The gate still sits at
+0.64, not 1: the reference adapts over ~6 s and the body rocks within that.
+
+**What killed it.** Three events, two kinds.
+1. **Two HAT brownouts, 22 s and 84 s:** 62 and 108 rail readings under 3.1 V in ten seconds,
+   the rail to 2.00 and 1.98 V, servo current 2.7–3.0 A at the dips, the HAT's MCU reset and
+   disarmed (`armed` 0), then re-armed (the 2026-10-03 fix held: the servos did not run to
+   their stops). The 2026-10-05 finding again: the 3.3 V rail browns out under servo current;
+   peaks above ~2.4 A are the known reset line, and this run spent 2–8 % of its samples there.
+2. **The Pi dropped out at 190 s** with the rail at 3.06–3.3 V and the fast current trace
+   showing 1.3 A and a 7.4 V bus in the last tenth of a second — no rail or current signature
+   at all. Two seconds earlier the stuck sense had fired (stall 1.0, forward stride −0.30 m/s,
+   intent error −1.06, speed cut to 0.49): the body was pushing on something it could not
+   back out of. The Pi sits on its own BEC upstream of the shunt, so a dropout there is
+   invisible to both instruments; a battery lower than on the 13th (bus 6.6–7.7 V, mean 7.4;
+   the HAT's battery sense ~3 045 counts against ~3 150) leaves the BEC less margin under
+   the stall's load. The journal cannot confirm an under-voltage reboot because it is not
+   persistent.
+
+**Levers, in order.**
+- **A stall gate on the push** (`stuck_gate_gain`, MotorEPMv2, reading StuckSense's score):
+  the stroke scaled by 1 − gain·stuck, so a body the stuck sense calls stalled stops driving
+  into what it is stalled on. The escape by backing was deferred (the stride estimate is noise
+  on carpet); this is the half that costs nothing when wrong — a stalled body that stops
+  pushing is merely still. "Fatal events have no gradient": the reflex keeps the learner alive.
+- **The persistent journal** on the Pi (`/var/log/journal`), so the next reboot carries its
+  cause; a one-line system change, the operator's call.
+- **Battery state before a run**: the bus mean and the HAT's battery sense are in every feed;
+  read them before trusting a brownout to the gait.

@@ -574,6 +574,17 @@ private:
     // stroke by the fused tilt every tick, and that signal is noisy on hardware.  alpha > 0:
     // the gate reads an EMA of |tilt| (alpha per tick) instead of the raw magnitude.  0 = raw.
     double stroke_level_smooth_ = 0.0;
+    // STALL GATE on the push (2026-10-18).  The robot died pushing on something it could not
+    // back out of: the stuck sense had fired two seconds earlier and nothing acted on it (the
+    // escape by backing is deferred).  stuck_topic = StuckSense's output ([score, ...]);
+    // the propulsion term is scaled by 1 - stuck_gate_gain * score, so a stalled body stops
+    // driving into what it is stalled on.  Costs nothing when wrong: a stalled body that
+    // stops pushing is merely still.  Empty topic / gain 0 = byte-identical.
+    std::string stuck_topic_;
+    double stuck_gate_gain_ = 0.0;
+    float  stuck_score_ = 0.0f;
+    bool   stuck_seen_ = false;
+    void handle_stuck(MessagePtr payload);
     float  tilt_mag_ema_ = 0.0f;
     // LEVEL GATE REFERENCED TO THE RUNNING ATTITUDE (2026-10-13, the operator's ramp).  With
     // the gate on absolute tilt a side slope is a permanent error and the push is withheld for
