@@ -8480,3 +8480,35 @@ fire with nothing ahead within the beam's 1.4 m; the curtain had a valid echo at
 3.3 V regulator with no reserve. A bulk capacitor on the HAT's rail, or a separate servo
 supply, is the lever for those; no gate on the command should be asked to trim a healthy
 stride's peaks.
+
+### 2026-10-18 (night) — THE SERVO CURRENT'S SHAPE DOES NOT SEPARATE A STALL FROM WALKING EITHER: the stalled body kept cycling; refuted on the logs before a gate was built on it
+
+*Operator: "Does this new method account for normal slippage? Both no progress and high sustained
+current?" — the hypothesis offered in reply: a stalled body's legs are pinned so its current goes
+flat, a walking or slipping body's current pulses at the stride; so deficit × (1 − pulsation)
+would separate stall from slip. Checked on the recorded feeds (50 Hz servo-branch current,
+pulsation = sd / mean over the segment, the strongest autocorrelation lag as the rhythm):*
+
+| segment | mean A | pulsation | strongest period (autocorr) |
+|---|---|---|---|
+| walking, running-attitude run, 100–180 s | 1.22 | 0.49 | 1.28 s (+0.09) |
+| **the curtain stall, last 3 s before the Pi died** | 1.22 | **0.47** | 1.28 s (+0.14) |
+| the same, last 8 s | 1.19 | 0.47 | 1.20 s (+0.39) |
+| walking, 2026-10-15 run, 60–200 s | 1.47 | 0.43 | 1.12 s (+0.19) |
+| the slick-floor crab-walk, last 30 s | 1.07 | **0.66** | 0.60 s (+0.42) |
+| the stall-gate run, push withheld, 20–100 s | 1.09 | 0.60 | 1.64 s (+0.22) |
+
+**Refuted.** The stalled body pulsed exactly like the walking one, with the same stride rhythm:
+against the curtain the gait kept cycling (the load rule only slows a loaded leg; the strokes
+went on, the feet scrubbed), so nothing was pinned and the current never went flat. Slip did
+not read lower either — it read HIGHER (0.66, with a faster rhythm), the opposite of the
+expectation. The current's level was refuted the same day; its shape is refuted now. Not
+built, by the measure-first rule.
+
+**What stands.** No-progress-toward-a-surface (the range deficit from the commanded speed) is
+the one honest stall signal on this body, and it cannot tell a stall from slippage with a
+surface ahead; with none ahead it is blind to both. The slip signature that the logs do show is
+in the odometry's direction (sideways and backward drift at 0.03–0.04 m/s with the strokes
+unchanged, 2026-10-15), which is a slow read and noise on carpet. Slip versus stall stays an
+open question; the conservative gate (fade the push when the surface ahead does not approach)
+is what runs next, and its cost on a slippery floor is a body that stops pushing.
