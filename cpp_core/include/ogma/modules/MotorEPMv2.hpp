@@ -585,6 +585,18 @@ private:
     float  stuck_score_ = 0.0f;
     bool   stuck_seen_ = false;
     void handle_stuck(MessagePtr payload);
+    // CURRENT GATE on the push (2026-10-18, after the stall gate on the stuck sense failed:
+    // the sense's stall channel is noise on carpet and fired 48 % of a walking run).  The
+    // signal that actually kills the robot is the servo current: the HAT's rail browns out
+    // and its MCU resets above ~2.4 A, and a stalled servo draws ~1 A each.  current_topic =
+    // the servo-branch current (A, sense.servo_current on both sides); the propulsion term is
+    // scaled by 1 - clamp((I_ema - lo) / (hi - lo), 0, 1): the push fades from lo and is
+    // gone at hi (the reset line).  The effort variable, read where the regulation hides it.
+    std::string current_topic_;
+    double current_gate_lo_ = 0.0, current_gate_hi_ = 0.0;   // amps; hi <= lo = off
+    float  current_a_ = 0.0f, current_ema_ = 0.0f;
+    bool   current_seen_ = false;
+    void handle_current(MessagePtr payload);
     float  tilt_mag_ema_ = 0.0f;
     // LEVEL GATE REFERENCED TO THE RUNNING ATTITUDE (2026-10-13, the operator's ramp).  With
     // the gate on absolute tilt a side slope is a permanent error and the push is withheld for

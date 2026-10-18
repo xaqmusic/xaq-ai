@@ -289,7 +289,8 @@ class RobotIo:
                         if isinstance(r, dict) and mid == "motor_epm" and isinstance(r.get("diag"), dict):
                             keep = ("leg_phase", "level", "stroke_level", "tilt", "corner_err",
                                     "lift_scale", "clear_ema", "foot_y_cmd", "sc_off", "sag", "swing_frac",
-                                    "hk_share", "clip_", "pre_", "c_mass", "amp_leg", "tle_leg")   # per-leg loop state
+                                    "hk_share", "clip_", "pre_", "c_mass", "amp_leg", "tle_leg",   # per-leg loop state
+                                    "stuck_score", "current_")                                 # the push gates' inputs
                             r = dict(r, diag={k: v for k, v in r["diag"].items() if k.startswith(keep)})
                         if r.get("status") == "ok":
                             row["mods"][mid] = r.get("diag", {})

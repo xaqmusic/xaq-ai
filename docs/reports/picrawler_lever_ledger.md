@@ -8424,3 +8424,26 @@ absolute gate multiplying the standing lean tick by tick on that leg. The gate s
   cause; a one-line system change, the operator's call.
 - **Battery state before a run**: the bus mean and the HAT's battery sense are in every feed;
   read them before trusting a brownout to the gait.
+
+### ★★ 2026-10-18 (later) — THE STALL GATE ON THE STUCK SENSE: `REGRESSION`, for the reason the ledger already held — the stall channel is stride noise on carpet; replaced by a CURRENT gate on the push
+
+*Operator: "the gate may be too sensitive. The robot only took a few steps and spent most of the
+time struggling."* Run 104 s: the stuck score above 0.8 for 44 % of the run, all of it the STALL
+channel (the range-deficit channel 0 %, never measured: it speaks only when the stride claims
+walking); the stride estimate sat at ±0.02 m/s around zero with its reference at 0.02–0.17; the
+push was withheld, the body made 0.36 m in 99 s (0.011 m/s). The loop the 2026-10-12 deferral
+predicted: withhold the push, the stride reads lower, the score rises, withhold more. My miss —
+the deferral was on the books. Verdict `REGRESSION`; the arm stays in the launcher as a TEST
+for the record; `stuck_gate_gain` 0 everywhere.
+
+**The right sensor is the one that kills the robot.** The HAT's rail browns out and its MCU
+resets above ~2.4 A (2026-10-05, 2026-10-18), a stalled servo draws ~1 A each (2026-10-05 scale
+probe), and the servo-branch current is on the bus on both sides (`sense.servo_current`: the
+INA on the robot, the power model in the sim). **Lever: `current_gate_lo/hi`** — the
+propulsion term fades linearly from full at 1.8 A to zero at 2.4 A of a 5-tick EMA of the
+current; steer untouched. The effort variable, read where the regulation hides it (the memory
+of 2026-10-05). Arm `…_r05_e0d0_ref300_cg`. What it should show: the current's time above
+2.4 A (2–8 % of samples on the 18th) going to ~0 with the stride intact on open floor; on a
+stall, the push fading while the steer turns the body away. What would refute it: a walking
+gait whose normal peaks (3 A on the 18th) are themselves above the line — then the gate
+withholds the push mid-stride and the test is the stride, not the stall.

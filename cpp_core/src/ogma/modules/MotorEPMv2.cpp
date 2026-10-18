@@ -97,6 +97,9 @@ std::vector<TopicSpec> MotorEPMv2::input_topics() const {
     if (!stuck_topic_.empty())
         v.emplace_back(stuck_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
+    if (!current_topic_.empty())
+        v.emplace_back(current_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
     if (!torque_topic_.empty())
         v.emplace_back(torque_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
@@ -1032,6 +1035,16 @@ ParamSchema MotorEPMv2::params_schema() const {
          "the push while the chassis is off level removes the cause rather than fighting the effect. The STEER half of the "
          "stroke (the heading hold) is not gated. 0 = off, byte-identical.",
          ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"current_topic", ParamMutability::ConstructionOnly,
+         "Servo-branch current in amps (sense.servo_current: the INA on the robot, the power model in the sim). Empty = no "
+         "subscription, byte-identical.",
+         ParamValue{std::string("")}, std::nullopt, std::nullopt},
+        {"current_gate_lo", ParamMutability::HotMutable,
+         "CURRENT GATE on the push: the propulsion term fades linearly from full at this current to zero at current_gate_hi "
+         "(a 5-tick EMA of the current). The HAT's rail browns out and its MCU resets above ~2.4 A (2026-10-05/18); a stalled "
+         "servo draws ~1 A. hi <= lo = off, byte-identical. The steer keeps its authority.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"current_gate_hi", ParamMutability::HotMutable, "The current (A) at which the push is fully withheld.", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"stuck_topic", ParamMutability::ConstructionOnly,
          "StuckSense's output (reality.proprio.stuck, [score, deficit, expected, observed]). Empty = no subscription, byte-identical.",
          ParamValue{std::string("")}, std::nullopt, std::nullopt},
@@ -1447,6 +1460,9 @@ ParamMap MotorEPMv2::current_params() const {
     m["stroke_level_steer"]  = stroke_level_steer_;
     m["stroke_level_smooth"] = stroke_level_smooth_;
     m["stuck_topic"]         = stuck_topic_;
+    m["current_topic"]       = current_topic_;
+    m["current_gate_lo"]     = current_gate_lo_;
+    m["current_gate_hi"]     = current_gate_hi_;
     m["stuck_gate_gain"]     = stuck_gate_gain_;
     m["stroke_level_ref_tau"] = stroke_level_ref_tau_;
     m["level_int_gain"]      = level_int_gain_;
@@ -1699,6 +1715,9 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "stroke_level_steer",  [&](auto const& v){ stroke_level_steer_  = get_double(v, "stroke_level_steer"); });
     apply_param(params, "stroke_level_smooth", [&](auto const& v){ stroke_level_smooth_ = get_double(v, "stroke_level_smooth"); });
     apply_param(params, "stuck_topic",         [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) stuck_topic_ = *p; });
+    apply_param(params, "current_topic",       [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) current_topic_ = *p; });
+    apply_param(params, "current_gate_lo",     [&](auto const& v){ current_gate_lo_     = get_double(v, "current_gate_lo"); });
+    apply_param(params, "current_gate_hi",     [&](auto const& v){ current_gate_hi_     = get_double(v, "current_gate_hi"); });
     apply_param(params, "stuck_gate_gain",     [&](auto const& v){ stuck_gate_gain_     = get_double(v, "stuck_gate_gain"); });
     apply_param(params, "stroke_level_ref_tau", [&](auto const& v){ stroke_level_ref_tau_ = get_double(v, "stroke_level_ref_tau"); });
     apply_param(params, "level_int_gain",      [&](auto const& v){ level_int_gain_      = get_double(v, "level_int_gain"); });
@@ -1902,6 +1921,11 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(
             stuck_topic_, SubscriptionKind::Direct,
             [this](std::string_view /*topic*/, MessagePtr p){ handle_stuck(p); }));
+    }
+    if (!current_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            current_topic_, SubscriptionKind::Direct,
+            [this](std::string_view /*topic*/, MessagePtr p){ handle_current(p); }));
     }
     if (!leg_phase_topics_.empty()) {
         if (int(leg_phase_topics_.size()) != n_legs_)
@@ -2326,6 +2350,17 @@ void MotorEPMv2::handle_feet(MessagePtr payload) {
 // from foot HEIGHT relative to that foot's own moving average, which measured 40.3 %
 // "swinging" while the feet were genuinely down 99.3 % of the time.  Every consumer of
 // in_swing_ (stance_lift, all the Cruse rules) was gating on that error.
+// CURRENT GATE input: the servo-branch current (A).  A ProprioToken on both sides.
+void MotorEPMv2::handle_current(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt || pt->values.size() < 1) return;
+    current_a_ = std::max(0.0f, pt->values[0]);
+    if (!current_seen_) current_ema_ = current_a_;
+    current_ema_ += 0.2f * (current_a_ - current_ema_);     // ~5 ticks
+    current_seen_ = true;
+}
+
 // STALL GATE input: StuckSense's score.
 void MotorEPMv2::handle_stuck(MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
@@ -3246,6 +3281,8 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "stroke_level_steer")  stroke_level_steer_  = get_double(value, "stroke_level_steer");
     else if (key == "stroke_level_smooth") stroke_level_smooth_ = get_double(value, "stroke_level_smooth");
     else if (key == "stuck_gate_gain")     stuck_gate_gain_     = get_double(value, "stuck_gate_gain");
+    else if (key == "current_gate_lo")     current_gate_lo_     = get_double(value, "current_gate_lo");
+    else if (key == "current_gate_hi")     current_gate_hi_     = get_double(value, "current_gate_hi");
     else if (key == "stroke_level_ref_tau") stroke_level_ref_tau_ = get_double(value, "stroke_level_ref_tau");
     else if (key == "level_int_gain")      level_int_gain_      = get_double(value, "level_int_gain");
     else if (key == "level_int_max")       level_int_max_       = get_double(value, "level_int_max");
@@ -6096,7 +6133,14 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // STALL GATE (stuck_gate_gain): a stalled body stops pushing; steer untouched.
             const float stall_mult = (stuck_gate_gain_ > 0.0 && stuck_seen_)
                                    ? std::max(0.0f, 1.0f - float(stuck_gate_gain_) * stuck_score_) : 1.0f;
-            float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd * load_gate * level_mult * stall_mult
+            // CURRENT GATE (current_gate_lo/hi): the push fades as the servo current climbs
+            // toward the HAT's reset line; steer untouched.
+            float cur_mult = 1.0f;
+            if (current_gate_hi_ > current_gate_lo_ && current_seen_) {
+                const float x = (current_ema_ - float(current_gate_lo_)) / float(current_gate_hi_ - current_gate_lo_);
+                cur_mult = 1.0f - std::clamp(x, 0.0f, 1.0f);
+            }
+            float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd * load_gate * level_mult * stall_mult * cur_mult
                                 + side * steer_eff * steer_mult);
             // STROKE-TO-STEP LOCK.  The ONLY consumer of L.step_phase: coupling, the
             // amplitude homeostat and prop-credit all keep the legacy L.phase, so this is
@@ -6914,6 +6958,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["level_err_mean"]         = level_ticks_ ? float(level_acc_ / double(level_ticks_)) : 0.0f;
     mod["stroke_level_mean"]      = float(stroke_level_ema_);
     mod["stuck_score"]            = stuck_score_;
+    mod["current_a"]              = current_a_;
+    mod["current_ema"]            = current_ema_;
     mod["level_off"]              = level_off_;
     mod["sc_off"]                 = sc_off_;
     mod["corner_err"]             = corner_err_;
@@ -7360,6 +7406,8 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["level_err_mean"]      = level_ticks_ ? float(level_acc_ / double(level_ticks_)) : 0.0f;
     j["stroke_level_mean"]   = float(stroke_level_ema_);
     j["stuck_score"]         = stuck_score_;
+    j["current_a"]           = current_a_;
+    j["current_ema"]         = current_ema_;
     j["level_off"]           = level_off_;
     j["sc_off"]              = sc_off_;
     j["corner_err"]          = corner_err_;
