@@ -344,7 +344,8 @@ z | 2 spare; the H2 prior is `state_prior_indices [12, 13]` (head gravity x, y โ
 | H3 | the camera-stability number over R30 | the tour | frame-to-frame difference, H2 vs control | the number moves with the eye. **Built (offline from a run's qpos): control 12.3, every H2 arm worse** |
 
 **Hardware check before H2 counts there:** whether the head IMU's readings reach a client over
-the ToF socket or stay inside tofd.
+the ToF socket or stay inside tofd. *2026-10-13: they reach clients as `head_imu.stream` (upstream PR #232, off by
+default on the zero3), and a gyro computed through the neck stands in for it in simulation (design doc ยง17.119).*
 
 ## 5. The playroom
 

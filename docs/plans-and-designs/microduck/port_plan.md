@@ -1,6 +1,9 @@
 > **LIVING DOC — the single reference for the Microduck project.** Started 2026-08-30 on branch
 > `microduck`, cut from `master` — **merged into `master` (R19–R25); duck work now lands on `master` branches.** Update it in place — do not fork a second port doc.
 >
+> **Status 2026-10-18: duck work is briefly PAUSED, pending Pollen's response to #381.** The last lever before the
+> pause answered whether the head brain needs a head IMU on the robot (design doc §17.119).
+>
 > **Status 2026-10-11:** the host runs three brains above Pollen's shipped policies (walker, stand,
 > kicks, roll, sit/stand, ground pick) in a playroom with a moving train; ★ MV is the promoted
 > stack ("▶ Resume here" below). Upstream: #260 (velocities and currents on `robot.state`) merged
@@ -26,6 +29,14 @@
 # Microduck port plan
 
 ## ▶ Resume here
+
+**2026-10-18: paused, pending Pollen's response to #381 (the design document).** Duck work waits for that reply before the
+next push; ★ MV stays the promoted stack. The last piece of work (design doc §17.119): the real robot does carry a head IMU
+(`head_imu.stream`, upstream PR #232 — off by default on the zero3 board), and a head gyro computed from the trunk gyro and the
+neck joint velocities serves the head brain about as well as the sensor in simulation (zeroing it is a loud regression;
+rounded to the servo's resolution it ties; one tick late it costs some pitch steadiness, and the operator saw a fine head).
+`--head-gyro-fk QUANT LAG` / `--head-gyro-zero`, presets HG LAG and HG CTL. **On resuming:** the open items under 2026-10-11
+below, the unexplained escapes rise in §17.119, and the substitute against the real head IMU once there is hardware.
 
 **2026-10-11: ★ MV promoted — navigation and telling what moves.** Since ★ M2: ★ L1 / ★ P2 (the saccade look, no pause),
 ★ E4 (2026-10-10: sit on a stall, then look and walk out). Then design doc §17.116 (places: the place map never forgets; the
@@ -284,7 +295,9 @@ stands, and this was checked against `duck-ipc-proto/src/lib.rs` rather than ass
 
 *2026-10-11: the paragraph below is the 2026-08-31 reading; #260 closed it, and upstream main
 (`dec725c`, 2026-10-07) also carries `imu` and the camera and ToF poses (`frames`). What the wire
-still lacks for ★ MV: the accelerometer, a head IMU, and a joint-level head intent.*
+still lacks for ★ MV: the accelerometer, a head IMU, and a joint-level head intent.* *2026-10-13: a head IMU is there after
+all (`head_imu.stream`, upstream PR #232, off by default on the zero3), and a substitute through the neck works in simulation
+(design doc §17.119).*
 
 **Track B loses velocity and load, and that is the honest cost of standing outside the loop.**
 Velocity can be differenced from `joints` at 50 Hz. Load cannot be recovered at all: it exists
@@ -1058,7 +1071,8 @@ identified model's regime, which is the rung-2 shape again.
 
 **Stage 16 — the full IMU vector (2026-09-01, operator-directed).** The IMU-count audit
 found ONE hardware IMU (the trunk `imu_to_dxl` v2 board, id 200; the v1 lineage's four
-other IMUs — the head's among them — are dropped, leaving `head_imu` as an orphan CAD frame).
+other IMUs — the head's among them — are dropped, leaving `head_imu` as an orphan CAD frame; *2026-10-13: superseded — upstream PR #232 added a head IMU after this audit,
+design doc §17.119*).
 The operator's directive — fill the vector with all possible inputs — became twelve sense
 slots per group: trunk pitch/roll, all three rates, linear accel, **head-frame gravity**
 (trunk IMU ∘ measured-neck FK — what the dropped head IMU would have sensed, the reduction
