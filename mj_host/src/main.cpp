@@ -1432,6 +1432,12 @@ bool g_detour_commit = false; double g_detour_reopen = 0.0;   // --detour-reopen
 double g_seek_gate_near = 0.0;      // --seek-gate-near M (§17.117 G1): the gate erases only returns no nearer than the target less M
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
+// --head-gyro-fk QUANT LAG (2026-10-12): the head brain's head gyro rebuilt from the trunk gyro and the neck joints
+// (DuckBody::head_gyro_fk) instead of the head IMU, each neck velocity rounded to QUANT rad/s (the XL330 reports 0.229 rpm a
+// count = 0.02398 rad/s; 0 = exact) and LAG ticks old (0 = this tick's).  --head-gyro-zero: the head gyro slots read zero
+// (the lesion: does the head brain use them at all).  Off = byte-identical; the log's "hw" stays the true sensor.
+bool g_head_gyro_fk = false, g_head_gyro_zero = false; double g_hgfk_quant = 0.0; int g_hgfk_lag = 0;
+std::array<double, 3> g_hgfk_now{}, g_hgfk_sensor{};   // what the head brain got, and the head IMU at that same tick
 bool g_head_gaze_sense = false; double g_head_stop_slew = 0.0;   // --head-stop-slew RATE: at a stop the yaw slews home until the look takes it; on release it slews back   // --head-gaze-sense: the gaze error in the head brain's 12th sense slot
 double g_yaw_range = 0.0; bool g_yaw_lin = false; bool g_range_sense = false; bool g_mover_sense = false; double g_yaw_lin_below = 0.0;   // --yaw-linearize-below VX: the calibration only while |vx cmd| < VX (the in-place deadband)   // --intent-range-sense   // --yaw-linearize: the walker's yaw is a desired RATE, mapped through the body's measured response   // --twist-yaw-range R: the walker's yaw command range (0 = the default 1.0)
 double g_tof_body = -1.0;   // --tof-body MEM: the walker's ToF slots in the BODY frame from the last MEM s of returns (-1 = off)
@@ -1701,6 +1707,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_head_home_s > 0.0) std::fprintf(stderr, "  head home: for %.1f s after a stop begins the head's targets are home (slewed), then the head brain's -- the level loop starts from level, not from where the walk left the head\n", g_head_home_s);
     if (g_tell_head) std::fprintf(stderr, "  tell head: while the head brain owns the joints, the policy's head command is the head's own targets as offsets from home (it balances for the head it carries)\n");
     if (g_head_rate > 0.0) std::fprintf(stderr, "  head slew: the head's joint targets and the walker's head command slew at most %.2f rad/s (the hand-offs between the head brain and the intent)\n", g_head_rate);
+    if (g_head_gyro_fk) std::fprintf(stderr, "  head gyro from FK: the trunk gyro + the neck joints' velocities (rounded to %.5f rad/s, %d ticks old) in place of the head IMU\n", g_hgfk_quant, g_hgfk_lag);
+    if (g_head_gyro_zero) std::fprintf(stderr, "  head gyro ZEROED for the head brain (lesion)\n");
     if (g_head_gaze_sense) std::fprintf(stderr, "  head gaze sense: the head brain's 12th sense slot carries the gaze error (the seek target's bearing while seek steers, else straight ahead, minus the head's yaw)\n");
     if (g_fix_escape_sign) std::fprintf(stderr, "  fix: the escapes head for the freest sector, not its mirror image\n");
     if (g_fix_sweep_sign) std::fprintf(stderr, "  fix: a stop's sweep is centred on its target's side, not the mirror image\n");
@@ -2894,7 +2902,23 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 while (e < -M_PI) e += 2.0 * M_PI;
                 head->feed_gaze_error(e);
             }
-            const auto hcmd = head->tick(head_q, body.head_gravity(), body.head_gyro(), g, w,
+            std::array<double, 3> head_w = body.head_gyro();
+            if (g_head_gyro_fk) {
+                static std::deque<std::array<double, 4>> qd_line;   // the neck velocities as the servos reported them
+                const auto v = body.joint_velocities();
+                std::array<double, 4> qd{};
+                for (int i = 0; i < 4; ++i) {
+                    double x = v[size_t(5 + i)];
+                    if (g_hgfk_quant > 0.0) x = g_hgfk_quant * std::round(x / g_hgfk_quant);
+                    qd[size_t(i)] = x;
+                }
+                qd_line.push_back(qd);
+                while (int(qd_line.size()) > g_hgfk_lag + 1) qd_line.pop_front();
+                g_hgfk_sensor = head_w;
+                head_w = g_hgfk_now = body.head_gyro_fk(qd_line.front());
+            }
+            if (g_head_gyro_zero) head_w = {0.0, 0.0, 0.0};
+            const auto hcmd = head->tick(head_q, body.head_gravity(), head_w, g, w,
                                          q[2] - kHomePose[2]);            // the left hip pitch: the stride clock
             if (driver == Driver::Brain) command.head = hcmd;
         }
@@ -3391,6 +3415,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 const auto hg = body.head_gravity(); const auto hw = body.head_gyro(); const auto hc = head->last_command();
                 std::printf(",\"head\":[%.4f,%.4f,%.4f,%.4f],\"hg\":[%.4f,%.4f,%.4f],\"hw\":[%.4f,%.4f,%.4f]",
                             hc[0], hc[1], hc[2], hc[3], hg[0], hg[1], hg[2], hw[0], hw[1], hw[2]);
+                if (g_head_gyro_fk) std::printf(",\"hwf\":[%.4f,%.4f,%.4f],\"hws\":[%.4f,%.4f,%.4f]", g_hgfk_now[0], g_hgfk_now[1], g_hgfk_now[2],
+                                                g_hgfk_sensor[0], g_hgfk_sensor[1], g_hgfk_sensor[2]);   // what the head brain got; the head IMU at that tick
                 if (g_translate > 0.0) std::printf(",\"fore\":%.4f", g_fore_now);
                 if (g_neck_burst_s > 0.0) std::printf(",\"nb\":%d", neck_burst_left > 0 ? 1 : 0);
                 if (g_gaze_mover_memory) std::printf(",\"gmm\":%d", g_gmm_now);
@@ -3904,6 +3930,12 @@ int main(int argc, char** argv) {
             g_tof_lag = std::stod(next("--tof-real"));
         } else if (a == "--head-stop-slew") {
             g_head_stop_slew = std::stod(next("--head-stop-slew"));
+        } else if (a == "--head-gyro-fk") {
+            g_head_gyro_fk = true;
+            g_hgfk_quant = std::stod(next("--head-gyro-fk"));
+            g_hgfk_lag = std::stoi(next("--head-gyro-fk"));
+        } else if (a == "--head-gyro-zero") {
+            g_head_gyro_zero = true;
         } else if (a == "--head-gaze-sense") {
             g_head_gaze_sense = true;
         } else if (a == "--yaw-linearize-below") {

@@ -143,6 +143,12 @@ public:
     // model), so nothing else changes. Hardware: the ToF board's IMU.
     std::array<double, 3> head_gyro() const;
     bool has_head_gyro() const { return head_gyro_adr_ >= 0; }
+    // The head IMU's gyro REBUILT without a head IMU (2026-10-12, --head-gyro-fk): the trunk gyro carried through the
+    // neck's forward kinematics, plus each neck joint's velocity about its own axis, expressed in the head_imu site's
+    // frame -- what the head_gyro sensor reads, from what robot.state carries (imu.gyro, joints, velocities).  The caller
+    // passes the four neck-joint velocities (neck_pitch, head_pitch, head_yaw, head_roll) so it can quantise or delay
+    // them as the servos would; the joint AXES come from the measured positions (FK).  Exact on a rigid chain.
+    std::array<double, 3> head_gyro_fk(const std::array<double, 4>& neck_qdot) const;
     std::array<double, 2> head_com_trunk() const;   // head-subtree CoM offset, trunk frame x/y (m)
 
     // Trunk-frame angular velocity, rad/s, from the model's own gyro sensor.
@@ -208,6 +214,8 @@ private:
     int trunk_body_  = -1;
     int    n_objects_ = 0;                    // bodies named obj_*
     int    head_gyro_adr_ = -1;               // sensordata address of head_gyro, or -1
+    int    imu_site_ = -1, head_imu_site_ = -1;   // the trunk IMU's and the head IMU's sites (head_gyro_fk)
+    std::array<int, 4> neck_jnt_{};            // joint ids of the four neck joints (policy indices 5-8)
     bool   robot_contact(int i, int& other_geom) const;   // is contact i the robot's, and with which geom
     std::vector<char> qpos_is_robot_;         // per qpos index: does the robot own it (reset noise)
     std::array<double, 3> push_{};

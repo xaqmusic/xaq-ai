@@ -101,6 +101,9 @@ DuckBody::DuckBody(const std::string& scene_path) {
         const int sid = mj_name2id(m_, mjOBJ_SENSOR, "head_gyro");
         head_gyro_adr_ = (sid >= 0) ? m_->sensor_adr[sid] : -1;
     }
+    imu_site_      = require(m_, mjOBJ_SITE, "imu", "site");
+    head_imu_site_ = require(m_, mjOBJ_SITE, "head_imu", "site");
+    for (int k = 0; k < 4; ++k) neck_jnt_[size_t(k)] = require(m_, mjOBJ_JOINT, kPolicyJoints[5 + k], "joint");
     if (train_contacts) {
         // microduck_rl's FULL_COLLISION, the contacts the walking policy trained with: the soles frictional (condim 3, priority
         // 1, friction 1.0), every other robot collision geom frictionless (condim 1)
@@ -192,6 +195,25 @@ std::array<double, 3> DuckBody::head_gyro() const {
     if (head_gyro_adr_ < 0) return {0.0, 0.0, 0.0};
     const double* w = &d_->sensordata[head_gyro_adr_];
     return {w[0], w[1], w[2]};
+}
+
+std::array<double, 3> DuckBody::head_gyro_fk(const std::array<double, 4>& neck_qdot) const {
+    // world-frame angular velocity of the head: the trunk's (its gyro, rotated out of the IMU site) plus each neck
+    // joint's rate about its world axis; then into the head IMU site's frame.  Every rotation used is the trunk's
+    // world attitude composed with the neck FK, and the trunk's attitude cancels in the final product, so the result
+    // depends only on the trunk gyro, the neck angles and the neck velocities -- the robot's own sensors.
+    const double* Ri = &d_->site_xmat[9 * imu_site_];        // row-major, site -> world
+    const double* Rh = &d_->site_xmat[9 * head_imu_site_];
+    const double* g  = &d_->sensordata[gyro_adr_];
+    double w[3];
+    for (int r = 0; r < 3; ++r) w[r] = Ri[3 * r] * g[0] + Ri[3 * r + 1] * g[1] + Ri[3 * r + 2] * g[2];
+    for (int k = 0; k < 4; ++k) {
+        const double* ax = &d_->xaxis[3 * neck_jnt_[size_t(k)]];
+        for (int r = 0; r < 3; ++r) w[r] += ax[r] * neck_qdot[size_t(k)];
+    }
+    std::array<double, 3> out{};
+    for (int c = 0; c < 3; ++c) out[size_t(c)] = Rh[c] * w[0] + Rh[3 + c] * w[1] + Rh[6 + c] * w[2];   // Rh^T w
+    return out;
 }
 
 DuckBody::~DuckBody() {

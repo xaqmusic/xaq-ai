@@ -8419,3 +8419,59 @@ updates) are the chase's next levers.
 the camera is tied to the robot's center").** The look-at point now eases toward the trunk (0.5 s of run time) and a right-drag
 pan is kept as an offset that rides with the duck; `O` recentres (`tools/duck_viewer/view.py` `CameraFollow`). The operator:
 "the camera works well."
+
+### 17.119 The head gyro on the real robot, and a substitute computed through the neck (2026-10-13)
+
+**The question (the operator):** the head brain reads a head gyro that our scene adds (H0, §17.9) and the gap table lists as
+"not present" on the robot; what is the sensor's real state, and could another mechanism give the same head behaviour?
+
+**The hardware, read from upstream `main` (pollen-robotics/microduck PR #232, 2026-09-07..10 — after our 2026-09-01 IMU audit,
+port plan Stage 16, which is why our docs said "not present").** The wire has `head_imu.stream` / `head_imu.frame`: gyro (rad/s)
+and accelerometer (m/s²) in the chip's own axes, a Madgwick orientation, `t_ns` on CLOCK_MONOTONIC (robot.state's clock).
+`robot.state.frames.head_imu` (proto v24) gives the sensor-to-trunk pose to rotate samples. Two boards:
+
+- **zero3:** a BMI088 on the head HAT, served by `tofd`, **off by default** (about 4 % of a core at 100 Hz; `[head_imu] enabled`
+  in robotd.toml, or `tofd --imu --imu-hz N`).
+- **beta:** the face board's LSM6DSV16X, served by `robotd`, on by default at 60 Hz; the kinematic model has no beta mount yet.
+
+**The substitute.** In a rigid body the head's angular rate is the trunk's plus each neck joint's axis times its velocity:
+ω_head = R_head^T (R_imu · ω_trunk + Σ_j axis_j · q̇_j) over the four neck joints (neck pitch, head pitch, head yaw, head roll).
+Both inputs are on the robot already: the trunk gyro, and the servo velocities on `robot.state` (#260), which an XL330 reports
+in counts of 0.229 rpm = 0.02398 rad/s. `DuckBody::head_gyro_fk` computes it; `--head-gyro-fk QUANT LAG` hands it to the head
+brain in place of the head IMU, each neck velocity rounded to QUANT and LAG ticks old; `--head-gyro-zero` zeroes the head
+brain's gyro slots (the lesion). Both off, the binary is tick-identical to the previous one (240 s, seed 7). The log's `hw`
+stays the true sensor; with the flag on it adds `hwf` (what the head brain got) and `hws` (the head IMU at that same tick).
+Head gravity was never a sensor here: it is already trunk IMU ∘ FK on hardware (Stage 16).
+
+**The A/B (★ MV, n = 24 each, 600 s from 30 s; arms `mj_host/log/ten/hgfk_*`; placebo = `play.explore_seed` 12).** Head
+metrics while walking upright (scratch `head_readout.py`): the true head gyro's RMS per axis, roll and pitch error from level,
+the share of ticks past 0.15 of pitch error. Paired Δ against the control; * = the 95 % interval excludes 0.
+
+| arm | substitute vs sensor (same tick) | gyro all | gyro y (pitch axis) | pitch err | pitch > 0.15 | body sees target | bearing err |
+|---|---|---|---|---|---|---|---|
+| control `ctl` | — | 0.958 | 0.684 | 0.028 | 1.84 % | 44 % | 26° |
+| exact FK `ex` | 0 | bit-identical | | | | 44 % | 26° |
+| rounded 0.024, no lag `q` | ~1 % | +0.070* | +0.110 | +0.007* | +1.06 | 43 % | 27° |
+| rounded, 1 tick late `real` | 46 % | +0.034 | **+0.154*** | +0.004 | +0.28 | 45 % | 25° |
+| zeroed `zero` | — | **+0.163*** | **+0.362*** | **+0.016*** | **+2.11*** | **36 %** | **31°** |
+| placebo `plc` | — | +0.046 | +0.060 | +0.005 | +1.06 | 43 % | 26° |
+
+The battery (`fx_study.py`, paired Δ): the placebo alone moved skills touching −10.4*, walls +6.4, cells −8.2, so engagement
+deltas are read against it. Stops at things: `real` −8.4*, `zero` −9.9*, `q` −6.1, placebo −5.8. Escapes: `real` +1.46*,
+`q` +1.92*, `zero` +0.62, placebo +0.42. `q` also: cells −10.5*, train contacts −1.17*. Falls, skills, map growth, boring and
+interesting tie on every arm.
+
+- **Exact FK `TAUTOLOGY`** — in a rigid simulation the computed gyro is the sensor; this confirms the reduction, not behaviour.
+- **Zeroed `REGRESSION`, loud** — pitch shake +53 %, pitch error +57 %, the body on its target 44 → 36 %: the head brain uses
+  the gyro, and a robot without one would need the substitute or the sensor.
+- **Rounded, no lag `NULL`** — about the placebo's size on the head; the servo's resolution costs nothing measurable.
+- **Rounded, 1 tick late `PARTIAL`** — only the pitch axis moves beyond the placebo (+0.15 against the lesion's +0.36), gaze
+  ties. The lag is pessimistic: on the robot the trunk gyro and the joint velocities come off the same bus read. **The
+  operator watched it (preset HG LAG, seed 4 from 120 s, the worst seed's worst window): "the head looks fine."**
+- **Unexplained:** escapes rise in both substitute arms and not under the lesion; a rounding error of 1 % is an unlikely
+  cause, and the control's 2.4 may be a low draw. A second placebo would settle it.
+
+**Context and re-use.** Rigid MuJoCo: the neck's compliance and gear backlash are not modelled, and they are exactly what the
+joint encoders miss, so the substitute's error on the robot is larger than here by an unknown amount. Re-measure on hardware
+against the real `head_imu.stream` (enable it on a zero3) before choosing; the real stream is asynchronous at 50–100 Hz, which
+is its own lag. Presets **HG LAG** and **HG CTL** (seed 4). Signal, not finding: fixed seeds, no perturbation test.
