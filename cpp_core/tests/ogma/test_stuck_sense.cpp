@@ -104,3 +104,33 @@ TEST(StuckSense, TheRangeChannelExpectedFromTheCommandFiresWhenTheStrideEstimate
     for (uint64_t t = 0; t < 40; ++t) { ok.run(t, r, true, 0.0f); r -= 0.03f / 50.0f; }
     EXPECT_LT(ok.m.last_deficit(), 0.15f);
 }
+
+TEST(StuckSense, MedianWindowEndsResolveAWalkUnderTheSonarsJitterWhereSingleSamplesCoinFlip) {
+    // The robot run of 2026-10-18 (sg2): the sonar's reading jitters 0.04 m (median) to 0.17 m
+    // (90th percentile) over a second and a third of its readings are invalid, while the body
+    // closes 0.03 m in that second.  Two single end samples over 1 s make the deficit a coin
+    // flip (measured 35 % exactly 1 and 38 % exactly 0 while the odometry said progressing);
+    // the gate withheld a fifth of the push on a body that was never stuck.
+    auto jitter = [](uint64_t t) { const double j[] = {0.0, 0.08, -0.05, 0.12, -0.09, 0.03, -0.11}; return float(j[t % 7]); };
+    auto valid  = [](uint64_t t) { return t % 3 != 1; };
+    ogma::ParamMap single = {{"window_ticks", int64_t{50}},  {"ema_alpha", 0.05}, {"min_expected_m", 0.02}, {"expect_from_cmd", 0.03}, {"decay", 0.0}};
+    ogma::ParamMap median = {{"window_ticks", int64_t{500}}, {"ema_alpha", 0.05}, {"min_expected_m", 0.15}, {"expect_from_cmd", 0.03}, {"decay", 0.0},
+                             {"end_median_ticks", int64_t{100}}};
+    // Walking toward a wall at the commanded rate under that jitter.
+    Fix s_walk(single), m_walk(median);
+    float r = 1.2f;
+    for (uint64_t t = 0; t < 1500; ++t) {
+        s_walk.run(t, r + jitter(t), valid(t), 0.0f); m_walk.run(t, r + jitter(t), valid(t), 0.0f);
+        r -= 0.03f / 50.0f;
+    }
+    EXPECT_GT(s_walk.score(), 0.3f) << "single end samples: the jitter reads as a deficit on a walking body";
+    // The jitter pattern's phase at the two ends leaves a residual (~0.05 m on the 0.3 m expected):
+    // the walk reads a fifth of a deficit, not a coin flip.
+    EXPECT_LT(m_walk.score(), 0.3f) << "median ends over 10 s: the walk is resolved to well under the coin flip";
+    EXPECT_LT(m_walk.score(), 0.5f * s_walk.score());
+    // Pinned against the wall under the same jitter: the median channel still fires.
+    Fix m_stall(median);
+    for (uint64_t t = 0; t < 1500; ++t) m_stall.run(t, 0.6f + jitter(t), valid(t), 0.0f);
+    EXPECT_GT(m_stall.score(), 0.8f) << "the wall does not approach: a full deficit, jitter or not";
+    EXPECT_TRUE(m_stall.m.measured());
+}

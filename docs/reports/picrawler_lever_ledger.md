@@ -8512,3 +8512,53 @@ in the odometry's direction (sideways and backward drift at 0.03–0.04 m/s with
 unchanged, 2026-10-15), which is a slow read and noise on carpet. Slip versus stall stays an
 open question; the conservative gate (fade the push when the surface ahead does not approach)
 is what runs next, and its cost on a slippery floor is a body that stops pushing.
+
+### 2026-10-18 (night) — THE RANGE-DEFICIT GATE READ THE SONAR'S JITTER, NOT A STALL: a 1 s window cannot resolve the 3 cm a walking body closes — the window goes to 10 s with median ends, and the expectation to the body's measured 0.02 m/s
+
+*The run of "running attitude + range-deficit stall gate" (`…_ref300_sg2`, 189 s, 0 HAT resets,
+rail never below 3.0 V, the operator: "the robot did not encounter any stuck situations").
+Verdict on the gate as built: NULL on progress at n=1 and a MEASUREMENT DEFECT in its input.*
+
+| run (2026-10-18) | net m/s | path m/s | along-heading (5 s windows) | straight | reversals/s | range_score > 0.5 | rail min |
+|---|---|---|---|---|---|---|---|
+| running attitude (`ref300`, baseline) | 0.015 | 0.054 | 0.020 | 0.27 | 136 | 6 % (gate not wired) | 1.98 V (the Pi died) |
+| + range-deficit gate (`sg2`) | 0.018 | 0.039 | 0.020 | 0.46 | 150 | **15 %** (34 % > 0.2) | 3.04 V |
+
+**What the channel was reading.** While the odometry said the body was progressing along its
+heading (> 1.5 cm/s), the channel's deficit was **35 % exactly 1.0 and 38 % exactly 0.0** (mean
+0.50): a coin flip. The sonar's valid reading changes by 0.040 m (median) to 0.17 m (90th
+percentile) over one second, and a third of its readings are invalid, while the body closes
+0.03 m in that second; two single end samples one second apart cannot see 3 cm through that.
+The gate's smoothed input therefore sat at 0.3–0.95 whenever a surface was within 1.4 m and
+the push was withheld a fifth of the time on average (`stuck_gate_gain` 1 × a mean
+`range_score` of 0.19), peaking at 95 % during wall approaches at t = 56, 78, 104 s where the
+odometry shows the body still moving at 1–3 cm/s. A second bias on top: the expectation
+(`expect_from_cmd` 0.03) is above what this stack's body measurably does along its heading on
+carpet (0.020 mean in both runs), so a healthy walk already reads a third of a deficit.
+
+**Why it did not hurt more.** The gate only attenuates the stroke; the gait kept cycling, net
+progress matched the baseline exactly (0.020 along-heading in both), and the straightness
+doubled — read with care, n=1 and the baseline run ended in the brownout. The run was also the
+first of the day with no rail excursion below 3.0 V, which the gate may have bought by
+trimming the stroke near walls; that is not a stall protection, it is a random 20 % push
+attenuator near walls, and it is recorded as such.
+
+**Lever (re-instrumentation, not a new idea).** StuckSense `end_median_ticks`: the range at
+each end of the window is the MEDIAN of the valid samples in the window's first and last N
+ticks (an end needs a quarter of them valid). Default 0 = legacy single samples, byte-identical.
+Test: under the recorded jitter pattern (±0.12 m, one in three invalid) a 1 s window with single
+ends scores > 0.3 on a walking body; a 10 s window with 2 s median ends scores under 0.3 and
+under half of that, and still scores > 0.8 on a wall that does not approach. The residual
+(~0.2) is the jitter's phase at the two ends on a 0.3 m expectation; a walk reads a fifth of a
+deficit, not a coin flip. **Arm `…_ref300_sg3`** ("EXP · ROBOT · running attitude + 10 s range
+gate"): `window_ticks` 500, `end_median_ticks` 100, `min_expected_m` 0.10, `expect_from_cmd`
+0.02 (the body's measured along-heading speed under this stack — a constant, named as such;
+the adaptive form, the body's own recent best closing rate held like the stall channel's
+`v_ref`, is the next lever if this one holds). The cost: a stall takes several seconds to
+register; this gate protects the rail from a long stall, not a stumble. The dash now logs the
+gate's actual input (`stuck_gate_in`), which the sg2 run did not (its `stuck_score` row is
+the combined score, not the channel the gate read).
+
+**Re-use context for the 1 s window:** a rangefinder with jitter well under the per-window
+closing (a ToF at 1 cm sigma would resolve 3 cm per second), or a body walking ten times
+faster.

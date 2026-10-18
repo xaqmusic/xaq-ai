@@ -96,6 +96,14 @@ private:
     // stall on the 18th the stride read -0.3 m/s (carpet noise) and the channel stayed silent.
     // 0 = legacy (the stride's own claim), byte-identical.
     double expect_from_cmd_ = 0.0;    // m/s at full speed command
+    // 2026-10-18 (night): the window's ends as MEDIANS of the valid samples in its first and
+    // last end_median_ticks.  The sonar's reading jitters 0.04 m (median) to 0.17 m (90th
+    // percentile) over a second against the 0.03 m a walking body closes in that second, so
+    // two single end samples make the deficit a coin flip (measured: 35 % exactly 1, 38 %
+    // exactly 0 while the odometry said the body was progressing).  0 = legacy (single
+    // samples), byte-identical.
+    int    end_median_ticks_ = 0;
+    bool   end_range(size_t begin, size_t end, double& r_out) const;   // median of the valid samples in ring_[begin, end)
 
     struct Sample { double r; bool valid; double vfwd; double cmd; };
     std::deque<Sample> ring_;
