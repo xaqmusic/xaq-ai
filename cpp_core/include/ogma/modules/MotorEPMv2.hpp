@@ -582,6 +582,11 @@ private:
     // stops pushing is merely still.  Empty topic / gain 0 = byte-identical.
     std::string stuck_topic_;
     double stuck_gate_gain_ = 0.0;
+    // 0 = the sense's combined score (the stall channel is stride noise on carpet: REGRESSION
+    // 2026-10-18); 1 = the RANGE channel alone (values[4]: "I command forward and the wall does
+    // not get closer"), through an EMA of stuck_gate_tau ticks.
+    double stuck_gate_src_ = 0.0, stuck_gate_tau_ = 0.0;
+    float  stuck_gate_in_ = 0.0f;
     float  stuck_score_ = 0.0f;
     bool   stuck_seen_ = false;
     void handle_stuck(MessagePtr payload);

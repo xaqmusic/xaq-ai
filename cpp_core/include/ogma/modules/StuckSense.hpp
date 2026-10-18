@@ -90,8 +90,14 @@ private:
     double v_ref_tau_s_    = 20.0;    // the peak-hold's decay
     double v_floor_        = 0.01;    // m/s; v_ref never falls below this (a body that never walked has no stall)
     double stall_frac_     = 0.25;    // v_ema below this fraction of v_ref is a full stall
+    // 2026-10-18: the range channel's expectation from the COMMANDED speed instead of the
+    // stride estimate.  expected = sum(speed_cmd * expect_from_cmd / hz) over the window, so the
+    // channel speaks whenever the brain commands forward with a surface ahead -- at the fatal
+    // stall on the 18th the stride read -0.3 m/s (carpet noise) and the channel stayed silent.
+    // 0 = legacy (the stride's own claim), byte-identical.
+    double expect_from_cmd_ = 0.0;    // m/s at full speed command
 
-    struct Sample { double r; bool valid; double vfwd; };
+    struct Sample { double r; bool valid; double vfwd; double cmd; };
     std::deque<Sample> ring_;
     double d_ = 1.5; bool valid_ = false; double vfwd_ = 0.0; double speed_cmd_ = 1.0; bool have_speed_ = false;
     double yaw_ = 0.0, yaw_rate_ = 0.0; bool have_odom_ = false;

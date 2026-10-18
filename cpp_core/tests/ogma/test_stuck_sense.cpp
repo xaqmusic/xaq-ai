@@ -81,3 +81,26 @@ TEST(StuckSense, AbstainsWhileTheBodyIsActuallyTurningNotWhileATurnIsMerelyComma
     for (int i = 0; i < 400; ++i) step(0.0f, 0.2 / 50.0 * std::sin(2.0 * M_PI * i / 70.0));
     EXPECT_GT(f.m.stall(), 0.9f) << "not moving, rocking but not turning, commanding forward: a stall";
 }
+
+TEST(StuckSense, TheRangeChannelExpectedFromTheCommandFiresWhenTheStrideEstimateIsNoise) {
+    // The fatal stall of 2026-10-18: a wall ahead at 0.6 m not getting closer, the brain commanding
+    // forward, the stride estimate reading noise around zero (carpet).  Legacy: the channel is
+    // silent (the stride claims no walking).  From the command: it fires.
+    Fix legacy({{"window_ticks", int64_t{10}}, {"ema_alpha", 0.5}, {"min_expected_m", 0.002}});
+    Fix cmd({{"window_ticks", int64_t{10}}, {"ema_alpha", 0.5}, {"min_expected_m", 0.002}, {"expect_from_cmd", 0.03}});
+    for (uint64_t t = 0; t < 40; ++t) {
+        const float noise = (t % 2 == 0) ? 0.02f : -0.02f;
+        legacy.run(t, 0.6f, true, noise); cmd.run(t, 0.6f, true, noise);
+    }
+    EXPECT_FALSE(legacy.m.measured()) << "the stride claims nothing, the legacy channel abstains";
+    EXPECT_TRUE(cmd.m.measured());
+    EXPECT_GT(cmd.m.last_deficit(), 0.9f) << "commanding forward, the wall does not approach: a full deficit";
+    auto s = std::dynamic_pointer_cast<const ogma::ProprioToken>(cmd.bus.last_value("reality.proprio.stuck"));
+    ASSERT_TRUE(s); ASSERT_EQ(s->values.size(), 5);
+    EXPECT_GT(s->values[4], 0.9f) << "the smoothed range channel is published on its own";
+    // Walking free toward it at the commanded rate: no deficit.
+    Fix ok({{"window_ticks", int64_t{10}}, {"ema_alpha", 0.5}, {"min_expected_m", 0.002}, {"expect_from_cmd", 0.03}});
+    float r = 1.2f;
+    for (uint64_t t = 0; t < 40; ++t) { ok.run(t, r, true, 0.0f); r -= 0.03f / 50.0f; }
+    EXPECT_LT(ok.m.last_deficit(), 0.15f);
+}

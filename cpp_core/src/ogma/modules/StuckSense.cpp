@@ -62,7 +62,8 @@ ParamSchema StuckSense::params_schema() const {
         {"v_ema_alpha",    ParamMutability::HotMutable, "The stride forward's EMA (the stall channel's sensed speed). 0.01 = ~2 s: long enough to average the gait's own +/-0.3 m/s stride oscillation.", ParamValue{0.01}},
         {"v_ref_tau_s",    ParamMutability::HotMutable, "The decay of the peak-hold of v_ema: the body's own recent best forward speed (s).", ParamValue{20.0}},
         {"v_floor",        ParamMutability::HotMutable, "v_ref never falls below this (m/s): a body that never walked has no stall.", ParamValue{0.01}},
-        {"stall_frac",     ParamMutability::HotMutable, "v_ema below this fraction of v_ref, while commanding, is a full stall.", ParamValue{0.25}},
+        {"stall_frac",     ParamMutability::HotMutable, "v_ema below this fraction of v_ref, while commanding, is a full stall.", ParamValue{0.25}},        {"stall_frac",     ParamMutability::HotMutable, "v_ema below this fraction of v_ref, while commanding, is a full stall.", ParamValue{0.25}},
+        {"expect_from_cmd", ParamMutability::HotMutable, "The range channel's expectation from the COMMANDED speed: expected = sum(speed_cmd * this / hz) over the window (m/s at full command; the body walks ~0.03). The channel then speaks whenever the brain commands forward with a surface ahead, not only when the stride estimate (noise on carpet) claims walking. 0 = legacy.", ParamValue{0.0}},
     };
 }
 
@@ -75,7 +76,7 @@ ParamMap StuckSense::current_params() const {
     m["cmd_min"] = ParamValue{cmd_min_}; m["range_max_m"] = ParamValue{range_max_m_};
     m["ema_alpha"] = ParamValue{ema_alpha_}; m["decay"] = ParamValue{decay_}; m["hz"] = ParamValue{hz_};
     m["v_ema_alpha"] = ParamValue{v_ema_alpha_}; m["v_ref_tau_s"] = ParamValue{v_ref_tau_s_};
-    m["v_floor"] = ParamValue{v_floor_}; m["stall_frac"] = ParamValue{stall_frac_};
+    m["v_floor"] = ParamValue{v_floor_}; m["stall_frac"] = ParamValue{stall_frac_};    m["v_floor"] = ParamValue{v_floor_}; m["stall_frac"] = ParamValue{stall_frac_}; m["expect_from_cmd"] = ParamValue{expect_from_cmd_};
     return m;
 }
 
@@ -99,7 +100,8 @@ void StuckSense::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "v_ema_alpha",    [&](auto const& v){ v_ema_alpha_    = get_double(v, "v_ema_alpha"); });
     apply_param(params, "v_ref_tau_s",    [&](auto const& v){ v_ref_tau_s_    = get_double(v, "v_ref_tau_s"); });
     apply_param(params, "v_floor",        [&](auto const& v){ v_floor_        = get_double(v, "v_floor"); });
-    apply_param(params, "stall_frac",     [&](auto const& v){ stall_frac_     = get_double(v, "stall_frac"); });
+    apply_param(params, "stall_frac",     [&](auto const& v){ stall_frac_     = get_double(v, "stall_frac"); });    apply_param(params, "stall_frac",     [&](auto const& v){ stall_frac_     = get_double(v, "stall_frac"); });
+    apply_param(params, "expect_from_cmd", [&](auto const& v){ expect_from_cmd_ = get_double(v, "expect_from_cmd"); });
     sub_ids_.push_back(bus_->subscribe(range_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ handle_range(p); }));
     sub_ids_.push_back(bus_->subscribe(stride_topic_, SubscriptionKind::Direct,
@@ -130,7 +132,8 @@ void StuckSense::on_param_change(std::string_view key, ParamValue const& value) 
     else if (k == "v_ema_alpha")    v_ema_alpha_    = get_double(value, k);
     else if (k == "v_ref_tau_s")    v_ref_tau_s_    = get_double(value, k);
     else if (k == "v_floor")        v_floor_        = get_double(value, k);
-    else if (k == "stall_frac")     stall_frac_     = get_double(value, k);
+    else if (k == "stall_frac")     stall_frac_     = get_double(value, k);    else if (k == "stall_frac")     stall_frac_     = get_double(value, k);
+    else if (k == "expect_from_cmd") expect_from_cmd_ = get_double(value, k);
     else if (k == "yaw_rate_max")   yaw_rate_max_   = get_double(value, k);
     else if (k == "yaw_window_ticks") yaw_window_ticks_ = std::max(2, int(get_double(value, k)));
     else throw std::invalid_argument("StuckSense: param '" + k + "' is construction-only / unknown");
@@ -156,7 +159,7 @@ void StuckSense::handle_speed(MessagePtr p) {
 }
 
 void StuckSense::tick(uint64_t tick_id) {
-    ring_.push_back(Sample{d_, valid_, vfwd_});
+    ring_.push_back(Sample{d_, valid_, vfwd_});    ring_.push_back(Sample{d_, valid_, vfwd_, (have_speed_ || speed_topic_.empty()) ? std::max(0.0, speed_cmd_) : 1.0});
     while (int(ring_.size()) > window_ticks_ + 1) ring_.pop_front();
     measured_ = false;
     if (have_odom_) {
@@ -179,7 +182,8 @@ void StuckSense::tick(uint64_t tick_id) {
         const Sample& a = ring_.front(); const Sample& b = ring_.back();
         if (a.valid && b.valid && a.r <= range_max_m_ && b.r <= range_max_m_) {
             double exp = 0.0;
-            for (size_t i = 1; i < ring_.size(); ++i) exp += ring_[i].vfwd / hz_;
+            if (expect_from_cmd_ > 0.0) for (size_t i = 1; i < ring_.size(); ++i) exp += ring_[i].cmd * expect_from_cmd_ / hz_;
+            else                        for (size_t i = 1; i < ring_.size(); ++i) exp += ring_[i].vfwd / hz_;
             if (exp >= min_expected_m_) {
                 expected_ = exp; observed_ = a.r - b.r;
                 deficit_ = float(std::clamp(1.0 - observed_ / expected_, 0.0, 1.0));
@@ -192,9 +196,10 @@ void StuckSense::tick(uint64_t tick_id) {
     score_ = std::max(stall_, range_score_);
     auto out = std::make_shared<ProprioToken>();
     out->tick_id = tick_id; out->producer_id = id_.empty() ? std::string("stuck") : id_; out->sensor = "stuck";
-    out->values = Eigen::VectorXf(4);
+    out->values = Eigen::VectorXf(5);
     out->values[0] = score_; out->values[1] = measured_ ? deficit_ : 0.0f;
     out->values[2] = float(expected_); out->values[3] = float(observed_);
+    out->values[4] = range_score_;    // the range channel alone, smoothed: what a push gate should read
     bus_->publish(output_topic_, out);
 }
 

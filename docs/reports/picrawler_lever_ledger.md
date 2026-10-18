@@ -8447,3 +8447,36 @@ of 2026-10-05). Arm `…_r05_e0d0_ref300_cg`. What it should show: the current's
 stall, the push fading while the steer turns the body away. What would refute it: a walking
 gait whose normal peaks (3 A on the 18th) are themselves above the line — then the gate
 withholds the push mid-stride and the test is the stride, not the stall.
+
+### ★★ 2026-10-18 (evening) — THE CURRENT GATE ON THE PUSH: `REGRESSION` — the servo current is the stride's own rhythm, not a stall; and a stall on this body does not show as current at all
+
+*Operator: run completed on the current-gate config; "let's see the data."* 292 s, 0 HAT resets.
+
+| | time > 2.4 A | time > 1.8 A | rail min / dips < 3.1 V | forward (odom) | knee reversals / stride |
+|---|---|---|---|---|---|
+| running attitude (the brownout run) | 4.9 % | 14.3 % | 1.98 V / 188 | **0.037 m/s** | 5–8 |
+| + current gate 1.8 → 2.4 A | 4.2 % | 14.5 % | 2.79 V / 57 | 0.010 m/s | **16–20** |
+
+The gate saw its input above 1.8 A on 12 % of ticks and modulated the push at the current's
+own rhythm: the servo current swings 0.3–3 A inside every stride as the legs drive, so a 5-tick
+average of it is the gait, not a stall. The stride fell to a third, the knee thrash tripled, and
+the rail's time above the reset line barely moved, because those dips ARE the stride's peaks.
+This is the refutation case named when the arm was built. **And a stall does not show as
+current here:** in the two seconds before the Pi dropped out on the 18th the fast trace read
+1.3–2.3 A, because slew-limited servos that have reached their targets against an obstacle
+draw little. Verdict `REGRESSION`; the arm stays as a TEST for the record; `current_gate_hi` 0.
+
+**What the record now says about the stall.** Three signals tried, three verdicts: the stride
+estimate (noise on carpet — the stall gate withheld a walking body), the current (the stride's
+own rhythm, and silent at a real stall), and the range deficit (the honest one — "I command
+forward and the wall does not get closer" — but it only speaks when the STRIDE claims walking,
+which at the fatal stall it did not). **Lever: the range deficit expected from the COMMANDED
+speed** (`expect_from_cmd` on StuckSense: expected = speed command × a nominal forward speed ×
+the window), so the sense speaks whenever the brain commands forward with a surface ahead,
+and the push gate reads THAT channel (`stuck_gate_src` 1) through a slow EMA. It will not
+fire with nothing ahead within the beam's 1.4 m; the curtain had a valid echo at 0.5–0.8 m.
+
+**The rail dips themselves are hardware** (the 2026-10-05 finding): 3 A stride peaks against a
+3.3 V regulator with no reserve. A bulk capacitor on the HAT's rail, or a separate servo
+supply, is the lever for those; no gate on the command should be asked to trim a healthy
+stride's peaks.
