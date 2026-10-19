@@ -1,7 +1,7 @@
 {
  "metadata": {
   "name": "EXP \u00b7 TEGOTAE \u00b7 bare rule + the robot's stance press (sim, measured body)",
-  "description": "WATCH: the diagonal pairs land together and all four feet clear the floor; the standing legs press down (the robot's stance press, stance_lift_gain 0.5) so the weight leaves the legs about to swing -- the operator's 'the diagonal legs push together'. Owaki & Ishiguro's rule (LoadPhaseGait, absolute load, sigma_r 1.75, period 70), stroke 0.525, lift hip2 -0.6 / knee +0.4, learned layer / tuck / heading hold / noise off, no GainEvolver; measured body; sim at 2 mm contact and 256 solver iterations (the defaults from 2026-10-19). No heading hold, so in the corridor it will curve. Numbers: see the plan, section 7.14. A MEASUREMENT SCAFFOLD.",
+  "description": "WATCH: the diagonal pairs land together and all four feet clear the floor; the standing legs press down (the robot's stance press, stance_lift_gain 0.5) so the weight leaves the legs about to swing -- the operator's 'the diagonal legs push together'. Owaki & Ishiguro's rule (LoadPhaseGait, absolute load, sigma_r 1.75, period 70), stroke 0.525, lift hip2 -0.6 / knee +0.4, learned layer / tuck / heading hold / noise off, no GainEvolver; measured body; sim at 2 mm contact and 256 solver iterations (the defaults from 2026-10-19). No heading hold, so in the corridor it will curve. Arena n=6 x 4500 (measured body, 2 mm, 256 iterations): 3.78 +/- 0.18 m, straight 0.72, 0 falls; corridor 3.79 +/- 1.27 m, 0 falls (plan 7.14). A MEASUREMENT SCAFFOLD.",
   "env_target": "picrawler",
   "gym_mode": "arena",
   "phase_tag": "motor-epm (minimal/deploy)",

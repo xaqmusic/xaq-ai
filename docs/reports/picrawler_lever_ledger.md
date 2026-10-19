@@ -8748,3 +8748,15 @@ hinge motor's per-iteration impulse cap: configs without `HONEST_TORQUE_CAP` now
 servo authority (38.4 N·m); the 2×2 of 2026-10-18 showed authority is not binding. Re-baseline of every
 launcher config (paired 256 vs 64, arena / corridor / room, n = 6) is in
 `~/xaq_runs/rebase_20261019/`; tables in the plan §7.14 and the next entry.
+
+### 2026-10-19 — RE-BASELINE AT 2 mm / 256 ITERATIONS: every config steps more and stands higher; the promoted stacks tie in the corridor, travel 10–30 % less in the arena, and FALL MORE IN THE ROOM (promoted robot 0.33 → 2.33 per 12 000 ticks); the bare Tegotae rule on the measured body goes 1.73 → 6.24 m
+
+*Plan §7.14 has the three tables (arena 4500, corridor 6000, room 12 000; n = 6; each config paired
+256 vs 64 at 2 mm; standard harnesses; `~/xaq_runs/rebase_20261019/`).* Highlights, 256 / 64: promoted
+LPG stack (sim) arena 4.99 / 6.47 m, corridor 4.08 / 4.03, room falls 1.00 / 0.33; promoted ROBOT
+arena 5.14 / 5.63, corridor 4.08 / 4.02 (std 0.11 / 0.56), room coverage 44 / 50, falls 2.33 / 0.33;
+benchmarks arena −15 to −42 %, corridor −0.5 to −1.5 m. Stride-proxy steps 2–8×, belly clearance
++12–20 mm everywhere. The room falls at 256 come mostly before the GainEvolver's tick-10 000 switch-on
+(promoted robot 11 of 14), so they belong to the body, not the evolver. **These are the baselines from
+2026-10-19.** Next for the stacks: the room falls on the stiffer body (the turn-ride-the-stroke anatomy of
+2026-10-13 is the first suspect), then any re-tuning.

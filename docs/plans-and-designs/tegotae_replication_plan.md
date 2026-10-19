@@ -650,6 +650,62 @@ straight. **The default stays 64 (verified byte-identical per tick) until the op
 gate (7.7), the press probe (7.8) and the learned weight-shift press (7.12) were judged against a
 body whose loaded joints gave way. Their re-use context is "rerun at 256".
 
+### 7.14 Re-baseline at the new sim defaults (2026-10-19)
+
+256 solver iterations became the default on 2026-10-19 (operator: "that slower speed sounds like
+what I see on the real robot"). Every launcher config was re-measured, each paired with
+`OGMA_SOLVER_ITERATIONS=64` and both at 2 mm contact, with the standard harnesses (`arenaavg`,
+`seedavg`, `roomavg`), n = 6, difficulty 0.3. The benchmarks and promoted configs ran headless on the
+CAD body (as the record always has); the two measured-body Tegotae entries ran on `measured_fsr`.
+Runs: `~/xaq_runs/rebase_20261019/`. Each cell is **256 / 64**.
+
+**Arena, 4500 ticks**
+
+| config | net_disp (m) | straight | falls | steps (proxy) | belly clearance (mm) | tilt_sd |
+|---|---|---|---|---|---|---|
+| P-e·h0 benchmark | 2.34 / 4.05 | 0.54 / 0.78 | 0 / 0 | 39 / 5 | 47 / 28 | 0.073 / 0.066 |
+| + hip2 +0.3 benchmark | 2.82 / 3.33 | 0.63 / 0.71 | 0.17 / 0 | 21 / 2.5 | 65 / 52 | 0.059 / 0.065 |
+| robot-stack benchmark | 2.70 / 3.31 | 0.61 / 0.69 | 0.33 / 0.17 | 21 / 5 | 65 / 51 | 0.058 / 0.080 |
+| PROMOTED · LPG stack (sim) | 4.99 / 6.47 | 0.78 / 0.84 | 0.17 / 0 | 29 / 13 | 68 / 53 | 0.055 / 0.045 |
+| PROMOTED · ROBOT · LPG + running-attitude gate | 5.14 / 5.63 | 0.83 / 0.86 | 0 / 0 | 69 / 56 | 65 / 49 | 0.064 / 0.089 |
+| Tegotae bare rule, CAD | 5.32 / 5.20 | 0.82 / 0.84 | 0 / 0 | 13 / 0 | 43 / 31 | 0.087 / 0.031 |
+| Tegotae bare rule, measured | **6.24 / 1.73** | **0.88 / 0.37** | 0 / 0 | 2 / 0 | 42 / 27 | 0.046 / 0.025 |
+| Tegotae + stance press, measured | 3.78 / 4.49 | 0.72 / 0.75 | 0 / 0 | 84 / 0 | 68 / 23 | 0.091 / 0.068 |
+
+**Corridor, 6000 ticks**
+
+| config | net_z (m) | straight | falls | steps | tilt_sd |
+|---|---|---|---|---|---|
+| P-e·h0 benchmark | 3.13 / 4.64 | 0.54 / 0.74 | 0 / 0 | 91 / 35 | 0.073 / 0.069 |
+| + hip2 +0.3 benchmark | 3.42 / 3.97 | 0.60 / 0.67 | 0.17 / 0 | 71 / 36 | 0.059 / 0.066 |
+| robot-stack benchmark | 3.04 / 3.75 | 0.54 / 0.63 | 0.33 / 0.17 | 65 / 40 | 0.059 / 0.078 |
+| PROMOTED · LPG stack (sim) | 4.08 / 4.03 | 0.60 / 0.63 | 0.17 / 0 | 96 / 47 | 0.061 / 0.062 |
+| PROMOTED · ROBOT | 4.08 / 4.02 (std 0.11 / 0.56) | 0.66 / 0.66 | 0 / 0 | 82 / 66 | 0.164 / 0.149 |
+| Tegotae bare rule, CAD | 4.45 / 2.83 | 0.64 / 0.54 | **0.67** / 0 | 29 / 26 | **0.325** / 0.117 |
+| Tegotae bare rule, measured | 4.69 / 1.63 | 0.68 / 0.58 | 0.17 / 0 | 36 / 22 | 0.122 / 0.139 |
+| Tegotae + stance press, measured | 3.79 / 4.17 | 0.66 / 0.62 | 0 / 0 | 85 / 47 | 0.189 / 0.151 |
+
+**Room (3 m), 12 000 ticks** (the promoted configs still carry the GainEvolver, which switches
+coupling on at tick 10 000 in both arms; most falls at 256 come *before* it: promoted robot 11 of
+14, promoted sim 6 of 6, robot-stack benchmark 4 of 5)
+
+| config | coverage (cells) | wall_frac | falls | net_disp |
+|---|---|---|---|---|
+| robot-stack benchmark | 33.0 / 39.0 | 0.020 / 0.055 | 0.83 / 0.17 | 0.90 / 0.95 |
+| PROMOTED · LPG stack (sim) | 39.2 / 41.5 | 0.032 / 0.024 | 1.00 / 0.33 | 0.89 / 0.62 |
+| PROMOTED · ROBOT | 44.2 / 50.3 | 0.123 / 0.142 | **2.33** / 0.33 | 0.71 / 1.16 |
+
+**Readings.** On the stiffer body every config steps more (2–8× by the stride proxy) and carries
+its belly 12–20 mm higher. In the open arena the benchmarks and promoted stacks travel 10–40 %
+less and less straight. In the corridor the two promoted configs tie (the robot config's spread
+falls fivefold, std 0.56 → 0.11) while the benchmarks lose about 0.6 m. In the room they **fall
+more**: the promoted robot config 0.33 → 2.33 per 12 000 ticks. That is the new body's open
+problem, and these stacks were tuned on the sagging one. The bare Tegotae rule on the measured body
+goes from the worst entry to the best in the arena (1.73 → 6.24 m, straight 0.37 → 0.88), because
+its rear feet now lift. The CAD bare rule now falls in the corridor (0.67, tilt_sd 0.33): with no
+heading hold it climbs the side walls. **These are the baselines from 2026-10-19.** Numbers before
+that date ran at 10 mm / 64 iterations.
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |

@@ -58,8 +58,8 @@ const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
 	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300.json",  # ROBOT: LPG with per-foot normalised FSR shares + the level gate on the running attitude + noise off + heading D off + avoid 50 cm: +40 % speed, FR thrash halved (ledger 2026-10-18)
 	# ---- EXPERIMENT (2026-10-18): Tegotae replication (docs/plans-and-designs/tegotae_replication_plan.md). The bare load rule with every
 	# ---- other joint writer off and no GainEvolver — a measurement scaffold, sim only. Same brain, two bodies: the CAD body the batches ran on, and the measured one.
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030__lpg_tegotae_trot.json",  # SIM, CAD body: trot from 6/6 random starts, 55 % clean trot strides, 4.45 m (2 mm contact)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030__lpg_tegotae_trot_measured.json",  # SIM, measured body: all four step at 2 mm contact, 31 % clean trot strides, 1.93 m
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030__lpg_tegotae_trot.json",  # SIM, CAD body: the bare rule; arena 5.32 m at 2 mm / 256 iterations (plan 7.14)
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030__lpg_tegotae_trot_measured.json",  # SIM, measured body: the bare rule; rear feet clear at 256 iterations, arena 6.24 m (plan 7.14)
 	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030__lpg_tegotae_trot_press.json",  # SIM, measured body + the robot's stance press (the weight shift); 2 mm + 256 iterations
 ]
 
