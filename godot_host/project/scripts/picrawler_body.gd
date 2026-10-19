@@ -245,6 +245,14 @@ func _make_contact_mat() -> PhysicsMaterial:
 	if _contact_mat == null:
 		_contact_mat = PhysicsMaterial.new()
 		_contact_mat.friction = 1.5
+		# DIAGNOSTIC (2026-10-18, the rear-foot drag): OGMA_PICRAWLER_GROUND_FRICTION sets this shared
+		# material (floor, obstacles, feet) -- the only way to lower foot-floor friction, because Godot
+		# combines two `rough` materials by keeping the HIGHER friction, so a per-foot material cannot
+		# go below the floor's.  Unset = 1.5, unchanged.
+		var _gf: String = OS.get_environment("OGMA_PICRAWLER_GROUND_FRICTION")
+		if _gf != "":
+			_contact_mat.friction = max(0.0, _gf.to_float())
+			print("PicrawlerBody: \u26a0 GROUND_FRICTION %.2f (floor, obstacles, feet; diagnostic)" % _contact_mat.friction)
 		_contact_mat.rough    = true
 		_contact_mat.bounce   = 0.0
 		_contact_mat.absorbent = true
@@ -790,7 +798,8 @@ const AUTO_RESET_OUTER_WALL_RADIUS: float = 9.5  # m
 # could share symmetry if the influence is light enough."  0 = off.  Light = 0.1–0.3.
 @export var leg_symmetry_fr_blend: float = 0.0
 @export var physics_hz: int          = 240
-@export var solver_iterations: int   = 64    # more iterations = constraint chain converges
+@export var solver_iterations: int   = 256   # DEFAULT 256 from 2026-10-19 (operator): 64 did not converge the loaded leg chain (rear feet dragged; Tegotae plan 7.13). OGMA_SOLVER_ITERATIONS=64 reproduces earlier runs    # more iterations = constraint chain converges
+@export var contact_max_penetration: float = 0.002   # m; engine default 10 mm sank the last-built leg (see _ready); env OGMA_PICRAWLER_CONTACT_PENETRATION
 											  # cleanly under contact load (was 32; with 12-DOF
 											  # chain + 4-foot ground contact, 32 left residual
 											  # constraint error → ragdoll twitching).
@@ -1608,6 +1617,19 @@ var _dbg_gc_raw: float = 0.0
 # published and the JSONL carries no range field, so every existing run is
 # byte-identical.
 @export var ultrasonic_model: bool = false      # OGMA_PICRAWLER_ULTRASONIC=1
+# 2026-10-18 — TEGOTAE INSTRUMENTS (docs/plans-and-designs/tegotae_replication_plan.md).
+# load_log (OGMA_PICRAWLER_LOAD_LOG=1): every diag line carries the published per-foot
+# load (`fload`, body weights) and the chassis's own ground load (`bload`, body weights,
+# from the solver's normal impulse on the chassis — god's-eye, NEVER published).  The
+# question it answers is whether a lifted foot's weight goes to the other feet (Owaki's
+# "physical communication") or to the belly.  Instrument only: off = the log unchanged.
+@export var load_log: bool = false
+var _chassis_load_ema: float = 0.0
+# com_shift (OGMA_PICRAWLER_COM_SHIFT="dx,dy,dz", metres, chassis frame, +z = front):
+# moves the chassis centre of mass, the weight-distribution change of Owaki et al. 2013.
+# A body FIXTURE for the experiment, not a brain input.  Unset = the body unchanged.
+var com_shift: Vector3 = Vector3.ZERO
+var _com_shift_set: bool = false
 const ULTRASONIC_MAX_RANGE_M: float = 1.5       # driver max_range_m; a no-echo ping reads this, valid 0
 const ULTRASONIC_MIN_RANGE_M: float = 0.02338   # commissioned floor (picrawler_senses.json dim_min)
 const ULTRASONIC_HZ: float = 20.0               # driver Config.hz, measured 2026-09-01
@@ -1718,6 +1740,7 @@ var _gyro_body_last: Vector3 = Vector3.ZERO   # last modelled gyro reading
 #   tc    — cmdlp-angle FK, stance = TRUE physics contact → isolates stance-gate error
 #           (if tc correlates and cmdlp does not, the fix is the load threshold, not FK).
 var _toe_off_c: Array = []                    # construction-frame toe offset per leg (lower_dir·L3/2)
+var _leg_build_custom: bool = false           # diagnostic LEG_BUILD_ORDER in progress
 var _strido_prev_valid: bool = false          # false ⇒ no displacement this tick (reset/suspend)
 var _strido_prev_cmd: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
 var _strido_prev_cmdlp: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
@@ -2917,6 +2940,21 @@ func _ready() -> void:
 	# Apply physics oversampling.
 	Engine.physics_ticks_per_second = physics_hz
 	ProjectSettings.set_setting("physics/3d/solver/solver_iterations", solver_iterations)
+	# CONTACT PENETRATION ALLOWANCE (2026-10-18; Tegotae plan 7.9, ledger 2026-10-18 night).  Godot
+	# Physics 3D lets a contact sink up to 10 mm by default and solves in creation order, so the
+	# LAST-BUILT leg (leg 3, `rr`) settled ~6 mm deeper than the others: the record's "right rear
+	# lowest" corner and a dragging rear foot.  2 mm evens the four feet (within 0.4 mm) and is close
+	# to the real FSR toe's travel.  DEFAULT CHANGED 2026-10-18 (operator) — every sim result before
+	# this date ran at 10 mm; OGMA_PICRAWLER_CONTACT_PENETRATION=0.01 reproduces them.
+	var _pen_env: String = OS.get_environment("OGMA_PICRAWLER_CONTACT_PENETRATION")
+	if _pen_env != "":
+		contact_max_penetration = max(0.0, _pen_env.to_float())
+	var _sp: RID = get_world_3d().space
+	PhysicsServer3D.space_set_param(_sp, PhysicsServer3D.SPACE_PARAM_CONTACT_MAX_ALLOWED_PENETRATION, contact_max_penetration)
+	print("PicrawlerBody: contact max allowed penetration = %.4f m%s, solver iterations = %d" % [
+		PhysicsServer3D.space_get_param(_sp, PhysicsServer3D.SPACE_PARAM_CONTACT_MAX_ALLOWED_PENETRATION),
+		" (env override)" if _pen_env != "" else "",
+		int(PhysicsServer3D.space_get_param(_sp, PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS))])
 
 	# Turbo mode (OGMA_TURBO=1) — wall-decoupled execution.  Combined with
 	# `--fixed-fps <N> --disable-render-loop --headless`, the engine
@@ -3074,6 +3112,16 @@ func _ready() -> void:
 		servo_signs[k]   = 1.0
 		servo_origins[k] = 0.0
 	_resolve_env()
+	# ⚠ ORDER (found 2026-10-18): the physics setup at the top of _ready() runs BEFORE this call, so
+	# OGMA_SOLVER_ITERATIONS and OGMA_PHYSICS_HZ never reached the engine (the space stayed at 64
+	# iterations; OGMA_PHYSICS_HZ changed this script's normalisations but not the engine rate).
+	# Solver iterations are applied to the space here (the env knob was dead before 2026-10-18).  At 64
+	# the leg joint chain does not converge under load, so the loaded (rear) legs gave way instead of
+	# lifting -- the dragging rear feet, order-dependent, absent on the real robot.  DEFAULT 256 FROM
+	# 2026-10-19 (operator: the slower sim speed matches the robot).  Every sim result before that date
+	# ran at 64; OGMA_SOLVER_ITERATIONS=64 reproduces it (Tegotae plan 7.13).
+	PhysicsServer3D.space_set_param(get_world_3d().space, PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS, solver_iterations)
+	print("PicrawlerBody: solver iterations -> %d" % int(PhysicsServer3D.space_get_param(get_world_3d().space, PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS)))
 	# The power instrument is byte-identical (trace cmp, 2026-10-05), so a WINDOWED run turns it on
 	# for the HUD's power panel; OGMA_PICRAWLER_POWER_MODEL=0 keeps it off.  Headless runs are
 	# unchanged: they opt in through the env, as before.
@@ -3636,7 +3684,8 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
-			  "OGMA_PICRAWLER_PUBLISH_CURRENT"]:
+			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
+			  "OGMA_PICRAWLER_LOAD_LOG", "OGMA_PICRAWLER_COM_SHIFT"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3668,6 +3717,13 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_HONEST_JOINTS":     honest_joints     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_IMU":        honest_imu        = (v != "0" and v != "")
 			"OGMA_PICRAWLER_POWER_MODEL":       power_model       = (v != "0" and v != "")
+			"OGMA_PICRAWLER_LOAD_LOG":          load_log          = (v != "0" and v != "")
+			"OGMA_PICRAWLER_COM_SHIFT":
+				var _cs: PackedStringArray = v.split(",")
+				if _cs.size() == 3:
+					com_shift = Vector3(_cs[0].to_float(), _cs[1].to_float(), _cs[2].to_float())
+					_com_shift_set = true
+					print("PicrawlerBody: \u26a0 COM_SHIFT %s m (chassis frame) \u2014 weight-distribution fixture" % [com_shift])
 			"OGMA_PICRAWLER_POWER_LOG":         _power_log_path = v; power_model = true
 			"OGMA_PICRAWLER_HONEST_TORQUE_CAP": honest_torque_cap = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_HONEST_HOLD_CAP":   honest_hold_cap   = maxf(0.0, v.to_float())
@@ -3923,6 +3979,7 @@ func _build_world() -> void:
 
 func _rebuild_world_contents() -> void:
 	var floor_body := StaticBody3D.new()
+	floor_body.set_meta("ogma_floor", true)       # instrument tag (load_log `fcol`); no physics effect
 	floor_body.collision_layer = _LAYER_WORLD
 	floor_body.collision_mask  = _world_collision_mask()
 	floor_body.physics_material_override = _make_contact_mat()
@@ -4966,6 +5023,7 @@ func _rebuild_body(geometry_path: String = "") -> void:
 	_coxa_rest_xform.clear(); _upper_rest_xform.clear(); _lower_rest_xform.clear()
 	_hip1_world_c.clear();    _hip2_world_c.clear();     _knee_world_c.clear()
 	_foot_load_ema        = [0.0, 0.0, 0.0, 0.0]
+	_chassis_load_ema     = 0.0
 	_foot_was_in_contact  = [false, false, false, false]
 
 	# 3 — New dimensions, then rebuild AT THE REMEMBERED POSE.  _build_leg()
@@ -5054,6 +5112,12 @@ func _build_body() -> void:
 	if _chassis_com_valid:
 		_chassis.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 		_chassis.center_of_mass = _chassis_com
+	if _com_shift_set:
+		_chassis.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
+		_chassis.center_of_mass = (_chassis_com if _chassis_com_valid else Vector3.ZERO) + com_shift
+	if load_log and not _chassis.contact_monitor:
+		_chassis.contact_monitor = true      # reporting only; the room enables it the same way
+		_chassis.max_contacts_reported = 8
 
 	# Visual "eyes" on the +Z chassis face (front): the two transducers of the
 	# robot's forward ultrasonic module, as black half-embedded spheres (visible
@@ -5083,8 +5147,32 @@ func _build_body() -> void:
 	add_child(_chassis)
 	_chassis_rest_xform = _chassis.global_transform
 
-	for i in range(4):
-		_build_leg(i)
+	# DIAGNOSTIC (2026-10-18, the leg-3 asymmetry): OGMA_PICRAWLER_LEG_BUILD_ORDER="3,2,1,0" builds the
+	# legs (and so creates their bodies and joints) in that order, then restores index order in every
+	# per-leg array, so leg k is the same leg whatever the order.  If an asymmetry follows the BUILD
+	# POSITION rather than the leg, it is the sequential solver's ordering.  Unset = 0,1,2,3 (unchanged).
+	var _ord_env: String = OS.get_environment("OGMA_PICRAWLER_LEG_BUILD_ORDER")
+	var _ord: Array = [0, 1, 2, 3]
+	if _ord_env != "":
+		var _parts: PackedStringArray = _ord_env.split(",")
+		if _parts.size() == 4:
+			_ord = [_parts[0].to_int(), _parts[1].to_int(), _parts[2].to_int(), _parts[3].to_int()]
+			print("PicrawlerBody: \u26a0 LEG_BUILD_ORDER %s (diagnostic)" % [_ord])
+	if _ord == [0, 1, 2, 3]:
+		for i in range(4):
+			_build_leg(i)
+	else:
+		_toe_off_c.clear()
+		_leg_build_custom = true
+		for i in _ord:
+			_build_leg(i)
+		_leg_build_custom = false
+		for arr in [_coxas, _hip1_joints, _uppers, _hip2_joints, _hip2_axes, _toe_off_c, _lowers,
+					_knee_joints, _knee_axes, _coxa_rest_xform, _upper_rest_xform, _lower_rest_xform,
+					_hip1_world_c, _hip2_world_c, _knee_world_c]:
+			var _old: Array = (arr as Array).duplicate()
+			for _p in range(4):
+				arr[_ord[_p]] = _old[_p]
 	if honest_torque_cap > 0.0:
 		var iters: float = PhysicsServer3D.space_get_param(get_world_3d().space, PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS)
 		_motor_impulse_scale = (honest_torque_cap / MAX_SERVO_TORQUE) / maxf(1.0, iters)
@@ -5393,7 +5481,7 @@ func _build_leg(leg_index: int) -> void:
 	# CENTER.  The FK transforms carry the center; odometry needs the TIP — the center
 	# rotates about a planted toe as the knee flexes, and at 50 Hz that spurious motion
 	# is the same order as the true ~2 mm/tick body displacement it would contaminate.
-	if leg_index == 0:
+	if leg_index == 0 and not _leg_build_custom:
 		_toe_off_c.clear()
 	_toe_off_c.append(lower_dir * (L3 * 0.5))
 	# Markov-compliant foot-contact sensor: enable true physics contact reporting
@@ -11466,6 +11554,13 @@ func _accum_grf() -> void:
 		_grf_up[i]  += up_acc[i]
 		_grf_nrm[i] += nrm_acc[i]
 		_foot_load_ema[i] = (1.0 - _FOOT_LOAD_ALPHA) * _foot_load_ema[i] + _FOOT_LOAD_ALPHA * nrm_acc[i]
+	if load_log:
+		var cst := PhysicsServer3D.body_get_direct_state(_chassis.get_rid())
+		var c_acc: float = 0.0
+		if cst != null:
+			for j in range(cst.get_contact_count()):
+				c_acc += absf(cst.get_contact_impulse(j).dot(cst.get_contact_local_normal(j)))
+		_chassis_load_ema = (1.0 - _FOOT_LOAD_ALPHA) * _chassis_load_ema + _FOOT_LOAD_ALPHA * c_acc
 
 # Servo power model (S1) — see the power_model @export.  Rebuilt with the body, because it holds
 # the segments by reference and their anchors in the parents' frames.
@@ -12350,6 +12445,36 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		var _ca := PackedFloat64Array()
 		for _v in _last_foot_contact: _ca.append(float(_v))
 		line["con"] = _ca
+	if load_log:
+		var _fla := PackedFloat64Array()
+		for _i in range(4): _fla.append(snappedf(_foot_load_ema[_i] / _fl_norm(), 0.001))
+		line["fload"] = _fla
+		line["bload"] = snappedf(_chassis_load_ema / _fl_norm(), 0.001)
+		# TRUE foot clearance (god's-eye, instrument only, never published): the toe end of each
+		# lower capsule (`ftip`) and the capsule's knee end (`fknee`), world height of the surface
+		# point (centre minus radius).  `feet_y` is a vertical-shank approximation; this is the
+		# segment's actual geometry, so "touching in swing" can be told apart as toe vs shank.
+		if _toe_off_c.size() == 4 and _lowers.size() == 4:
+			var _ft := PackedFloat64Array(); var _fk := PackedFloat64Array()
+			var _r: float = LEG_RADIUS * 0.8
+			for _i in range(4):
+				var _xf: Transform3D = _lowers[_i].global_transform
+				_ft.append(snappedf((_xf * Vector3(_toe_off_c[_i])).y - _r, 0.0001))
+				_fk.append(snappedf((_xf * (-Vector3(_toe_off_c[_i]))).y - _r, 0.0001))
+			line["ftip"] = _ft
+			line["fknee"] = _fk
+			# What each lower leg touches: 0 nothing, 1 the floor, 2 a wall (the mu=3 wedge
+			# material: corridor side/back walls, arena perimeter), 3 an obstacle (hump, bump, pyramid).
+			var _fc := PackedFloat64Array()
+			for _i in range(4):
+				var _code: int = 0
+				for _b in _lowers[_i].get_colliding_bodies():
+					var _c: int = 3
+					if _b.has_meta("ogma_floor"): _c = 1
+					elif _b is StaticBody3D and (_b as StaticBody3D).physics_material_override == _wedge_mat: _c = 2
+					_code = max(_code, _c)
+				_fc.append(float(_code))
+			line["fcol"] = _fc
 	# Servo tracking error in foot-height metres = the information hobby servos do NOT
 	# report. If this is large, commanded-angle FK is a materially different signal.
 	line["fk_cmd_err"] = snappedf(_dbg_fk_cmd_err, 0.00001)
@@ -12865,6 +12990,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["lv_ticks"]  = int(_mm.get("level_ticks", 0))
 			line["lv_err"]    = snappedf(float(_mm.get("level_err_mean", 0.0)), 0.0001)
 			line["sl_mult"]   = snappedf(float(_mm.get("stroke_level_mean", 1.0)), 0.001)
+			line["swl_mult"]  = snappedf(float(_mm.get("swingload_gate_mean", 1.0)), 0.001)
+			var _wa = _mm.get("wshift_a", [])
+			if _wa is Array and _wa.size() == 4:
+				var _waa := PackedFloat64Array()
+				for _v in _wa: _waa.append(snappedf(float(_v), 0.001))
+				line["ws_a"] = _waa
+			line["ws_u"] = snappedf(float(_mm.get("wshift_u", 0.0)), 0.0001)
 			line["tilt_p"]    = snappedf(float(_mm.get("tilt_pitch", 0.0)), 0.001)
 			line["tilt_r"]    = snappedf(float(_mm.get("tilt_roll", 0.0)), 0.001)
 			var _lo = _mm.get("level_off", [])
