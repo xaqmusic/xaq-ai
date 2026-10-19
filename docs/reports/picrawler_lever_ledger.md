@@ -8588,3 +8588,163 @@ the body probes again: push, test, fade, retry at the window's timescale. Not bu
 **Promoted and in the launcher:** the three benchmarks (the original mechanism) and the
 LoadPhaseGait stack's best in each world — sim `…__lpg_sl4s_st07_int` ("PROMOTED · LPG stack
 (sim)"), robot `…__lpgn_r05_e0d0_ref300` ("PROMOTED · ROBOT · LPG + running-attitude gate").
+
+### 2026-10-18 (evening) — TEGOTAE REPLICATION: the bare load rule TROTS from random starts (signal); Owaki's walk regime is closed on this body; THE SWING-LOAD PUSH GATE is a `REGRESSION`, and it refutes the "the push pins the rear foot" diagnosis in its within-stride form
+
+*Operator: set up experiments to see what it takes to reach Owaki & Ishiguro's results on our quadruped.
+Plan and full tables: [`tegotae_replication_plan.md`](../plans-and-designs/tegotae_replication_plan.md).
+Harness `scripts_tools/tegotae_sweep.py`. Runs `~/xaq_runs/tegotae_20261018/`. Arena, n = 6 × 4500,
+stripped mode = LoadPhaseGait + posture spring + phase stroke and lift only (every other joint writer
+0), GainEvolver removed (operator).*
+
+**Measurement defects found first (each would have produced a false verdict):** (1) LoadPhaseGait
+read its seed through a double, so every OGMA_SEED started the legs from the SAME phases — every LPG
+seed-average in this ledger since 2026-10-12 shares one start condition (fixed, regression test);
+(2) `babble_scale` 0 divides by zero in MotorEPMv2's pulse identification and freezes the joints
+all run; (3) the GainEvolver re-publishes `coupling_gain` 1.509 at tick 10 000 in every LPG config
+(separate task); (4) headless harnesses load the `cad` body, the launcher `measured_fsr`.
+
+**Results (signal, CAD body unless noted).** The stripped rule trots: diagonal touchdowns locked
+(R ≈ 1) from 6/6 random starts, 59 % of strides on the trot template at a slew-matched stroke
+(0.525), 4.35 m. Free clock and contact-count shares: no gait (R2 and the tonic-receptor claim
+reproduced). Owaki's walk (σN/ω ≈ 5) is out of reach: from σ_r ≈ 3 every leg parks at the stance
+fixed point, because the sprawled body's foot load PEAKS in late stance (`sigma_crit` = 1/max(N cos φ)
+≈ 3.0, measured). The ω sweep at fixed σ keeps a trot at every period 30–100 (R3 not reproduced:
+long periods park, short ones slew-clip the lift). `leg_phase_lift_lead` (late-stance unload):
+`PARTIAL` (frees σ_r 3 only; breaks the σ_r 2 trot). On `measured_fsr` the same arm's rear feet
+barely lift (yellow = code `rr`: 0 touchdowns), and the trot does not reach the feet.
+
+**The yellow leg, ruled out:** servo (joints overshoot the lift), attitude (corner integrator
+levels pitch/roll to 0: `NULL`), static COM/feet (centred), COM height (8 mm lower: `NULL`), more
+lift (`REGRESSION`). Freed by: COM 15 mm forward (yellow 46 touchdowns, 77 % trot) or a constant
+stroke 0.35 (38, 77 %).
+
+**Lever: swing-load push gate** (`MotorEPMv2.stroke_swingload_gain`, push × max(floor, 1 − g·e),
+e = max over legs of max(0, sin φ)·N, N = the phase token's absolute load). Gain-0 arm
+byte-identical on x, z, hip1, knee per tick, all six seeds. Consumer: gate mean 0.70 / 0.47 / 0.35.
+
+| arm (measured body) | net (m) | straight | touchdowns FL/FR/RL/RR | trot strides | yellow mid-swing load |
+|---|---|---|---|---|---|
+| base | 2.98 ± 0.43 | 0.40 | 47 / 51 / 12 / 0 | 0 % | 0.070 |
+| gate 4 | 3.11 ± 0.04 | 0.38 | 46 / 46 / 54 / **0** | 0 % | 0.069 |
+| gate 8 | 0.77 ± 0.04 | 0.11 | 47 / 14 / 47 / 0 | 0 % | 0.047 |
+| gate 15 | 1.18 ± 0.16 | 0.18 | 48 / 39 / 42 / 0 | 0 % | **0.032** |
+| constant stroke 0.35 (matched to gate 4's mean push) | 2.82 ± 0.01 | — | 48 / 48 / 50 / **38** | **77 %** | 0.046 |
+| CAD base / CAD gate 8 | 4.35 / 3.44 | 0.55 / 0.34 | 46/49/51/48 → 46/86/46/46 | 59 % → 13 % | 0.037 / 0.023 |
+
+**Verdict: `REGRESSION`** (measured and CAD bodies, stripped mode, arena, n = 6). At gate 15 yellow's
+swing load is below the CAD body's (0.032 vs 0.037) and it still never lifts, and the constant
+stroke with gate 4's mean push frees it where the gate does not. So the within-stride form of the
+diagnosis — "the push loads the swinging rear foot and pins it" — is refuted. Load is not what
+holds the foot down. What frees it changes the foot path or the standing load (stroke amplitude,
+COM). The next instrument is a true foot clearance (the lower segment's tip height, god's-eye,
+instrument only); the record has only the shank-angle proxy. **Re-use context:** a body whose
+swing feet are pinned by load, shown by a clearance instrument rather than inferred from contact.
+
+### 2026-10-18 (evening) — THE LATE-STANCE PRESS PROBE: a leg's pre-liftoff press DOES control its corner (signed per corner it levels them), but a level corner does not free the yellow foot; the true clearance instrument finds a BODY-SIDE ASYMMETRY AT LEG 3 (`rr`), present with the brain off
+
+*Operator proposal: the push force each leg applies should be learned, to reduce the dip of the corner
+it is responsible for (terrain, stuck legs). Step 1, a probe of the actuation before building a learner.
+Full table: [`tegotae_replication_plan.md`](../plans-and-designs/tegotae_replication_plan.md) §7.8.*
+
+`MotorEPMv2.leg_phase_late_press` (+ `_hip2`, `_legs`): a fixed press over the second half of stance;
+gain 0 byte-identical per tick, six seeds. Measured body, Tegotae trot config, n = 6 × 4500.
+A uniform press trades stance dip for swing dip (yellow +177/+56 → +133/+214 at 0.4). A press SIGNED
+per corner (multipliers from each leg's measured swing dip) levels them (yellow +96 swing / −10 stance
+at ×0.2), so the proposed error is controllable by the proposed actuator. **But yellow still never
+lifts** (0 touchdowns in every press arm; blue stops too; net 2.98 → 1.22 m). Verdict on the press
+as a stuck-leg fix: `REGRESSION`. As levelling actuation: established (signal), and the learned per-leg
+press stays well-founded for terrain.
+
+**New instrument, new finding.** `ftip`/`fknee` (true toe and knee-end height of the lower capsule,
+god's-eye, logged under `OGMA_PICRAWLER_LOAD_LOG`): yellow's toe sits ~5 mm deeper than the other toes
+from spawn, before any gait (−10 vs −6 mm), and with the brain OFF its joints settle at different
+angles from the other three (hip2 +0.025 vs ~+0.012, knee −1.590 vs −1.600), on both bodies. Leg 3 is
+built as an exact mirror and the body files have no per-leg offsets. **A body-side asymmetry at leg 3**
+is the likeliest source of the record's "right rear lowest corner" (code names, since 2026-10-13) and
+of yellow dragging; not yet located. Every per-leg verdict on this body carries it until found.
+
+### 2026-10-18 (night) — THE LEG-3 ASYMMETRY IS THE PHYSICS ENGINE: Godot Physics lets contacts sink 10 mm and solves in creation order, so the LAST-BUILT LEG sinks ~6 mm deeper; a 2 mm allowance evens the feet and the yellow leg steps
+
+*Plan §7.9 has the tables.* **Cause.** `SPACE_PARAM_CONTACT_MAX_ALLOWED_PENETRATION` defaults to
+10 mm and the sequential solver favours creation order. Legs are built 0–3, so leg 3 (`rr`, yellow)
+settles deepest (stance toe −13 mm vs −6 to −8). **Proof by build order** (diagnostic
+`OGMA_PICRAWLER_LEG_BUILD_ORDER`): reversed, yellow is normal and steps (0 → 20 touchdowns), and
+leg 0, now last, goes deep. With the brain off the last-built leg's joints settle off the
+others. **Fix candidate** `OGMA_PICRAWLER_CONTACT_PENETRATION=0.002` (diagnostic env, default
+unchanged): feet within 0.4 mm. Measured body: yellow 0 → 39 touchdowns, trot strides 0 → 31 %,
+corner dips halved, tilt_sd −30 %, net 2.98 → 1.93 m (the base's distance was front paddling with
+rears sliding). CAD: ties on net and straightness (4.35 → 4.45, 0.55 → 0.56), trot 59 → 55 %,
+tilt_sd −40 %. **This resolves the 2026-10-13 "right rear lowest" corner**, recorded then as rear-femur
+sag physics; the sag is real but the asymmetry was the solver. **Every sim verdict in this ledger
+carries the bias.** Making 2 mm the default, and re-baselining the promoted configs, is the
+operator's call. Aside: `OGMA_SOLVER_ITERATIONS` does not reach the physics space at runtime (still
+64 after setting 256). Recorded, not chased. Verdicts in the 2026-10-18 evening entries on the yellow
+leg (swing-load gate, press probe) are measurement outcomes of this artifact, not verdicts on
+those mechanisms; their re-use context is "rerun at 2 mm".
+
+**Addendum (same night) — 2 mm IS THE SIM DEFAULT** (operator: "not unlike the travel on the real FSR
+toes"; sim-to-real is a rough translation anyway). `picrawler_body.gd` `contact_max_penetration` =
+0.002, override `OGMA_PICRAWLER_CONTACT_PENETRATION`. **Every sim result before 2026-10-18 ran at
+10 mm**; set `…=0.01` to reproduce one. Deployed stacks tie (arena, n = 6 × 4500, 2 vs 10 mm):
+promoted LPG stack (sim) 5.73 vs 5.80 m, benchmark (hip2 +0.3) 2.80 vs 2.90 m, 0 falls in all four.
+
+### 2026-10-18 (night) — WHY BOTH REAR FEET DRAG: the load-held phase lifts every leg while it still carries ~a quarter of the body, and the forward push keeps the rear pair loaded; the missing mechanism is a WEIGHT SHIFT before liftoff
+
+*Operator: both back legs drag in the corridor, the fronts step. Plan §7.11 has the tables.* At 2 mm,
+measured body: the rears drag in the ARENA too (in contact ~90 % of mid-swing, toes never above
+−4 mm; the touchdown counts were flickers). Ruled out: pitch (levelled: `NULL`), more lift
+(`REGRESSION`), friction (lower = worse; note: a per-foot material cannot lower foot–floor friction
+in Godot, because two `rough` materials combine to the HIGHER friction, so the diagnostic is
+`OGMA_PICRAWLER_GROUND_FRICTION`), imposed trot or walk clocks (rears pinned in both), build order
+(only matters when marching in place). **Cause:** at the phase's liftoff every foot carries 0.20–0.23
+BW (σ_r·N ≈ 0.4 < 1, so the load never stops the phase). Ten ticks later the fronts are down to
+0.02–0.03 and the rears still carry 0.08–0.11. The COM sweep moves the drag continuously from
+rear to front (+30 mm: rear mid-swing contact 0.94/0.89 → 0.61/0.67, trot strides 33 → 90 %), so
+the push keeps the rear pair loaded. A stronger hold would wait for the unload but deadlocks,
+because nothing unloads a waiting leg on this body. **Next mechanism:** a weight shift. The error
+is "my phase says swing and my foot carries weight", the sensor is the FSR, and the actuators are
+the other legs. This is the operator's learned per-leg press, extended to the neighbour's unload.
+Correction: the measured-body "trot" (plan §7.5, §7.9) is a touchdown-timing pattern whose rear
+feet do not clear.
+
+### 2026-10-18 (night) — THE SIM FORCE SENSORS ARE CORRECT; THE ROBOT'S STANCE PRESS IS THE WEIGHT SHIFT; THE LEARNED WEIGHT-SHIFT PRESS (`wshift_rate`) IS A `REGRESSION` — it winds up to its bound on every leg
+
+*Plan §7.12.* Operator: the robot trots with the diagonal legs pushing together and no dragging rear
+feet. **Sensor check (sim, measured body, 2 mm):** feet + belly = 0.999 BW; LPG's N = published
+`foot_load` on the same tick; 0.0007 BW when the contact flag is 0; no lag at liftoff. **The robot's
+config in sim** (`…lpgn_r05_e0d0_ref300`, corridor): rear toes clear 6–19 mm. With its stance press
+(0.5) removed, every foot drags (contact ~0.9, net 2.47 → 0.65 m). The stripped Tegotae entries
+dragged because they removed exactly this press. **Lever:** each standing leg's press learned from the
+swing-weighted load on the other feet (gain 0 byte-identical). On the robot config the amplitude
+saturates at its bound on every leg (rate 0.02/0.05, bound 1: net 3.23 → 0.34–0.39 m, falls 0.5 →
+1.2–2.7, tilt_sd ×7–10). Bounded at 0.1/0.2 it is a constant extra press (net 2.31/2.12, rear contact
+down), the same trade as a fixed 0.7 press (1.77 m). Verdict `REGRESSION`: the integrator assumes more
+press clears the swing foot; past ~0.3 the body rocks and the residual swing load rises. A uniform press
+also cannot move weight between legs. **Re-use context:** a differential press (per leg and per
+neighbour) with an estimated sensitivity or a deadbanded target, judged against the fixed 0.5 press.
+
+### 2026-10-18 (night) — THE DRAGGING REAR FEET ARE AN UNCONVERGED SOLVER: 64 iterations let the loaded leg joints give way; `OGMA_SOLVER_ITERATIONS` was DEAD (physics configured before the env is read); at 256 the rear feet lift on every config — and the promoted stacks lose ~20 % transport (operator's call)
+
+*Plan §7.13.* After the stance press, which rear foot dragged depended on the build order. The
+iterations knob had never worked: `_ready()` configures physics before `_resolve_env()` runs. Same bug
+for `OGMA_PHYSICS_HZ` (normalisations change, engine rate does not): recorded. Iterations now applied
+to the space after the env. **At 256** (corridor, measured, 2 mm, n = 6): robot config rear mid-swing
+contact 0.74/0.87 → 0.13/0.17, rear toe peaks 21/20 → 55/47 mm, net 3.23 → 3.70, falls 0.5 → 0.2;
+order-independent. Stripped rule without the press: 0.99 → 3.18 m, rears lift. **2×2:** 256 iterations
+at the 64-iteration motor authority still lift the rears; 64 iterations at 4× authority are identical
+to base, so it is convergence, not servo strength. This is likely the 2026-10-13 "rear femurs sag
+under load". **But** arena, promoted LPG stack (sim) 5.73 → 4.52 m, straight 0.54 → 0.38, and benchmark
+2.80 → 2.31 m (0 falls, rear feet clear, twice the touchdowns): the stacks were tuned on the sagging
+body. **Default kept at 64** (verified byte-identical per tick); 256 is the operator's call.
+Measurement outcome for this session's 64-iteration verdicts on the rear legs (swing-load gate, press
+probe, learned weight-shift press): rerun at 256.
+
+**Addendum 2026-10-19 — 256 SOLVER ITERATIONS IS THE SIM DEFAULT** (operator: "that slower speed sounds
+like what I see on the real robot"). `picrawler_body.gd` `solver_iterations` = 256, applied to the space
+after the env is read; `OGMA_SOLVER_ITERATIONS=64` reproduces earlier runs. With the 2 mm contact
+default (2026-10-18), **every sim result before 2026-10-18 ran at 10 mm / 64 iterations**. Note the
+hinge motor's per-iteration impulse cap: configs without `HONEST_TORQUE_CAP` now have 4× the legacy
+servo authority (38.4 N·m); the 2×2 of 2026-10-18 showed authority is not binding. Re-baseline of every
+launcher config (paired 256 vs 64, arena / corridor / room, n = 6) is in
+`~/xaq_runs/rebase_20261019/`; tables in the plan §7.14 and the next entry.
