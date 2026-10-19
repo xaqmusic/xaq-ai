@@ -533,6 +533,13 @@ private:
     double leg_phase_swing_     = 0.0;
     double leg_phase_lift_hip2_ = 0.0;
     double leg_phase_lift_knee_ = 0.0;
+    double leg_phase_lift_lead_ = 0.0;   // rad; lift = max(0, sin(phi + lead)); 0 = byte-identical
+    double leg_phase_late_press_ = 0.0;      // probe: fixed late-stance press; 0 = byte-identical
+    double leg_phase_late_press_hip2_ = 1.0;
+    std::vector<double> leg_phase_late_press_legs_;   // probe: per-leg multipliers; empty = all 1
+    double wshift_rate_ = 0.0, wshift_leak_ = 0.002, wshift_max_ = 1.0, wshift_hip2_ = 0.25;   // learned weight shift
+    std::vector<float> wshift_a_;          // per-leg learned press amplitude
+    double wshift_u_ema_ = 0.0;            // report-only: swing-load error seen by leg 0
     // AIRBORNE SOURCE for the contact-gated terms (robot runs 2026-10-13).  The swing tuck
     // and the rear landing gate on the raw foot-contact flag; on the robot that flag flickers
     // at the FSR threshold (hundreds of transitions a minute), and every flicker switches a
@@ -564,6 +571,8 @@ private:
     // the posture spring and the load-held stance recover it; level, the stroke is untouched.
     double stroke_level_gain_ = 0.0;
     double stroke_level_floor_ = 0.0;   // the gate never scales the stroke below this fraction
+    double stroke_swingload_gain_  = 0.0;   // swing-load push gate (Tegotae plan 7.6); 0 = byte-identical
+    double stroke_swingload_floor_ = 0.0;
     // 1 = the level gate scales the STEER differential too (the room, 2026-10-13: the avoid
     // loop's turns put a steer of ~1 on a bearing error of 0.15 x gain 7, so one side's hip
     // sweeps the full clipped range every stride -- the fall anatomy -- and a gate that spares
@@ -669,6 +678,7 @@ private:
         return n ? s / float(n) : 0.0f;
     }
     double stroke_level_ema_ = 1.0;     // report-only: mean gate
+    double swingload_ema_ = 1.0;        // report-only: mean swing-load gate
     bool   tilt_seen_  = false;
     int64_t level_ticks_ = 0; double level_acc_ = 0.0;
     std::vector<float>   ext_cos_, ext_sin_, ext_swing_, ext_load_;

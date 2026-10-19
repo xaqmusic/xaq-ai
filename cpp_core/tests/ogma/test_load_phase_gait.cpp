@@ -100,3 +100,47 @@ TEST(LoadPhaseGait, PerFootNormalisationMakesAStiffSensorAndAWeakOneCarryEqualSh
     nrm.run(300, {1, 1, 0, 0}, {6.0f, 1.0f, 0.0f, 0.0f});
     EXPECT_GT(nrm.m.share(0), 0.6f);
 }
+TEST(LoadPhaseGait, AbsoluteModeHoldsAFourFootStanceThatSharesWouldLetThrough) {
+    // Four feet each carry a quarter of the body (0.25 body weights).  As shares (mode 0) the
+    // hold factor is 1 - 2 * 0.25 * cos phi >= 0.5: every leg flows through stance.  In
+    // Owaki's absolute form with his walking ratio (sigma * BW / omega ~ 20) the quarter load
+    // gives sigma N = 5 > 1: each leg stops at cos phi = 1 / 5 and none lifts while it bears weight.
+    Fix f({{"sigma_ratio", 20.0}, {"load_mode", int64_t{1}}, {"load_topic", std::string("reality.proprio.foot_load")},
+           {"init_phase", std::vector<double>{1.5 * kPi, 1.5 * kPi, 1.5 * kPi, 1.5 * kPi}}});
+    for (uint64_t t = 0; t < 500; ++t) {
+        f.run(t, {1, 1, 1, 1}, {0.25f, 0.25f, 0.25f, 0.25f});
+        for (int leg = 0; leg < 4; ++leg) ASSERT_FALSE(f.m.swing(leg)) << "tick " << t << " leg " << leg;
+    }
+    EXPECT_NEAR(std::cos(f.m.phase(0)), 0.2f, 0.02f) << "the fixed point cos phi = 1 / (sigma_ratio N)";
+    EXPECT_FLOAT_EQ(f.out(0, 3), 0.25f) << "mode 1 publishes the load itself, not a share";
+}
+TEST(LoadPhaseGait, AbsoluteModeSeesTheLoadTheBellyTakesAndSharesDoNot) {
+    // The feet carry only half the body (the belly the rest).  Shares renormalise it away: the
+    // phases match a full-weight stance.  Absolute mode sees half the load and holds less.
+    auto run = [](int64_t mode) {
+        Fix f({{"sigma_ratio", 2.0}, {"load_mode", mode}, {"load_topic", std::string("reality.proprio.foot_load")},
+               {"init_phase", std::vector<double>{1.5 * kPi, 1.5 * kPi, 1.5 * kPi, 1.5 * kPi}}});
+        for (uint64_t t = 0; t < 10; ++t) f.run(t, {1, 1, 1, 1}, {0.125f, 0.125f, 0.125f, 0.125f});
+        return f.m.phase(0);
+    };
+    Fix full({{"sigma_ratio", 2.0}, {"load_topic", std::string("reality.proprio.foot_load")}, {"init_phase", std::vector<double>{1.5 * kPi, 1.5 * kPi, 1.5 * kPi, 1.5 * kPi}}});
+    for (uint64_t t = 0; t < 10; ++t) full.run(t, {1, 1, 1, 1}, {0.25f, 0.25f, 0.25f, 0.25f});
+    EXPECT_FLOAT_EQ(run(0), full.m.phase(0)) << "shares cannot tell a belly-borne body from a leg-borne one";
+    EXPECT_GT(run(1), run(0)) << "absolute: less load on the feet, less hold, the phase runs further";
+}
+TEST(LoadPhaseGait, AbsoluteModeWithoutALoadTopicIsTheContactFlag) {
+    Fix f({{"sigma_ratio", 4.0}, {"load_mode", int64_t{1}}});
+    f.run(0, {1, 0, 1, 0});
+    EXPECT_FLOAT_EQ(f.out(0, 3), 1.0f); EXPECT_FLOAT_EQ(f.out(1, 3), 0.0f);
+}
+TEST(LoadPhaseGait, NeighbouringSixtyFourBitSeedsGiveDifferentStartPhases) {
+    // OgmaBrain derives per-run seeds as namespace_seed(master, id): 64-bit values a unit apart.
+    // Read through a double they collapsed to one value and every run started identically.
+    auto start = [](int64_t seed) {
+        ogma::InProcessBus bus; ogma::LoadPhaseGait m; m.set_id("load_phase");
+        m.on_setup(&bus, {{"seed", ogma::ParamValue{seed}}});
+        return m.phase(0);
+    };
+    const int64_t s = 8409386222832229053LL;
+    EXPECT_NE(start(s), start(s + 1));
+}

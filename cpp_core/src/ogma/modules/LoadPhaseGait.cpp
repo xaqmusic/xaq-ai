@@ -81,7 +81,15 @@ ParamSchema LoadPhaseGait::params_schema() const {
          "record rejected, kept as the structure control.", ParamValue{2.0}},
         {"load_floor", ParamMutability::HotMutable,
          "A share below this reads as 0 (sensor noise on an unloaded foot).", ParamValue{0.02}},
-        {"seed", ParamMutability::ConstructionOnly, "Seed for the legs' random starting phases.", ParamValue{int64_t{1234}}},        {"load_norm_tau", ParamMutability::HotMutable,
+        {"seed", ParamMutability::ConstructionOnly, "Seed for the legs' random starting phases.", ParamValue{int64_t{1234}}},
+        {"load_mode", ParamMutability::HotMutable,
+         "0 = SHARES: N_i = f_i / sum_j f_j (the deployed form; the sum is 1 whatever the body weighs, so the belly's "
+         "load and the stride's dynamic peaks are invisible). 1 = ABSOLUTE, Owaki's form: N_i = the load as published "
+         "(body weights in the sim; with load_norm_tau, the foot's load over its own stance reference; with no "
+         "load_topic, the contact flag 0/1 -- the 'phasic receptor' control). In mode 1, sigma_ratio = sigma * load_unit "
+         "/ omega: Owaki & Ishiguro 2017's sigma = 6 rad/(N s) on a 2 kg body is 117.6 rad/s per body weight, i.e. "
+         "sigma_ratio 19.6 at their walk (omega 6), 13 at trot (9), 4.5 at gallop (26).", ParamValue{int64_t{0}}},
+        {"load_norm_tau", ParamMutability::HotMutable,
          "PER-FOOT SELF-NORMALISATION of the load before the shares: each foot's load is divided by its own running "
          "reference (EMA over tau ticks of its load while touching). The robot's FSRs differ 3x in sensitivity under one "
          "curve (RL 0.5 share, RR 0.05 measured 2026-10-13), which held one leg and freed another. Try 300-1000. 0 = raw.",
@@ -97,7 +105,8 @@ ParamMap LoadPhaseGait::current_params() const {
     m["contact_topic"] = ParamValue{contact_topic_}; m["load_topic"] = ParamValue{load_topic_};
     m["output_topics"] = ParamValue{output_topics_}; m["n_legs"] = ParamValue{int64_t(n_legs_)};
     m["period_ticks"] = ParamValue{period_ticks_}; m["sigma_ratio"] = ParamValue{sigma_ratio_};
-    m["load_floor"] = ParamValue{load_floor_}; m["seed"] = ParamValue{seed_};    m["load_floor"] = ParamValue{load_floor_}; m["seed"] = ParamValue{seed_}; m["load_norm_tau"] = ParamValue{load_norm_tau_};
+    m["load_floor"] = ParamValue{load_floor_}; m["seed"] = ParamValue{seed_}; m["load_norm_tau"] = ParamValue{load_norm_tau_};
+    m["load_mode"] = ParamValue{int64_t(load_mode_)};
     m["init_phase"] = ParamValue{init_phase_};
     return m;
 }
@@ -111,9 +120,14 @@ void LoadPhaseGait::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "n_legs",        [&](auto const& v){ n_legs_        = std::max(1, int(get_double(v, "n_legs"))); });
     apply_param(params, "period_ticks",  [&](auto const& v){ period_ticks_  = std::max(2.0, get_double(v, "period_ticks")); });
     apply_param(params, "sigma_ratio",   [&](auto const& v){ sigma_ratio_   = get_double(v, "sigma_ratio"); });
-    apply_param(params, "load_floor",    [&](auto const& v){ load_floor_    = get_double(v, "load_floor"); });    apply_param(params, "load_floor",    [&](auto const& v){ load_floor_    = get_double(v, "load_floor"); });
+    apply_param(params, "load_floor",    [&](auto const& v){ load_floor_    = get_double(v, "load_floor"); });
+    apply_param(params, "load_mode",     [&](auto const& v){ load_mode_     = int(get_double(v, "load_mode")); });
     apply_param(params, "load_norm_tau", [&](auto const& v){ load_norm_tau_ = get_double(v, "load_norm_tau"); });
-    apply_param(params, "seed",          [&](auto const& v){ seed_          = int64_t(get_double(v, "seed")); });
+    // Read as an integer: the per-run seeds OgmaBrain derives are 64-bit, and through a
+    // double they rounded to ONE value, so every OGMA_SEED started the legs from the same
+    // phases (found 2026-10-18; the record's LPG seed-averages share one set of start phases).
+    apply_param(params, "seed",          [&](auto const& v){
+        if (auto p = std::get_if<int64_t>(&v)) seed_ = *p; else seed_ = int64_t(get_double(v, "seed")); });
     apply_param(params, "init_phase",    [&](auto const& v){ init_phase_    = get_double_vec(v, "init_phase"); });
     if (int(output_topics_.size()) != n_legs_)
         throw std::invalid_argument("LoadPhaseGait: output_topics length must equal n_legs");
@@ -147,7 +161,8 @@ void LoadPhaseGait::on_param_change(std::string_view key, ParamValue const& valu
     const std::string k(key);
     if      (k == "period_ticks") period_ticks_ = std::max(2.0, get_double(value, k));
     else if (k == "sigma_ratio")  sigma_ratio_  = get_double(value, k);
-    else if (k == "load_floor")   load_floor_   = get_double(value, k);    else if (k == "load_floor")   load_floor_   = get_double(value, k);
+    else if (k == "load_floor")   load_floor_   = get_double(value, k);
+    else if (k == "load_mode")    load_mode_    = int(get_double(value, k));
     else if (k == "load_norm_tau") load_norm_tau_ = get_double(value, k);
     else throw std::invalid_argument("LoadPhaseGait: param '" + k + "' is construction-only / unknown");
 }
@@ -187,7 +202,7 @@ void LoadPhaseGait::tick(uint64_t tick_id) {
         share_[i] = v; total += v;
     }
     for (size_t i = 0; i < n; ++i) {
-        share_[i] = total > 1e-6f ? share_[i] / total : 0.0f;
+        if (load_mode_ != 1) share_[i] = total > 1e-6f ? share_[i] / total : 0.0f;   // mode 1: absolute
         if (share_[i] < float(load_floor_)) share_[i] = 0.0f;
     }
     // ---- the rule, and the instruments it feeds ----

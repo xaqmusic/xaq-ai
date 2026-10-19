@@ -1114,6 +1114,15 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"level_int_max", ParamMutability::HotMutable,
          "Bound on each leg's integrated offset (command units; the stance press is 0.5).",
          ParamValue{0.3}, std::nullopt, std::nullopt},
+        {"stroke_swingload_gain", ParamMutability::HotMutable,
+         "SWING-LOAD PUSH GATE (Tegotae plan 7.6). The propulsion term is scaled by max(floor, 1 - gain * e), e = the "
+         "largest swing-weighted load of any foot that should be in the air: max_j max(0, sin phi_j) * N_j, from the "
+         "load-held phase tokens (rhythm.leg.*, values[3]; body weights under LoadPhaseGait load_mode 1). The error it "
+         "descends: a foot whose phase says swing still carries weight, because the stance legs' push pitches the body "
+         "onto it. The stance legs withhold the push until it is off the ground. Steer is untouched. 0 = byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"stroke_swingload_floor", ParamMutability::HotMutable,
+         "The swing-load gate never scales the push below this fraction.", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"stroke_level_floor", ParamMutability::HotMutable,
          "The least fraction of the stroke the level gate leaves (0 = it may stop the push entirely).",
          ParamValue{0.0}, std::nullopt, std::nullopt},
@@ -1123,6 +1132,28 @@ ParamSchema MotorEPMv2::params_schema() const {
          "robot the raw flag flickers at the FSR threshold and every flicker toggles a bias (2026-10-13: 30-45 command "
          "reversals a stride on hip2/knee against the sim's 6-20).",
          ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"wshift_rate", ParamMutability::HotMutable,
+         "LEARNED WEIGHT-SHIFT PRESS (Tegotae plan 7.12). Per standing tick each leg's press amplitude a_i += rate * u - leak * a_i, "
+         "u = sum over the OTHER legs of max(0, sin phi_j) * N_j (load still on feet whose phase says swing; values[3] of the "
+         "rhythm.leg tokens). Applied while the leg stands: knee += a_i, hip2 += a_i * wshift_hip2. 0 = byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"wshift_leak", ParamMutability::HotMutable, "Per standing tick decay of a_i toward 0.", ParamValue{0.002}, std::nullopt, std::nullopt},
+        {"wshift_max", ParamMutability::HotMutable, "Upper bound on a_i (command units; the fixed stance press is 0.5).", ParamValue{1.0}, std::nullopt, std::nullopt},
+        {"wshift_hip2", ParamMutability::HotMutable, "hip2 share of the learned press (the stance press uses 0.25).", ParamValue{0.25}, std::nullopt, std::nullopt},
+        {"leg_phase_late_press", ParamMutability::HotMutable,
+         "PROBE: a fixed press over the second half of stance, y[knee] += g * w, y[hip2] += g * late_press_hip2 * w, "
+         "w = -sin 2phi on (3pi/2, 2pi) (zero at mid-stance and liftoff). + raises the corner (the level reflex's sign). "
+         "Asks whether a leg's pre-liftoff press changes its corner's dip in the following swing. 0 = byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"leg_phase_late_press_legs", ParamMutability::ConstructionOnly,
+         "PROBE: per-leg multipliers on the late-stance press (n_legs values, may be negative). Empty = 1 for every leg.",
+         ParamValue{std::vector<double>{}}},
+        {"leg_phase_late_press_hip2", ParamMutability::HotMutable,
+         "hip2 share of the late-stance press (knee gets 1).", ParamValue{1.0}, std::nullopt, std::nullopt},
+        {"leg_phase_lift_lead", ParamMutability::HotMutable,
+         "Phase lead (rad) of the leg-phase lift: lift = max(0, sin(phi + lead)). > 0 starts the lift in late stance, so a leg "
+         "held at the Tegotae fixed point (cos phi = omega / (sigma N), late stance) unloads itself and is released, as a "
+         "crank-driven foot is. 0 = byte-identical.", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"leg_phase_lift_knee", ParamMutability::HotMutable,
          "Phase-shaped swing lift, shank half: y[knee] += gain * max(0, sin phi). Positive = fold (the swing_tuck sign). "
          "0 = off, byte-identical.",
@@ -1458,11 +1489,18 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_swing"]    = leg_phase_swing_;
     m["leg_phase_lift_hip2"] = leg_phase_lift_hip2_;
     m["leg_phase_lift_knee"] = leg_phase_lift_knee_;
+    m["leg_phase_lift_lead"] = leg_phase_lift_lead_;
+    m["leg_phase_late_press"] = leg_phase_late_press_;
+    m["wshift_rate"] = wshift_rate_; m["wshift_leak"] = wshift_leak_; m["wshift_max"] = wshift_max_; m["wshift_hip2"] = wshift_hip2_;
+    m["leg_phase_late_press_hip2"] = leg_phase_late_press_hip2_;
+    m["leg_phase_late_press_legs"] = leg_phase_late_press_legs_;
     m["swing_gate_src"]      = swing_gate_src_;
     m["level_gain"]          = level_gain_;
     m["level_knee_gain"]     = level_knee_gain_;
     m["stroke_level_gain"]   = stroke_level_gain_;
     m["stroke_level_floor"]  = stroke_level_floor_;
+    m["stroke_swingload_gain"]  = stroke_swingload_gain_;
+    m["stroke_swingload_floor"] = stroke_swingload_floor_;
     m["stroke_level_steer"]  = stroke_level_steer_;
     m["stroke_level_smooth"] = stroke_level_smooth_;
     m["stuck_topic"]         = stuck_topic_;
@@ -1715,11 +1753,21 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "leg_phase_swing",     [&](auto const& v){ leg_phase_swing_     = get_double(v, "leg_phase_swing"); });
     apply_param(params, "leg_phase_lift_hip2", [&](auto const& v){ leg_phase_lift_hip2_ = get_double(v, "leg_phase_lift_hip2"); });
     apply_param(params, "leg_phase_lift_knee", [&](auto const& v){ leg_phase_lift_knee_ = get_double(v, "leg_phase_lift_knee"); });
+    apply_param(params, "leg_phase_lift_lead", [&](auto const& v){ leg_phase_lift_lead_ = get_double(v, "leg_phase_lift_lead"); });
+    apply_param(params, "leg_phase_late_press", [&](auto const& v){ leg_phase_late_press_ = get_double(v, "leg_phase_late_press"); });
+    apply_param(params, "wshift_rate", [&](auto const& v){ wshift_rate_ = get_double(v, "wshift_rate"); });
+    apply_param(params, "wshift_leak", [&](auto const& v){ wshift_leak_ = get_double(v, "wshift_leak"); });
+    apply_param(params, "wshift_max",  [&](auto const& v){ wshift_max_  = get_double(v, "wshift_max"); });
+    apply_param(params, "wshift_hip2", [&](auto const& v){ wshift_hip2_ = get_double(v, "wshift_hip2"); });
+    apply_param(params, "leg_phase_late_press_hip2", [&](auto const& v){ leg_phase_late_press_hip2_ = get_double(v, "leg_phase_late_press_hip2"); });
+    apply_param(params, "leg_phase_late_press_legs", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) leg_phase_late_press_legs_ = *p; });
     apply_param(params, "swing_gate_src",      [&](auto const& v){ swing_gate_src_      = get_double(v, "swing_gate_src"); });
     apply_param(params, "level_gain",          [&](auto const& v){ level_gain_          = get_double(v, "level_gain"); });
     apply_param(params, "level_knee_gain",     [&](auto const& v){ level_knee_gain_     = get_double(v, "level_knee_gain"); });
     apply_param(params, "stroke_level_gain",   [&](auto const& v){ stroke_level_gain_   = get_double(v, "stroke_level_gain"); });
     apply_param(params, "stroke_level_floor",  [&](auto const& v){ stroke_level_floor_  = get_double(v, "stroke_level_floor"); });
+    apply_param(params, "stroke_swingload_gain",  [&](auto const& v){ stroke_swingload_gain_  = get_double(v, "stroke_swingload_gain"); });
+    apply_param(params, "stroke_swingload_floor", [&](auto const& v){ stroke_swingload_floor_ = get_double(v, "stroke_swingload_floor"); });
     apply_param(params, "stroke_level_steer",  [&](auto const& v){ stroke_level_steer_  = get_double(v, "stroke_level_steer"); });
     apply_param(params, "stroke_level_smooth", [&](auto const& v){ stroke_level_smooth_ = get_double(v, "stroke_level_smooth"); });
     apply_param(params, "stuck_topic",         [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) stuck_topic_ = *p; });
@@ -3288,11 +3336,20 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "leg_phase_swing")     leg_phase_swing_     = get_double(value, "leg_phase_swing");
     else if (key == "leg_phase_lift_hip2") leg_phase_lift_hip2_ = get_double(value, "leg_phase_lift_hip2");
     else if (key == "leg_phase_lift_knee") leg_phase_lift_knee_ = get_double(value, "leg_phase_lift_knee");
+    else if (key == "leg_phase_lift_lead") leg_phase_lift_lead_ = get_double(value, "leg_phase_lift_lead");
+    else if (key == "leg_phase_late_press") leg_phase_late_press_ = get_double(value, "leg_phase_late_press");
+    else if (key == "wshift_rate") wshift_rate_ = get_double(value, "wshift_rate");
+    else if (key == "wshift_leak") wshift_leak_ = get_double(value, "wshift_leak");
+    else if (key == "wshift_max")  wshift_max_  = get_double(value, "wshift_max");
+    else if (key == "wshift_hip2") wshift_hip2_ = get_double(value, "wshift_hip2");
+    else if (key == "leg_phase_late_press_hip2") leg_phase_late_press_hip2_ = get_double(value, "leg_phase_late_press_hip2");
     else if (key == "swing_gate_src")      swing_gate_src_      = get_double(value, "swing_gate_src");
     else if (key == "level_gain")          level_gain_          = get_double(value, "level_gain");
     else if (key == "level_knee_gain")     level_knee_gain_     = get_double(value, "level_knee_gain");
     else if (key == "stroke_level_gain")   stroke_level_gain_   = get_double(value, "stroke_level_gain");
     else if (key == "stroke_level_floor")  stroke_level_floor_  = get_double(value, "stroke_level_floor");
+    else if (key == "stroke_swingload_gain")  stroke_swingload_gain_  = get_double(value, "stroke_swingload_gain");
+    else if (key == "stroke_swingload_floor") stroke_swingload_floor_ = get_double(value, "stroke_swingload_floor");
     else if (key == "stroke_level_steer")  stroke_level_steer_  = get_double(value, "stroke_level_steer");
     else if (key == "stroke_level_smooth") stroke_level_smooth_ = get_double(value, "stroke_level_smooth");
     else if (key == "stuck_gate_gain")     stuck_gate_gain_     = get_double(value, "stuck_gate_gain");
@@ -5748,6 +5805,28 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                    && int(in_swing_.size()) == n_legs_ && in_swing_[leg]) {
             sr_was_stance_[leg] = false;             // swing: arm the next bout's reset
         }
+        // LEARNED WEIGHT-SHIFT PRESS (wshift_rate; Tegotae plan 7.12).  The error: a foot whose phase
+        // says swing still carries weight (the load-held phase's own sensor, values[3]), so its lift
+        // drops the body's corner instead of raising the foot.  The legs that can clear it are the
+        // OTHER legs, by pressing while they stand.  Each leg learns its own press amplitude a_i: while
+        // it stands, a_i rises with the swing-weighted load still on the other feet and leaks back
+        // when they are clear; the press is applied as the stance press is (knee +a, hip2 +a*wshift_hip2).
+        // It replaces a designer's constant (stance_lift_gain) with an amplitude each leg earns
+        // from the error.  wshift_rate 0 = byte-identical.
+        if (!warmup && wshift_rate_ > 0.0 && m >= 3 && ext_all_seen()) {
+            if (int(wshift_a_.size()) != n_legs_) wshift_a_.assign(size_t(n_legs_), 0.0f);
+            if (ext_sin_[size_t(leg)] < 0.0f) {                       // this leg stands
+                float u = 0.0f;
+                for (int j = 0; j < n_legs_; ++j)
+                    if (j != leg) u += std::max(0.0f, ext_sin_[size_t(j)]) * ext_load_[size_t(j)];
+                float& a = wshift_a_[size_t(leg)];
+                a += float(wshift_rate_) * u - float(wshift_leak_) * a;
+                a = std::clamp(a, 0.0f, float(wshift_max_));
+                y[m - 1] += a;
+                y[1]     += a * float(wshift_hip2_);
+                if (leg == 0) wshift_u_ema_ += 0.01 * (double(u) - wshift_u_ema_);
+            }
+        }
         // LEG-PHASE LIFT (leg_phase_lift_*): a swing lift shaped by the external phase,
         // max(0, sin phi) -- zero at liftoff and touchdown, peak mid-swing.  The existing lift
         // is the withdrawal of the stance press plus the contact-gated swing tuck, both of
@@ -5755,7 +5834,13 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // a loaded leg's phase is held in stance (sin < 0).
         if (!warmup && (leg_phase_lift_hip2_ != 0.0 || leg_phase_lift_knee_ != 0.0) && m >= 3
             && leg < int(ext_seen_.size()) && ext_seen_[size_t(leg)]) {
-            const float lift = std::max(0.0f, ext_sin_[size_t(leg)]);
+            // leg_phase_lift_lead (rad): the lift curve sin(phi + lead).  A positive lead starts
+            // the lift in LATE STANCE, so a leg held at the Tegotae rule's stance fixed point
+            // begins to unload itself, as a crank-driven foot does (Owaki's Oscillex: the crank's
+            // foot path rises before liftoff).  0 = max(0, sin phi), byte-identical.
+            const float s_lift = leg_phase_lift_lead_ == 0.0 ? ext_sin_[size_t(leg)]
+                : ext_sin_[size_t(leg)] * float(std::cos(leg_phase_lift_lead_)) + ext_cos_[size_t(leg)] * float(std::sin(leg_phase_lift_lead_));
+            const float lift = std::max(0.0f, s_lift);
             // SWING CLEARANCE (swing_clear_*; see the header): the commanded-FK clearance of
             // this swing foot above the planted plane scales its lift toward the target.
             float lscale = 1.0f;
@@ -5773,6 +5858,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             y[1]     += float(leg_phase_lift_hip2_) * lift * lscale;
             y[m - 1] += float(leg_phase_lift_knee_) * lift * lscale;
             ext_lift_acc_ += double(lift); ++ext_lift_n_;
+        }
+        // LATE-STANCE PRESS PROBE (leg_phase_late_press; Tegotae plan 7.8).  A FIXED press on every
+        // leg over the second half of its stance, w = max(0, -sin 2phi) on phi in (3pi/2, 2pi): zero at
+        // mid-stance and at liftoff, peak at 7pi/4.  The probe asks whether the press a leg gives
+        // before liftoff changes how far its corner sinks in the swing that follows -- the actuation
+        // a learned per-leg corner press would need.  Same sign as the level reflex (+ raises the
+        // corner).  0 = byte-identical.
+        if (!warmup && leg_phase_late_press_ != 0.0 && m >= 3
+            && leg < int(ext_seen_.size()) && ext_seen_[size_t(leg)]
+            && ext_sin_[size_t(leg)] < 0.0f && ext_cos_[size_t(leg)] > 0.0f) {
+            const float w = -2.0f * ext_sin_[size_t(leg)] * ext_cos_[size_t(leg)];   // -sin 2phi
+            const float lm = (int(leg_phase_late_press_legs_.size()) == n_legs_)
+                           ? float(leg_phase_late_press_legs_[size_t(leg)]) : 1.0f;     // per-leg multiplier
+            y[1]     += float(leg_phase_late_press_) * lm * float(leg_phase_late_press_hip2_) * w;
+            y[m - 1] += float(leg_phase_late_press_) * lm * w;
         }
         // LEVEL REFLEX on planted legs (level_gain; see the header note).  front = FL,FR
         // (0,1); left = FL,RL (0,2) -- the same corner map balance_gain used, with the
@@ -6157,7 +6257,17 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 const float x = (current_ema_ - float(current_gate_lo_)) / float(current_gate_hi_ - current_gate_lo_);
                 cur_mult = 1.0f - std::clamp(x, 0.0f, 1.0f);
             }
-            float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd * load_gate * level_mult * stall_mult * cur_mult
+            // SWING-LOAD PUSH GATE (stroke_swingload_gain; see the schema).  An EXPLICIT branch:
+            // at gain 0 swl_mult is the literal 1.0f and the product below is unchanged.
+            float swl_mult = 1.0f;
+            if (stroke_swingload_gain_ > 0.0 && ext_all_seen()) {
+                float e = 0.0f;
+                for (int j = 0; j < n_legs_; ++j)
+                    e = std::max(e, std::max(0.0f, ext_sin_[size_t(j)]) * ext_load_[size_t(j)]);
+                swl_mult = std::max(float(stroke_swingload_floor_), 1.0f - float(stroke_swingload_gain_) * e);
+                if (leg == 0) swingload_ema_ += 0.01 * (double(swl_mult) - swingload_ema_);
+            }
+            float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd * load_gate * level_mult * stall_mult * cur_mult * swl_mult
                                 + side * steer_eff * steer_mult);
             // STROKE-TO-STEP LOCK.  The ONLY consumer of L.step_phase: coupling, the
             // amplitude homeostat and prop-credit all keep the legacy L.phase, so this is
@@ -6974,6 +7084,9 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["level_ticks"]            = level_ticks_;
     mod["level_err_mean"]         = level_ticks_ ? float(level_acc_ / double(level_ticks_)) : 0.0f;
     mod["stroke_level_mean"]      = float(stroke_level_ema_);
+    mod["swingload_gate_mean"]    = float(swingload_ema_);
+    mod["wshift_a"]               = wshift_a_;
+    mod["wshift_u"]               = float(wshift_u_ema_);
     mod["stuck_score"]            = stuck_score_;
     mod["stuck_gate_in"]          = stuck_gate_in_;
     mod["current_a"]              = current_a_;
@@ -7423,6 +7536,9 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["level_ticks"]         = level_ticks_;
     j["level_err_mean"]      = level_ticks_ ? float(level_acc_ / double(level_ticks_)) : 0.0f;
     j["stroke_level_mean"]   = float(stroke_level_ema_);
+    j["swingload_gate_mean"] = float(swingload_ema_);
+    j["wshift_a"]            = wshift_a_;
+    j["wshift_u"]            = float(wshift_u_ema_);
     j["stuck_score"]         = stuck_score_;
     j["stuck_gate_in"]       = stuck_gate_in_;
     j["current_a"]           = current_a_;

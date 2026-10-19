@@ -83,6 +83,8 @@ private:
     // before the shares are formed, so a stiff sensor and a weak one carry the same weight.
     // Adapts to the sensor rather than calibrating it (CLAUDE.md s5.5).  0 = raw shares.
     double load_norm_tau_ = 0.0;
+    // 0 = shares (deployed); 1 = absolute load, Owaki's form (see the params schema).
+    int    load_mode_     = 0;
     std::vector<float> load_ref_;
     int64_t seed_        = 1234;   // the legs start at random phases, as on Owaki's robot
     std::vector<double> init_phase_;   // optional explicit start phases (radians); empty = seeded random
