@@ -8788,3 +8788,14 @@ original reaches max |x| 0.74 (never past the foot), LPG 0.86. At the foot the L
 ~31° with its front feet on the face and its rear pair loaded and jammed in the corner (rear toes ~0 mm):
 the weight-shift problem again. The operator's observation of the original's transition needs its
 placement to reproduce. Both levers are in the launcher as EXP entries (GainEvolver removed) for observation.
+
+### 2026-10-20 (evening) — THE PRE-LIMITS REFERENCE RESTORED (P-e at 6.0 rad/s): it reproduces its 8.61 m record to the digit, and it is the ONLY stack that climbs from the floor onto the wall (3/6 head-on, "eventually": median 4.3 min) — the operator's "original" was this servo speed
+
+*Plan §7.17.* Operator: restore the best config from before the robot limits, for performance on future
+or modified robots. `…native_measured__tofboom__fsrleg__ref_servo6.json` (MAX_SERVO_SPEED 6.0, GainEvolver
+removed), first in the launcher. `arenaavg` at 10 mm / 64: 8.61 ± 0.57 m, straight 0.87, steps 28.17, 0
+falls, exactly the 2026-10-01/02 record. At 2 mm / 256: 7.06 m, straight 0.75, 81 steps, 0.17 falls. Against
+the 3.668 rad/s stacks (measured body, 2 mm / 256, n = 6): wall transition 3/6 vs 0/6 (rises to 188 mm),
+left-wall escape 6/6 vs 1/6 (original) and 4/6 (LPG), pyramid i2 5/6 vs 5/6 and 0/6, hump escape twice as
+fast, reaches the rumble strips 6/6. Costs: belly lower (5th percentile 9 mm on the rumble strips), more
+tip-overs. The LPG stacks have never been measured at 6.0 rad/s; that is the comparison for future robots.

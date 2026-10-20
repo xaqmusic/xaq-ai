@@ -48,6 +48,8 @@ const _CONFIG_DIR := "res://addons/ami_ogma/configs/"
 # dropdown and picrawler-dash's "run config" offer.  Their annotated entries are in git history
 # (launcher.gd before this commit).
 const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
+	# ---- REFERENCE (2026-10-20, operator): the best config before the robot-faithful limits, for performance on future / modified robots.
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__ref_servo6.json",  # P-e at 6.0 rad/s: 8.61 m arena, 0 falls (ledger 2026-10-01/02)
 	# ---- BENCHMARKS: the original gait mechanism (the dropdown shows metadata.name; keep it short, the long form is in metadata.description) ----
 	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo.json",  # P-e·h0: robot-faithful inputs, height homeostat OFF (2026-10-02)
 	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030.json",  # P-e·h0 + hip2 rest +0.3 (the sim base of the gait audit, 2026-10-12)

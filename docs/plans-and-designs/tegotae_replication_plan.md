@@ -783,6 +783,42 @@ reproduced from these placements. The approach or placement where it was seen is
 BW) and cannot lift: rear toes ~0 mm through swing, jammed in the floor–wall corner. This is the
 weight-shift problem of 7.11–7.12 in its extreme form.
 
+### 7.17 The pre-limits reference restored: P-e at 6.0 rad/s (2026-10-20)
+
+Operator: every launcher config runs the robot's slow servo dynamics; in sim, performance for future or
+modified robots matters more than the picrawler's exact sim2real; restore the best config from before
+the limits. That config is **P-e at the sim's 6.0 rad/s**: `…native_measured__tofboom__fsrleg` (the
+original gait mechanism: learned layer, knee-derived phase, Kuramoto coupling 1.509, stroke 1.2; FSR-leg
+measured body; the sim's own inputs) with `MAX_SERVO_SPEED` 6.0 instead of the robot's 3.668. Restored as
+`…__ref_servo6.json` (GainEvolver removed; it never acts inside 6000 ticks) and put first in the launcher.
+
+**Reproduction** (`arenaavg`, n = 6 × 6000, arena 0.3): at the old 10 mm / 64 physics, **8.61 ± 0.57 m,
+straight 0.87, 28.17 steps, tilt_sd 0.066, 0 falls — the 2026-10-01/02 record to the digit**. At today's 2 mm /
+256: 7.06 ± 0.94 m, straight 0.75, 81 steps, tilt_sd 0.115, 0.17 falls.
+
+**Against the stacks of 7.15–7.16** (measured body, 2 mm / 256, n = 6):
+
+| test | reference (6.0 rad/s) | original (3.668) | LPG robot (3.668) |
+|---|---|---|---|
+| pyramid i2 escape | 5/6 (median 918, 4 falls) | 5/6 (2071, 3) | 0/6 |
+| pyramid i0 | 5/6 (603) | 6/6 (624) | 6/6 (782) |
+| left-wall escape | **6/6** (880, 2) | 1/6 (6) | 4/6 (0) |
+| hump | 6/6 (**246**) | 6/6 (495) | 6/6 (462) |
+| **wall transition, head-on, 15 000 ticks** | **3/6 onto the wall** (median 13 024 ticks, up to 188 mm) | 0/6 (59 mm) | 0/6 (88 mm) |
+| wall transition, 45° | 1/6 (144 mm) | 0/6 | 0/6 |
+| corridor: hump climb + descent (ticks) | 885 + 638 | 1560 + 3005 | 811 + 1520 |
+| corridor: reached the rumble strips | **6/6** | 2/6 | 5/6 |
+| corridor: posture change on the hump | 0.037–0.047 | 0.038–0.039 | 0.017–0.028 |
+| corridor: belly clearance, mean / 5th pct (mm) | 51 / 35 (rumble 40 / **9**) | 67 / 54 | 68 / 61 |
+
+**Reading.** The reference is the only stack that makes the floor-to-wall transition: 3 of 6 head-on,
+"eventually" (median 4.3 minutes), as the operator remembered. It also escapes the walls best and crosses
+the corridor fastest. Its posture adaptation is the original's, and its rhythm is the same mechanism. The
+servo speed is the difference from the "original" of 7.15–7.16, which is the same brain at 3.668 rad/s.
+It carries its belly lower (it scrapes on the rumble strips, 9 mm 5th percentile) and tips over more. **For
+future or modified robots the question is now the mechanism at 6.0 rad/s**: the LPG stacks have never been
+measured at full servo speed.
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |
