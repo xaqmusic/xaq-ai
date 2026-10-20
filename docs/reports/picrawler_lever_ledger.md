@@ -8810,3 +8810,12 @@ the hump: reference 0.037–0.047, LPG robot 0.016–0.018. Stance reach at 6.0 
 candidate` for flat + pyramid (its 3.668 flat cost is gone); not for walls. Harness fix: `--drop-module`
 on an already-absent module now warns instead of exiting (it had silently dropped one arm's runs, caught by
 the n = 0 rows).
+
+### 2026-10-20 (night) — THE CADENCE: LoadPhaseGait's `period_ticks` is a clock the servo speed never moved (stride 1.84 s at 3.668 AND 6.0 rad/s); at 6.0 rad/s and period 30 (0.82 s), LPG + stance reach covers 8.95 m vs the reference's 6.14 with 0 falls and escapes pyramid and wall without tip-overs — the floor-to-wall transition and hump posture adaptation stay the reference's
+
+*Plan §7.19.* Sweep 70 / 50 / 40 / 30 (executed stride 92 / 66 / 53 / 41 ticks, stroke 0.86–0.90 rad, no slew
+clipping). Flat (6000, same harness): 6.19 / 6.88 / 7.47 / **8.95 m**, 0 falls throughout; reference 6.14, 0.17
+falls. Pyramid i2 5–6/6, left wall up to 6/6 with 0 tip-overs at 30, hump escape 254 ticks (reference 246).
+Wall transition 0/6 at every period (rise ≤ 90 mm; reference 3/6, 188 mm). Hump posture change 0.021–0.025 vs
+the reference's 0.037–0.047. In the launcher: "EXP · LPG + stance reach at 6.0 rad/s, period 30 (sim)". Scorer
+fix (drop tick read from the teleport line); the only rescored arm (stance reach 0.03) keeps its `REGRESSION`.

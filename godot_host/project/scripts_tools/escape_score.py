@@ -12,7 +12,7 @@ The drop is found as the first tick after 1000 where the chassis jumps > 0.2 m. 
   falls     auto-resets after the drop
 Usage: escape_score.py NAME=<glob> [NAME=<glob> ...]   (per-tick diag logs)
 """
-import glob, json, math, statistics as st, sys
+import glob, json, math, re, statistics as st, sys
 
 ESC_R = 0.40
 
@@ -26,8 +26,16 @@ def one(path):
             except Exception:
                 pass
     drop = None
+    tp = None                                   # the drop tick, from the body's own "[teleport] ... tick N" line
+    for l in open(path, errors="replace"):
+        mm = re.search(r"\[teleport\] dropped.* tick (\d+)", l)
+        if mm:
+            tp = int(mm.group(1)); break
     for i in range(1, len(rows)):
-        if rows[i]["t"] > 1000 and math.hypot(rows[i]["x"] - rows[i - 1]["x"], rows[i]["z"] - rows[i - 1]["z"]) > 0.2:
+        if tp is not None:
+            if rows[i]["t"] > tp:
+                drop = i; break
+        elif rows[i]["t"] > 1000 and math.hypot(rows[i]["x"] - rows[i - 1]["x"], rows[i]["z"] - rows[i - 1]["z"]) > 0.2:
             drop = i; break
     if drop is None:
         return None

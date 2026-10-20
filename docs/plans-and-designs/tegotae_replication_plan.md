@@ -856,6 +856,41 @@ So the "wind-up toy" was half the slow servos (flat-ground performance) and half
 adaptation and the wall transition). The next lever targets the second half: the rear legs jammed at the
 wall's foot (7.16) with the weight on them.
 
+### 7.19 The cadence sweep at 6.0 rad/s (2026-10-20)
+
+Operator: was the step-speed parameter changed with the slow servos, and is it back? LoadPhaseGait's
+`period_ticks` (70, from a July stride measurement) is a clock: the LPG stride stayed at 92 ticks (1.84 s)
+at both 3.668 and 6.0 rad/s, while the reference's body-paced rhythm went from 45 ticks at 3.668 to 29 at
+6.0. The 6.0 comparison of 7.18 held LPG at the slow cadence. Sweep: the LPG robot config + stance reach at
+6.0 rad/s, `period_ticks` 70 / 50 / 40 / 30, measured body, 2 mm / 256, n = 6.
+
+**Executed** (hip-1 oscillation, flat arena): stride 92 / 66 / 53 / 41 ticks (0.82 s at 30); stroke range
+0.86 / 0.88 / 0.88 / 0.90 rad, so no slew clipping at any period.
+
+| test | reference | p70 | p50 | p40 | **p30** |
+|---|---|---|---|---|---|
+| flat arena 6000 (Tegotae harness): net / straight / falls / tilt_sd | 6.14 / 0.31 / 0.17 / 0.107 | 6.19 / 0.54 / 0 / 0.063 | 6.88 / 0.50 / 0 / 0.089 | 7.47 / 0.45 / 0 / 0.104 | **8.95 / 0.46 / 0 / 0.095** |
+| pyramid i2 escape (tip-overs) | 5/6 (4) | 5/6 (0) | 5/6 (2) | **6/6 (0)** | 5/6 (0) |
+| pyramid i0 (median ticks) | 5/6 (603) | 6/6 (689) | 6/6 (782) | 6/6 (444) | 6/6 (478) |
+| left-wall escape (tip-overs) | 6/6 (2) | 4/6 (1) | 5/6 (0) | 5/6 (1) | **6/6 (0)** |
+| hump escape (median ticks) | 246 | 412 | 359 | 298 | **254** |
+| floor → wall head-on, 15 000 ticks | **3/6** (188 mm) | 0/6 (72) | 0/6 (68) | 0/6 (84) | 0/6 (90) |
+| floor → wall 45° | 1/6 | 0/6 | 0/6 | 0/6 | 0/6 |
+| corridor: hump climb + descent (ticks) | 885 + 638 | 858 + 2504 | 897 + 1718 | 1218 + 2267 | **419 + 650** |
+| corridor: reached the rumble strips | 6/6 | 5/6 | 5/6 | 4/6 | 6/6 |
+| corridor: ticks on the rumble strips | **3534** | 3274 | 3855 | 5288 | 5066 |
+| corridor: posture change on the hump | **0.037–0.047** | 0.017–0.035 | 0.022–0.032 | 0.016–0.031 | 0.021–0.025 |
+| corridor: belly 5th pct on the rumble (mm) | 9 | 39 | 49 | 47 | 44 |
+
+**Readings.** The cadence was the rest of the flat-ground gap and more. At period 30, LPG + stance reach covers
+46 % more ground than the reference with no falls, escapes the pyramid and the wall with no tip-overs, and
+crosses the hump faster, with the belly 35 mm higher over the rumble strips. Transport rises monotonically with
+cadence. **What it still does not do is the reference's terrain adaptation**: it never climbs from the floor
+onto the wall at any period (rise ≤ 90 mm vs 188), its posture changes half as much on the hump, and it is
+slower over the rumble strips. Those belong to the mechanism, not to speed or cadence. (Scorer fix: both
+escape and wall scorers now read the drop tick from the body's teleport line; two seeds that tipped before the
+drop had been misread. Rescored: only the stance-reach 0.03 arm of 7.15 changed, and its `REGRESSION` stands.)
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |
