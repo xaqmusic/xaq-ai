@@ -8760,3 +8760,31 @@ benchmarks arena −15 to −42 %, corridor −0.5 to −1.5 m. Stride-proxy ste
 (promoted robot 11 of 14), so they belong to the body, not the evolver. **These are the baselines from
 2026-10-19.** Next for the stacks: the room falls on the stiffer body (the turn-ride-the-stroke anatomy of
 2026-10-13 is the first suspect), then any re-tuning.
+
+### 2026-10-20 — TERRAIN ADAPTATION: the LPG stacks are HIGH-CENTRED on a tall pyramid (0/6 escapes vs the original's 5/6); STANCE REACH frees them (5/6, faster than the original) but winds up after a fall (`PARTIAL`); NO STACK climbs from the floor onto the 30° wall in 60 s — the LPG robot stalls pressed against the wall's foot
+
+*Plan §7.15.* Operator: the original adapts to terrain and unsticks itself anywhere; the LPG walker
+"looks like a wind-up toy". Escape test (dropped at tick 1200, 3000 ticks, measured body, 2 mm / 256,
+no GainEvolver, n = 6): pyramid i2 original 5/6, LPG robot 0/6, LPG sim 0/6 (belly 0.66–0.77 BW, the legs
+cycling in the air). Walls: LPG robot 4/6 per side with 0 tip-overs, original 1/6 and 3/6 with 10
+tip-overs. The robot config lacks the planted-leg corner integrator (the sim stack levels on the hump;
+the robot config pitches beyond the slope). **Lever** `reach_rate` (+ `reach_load_topic` and friends):
+leg extension grows while the phase says stance and the self-normalised foot load is below half.
+Gain 0 byte-identical by construction. At 0.01: pyramid i2 0/6 → 5/6 (median 1232 ticks vs the
+original's 2071), other placements roughly held (pyr0 5/6, left wall 3/6 with 4 falls); flat arena
+4.46 → 4.05 m, falls 0 → 0.67, all on one seed that wound up after a fall. At 0.03: `REGRESSION`.
+Verdict `PARTIAL` (signal); fix the windup (reset on the reset event, leak floor) before re-testing.
+**Wall transition** (`OGMA_PICRAWLER_TELEPORT_YAW_DEG`, new): 0/6 for every stack. The LPG robot reaches the
+foot and stays there; the original does not reach the foot in 60 s. Needs a longer window, and the
+LPG failure is stepping up onto the slope.
+
+### 2026-10-20 (later) — ROUND 2: the stance-reach wind-up fix does not remove its flat falls (they were not wind-up); the corner integrator on the robot LPG config frees the pyramid 3/6 but tips over on the wall (0/6); NO STACK climbs onto the wall in 5 minutes, at 256 or 64 iterations — the original never passes the wall's foot
+
+*Plan §7.16.* Stance reach with a reset on the reset event and a leak floor: pyramid i2 4/6, left wall
+1/6 (7 tip-overs), flat 3.82 m with 0.83 falls (seed 6: 5; extension before the fall only 0.07–0.13).
+Corner integrator on the robot config: pyramid i2 3/6, left wall 0/6 (6), flat 3.33 m. Both `PARTIAL`, not
+promotable. Five-minute wall test: 0/6 for original, LPG, and both levers, also at 64 iterations; the
+original reaches max |x| 0.74 (never past the foot), LPG 0.86. At the foot the LPG robot is pitched
+~31° with its front feet on the face and its rear pair loaded and jammed in the corner (rear toes ~0 mm):
+the weight-shift problem again. The operator's observation of the original's transition needs its
+placement to reproduce. Both levers are in the launcher as EXP entries (GainEvolver removed) for observation.

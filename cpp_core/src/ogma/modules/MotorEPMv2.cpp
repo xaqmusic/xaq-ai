@@ -91,6 +91,9 @@ std::vector<TopicSpec> MotorEPMv2::input_topics() const {
     if (!contact_topic_.empty())
         v.emplace_back(contact_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
+    if (!reach_load_topic_.empty())
+        v.emplace_back(reach_load_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
     for (auto const& t : leg_phase_topics_)
         v.emplace_back(t, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
@@ -1132,6 +1135,19 @@ ParamSchema MotorEPMv2::params_schema() const {
          "robot the raw flag flickers at the FSR threshold and every flicker toggles a bias (2026-10-13: 30-45 command "
          "reversals a stride on hip2/knee against the sim's 6-20).",
          ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"reach_load_topic", ParamMutability::ConstructionOnly,
+         "STANCE REACH input: per-foot load (reality.proprio.foot_load). Empty = off (no subscription).", ParamValue{std::string("")}},
+        {"reach_rate", ParamMutability::HotMutable,
+         "STANCE REACH (Tegotae plan 7.15): while a leg's phase says stance and its foot's normalised load n = load / own "
+         "stance reference is below reach_target, its extension e += rate * (-sin phi) * (target - n); it leaks back at "
+         "reach_leak * min(1, n) * e. Applied in stance: knee += e, hip2 += e * reach_hip2 (the stance press's sign). 0 = byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"reach_target", ParamMutability::HotMutable, "Normalised stance load below which the leg reaches (1 = its usual stance load).", ParamValue{0.5}, std::nullopt, std::nullopt},
+        {"reach_leak", ParamMutability::HotMutable, "Per standing tick leak of e, scaled by the load felt.", ParamValue{0.01}, std::nullopt, std::nullopt},
+        {"reach_max", ParamMutability::HotMutable, "Upper bound on e (command units).", ParamValue{0.6}, std::nullopt, std::nullopt},
+        {"reach_leak_min", ParamMutability::HotMutable, "Floor on the load factor of the leak, so a body whose feet stay unloaded still unwinds (wind-up fix 2026-10-20).", ParamValue{0.25}, std::nullopt, std::nullopt},
+        {"reach_hip2", ParamMutability::HotMutable, "hip2 share of the reach (knee gets 1).", ParamValue{0.5}, std::nullopt, std::nullopt},
+        {"reach_ref_tau", ParamMutability::HotMutable, "Ticks of the per-foot stance-load reference EMA.", ParamValue{500.0}, std::nullopt, std::nullopt},
         {"wshift_rate", ParamMutability::HotMutable,
          "LEARNED WEIGHT-SHIFT PRESS (Tegotae plan 7.12). Per standing tick each leg's press amplitude a_i += rate * u - leak * a_i, "
          "u = sum over the OTHER legs of max(0, sin phi_j) * N_j (load still on feet whose phase says swing; values[3] of the "
@@ -1492,6 +1508,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_lift_lead"] = leg_phase_lift_lead_;
     m["leg_phase_late_press"] = leg_phase_late_press_;
     m["wshift_rate"] = wshift_rate_; m["wshift_leak"] = wshift_leak_; m["wshift_max"] = wshift_max_; m["wshift_hip2"] = wshift_hip2_;
+    m["reach_load_topic"] = reach_load_topic_; m["reach_rate"] = reach_rate_; m["reach_target"] = reach_target_;
+    m["reach_leak"] = reach_leak_; m["reach_max"] = reach_max_; m["reach_leak_min"] = reach_leak_min_; m["reach_hip2"] = reach_hip2_; m["reach_ref_tau"] = reach_ref_tau_;
     m["leg_phase_late_press_hip2"] = leg_phase_late_press_hip2_;
     m["leg_phase_late_press_legs"] = leg_phase_late_press_legs_;
     m["swing_gate_src"]      = swing_gate_src_;
@@ -1756,6 +1774,14 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "leg_phase_lift_lead", [&](auto const& v){ leg_phase_lift_lead_ = get_double(v, "leg_phase_lift_lead"); });
     apply_param(params, "leg_phase_late_press", [&](auto const& v){ leg_phase_late_press_ = get_double(v, "leg_phase_late_press"); });
     apply_param(params, "wshift_rate", [&](auto const& v){ wshift_rate_ = get_double(v, "wshift_rate"); });
+    apply_param(params, "reach_load_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) reach_load_topic_ = *p; });
+    apply_param(params, "reach_rate",    [&](auto const& v){ reach_rate_    = get_double(v, "reach_rate"); });
+    apply_param(params, "reach_target",  [&](auto const& v){ reach_target_  = get_double(v, "reach_target"); });
+    apply_param(params, "reach_leak",    [&](auto const& v){ reach_leak_    = get_double(v, "reach_leak"); });
+    apply_param(params, "reach_max",     [&](auto const& v){ reach_max_     = get_double(v, "reach_max"); });
+    apply_param(params, "reach_leak_min", [&](auto const& v){ reach_leak_min_ = get_double(v, "reach_leak_min"); });
+    apply_param(params, "reach_hip2",    [&](auto const& v){ reach_hip2_    = get_double(v, "reach_hip2"); });
+    apply_param(params, "reach_ref_tau", [&](auto const& v){ reach_ref_tau_ = std::max(1.0, get_double(v, "reach_ref_tau")); });
     apply_param(params, "wshift_leak", [&](auto const& v){ wshift_leak_ = get_double(v, "wshift_leak"); });
     apply_param(params, "wshift_max",  [&](auto const& v){ wshift_max_  = get_double(v, "wshift_max"); });
     apply_param(params, "wshift_hip2", [&](auto const& v){ wshift_hip2_ = get_double(v, "wshift_hip2"); });
@@ -1975,6 +2001,19 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
             contact_topic_, SubscriptionKind::Direct,
             [this](std::string_view /*topic*/, MessagePtr p){ handle_contact(p); }));
     }
+    if (!reach_load_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            reach_load_topic_, SubscriptionKind::Direct,
+            [this](std::string_view /*topic*/, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+                if (!pt) return;
+                if (int(reach_load_.size()) != n_legs_) reach_load_.assign(size_t(n_legs_), 0.0f);
+                const int k = std::min<int>(int(pt->values.size()), n_legs_);
+                for (int i = 0; i < k; ++i) reach_load_[size_t(i)] = std::max(0.0f, pt->values[i]);
+                reach_seen_ = true;
+            }));
+    }
     if (!stuck_topic_.empty()) {
         sub_ids_.push_back(bus_->subscribe(
             stuck_topic_, SubscriptionKind::Direct,
@@ -2115,6 +2154,7 @@ void MotorEPMv2::handle_event(std::string_view topic, MessagePtr payload) {
         reset_hit_this_tick_ = true;
         heading_bearing_ = 0.0f;   // respawn = new bearing origin (dead-reckoning restart)
         for (auto& o : level_off_) o = 0.0f;   // respawn = the terrain-written rest pose is void
+        for (auto& o : reach_e_) o = 0.0f;     // respawn = the stance reach starts unextended (its wind-up, 2026-10-20)
         for (auto& o : sc_off_) o = 0.0f;
         for (auto& o : lift_scale_) o = 1.0f;
         for (auto& o : sc_ema_) o = 0.0f;
@@ -3339,6 +3379,13 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "leg_phase_lift_lead") leg_phase_lift_lead_ = get_double(value, "leg_phase_lift_lead");
     else if (key == "leg_phase_late_press") leg_phase_late_press_ = get_double(value, "leg_phase_late_press");
     else if (key == "wshift_rate") wshift_rate_ = get_double(value, "wshift_rate");
+    else if (key == "reach_rate")    reach_rate_    = get_double(value, "reach_rate");
+    else if (key == "reach_target")  reach_target_  = get_double(value, "reach_target");
+    else if (key == "reach_leak")    reach_leak_    = get_double(value, "reach_leak");
+    else if (key == "reach_max")     reach_max_     = get_double(value, "reach_max");
+    else if (key == "reach_leak_min") reach_leak_min_ = get_double(value, "reach_leak_min");
+    else if (key == "reach_hip2")    reach_hip2_    = get_double(value, "reach_hip2");
+    else if (key == "reach_ref_tau") reach_ref_tau_ = std::max(1.0, get_double(value, "reach_ref_tau"));
     else if (key == "wshift_leak") wshift_leak_ = get_double(value, "wshift_leak");
     else if (key == "wshift_max")  wshift_max_  = get_double(value, "wshift_max");
     else if (key == "wshift_hip2") wshift_hip2_ = get_double(value, "wshift_hip2");
@@ -5827,6 +5874,35 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 if (leg == 0) wshift_u_ema_ += 0.01 * (double(u) - wshift_u_ema_);
             }
         }
+        // STANCE REACH (reach_rate; Tegotae plan 7.15).  The Tegotae error applied to leg LENGTH: my phase
+        // says stance and my foot feels no ground.  The foot's load is normalised by its own running
+        // stance reference (as the robot's FSR path is), n = load / ref, ~1 in an ordinary stance; shares
+        // cannot be used, because they sum to 1 even when the belly carries the body.  While the leg stands
+        // with n below reach_target, its extension e grows; when the foot bears weight again it leaks back.
+        // e is applied while the leg stands, same sign as the stance press (knee +e, hip2 +e*reach_hip2:
+        // the foot goes down / the corner goes up).  On flat ground e stays near 0.  reach_rate 0 = byte-identical.
+        if (!warmup && reach_rate_ > 0.0 && m >= 3 && reach_seen_ && ext_all_seen()
+            && int(reach_load_.size()) == n_legs_) {
+            if (int(reach_e_.size()) != n_legs_) { reach_e_.assign(size_t(n_legs_), 0.0f); reach_ref_.assign(size_t(n_legs_), 0.0f); reach_n_.assign(size_t(n_legs_), 1.0f); }
+            const float ld = reach_load_[size_t(leg)];
+            float& ref = reach_ref_[size_t(leg)];
+            if (ld > 0.0f && (ref <= 0.0f || ld > 0.3f * ref)) {        // the foot's own stance reference
+                if (ref <= 0.0f) ref = ld;
+                else ref += (1.0f / float(reach_ref_tau_)) * (ld - ref);
+            }
+            const float n = ref > 1e-6f ? ld / ref : 0.0f;
+            reach_n_[size_t(leg)] = n;
+            float& e = reach_e_[size_t(leg)];
+            const float st_w = std::max(0.0f, -ext_sin_[size_t(leg)]);  // 0 at touchdown/liftoff, 1 mid-stance
+            if (st_w > 0.0f) {
+                e += float(reach_rate_) * st_w * std::max(0.0f, float(reach_target_) - n)
+                   - float(reach_leak_) * std::max(float(reach_leak_min_), std::min(1.0f, n)) * e;   // floor: a body whose loads stay low still unwinds
+                e = std::clamp(e, 0.0f, float(reach_max_));
+                const float a = e * std::min(1.0f, 3.0f * st_w);        // ramps in over early stance
+                y[m - 1] += a;
+                y[1]     += a * float(reach_hip2_);
+            }
+        }
         // LEG-PHASE LIFT (leg_phase_lift_*): a swing lift shaped by the external phase,
         // max(0, sin phi) -- zero at liftoff and touchdown, peak mid-swing.  The existing lift
         // is the withdrawal of the stance press plus the contact-gated swing tuck, both of
@@ -7087,6 +7163,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["swingload_gate_mean"]    = float(swingload_ema_);
     mod["wshift_a"]               = wshift_a_;
     mod["wshift_u"]               = float(wshift_u_ema_);
+    mod["reach_e"]                = reach_e_;
+    mod["reach_n"]                = reach_n_;
     mod["stuck_score"]            = stuck_score_;
     mod["stuck_gate_in"]          = stuck_gate_in_;
     mod["current_a"]              = current_a_;
@@ -7539,6 +7617,8 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["swingload_gate_mean"] = float(swingload_ema_);
     j["wshift_a"]            = wshift_a_;
     j["wshift_u"]            = float(wshift_u_ema_);
+    j["reach_e"]             = reach_e_;
+    j["reach_n"]             = reach_n_;
     j["stuck_score"]         = stuck_score_;
     j["stuck_gate_in"]       = stuck_gate_in_;
     j["current_a"]           = current_a_;

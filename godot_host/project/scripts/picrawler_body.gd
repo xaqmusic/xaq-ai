@@ -4691,6 +4691,14 @@ func _teleport_to(ground: Vector3) -> void:
 	var drop: Vector3 = Vector3(ground.x, ground.y + (0.35 if flip else 0.30), ground.z)
 	var pivot: Vector3 = _chassis.global_transform.origin
 	var rot: Basis = Basis(Vector3(1, 0, 0), PI) if flip else Basis.IDENTITY
+	# Optional HEADING (env OGMA_PICRAWLER_TELEPORT_YAW_DEG, 2026-10-20): the absolute heading to drop
+	# the robot with, 0 = down the corridor (+Z), +90 = facing +X.  For the wall-transition test (face a
+	# side wall from the channel floor).  Unset = the heading it had, unchanged.
+	var yaw_env: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_YAW_DEG")
+	if yaw_env != "":
+		var fwd: Vector3 = _chassis.global_transform.basis.z
+		var cur: float = atan2(fwd.x, fwd.z)
+		rot = Basis(Vector3.UP, deg_to_rad(yaw_env.to_float()) - cur) * rot
 	var parts: Array = [_chassis] + (_coxas as Array) + (_uppers as Array) + (_lowers as Array)
 	for b in parts:
 		b.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
@@ -12450,6 +12458,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		for _i in range(4): _fla.append(snappedf(_foot_load_ema[_i] / _fl_norm(), 0.001))
 		line["fload"] = _fla
 		line["bload"] = snappedf(_chassis_load_ema / _fl_norm(), 0.001)
+		# True chassis attitude (god's-eye, instrument only): sin(pitch) nose-up negative and sin(roll),
+		# in the same sense as MotorEPMv2's tilt_p / tilt_r, for configs whose brain reads no tilt.
+		if _chassis != null and is_instance_valid(_chassis):
+			var _cb: Basis = _chassis.global_transform.basis
+			line["cpitch"] = snappedf(-_cb.z.normalized().y, 0.0001)   # +Z is forward; nose up -> negative
+			line["croll"]  = snappedf(_cb.x.normalized().y, 0.0001)
 		# TRUE foot clearance (god's-eye, instrument only, never published): the toe end of each
 		# lower capsule (`ftip`) and the capsule's knee end (`fknee`), world height of the surface
 		# point (centre minus radius).  `feet_y` is a vertical-shank approximation; this is the
@@ -12997,6 +13011,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				for _v in _wa: _waa.append(snappedf(float(_v), 0.001))
 				line["ws_a"] = _waa
 			line["ws_u"] = snappedf(float(_mm.get("wshift_u", 0.0)), 0.0001)
+			for _rk in [["reach_e", "rc_e"], ["reach_n", "rc_n"]]:
+				var _rv = _mm.get(_rk[0], [])
+				if _rv is Array and _rv.size() == 4:
+					var _ra := PackedFloat64Array()
+					for _v in _rv: _ra.append(snappedf(float(_v), 0.001))
+					line[_rk[1]] = _ra
 			line["tilt_p"]    = snappedf(float(_mm.get("tilt_pitch", 0.0)), 0.001)
 			line["tilt_r"]    = snappedf(float(_mm.get("tilt_roll", 0.0)), 0.001)
 			var _lo = _mm.get("level_off", [])

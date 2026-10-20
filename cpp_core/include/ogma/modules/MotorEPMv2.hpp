@@ -540,6 +540,12 @@ private:
     double wshift_rate_ = 0.0, wshift_leak_ = 0.002, wshift_max_ = 1.0, wshift_hip2_ = 0.25;   // learned weight shift
     std::vector<float> wshift_a_;          // per-leg learned press amplitude
     double wshift_u_ema_ = 0.0;            // report-only: swing-load error seen by leg 0
+    // STANCE REACH (Tegotae plan 7.15)
+    std::string reach_load_topic_;
+    double reach_rate_ = 0.0, reach_target_ = 0.5, reach_leak_ = 0.01, reach_max_ = 0.6, reach_hip2_ = 0.5, reach_ref_tau_ = 500.0;
+    double reach_leak_min_ = 0.25;
+    std::vector<float> reach_load_, reach_ref_, reach_e_, reach_n_;
+    bool reach_seen_ = false;
     // AIRBORNE SOURCE for the contact-gated terms (robot runs 2026-10-13).  The swing tuck
     // and the rear landing gate on the raw foot-contact flag; on the robot that flag flickers
     // at the FSR threshold (hundreds of transitions a minute), and every flicker switches a

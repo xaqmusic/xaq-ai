@@ -706,6 +706,83 @@ its rear feet now lift. The CAD bare rule now falls in the corridor (0.67, tilt_
 heading hold it climbs the side walls. **These are the baselines from 2026-10-19.** Numbers before
 that date ran at 10 mm / 64 iterations.
 
+### 7.15 Adaptation on terrain: the escape test, stance reach, the wall transition (2026-10-19/20)
+
+Operator: the original stack, noisy and slow, adapts to terrain and gets itself unstuck from almost
+anywhere in the corridor; the LPG stack "looks like a wind-up toy". Measured body, 2 mm / 256, the
+GainEvolver removed, n = 6. New instruments: true chassis attitude (`cpitch`/`croll`, load log),
+`terrain_scorecard.py` (per corridor zone), `escape_score.py` (dropped onto a feature at tick 1200,
+3000 ticks to get off), `wall_score.py` (dropped on the floor facing a wall), and
+`OGMA_PICRAWLER_TELEPORT_YAW_DEG` (drop heading). The chassis is solid in every run.
+
+**Corridor scorecard** (9000 ticks). On the hump's climb (≈ 3.7°) the original pitches −0.053 (it
+levels against part of the slope), the LPG robot config −0.074 (more than the slope, and it stays
+nose-up on the descent and at 8° on the rumble strips), the LPG sim stack −0.005 (its planted-leg
+corner integrator holds it level). Stance-posture change from the flat: original 0.038–0.040 rad,
+LPG robot 0.017–0.028, LPG sim 0.059–0.073. The robot config lacks the corner integrator.
+
+**Escape** (escaped / 6, median ticks): pyramid i0, i5 and the hump: every stack 6/6. **Pyramid i2**
+(centre, ~20 cm): original 5/6 (2071, 3 tip-overs), **both LPG stacks 0/6**, high-centred (belly 0.66–0.77
+BW, feet 0.03–0.14), the legs cycling a fixed shape in the air (knee sd 0.12–0.16 vs the original's
+0.40–0.51). Side walls: LPG robot 4/6 per side with 0 tip-overs; original 1/6 and 3/6 with 10 tip-overs
+in 12 drops; LPG sim 0/6 with 13.
+
+**Lever: stance reach** (`MotorEPMv2.reach_load_topic`, `reach_rate`, `_target`, `_leak`, `_max`,
+`_hip2`, `_ref_tau`). The Tegotae error applied to leg length: while a leg's phase says stance and
+its foot's load, normalised by its own stance reference, is below half, its extension grows; it leaks
+back when the foot bears weight. It reads `foot_load` directly, because shares sum to 1 even when
+the belly carries the body. On the LPG robot config:
+
+| arm | pyramid i2 | pyramid i0 | left wall | hump | flat arena: net / straight / falls / tilt_sd |
+|---|---|---|---|---|---|
+| original | 5/6 (2071, 3 falls) | 6/6 | 1/6 (6 falls) | 6/6 | 2.82 / 0.23 / 0 / 0.066 |
+| LPG robot | **0/6** | 6/6 | 4/6 (0) | 6/6 | 4.46 / 0.56 / 0 / 0.061 |
+| + reach 0.01 | **5/6 (1232, 1 fall)** | 5/6 (2) | 3/6 (4) | 6/6 | 4.05 / 0.49 / **0.67** / 0.193 |
+| + reach 0.03 | 5/6 (14 falls) | 3/6 (9) | 3/6 (9) | 6/6 | 2.04 / 0.23 / 2.0 / 0.390 |
+
+**Verdict: `PARTIAL` (signal) at 0.01, `REGRESSION` at 0.03.** It frees the high-centred robot
+(0/6 → 5/6, faster than the original, fewer tip-overs) and stays near zero on flat ground on five
+seeds (extension 0.00–0.04). On the sixth seed it **winds up** after a fall (extension 0.24–0.36 on all
+legs, normalised load 0.25–0.51) and falls 4 times. The leak scales with the load felt, so a body
+whose loads stay low never unwinds. To fix before any promotion: reset on the reset event, and a leak
+floor independent of the load.
+
+**Wall transition** (dropped on the floor 0.2–0.3 m from the wall's foot, facing it or at 45°, 3000
+ticks): **no stack gets onto the wall** (|x| > 0.95). The LPG robot walks straight to the foot and
+stays pressed against it (2400–2600 ticks at the foot, heading held, max |x| 0.82, rise 60 mm). The
+original never reaches the foot in this window (heading wanders, max |x| 0.68). Stance reach does not
+change it. The operator's "the original eventually makes it" needs a longer window to test, and the
+LPG failure is at the foot: the front feet do not step up onto the slope.
+
+### 7.16 Round 2: the stance-reach fix, the corner integrator on the robot config, the 5-minute wall test (2026-10-20)
+
+Same protocol as 7.15 (measured body, 2 mm / 256, no GainEvolver, n = 6).
+
+| arm (LPG robot config) | pyramid i2 | pyramid i0 | left wall | hump | flat: net / falls / tilt_sd |
+|---|---|---|---|---|---|
+| base | 0/6 | 6/6 | 4/6 (0 falls) | 6/6 | 4.46 / 0 / 0.061 |
+| stance reach 0.01 (7.15) | 5/6 | 5/6 | 3/6 (4) | 6/6 | 4.05 / 0.67 / 0.193 |
+| stance reach 0.01, reset + leak floor | 4/6 | 5/6 | 1/6 (7) | 6/6 | 3.82 / 0.83 / 0.190 |
+| corner integrator (`level_int_gain` 0.005, planted only) | 3/6 | 4/6 | **0/6 (6)** | 6/6 | 3.33 / 0.33 / 0.167 |
+
+**The wind-up fix did not remove the flat falls**, so wind-up was not their cause. On the falling
+seeds the reach extension before the fall is small (0.01–0.13), and seed 1 falls at t ≈ 340 under
+both levers (the base does not): each lever's small stance extension tips a marginally stable start.
+Both levers: `PARTIAL` (they free the high-centred robot, 3–5/6 vs 0/6) at a cost in flat-ground
+robustness and wall escapes. Neither is promotable as is.
+
+**The 5-minute wall test** (15 000 ticks after the drop, facing the wall and at 45°): **no stack gets
+onto the wall, at 256 or at 64 iterations.** Original: max |x| 0.74 / 0.74 (it never gets past the
+wall's foot), 9 tip-overs head-on; at 64: 0.73 / 0.67. LPG base: 0.86 / 0.78, rise 77–88 mm, 1 tip-over;
+at 64: 0.83 / 0.78. Pyramid i2 at 64 over 15 000 ticks: original 6/6 (median 1426, 14 tip-overs),
+LPG 3/6 (median 10 465). The operator's "the original eventually makes the transition" is not
+reproduced from these placements. The approach or placement where it was seen is needed.
+
+**At the wall's foot the LPG robot** is pitched about 31° nose-up with its front feet on the slope
+(touching the face 44–53 % of the time, toes 114–161 mm up). The rear pair carries the body (0.28–0.33
+BW) and cannot lift: rear toes ~0 mm through swing, jammed in the floor–wall corner. This is the
+weight-shift problem of 7.11–7.12 in its extreme form.
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |
