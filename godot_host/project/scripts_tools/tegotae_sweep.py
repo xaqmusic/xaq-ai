@@ -321,7 +321,8 @@ def write_arm(base_cfg, name, sets, outdir, drop=()):
     print(f"--- arm {name}")
     for mid in drop:
         if not any(m.get("id") == mid for m in cfg["modules"]):
-            sys.exit(f"--drop-module {mid}: no such module in the base")
+            print(f"    module {mid}: not in the base (already absent)")
+            continue
         cfg["modules"] = [m for m in cfg["modules"] if m.get("id") != mid]
         print(f"    module {mid}: DROPPED")
     ids = {m.get("id"): m for m in cfg["modules"]}

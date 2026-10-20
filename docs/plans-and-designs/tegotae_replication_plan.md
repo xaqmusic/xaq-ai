@@ -819,6 +819,43 @@ It carries its belly lower (it scrapes on the rumble strips, 9 mm 5th percentile
 future or modified robots the question is now the mechanism at 6.0 rad/s**: the LPG stacks have never been
 measured at full servo speed.
 
+### 7.18 The LPG stacks at 6.0 rad/s (2026-10-20)
+
+The same battery as the reference (7.17), every stack at `MAX_SERVO_SPEED` 6.0 (override checked in the
+run logs), measured body, 2 mm / 256, n = 6. Flat arena with `arenaavg` (6000 ticks), the rest with the
+Tegotae harness.
+
+| test | reference (original gait) | LPG robot | LPG robot + stance reach | LPG sim stack |
+|---|---|---|---|---|
+| flat arena: net / straight / falls / steps | **7.06** / 0.75 / 0.17 / 81 | 6.44 / 0.83 / 0.33 / 94 | **6.63 / 0.84 / 0.17** / 102 | 5.96 / 0.74 / 0.33 / 38 |
+| belly clearance, arena (mm) | — | 67 | 70 | 68 |
+| pyramid i2 escape | 5/6 (918, 4 tip-overs) | 0/6 | **5/6 (1217, 0 tip-overs)** | 3/6 (2341, 5) |
+| pyramid i0 | 5/6 | 6/6 | 6/6 (0) | 6/6 |
+| left-wall escape | **6/6** (2) | 5/6 (0) | 4/6 (1) | 0/6 (11) |
+| hump escape (median ticks) | 6/6 (**246**) | 6/6 (457) | 6/6 (412) | 6/6 (357) |
+| **floor → wall, head-on, 15 000 ticks** | **3/6** (188 mm) | 1/6 (88 mm) | 0/6 (72 mm) | 0/6 (41 mm) |
+| floor → wall, 45° | 1/6 | 0/6 | 0/6 | 0/6 |
+| corridor: reached the rumble strips | 6/6 | 5/6 | 5/6 | 4/6 |
+| corridor: posture change on the hump | 0.037–0.047 | 0.016–0.018 | 0.017–0.035 | 0.050–0.071 |
+| corridor: belly 5th percentile, rumble (mm) | **9** | 43 | 39 | 38 |
+
+**Readings.**
+1. **On flat ground the servo speed was most of the gap.** At 6.0 rad/s the LPG robot with stance reach comes
+   within 6 % of the reference's distance, goes straighter (0.84 vs 0.75), falls as rarely (0.17), and
+   carries its belly higher. Stance reach's flat-ground cost at 3.668 (7.16) is gone here: 0.17 falls
+   against the base's 0.33.
+2. **On the tall pyramid stance reach matches the reference** (5/6) with no tip-overs (the reference has 4).
+3. **The floor-to-wall transition is mechanism, not servo speed.** The reference climbs onto the wall 3/6
+   head-on. The LPG stacks manage 0–1/6 even at 6.0 rad/s. The reference also escapes walls best and
+   changes its posture on the hump 2–3× as much as the LPG robot configs. The LPG sim stack (with the
+   corner integrator) adapts its posture as much but tips over on walls.
+4. **Where the reference pays**: it scrapes its belly on the rumble strips (5th percentile 9 mm) and tips
+   over more on the pyramid.
+
+So the "wind-up toy" was half the slow servos (flat-ground performance) and half the mechanism (posture
+adaptation and the wall transition). The next lever targets the second half: the rear legs jammed at the
+wall's foot (7.16) with the weight on them.
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |

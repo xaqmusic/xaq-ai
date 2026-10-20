@@ -8799,3 +8799,14 @@ the 3.668 rad/s stacks (measured body, 2 mm / 256, n = 6): wall transition 3/6 v
 left-wall escape 6/6 vs 1/6 (original) and 4/6 (LPG), pyramid i2 5/6 vs 5/6 and 0/6, hump escape twice as
 fast, reaches the rumble strips 6/6. Costs: belly lower (5th percentile 9 mm on the rumble strips), more
 tip-overs. The LPG stacks have never been measured at 6.0 rad/s; that is the comparison for future robots.
+
+### 2026-10-20 (night) — THE LPG STACKS AT 6.0 rad/s: on flat ground the servo speed was most of the gap (LPG + stance reach 6.63 m vs the reference's 7.06, straighter, as few falls); stance reach matches the reference on the tall pyramid with no tip-overs; the FLOOR-TO-WALL TRANSITION stays the reference's alone (3/6 vs 0–1/6) — that part is mechanism
+
+*Plan §7.18.* Same battery as the reference, `MAX_SERVO_SPEED` 6.0, measured body, 2 mm / 256, n = 6. Flat
+arena (`arenaavg` 6000): reference 7.06 / straight 0.75 / 0.17 falls; LPG robot 6.44 / 0.83 / 0.33; LPG +
+stance reach 6.63 / 0.84 / 0.17; LPG sim 5.96 / 0.74 / 0.33. Pyramid i2: 5/6 / 0/6 / **5/6 (0 tip-overs)** /
+3/6. Left-wall escape 6/6 / 5/6 / 4/6 / 0/6. Wall transition head-on 3/6 / 1/6 / 0/6 / 0/6. Posture change on
+the hump: reference 0.037–0.047, LPG robot 0.016–0.018. Stance reach at 6.0 rad/s: `PARTIAL → WORKING
+candidate` for flat + pyramid (its 3.668 flat cost is gone); not for walls. Harness fix: `--drop-module`
+on an already-absent module now warns instead of exiting (it had silently dropped one arm's runs, caught by
+the n = 0 rows).
