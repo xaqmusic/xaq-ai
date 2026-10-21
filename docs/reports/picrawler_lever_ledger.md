@@ -8819,3 +8819,13 @@ falls. Pyramid i2 5–6/6, left wall up to 6/6 with 0 tip-overs at 30, hump esca
 Wall transition 0/6 at every period (rise ≤ 90 mm; reference 3/6, 188 mm). Hump posture change 0.021–0.025 vs
 the reference's 0.037–0.047. In the launcher: "EXP · LPG + stance reach at 6.0 rad/s, period 30 (sim)". Scorer
 fix (drop tick read from the teleport line); the only rescored arm (stance reach 0.03) keeps its `REGRESSION`.
+
+### 2026-10-20 (night) — THE FEMUR LEVEL (`hip2_tuck_target` 0.3 → 0.0): a lower, spider-like stance lets the LPG walker climb from the floor onto the wall 5/6 head-on (the reference 3/6), with zero tip-overs on every escape and the reference's posture adaptation — `WORKING` (signal, sim)
+
+*Plan §7.20.* Operator: the chassis rides too high; with the longer FSR leg the femur should sit near horizontal, as on the
+real robot. On the latest config (LPG robot + stance reach, 6.0 rad/s, period 30), measured body, 2 mm / 256, n = 6. Tuck 0.3
+/ 0.15 / 0.0 / −0.1: stance femur +0.25 / +0.14 / +0.03 / −0.03, chassis 101 / 92 / 89 / 78 mm. Flat 8.95 / 9.50 / 9.26 / 7.93 m
+(falls 0 / 0 / 0 / 0.33). Pyramid i2 5/6 / 5/6 / **6/6** / 3/6. **Floor → wall head-on 0/6 / 1/6 / 5/6 (median 4952 ticks) / 4/6.**
+Hump posture change 0.021–0.025 / … / **0.034–0.050** (the reference 0.037–0.047). Belly 5th percentile 60 / 47 / 30 / 23 mm,
+belly load ≈ 0 except at −0.1. 45° wall approach: 0/6 throughout. In the launcher: "EXP · LPG + stance reach, 6.0 rad/s, period
+30, femur level (sim)". Re-use context on the robot: its LPG config carries tuck 0.3 while the operator reports the real femur level.

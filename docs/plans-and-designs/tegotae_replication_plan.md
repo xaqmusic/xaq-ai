@@ -891,6 +891,32 @@ slower over the rumble strips. Those belong to the mechanism, not to speed or ca
 escape and wall scorers now read the drop tick from the body's teleport line; two seeds that tipped before the
 drop had been misread. Rescored: only the stance-reach 0.03 arm of 7.15 changed, and its `REGRESSION` stands.)
 
+### 7.20 The femur level: a lower, spider-like stance (2026-10-20)
+
+Operator: the LPG walker's chassis rides too high; with the longer FSR lower leg, hip 2 does not need to flex down, and on
+the real robot the femur is mostly horizontal; a lower chassis should be more stable and spider-like. Measured: stance femur
+(hip 2) +0.25 on the LPG configs (the posture spring's `hip2_tuck_target` 0.3, plus the stance press) vs +0.02 on the
+reference; chassis 101 vs 75 mm. Lever `hip2_tuck_target` on the latest launcher config (LPG robot + stance reach, 6.0 rad/s,
+period 30), measured body, 2 mm / 256, n = 6:
+
+| tuck | stance femur | chassis | belly mean / 5th pct (mm) | belly load | flat 6000: net / falls / tilt_sd | pyramid i2 | left wall | **floor → wall head-on** | 45° | hump posture change |
+|---|---|---|---|---|---|---|---|---|---|---|
+| reference | +0.02 | 75 | 49 / — | — | 6.14 / 0.17 / 0.107 | 5/6 (4 tips) | 6/6 (2) | 3/6 (median 13 024) | 1/6 | 0.037–0.047 |
+| 0.3 (base) | +0.25 | 101 | 69 / 60 | 0.000 | 8.95 / 0 / 0.095 | 5/6 (0) | 6/6 (0) | 0/6 (90 mm) | 0/6 | 0.021–0.025 |
+| 0.15 | +0.14 | 92 | 59 / 47 | 0.001 | 9.50 / 0 / 0.101 | 5/6 (0) | 5/6 (1) | 1/6 | 0/6 | 0.023–0.029 |
+| **0.0** | **+0.03** | **89** | **48 / 30** | 0.004 | **9.26 / 0 / 0.117** | **6/6 (0)** | **6/6 (0)** | **5/6 (median 4952, 149 mm)** | 0/6 | **0.034–0.050** |
+| −0.1 | −0.03 | 78 | 48 / 23 | 0.022 | 7.93 / 0.33 / 0.212 | 3/6 | 6/6 (0) | 4/6 (2882, 273 mm) | 0/6 | 0.032–0.044 |
+
+Corridor at 0.0: hump climb 381 ticks (the fastest of any arm), rumble strips 3749 ticks (the reference 3534), 5/6 reach them,
+belly 5th percentile on the rumble 27 mm (the reference scrapes at 9).
+
+**Verdict `WORKING` (signal, n = 6, sim only) at 0.0.** With the femur level the LPG walker climbs from the floor onto the wall
+on 5 of 6 head-on drops, three times faster than the pre-limits reference and more often, escapes everything without
+tipping, and adapts its posture on the hump as much as the reference. It does this without giving up flat-ground transport or
+belly clearance. −0.1 is too low: the belly starts to carry weight and flat stability suffers. The 45° approach is still 0/6
+for every arm. The robot's own LPG config also carries `hip2_tuck_target` 0.3 (the `hip2p030` family), and the operator
+reports the real femur horizontal; that is the robot-side re-use context.
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |
