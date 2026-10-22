@@ -44,8 +44,15 @@ public:
     // One brain tick.  v_right / v_fwd in m/s (body frame), heading in rad, tilt in rad
     // (>= 0), dt in s, tick = the caller's tick counter (the warmup is judged on it, as
     // the sim judges it on tick_counter).  Returns the published distress in [0, 1].
+    //
+    // n_planted (2026-10-22, Tegotae plan 7.21): the number of feet planted this tick (the FSR stance rule),
+    // or -1 = unknown (the original behaviour, byte-identical).  With NO foot planted the leg odometry is not
+    // a progress measurement -- inverted, the stride estimate coasted on a wrong attitude to 0.76 m/s while the
+    // body lay still, so the stall score read "walking" and panic never engaged -- so the displacement counts
+    // zero for that tick.  A body flailing upside down or high-centred reads as stalled.
     double step(double v_right, double v_fwd, double heading, double tilt, double dt,
-                int64_t tick) {
+                int64_t tick, int n_planted = -1) {
+        if (n_planted == 0) { v_right = 0.0; v_fwd = 0.0; }
         const double sh = std::sin(heading), ch = std::cos(heading);
         px_ += (v_fwd * sh + v_right * ch) * dt;
         pz_ += (v_fwd * ch - v_right * sh) * dt;

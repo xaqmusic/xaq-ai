@@ -2869,6 +2869,7 @@ const DISTRESS_RISE: float = 0.006            # accumulate rate × stuck_score
 const DISTRESS_DECAY: float = 0.004           # decay rate × (1 − stuck_score)
 var _distress_pos_history: Array = []         # ring of chassis XZ (Vector2)
 var _distress_node: RefCounted = null         # honest_distress: ogma::body::DistressAccumulator
+var _dbg_sv_ns_planted: int = -1             # feet planted by the stride FSR rule; -1 = not yet known (old distress form)
 var _stuck_deficit: float = 0.0               # fast 2 s net-displacement deficit (stall, 0..1)
 var _tilt_ema: float = 0.0                    # smoothed |tilt| (perch evidence)
 var _distress: float = 0.0                    # slow PERCH×STALL accumulator (the panic signal)
@@ -7159,8 +7160,15 @@ func _step_one() -> void:
 			push_error("picrawler_body: DistressNode unavailable — honest_distress cannot run")
 		else:
 			var up_t: float = acos(clamp(_up_est_body.y, -1.0, 1.0)) if _up_est_body.length() > 0.5 else 0.0
-			_distress = _distress_node.step(_stridev_est.x, _stridev_est.y, _ego_heading, up_t,
-											TAU, tick_counter)
+			# DISTRESS_PLANTED (2026-10-22, Tegotae plan 7.21; default on): with no foot planted (the FSR stance
+			# rule's count, sv_ns_sensor) the leg odometry is not progress -- inverted it coasted to a phantom
+			# 0.76 m/s and panic never engaged.  OGMA_PICRAWLER_DISTRESS_PLANTED=0 = the earlier form.
+			if OS.get_environment("OGMA_PICRAWLER_DISTRESS_PLANTED") != "0":
+				_distress = _distress_node.step_planted(_stridev_est.x, _stridev_est.y, _ego_heading, up_t,
+												TAU, tick_counter, _dbg_sv_ns_planted)
+			else:
+				_distress = _distress_node.step(_stridev_est.x, _stridev_est.y, _ego_heading, up_t,
+												TAU, tick_counter)
 			var dpkt := PackedFloat64Array()
 			dpkt.append(_distress)
 			brain.publish_proprio(dpkt, "distress")
@@ -7568,6 +7576,7 @@ func _step_one() -> void:
 		# sv_sensor is the SUM over planted feet; the filter takes the count and means
 		# it internally, so the stance rule stays here and the estimator stays shared.
 		_stridev.step(a_lin, sv_sensor, sv_ns_sensor, TAU)
+		_dbg_sv_ns_planted = sv_ns_sensor   # the distress gate's planted count (used next tick; 7.21)
 		_stridev_est = _stridev.est()
 		_stridev_bias = _stridev.bias()
 		_stridev_slip = _stridev.slip()

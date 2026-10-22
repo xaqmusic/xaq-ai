@@ -8829,3 +8829,15 @@ real robot. On the latest config (LPG robot + stance reach, 6.0 rad/s, period 30
 Hump posture change 0.021–0.025 / … / **0.034–0.050** (the reference 0.037–0.047). Belly 5th percentile 60 / 47 / 30 / 23 mm,
 belly load ≈ 0 except at −0.1. 45° wall approach: 0/6 throughout. In the launcher: "EXP · LPG + stance reach, 6.0 rad/s, period
 30, femur level (sim)". Re-use context on the robot: its LPG config carries tuck 0.3 while the operator reports the real femur level.
+
+### 2026-10-22 — SELF-RIGHTING: the robot-faithful distress NEVER FIRED upside down (stride odometry coasted to a phantom 0.76 m/s with no foot on the ground); gated on planted feet, the LPG walker panics and rights itself 9/30 vs the reference's 5/30, walking byte-identical — `WORKING` (sensor fix)
+
+*Plan §7.21.* Inverted drops (`TELEPORT_FLIP=1`, inversion auto-reset off, 15 000 ticks, measured body, 2 mm / 256,
+n = 6) on the channel floor, pyramids i2 and i0, both wall slopes. Reference 5/30 righted, LPG latest 1/30 with
+distress 0.00 and panic 0 % while inverted (legs walking, sd 0.39 rad). Same brain with the sim's world-position
+distress: 8/30. **Cause**: `HONEST_DISTRESS`'s stall score reads stride odometry, which coasts on the accelerometer
+when no foot is planted; inverted it reported 0.76 m/s (true 0.01). **Fix**: `DistressAccumulator::step(..., n_planted)`
+— zero displacement on ticks with no planted foot (−1 = old arithmetic, robot host unchanged); sim passes the FSR
+stance count (`OGMA_PICRAWLER_DISTRESS_PLANTED=0` restores). Tests `test_distress` 3/3. Result: 9/30 righted, panic
+70–85 % while inverted; flat and corridor byte-identical, walking panic 0 %. Open: the tall pyramid inverted (0/6 vs
+the reference's 4/6); the robot host must pass its FSR count; the confidence handover is next.

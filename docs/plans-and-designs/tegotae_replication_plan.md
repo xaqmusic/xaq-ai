@@ -917,6 +917,42 @@ belly clearance. −0.1 is too low: the belly starts to carry weight and flat st
 for every arm. The robot's own LPG config also carries `hip2_tuck_target` 0.3 (the `hip2p030` family), and the operator
 reports the real femur horizontal; that is the robot-side re-use context.
 
+### 7.21 Self-righting, and the distress signal that never fired (2026-10-22)
+
+Operator: the original walker, landed upside down on a pyramid or in some other inversion, would eventually thrash
+enough to flip itself back over; the LPG walker's movements seem restricted to walking. (Operator's note: inverted on
+flat floor the robot is normally auto-reset; successful escapes have been on angled surfaces.) Test: dropped upside down
+at tick 1200 (`OGMA_PICRAWLER_TELEPORT_FLIP=1`) with the inversion auto-reset off (`…_AUTO_RESET_INVERSION=0`), 15 000
+ticks; righted = tilt < 0.6 rad held 100 ticks (`selfright_score.py`). Measured body, 2 mm / 256, n = 6 per placement.
+
+| inverted on | reference (6.0 rad/s) | LPG latest (period 30, femur level) | LPG, sim distress | **LPG, planted-gated distress** |
+|---|---|---|---|---|
+| channel floor | 0/6 | 0/6 | 2/6 | **3/6** |
+| tall pyramid i2 | 4/6 (median 103 ticks) | 1/6 | 1/6 | 0/6 |
+| pyramid i0 | 0/6 | 0/6 | 2/6 | 2/6 |
+| left wall slope | 0/6 | 0/6 | 1/6 | 2/6 |
+| right wall slope | 1/6 | 0/6 | 2/6 | 2/6 |
+| **total** | **5/30** | **1/30** | 8/30 | **9/30** |
+| distress / panic while inverted | 0.3–0.97 / 0.3–0.98 | **0.00 / 0.00** | 0.58–0.73 / 0.62–0.75 | 0.68–0.83 / 0.70–0.85 |
+| leg sd while inverted (rad) | 0.56–0.63 | 0.38–0.42 | 0.60–0.65 | 0.63–0.70 |
+
+**Cause.** The LPG configs use the robot-faithful distress (`HONEST_DISTRESS`): its "no progress" score comes from
+stride odometry, and with no foot on the ground (contact 0 on all four legs) the stride filter coasts on a wrong
+attitude estimate to a phantom 0.76 m/s while the true speed is 0.01. Distress read "walking", so the panic pathway
+(stroke withdrawn, learned layer ×4, noise 0.4) never engaged. **Fix:** `ogma::body::DistressAccumulator::step` takes
+an optional planted-foot count; with none planted, the tick's displacement counts zero (−1 = unknown = the original
+arithmetic, so the robot host is unchanged until it passes its FSR count). The sim passes the stride FSR rule's count
+(`DistressNode.step_planted`), default on; `OGMA_PICRAWLER_DISTRESS_PLANTED=0` is the earlier form. Unit tests
+`test_distress` (3).
+
+**Walking is untouched:** flat arena and corridor byte-identical to before on every metric, walking distress 0.000,
+panic 0 % of ticks. Escapes and wall climb within one seed (pyramid i2 6/6 → 5/6, wall climb 5/6 → 4/6). Verdict:
+**`WORKING` (signal) as a sensor fix** — the LPG walker now panics when inverted and rights itself on 9/30 drops
+against the reference's 5/30. Still open: the tall pyramid inverted (0/6; the reference rolls off it 4/6 within ~100
+ticks), and the LPG terms (lift, stance press, stance reach) keep writing a walking shape under the flail; the
+confidence handover (gait authority scaled by its own phase-vs-contact agreement and the upright estimate) is the next
+lever.
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |

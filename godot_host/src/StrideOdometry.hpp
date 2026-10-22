@@ -92,6 +92,8 @@ class DistressNode : public RefCounted {
 public:
     double step(double v_right, double v_fwd, double heading, double tilt, double dt,
                 int64_t tick);
+    double step_planted(double v_right, double v_fwd, double heading, double tilt, double dt,
+                        int64_t tick, int64_t n_planted);   // n_planted 0 = no progress counted (7.21)
     double value() const;
     double stuck_deficit() const;
     void   reset();
