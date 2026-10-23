@@ -416,6 +416,12 @@ class Dash:
             self.tune_slew = max(dash_run.LIVE_SLEW_MIN, min(dash_run.LIVE_SLEW_MAX, us))
             self.msg, self.msg_bad = (f"next run: servo speed {self.tune_slew * dash_run.TICK_HZ / dash_run.US_PER_RAD:.2f} rad/s "
                                       f"({self.tune_slew} µs/tick)"), False
+        elif ch in (ord(";"), ord("'")):
+            t = dash_run.TUNABLES["lift"]
+            base = self.tune_other.get("lift", 0.30)
+            v = round((base + (-1 if ch == ord(";") else 1) * t.step) / t.step) * t.step
+            self.tune_other["lift"] = float(min(t.hi, max(t.lo, v)))
+            self.msg, self.msg_bad = f"next run: swing lift {self.tune_other['lift']:.2f} (config 0.30 on the robot candidates)", False
         elif ch in (ord(","), ord(".")):
             t = dash_run.TUNABLES["height"]
             base = self.tune_other.get("height", t.default)
@@ -439,6 +445,9 @@ class Dash:
             per = c.st.lpg_period if c.st.lpg_period is not None else c.period_target
             out = (f"servo {spd(sl) if sl else '—'} LIVE    LPG period "
                    + (f"{per:.0f} ticks = {per / dash_run.TICK_HZ:.2f} s/stride LIVE" if per is not None else "— (no LPG)"))
+            if "lift" in c.cfg.tunables:
+                lv = c.st.tuned.get("lift", c.tune_targets.get("lift", c.cfg.tunables["lift"][1]))
+                out += f"    swing lift {lv:.2f}"
             if "height" in c.cfg.tunables:
                 t = dash_run.TUNABLES["height"]
                 h = c.st.tuned.get("height", c.tune_targets.get("height", c.cfg.tunables["height"][1]))
@@ -451,6 +460,8 @@ class Dash:
         nxt_s = spd(self.tune_slew) if self.tune_slew else "config's"
         nxt_p = f"{self.tune_period:.0f} ticks = {self.tune_period / dash_run.TICK_HZ:.2f} s/stride" if self.tune_period is not None else "config's"
         out = f"servo {now}    next run: servo {nxt_s}, LPG period {nxt_p}"
+        if "lift" in self.tune_other:
+            out += f", swing lift {self.tune_other['lift']:.2f}"
         if "height" in self.tune_other:
             out += f", belly target {dash_run.fmt_tunable(dash_run.TUNABLES['height'], self.tune_other['height'])}"
         return out
@@ -514,6 +525,12 @@ class Dash:
                     self.msg_bad = "refused" in self.msg or "no LoadPhaseGait" in self.msg or "unknown" in self.msg
                     if self.ctrl.st.lpg_period is not None:
                         self.tune_period = self.ctrl.st.lpg_period
+                    return True
+                if ch in (ord(";"), ord("'")):
+                    self.msg = self.ctrl.nudge("lift", -1 if ch == ord(";") else 1)
+                    self.msg_bad = "refused" in self.msg or "not in this config" in self.msg
+                    if "lift" in self.ctrl.st.tuned:
+                        self.tune_other["lift"] = self.ctrl.st.tuned["lift"]
                     return True
                 if ch in (ord(","), ord(".")):
                     self.msg = self.ctrl.nudge("height", -1 if ch == ord(",") else 1)
@@ -610,7 +627,7 @@ class Dash:
                        C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
         if st.hat_warning:
             self._line(scr, y, 3, st.hat_warning, C(BAD) | curses.A_BOLD); y += 1
-        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   [ ] speed   - = period   , . belly target"
+        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   [ ] speed   - = period   ; ' lift   , . belly"
                 if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
         self._line(scr, y, 3, keys, C(DIM)); y += 1
@@ -872,7 +889,7 @@ class Dash:
         self._line(scr, h - 2, 36,
                    "— EPM amber = under 30% baked (still earning its vocabulary)", C(DIM))
         self._line(scr, h - 1, 1,
-                   f"SPACE stop/resume   C run config   [ ] speed   - = period   , . belly target   S restart services   q quit   r refresh"
+                   f"SPACE stop   C config   [ ] speed   - = period   ; ' swing lift   , . belly target   S restart svcs   q quit"
                    f"   every {self.interval:.1f}s", C(DIM))
         scr.refresh()
 
@@ -929,7 +946,7 @@ class Dash:
             elif ch == ord("S"):
                 self.request_restart()
                 draw()
-            elif ch in (ord("["), ord("]"), ord("-"), ord("="), ord("+"), ord(","), ord(".")):
+            elif ch in (ord("["), ord("]"), ord("-"), ord("="), ord("+"), ord(","), ord("."), ord(";"), ord("'")):
                 self.tune_between_runs(ch)
                 draw()
             elif ch in (ord("q"), ord("Q"), 27):

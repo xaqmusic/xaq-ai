@@ -97,6 +97,8 @@ class Tunable:
     scale: float = 1.0                      # display = value * scale
     default: Optional[float] = None         # the module's default, when the config does not set it
     requires: Optional[str] = None
+    sign: float = 1.0                       # param = sign * value (the lift is a magnitude; hip2 up is negative)
+    pair_key: Optional[str] = None          # a second param moved in proportion, at the config's own ratio
 
 
 TUNABLES = {
@@ -104,6 +106,10 @@ TUNABLES = {
                       PERIOD_MIN, PERIOD_MAX, "ticks", default=70.0),
     "height": Tunable("height", "belly target", "MotorEPMv2", "tuck_learn_target_m", 0.005, 0.030, 0.100, "mm",
                       scale=1000.0, default=0.065, requires="tuck_learn_rate"),
+    # Swing lift (operator, 2026-10-23: swinging toes brush the floor): the femur half of the phase-shaped swing
+    # lift, as a magnitude, with the knee half moved at the config's knee/femur ratio.  Read every tick.
+    "lift": Tunable("lift", "swing lift", "MotorEPMv2", "leg_phase_lift_hip2", 0.05, 0.0, 0.9, "",
+                    sign=-1.0, pair_key="leg_phase_lift_knee"),
 }
 
 
@@ -112,6 +118,8 @@ def fmt_tunable(t: Tunable, v: Optional[float]) -> str:
         return "—"
     if t.name == "period":
         return f"{v:.0f} ticks = {v / TICK_HZ:.2f} s/stride"
+    if t.name == "lift":
+        return f"{v:.2f}"
     return f"{v * t.scale:.0f} {t.unit}"
 VBAT_WARN = 7.0                               # limp is 6.4 sustained; belly-up draws ~1.5 A
 
@@ -194,6 +202,14 @@ def config_tunables(doc: dict) -> dict:
                 if t.requires and not float(params.get(t.requires, 0) or 0) > 0:
                     break
                 v = float(params[t.key]) if t.key in params else t.default
+                if v is None:
+                    break
+                v = v * t.sign
+                if t.pair_key:                  # (module id, value, pair/value ratio); a zero lift has no knob
+                    if not v > 0:
+                        break
+                    out[t.name] = (str(mod.get("id", "")), v, float(params.get(t.pair_key, 0.0)) / v)
+                    break
             except (TypeError, ValueError):
                 break
             out[t.name] = (str(mod.get("id", "")), v)
@@ -617,6 +633,15 @@ class RunController:
         self._ev(msg)
         return msg
 
+    def _send_tunable(self, name: str, value: float) -> Optional[dict]:
+        """set_param for one TUNABLES row (and its paired param), returning the first failure or the last reply."""
+        t = TUNABLES[name]
+        entry = self.cfg.tunables[name]
+        r = self.io.brain_call("set_param", id=entry[0], key=t.key, value=float(t.sign * value))
+        if t.pair_key and r and r.get("status") == "ok":
+            r = self.io.brain_call("set_param", id=entry[0], key=t.pair_key, value=float(entry[2] * value))
+        return r
+
     def nudge(self, name: str, steps: int) -> str:
         """Any TUNABLES row -/+ its step, hot-patched through ogma_host's set_param."""
         if name == "period":
@@ -624,12 +649,12 @@ class RunController:
         t = TUNABLES[name]
         if name not in self.cfg.tunables:
             return f"{t.label}: not in this config" + (f" ({t.requires} is off)" if t.requires else "")
-        mid, cfg_v = self.cfg.tunables[name]
+        cfg_v = self.cfg.tunables[name][1]
         cur = self.st.tuned.get(name, self.tune_targets.get(name, cfg_v))
         if cur is None:
             return f"{t.label}: unknown"
         want = float(min(t.hi, max(t.lo, round((cur + steps * t.step) / t.step) * t.step)))
-        r = self.io.brain_call("set_param", id=mid, key=t.key, value=want)
+        r = self._send_tunable(name, want)
         if not r or r.get("status") != "ok":
             msg = f"{t.label} {fmt_tunable(t, want)} refused: {(r or {}).get('message', 'no reply from ogma_host')}"
             self._ev(msg)
@@ -854,13 +879,13 @@ class RunController:
                 self._ev(f"LPG period {self.period_target:.0f} refused: {(r or {}).get('message', 'no reply')} — running the config's")
         elif self.cfg.lpg_period is not None:
             self.st.lpg_period = self.cfg.lpg_period
-        for name, (mid, cfg_v) in self.cfg.tunables.items():
+        for name, entry in self.cfg.tunables.items():
             if name == "period":
                 continue
-            t = TUNABLES[name]
+            t, cfg_v = TUNABLES[name], entry[1]
             want = self.tune_targets.get(name)
             if want is not None and want != cfg_v:
-                r = self.io.brain_call("set_param", id=mid, key=t.key, value=float(want))
+                r = self._send_tunable(name, float(want))
                 ok = bool(r and r.get("status") == "ok")
                 self.st.tuned[name] = float(want) if ok else cfg_v
                 self._ev(f"{t.label} {fmt_tunable(t, want)} (config {fmt_tunable(t, cfg_v)})" if ok

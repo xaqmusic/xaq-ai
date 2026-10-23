@@ -568,7 +568,7 @@ def test_the_dash_shows_the_tuning_readout_and_the_keys(monkeypatch):
     text = "\n".join(scr.lines.values())
     assert "TUNE" in text and "next run: servo" in text and "45 ticks" in text
     assert "[ ] speed" in scr.lines[scr.h - 1] and "- = period" in scr.lines[scr.h - 1]
-    assert "S restart services" in scr.lines[scr.h - 1]
+    assert "S restart svcs" in scr.lines[scr.h - 1] and "; ' swing lift" in scr.lines[scr.h - 1]
     assert ", . belly target" in scr.lines[scr.h - 1]
     d.tune_between_runs(ord("."))
     assert abs(d.tune_other["height"] - 0.070) < 1e-9
@@ -646,3 +646,25 @@ def test_picking_a_config_resets_the_tuning(monkeypatch):
     monkeypatch.setattr(pd.dash_run, "preflight", lambda io, pose: [])
     d.open_confirm()
     assert d.tune_slew is None and d.tune_period is None and d.tune_other == {}
+
+
+def test_the_swing_lift_moves_femur_and_knee_together_live_and_for_the_next_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    c = tl_cfg()
+    assert c.tunables["lift"][:2] == ("motor_epm", 0.3)
+    robot = FakeRobot(tmp_path)
+    ctrl = dash_run.RunController(robot, c, "stand", countdown_s=0.3, ready_extra_s=0.0, tune={"lift": 0.4})
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    calls = list(robot.calls)
+    hip = [x for x in calls if "leg_phase_lift_hip2" in x]; knee = [x for x in calls if "leg_phase_lift_knee" in x]
+    assert hip and abs(float(hip[-1].split("=")[-1]) + 0.4) < 1e-9          # femur up = negative
+    assert knee and abs(float(knee[-1].split("=")[-1]) - 0.4 * 0.2 / 0.3) < 1e-9
+    ctrl.nudge("lift", +1)
+    assert abs(ctrl.st.tuned["lift"] - 0.45) < 1e-9
+    assert abs(float([x for x in robot.calls if "leg_phase_lift_hip2" in x][-1].split("=")[-1]) + 0.45) < 1e-9
+    for _ in range(30):
+        ctrl.nudge("lift", -1)
+    assert ctrl.st.tuned["lift"] == 0.0
+    ctrl.end()
+    ctrl.join(10)
