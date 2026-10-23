@@ -554,6 +554,8 @@ private:
     double conf_noise_shaped_ = 0.0, conf_noise_tau_ = 15.0, conf_noise_knee_fold_ = 0.27;
     double conf_noise_esc_max_ = 1.0, conf_noise_esc_ticks_ = 50.0, conf_panic_upright_ = -2.0;
     double conf_panic_suspend_ = 0.0;   // 7.24: panic restores the gait terms the handover withdrew
+    std::vector<double> selfcol_knee_max_;   // 7.25: knee fold cap per hip2 command, -1..+1 evenly (empty = off)
+    double selfcol_capped_ = 0.0, selfcol_n_ = 0.0;   // leg-ticks the cap bit / all
     std::vector<float> conf_ou_;   // shaped search OU state, [leg * m + j]
     int64_t conf_low_ticks_ = 0;
     // AIRBORNE SOURCE for the contact-gated terms (robot runs 2026-10-13).  The swing tuck

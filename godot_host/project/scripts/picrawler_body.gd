@@ -5235,6 +5235,7 @@ func _build_body() -> void:
 	# confident poses for a body that no longer exists, into feet_y_gravity_cmd_imu.
 	_legkin_refresh()
 	_report_geometry()
+	_report_selfcol_map()
 
 # Hand the (re)built chassis to everything that tracks it by REFERENCE rather
 # than by NodePath.  The chassis is built programmatically, so it isn't
@@ -5374,6 +5375,72 @@ func _report_reach_gates(belly_rel_hip2: float) -> void:
 			% [pr[0], pr[1], d.dot(heading) * 1000.0, d.y * 1000.0, d.length() * 1000.0,
 			   d.length() / reach, q[1]])
 
+# SELF-COLLISION MAP (OGMA_PICRAWLER_SELFCOL_MAP=1; Tegotae plan 7.25).  The lower-leg capsules mask _LAYER_WORLD
+# only, so a toe folded into the chassis passes through it in the sim; on the robot it hits the shell.  This sweeps
+# the sim's own forward kinematics (_fk_leg, the same FK ogma_host uses) over hip1 x hip2 x knee and reports, per
+# hip2 COMMAND, the largest knee FOLD command whose lower capsule clears every chassis box at every hip1 within
+# +-hip1_max (command units, the brain's u).  Print-only: nothing reads it back.
+func _report_selfcol_map() -> void:
+	if OS.get_environment("OGMA_PICRAWLER_SELFCOL_MAP") != "1" or not is_instance_valid(_chassis):
+		return
+	var inv: Transform3D = _chassis.global_transform.affine_inverse()
+	var boxes: Array = _selfcol_boxes()
+	var r: float = LEG_RADIUS * 0.8
+	print("PicrawlerBody: SELFCOL MAP  lower capsule r %.1f mm  L3 %.1f mm  boxes %d  (knee u fold max per hip2 u; '-' = none clear)"
+		% [r * 1000.0, L3 * 1000.0, boxes.size()])
+	for hs in [-1.0, 1.0]:                       # which hip2 sign is DOWN: the knee's height rel the chassis
+		var kn: Vector3 = inv * _fk_leg(0, 0.0, hs * HIP_TARGET_RANGE + HIP2_REST, KNEE_REST)[1].origin
+		print("  hip2 u %+.0f -> femur centre y %+.1f mm rel chassis origin" % [hs, kn.y * 1000.0])
+	for h1max in [0.0, 0.5, 1.0]:
+		var line: String = "  |hip1 u| <= %.1f :" % h1max
+		var hu: float = -1.0
+		while hu <= 1.0001:
+			var worst: float = 1.0                   # the most restrictive knee cap over legs and hip1
+			for i in range(4):
+				var a1: float = -h1max
+				while a1 <= h1max + 1e-6:
+					var kmax: float = -2.0
+					var ku: float = 0.0
+					while ku <= 1.0001:
+						var t3: float = KNEE_REST + ku * KNEE_RANGE_FOLD
+						if _selfcol_hits(i, a1 * HIP_TARGET_RANGE, hu * HIP_TARGET_RANGE + HIP2_REST, t3, inv, boxes, r):
+							break
+						kmax = ku
+						ku += 0.04
+					worst = min(worst, kmax)
+					a1 += 0.25 if h1max > 0.0 else 1.0
+			line += " %+.1f:%s" % [hu, ("%.2f" % worst) if worst > -1.5 else "-"]
+			hu += 0.1
+		print(line)
+
+var _selfcol_probe_on: bool = OS.get_environment("OGMA_PICRAWLER_SELFCOL_PROBE") == "1"
+
+func _leg_self_collide() -> bool:
+	return OS.get_environment("OGMA_PICRAWLER_LEG_SELF_COLLIDE") == "1"
+
+func _selfcol_hits(i: int, t1: float, t2: float, t3: float, inv: Transform3D, boxes: Array, r: float) -> bool:
+	var fk: Array = _fk_leg(i, t1, t2, t3)
+	return _capsule_in_chassis(fk[2].origin, fk[2] * _toe_off_c[i], inv, boxes, r)
+
+func _selfcol_boxes() -> Array:
+	if _chassis_boxes.is_empty():
+		return [{"size": Vector3(CHASSIS_X, CHASSIS_Y, CHASSIS_Z), "offset": Vector3.ZERO}]
+	return _chassis_boxes
+
+# Does the lower capsule (centre c, toe end toe, world frame) overlap any chassis box?  inv = chassis world->local.
+func _capsule_in_chassis(c: Vector3, toe: Vector3, inv: Transform3D, boxes: Array, r: float) -> bool:
+	var half: Vector3 = toe - c
+	var inner: float = max(0.0, 1.0 - r / max(1e-6, half.length()))   # the capsule's cylinder, caps excluded
+	for s in range(11):
+		var p: Vector3 = inv * (c + half * inner * (float(s) / 5.0 - 1.0))
+		for b in boxes:
+			var q: Vector3 = (p - (b["offset"] as Vector3)).abs() - (b["size"] as Vector3) * 0.5
+			var outside: float = Vector3(max(q.x, 0.0), max(q.y, 0.0), max(q.z, 0.0)).length()
+			var inside: float = min(max(q.x, max(q.y, q.z)), 0.0)
+			if outside + inside < r:
+				return true
+	return false
+
 # Toe world position + signed knee fold for leg i at hinge angles (0, t2, t3).
 # fold = angle between femur (hip2->knee) and tibia (knee->toe): 0 = straight,
 # 180 = tibia parallel to the femur; sign from the knee axis (positive = under).
@@ -5499,6 +5566,13 @@ func _build_leg(leg_index: int) -> void:
 	# collision is genuine ground/obstacle contact.
 	lower.contact_monitor = true
 	lower.max_contacts_reported = 4
+	# HONEST SELF-COLLISION (OGMA_PICRAWLER_LEG_SELF_COLLIDE=1; Tegotae plan 7.25).  Off, a toe folded into the
+	# chassis passes through it; on the robot it hits the shell.  On, the lower leg also collides with the chassis,
+	# and the foot's touch sensor reads that contact as the robot's toe FSR would.  Off = byte-identical.
+	if _leg_self_collide():
+		lower.collision_mask |= _LAYER_CHASSIS
+		if leg_index == 0:
+			print("PicrawlerBody: LEG SELF-COLLISION on (lower legs collide with the chassis)")
 	_lowers.append(lower)
 
 	# Knee joint — same basis as hip2 (axis = leg-local lateral).
@@ -10347,6 +10421,8 @@ func abl_set_detached(leg: int, joint: int, on: bool) -> void:
 			b.visible = true
 			b.collision_layer = _LAYER_BODY     # leg segments live on _LAYER_BODY,
 			b.collision_mask  = _LAYER_WORLD    # colliding only with the world (:4223)
+			if _leg_self_collide() and _lowers.has(b):
+				b.collision_mask |= _LAYER_CHASSIS
 			b.freeze = false
 			b.linear_velocity = Vector3.ZERO
 			b.angular_velocity = Vector3.ZERO
@@ -12487,17 +12563,31 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["ftip"] = _ft
 			line["fknee"] = _fk
 			# What each lower leg touches: 0 nothing, 1 the floor, 2 a wall (the mu=3 wedge
-			# material: corridor side/back walls, arena perimeter), 3 an obstacle (hump, bump, pyramid).
+			# material: corridor side/back walls, arena perimeter), 3 an obstacle (hump, bump, pyramid),
+			# 4 its own chassis (only with OGMA_PICRAWLER_LEG_SELF_COLLIDE=1).
 			var _fc := PackedFloat64Array()
 			for _i in range(4):
 				var _code: int = 0
 				for _b in _lowers[_i].get_colliding_bodies():
 					var _c: int = 3
-					if _b.has_meta("ogma_floor"): _c = 1
+					if _b == _chassis: _c = 4
+					elif _b.has_meta("ogma_floor"): _c = 1
 					elif _b is StaticBody3D and (_b as StaticBody3D).physics_material_override == _wedge_mat: _c = 2
 					_code = max(_code, _c)
 				_fc.append(float(_code))
 			line["fcol"] = _fc
+			# SELF-INTRUSION PROBE (OGMA_PICRAWLER_SELFCOL_PROBE=1; plan 7.25): legs whose lower capsule overlaps the
+			# chassis this tick, from the bodies' actual transforms.  Geometry only — it touches no physics, so it
+			# counts toe-in-chassis poses whether or not the sim collides them.
+			if _selfcol_probe_on:
+				var _inv: Transform3D = _chassis.global_transform.affine_inverse()
+				var _bx: Array = _selfcol_boxes()
+				var _sci: int = 0
+				for _i in range(4):
+					var _xf2: Transform3D = _lowers[_i].global_transform
+					if _capsule_in_chassis(_xf2.origin, _xf2 * Vector3(_toe_off_c[_i]), _inv, _bx, _r):
+						_sci += 1
+				line["sci"] = _sci
 	# Servo tracking error in foot-height metres = the information hobby servos do NOT
 	# report. If this is large, commanded-angle FK is a materially different signal.
 	line["fk_cmd_err"] = snappedf(_dbg_fk_cmd_err, 0.00001)
@@ -13021,6 +13111,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				line["ws_a"] = _waa
 			line["ws_u"] = snappedf(float(_mm.get("wshift_u", 0.0)), 0.0001)
 			line["conf"] = snappedf(float(_mm.get("conf_eff", 1.0)), 0.001)
+			line["skc"] = snappedf(float(_mm.get("selfcol_cap_frac", 0.0)), 0.0001)
 			for _rk in [["reach_e", "rc_e"], ["reach_n", "rc_n"]]:
 				var _rv = _mm.get(_rk[0], [])
 				if _rv is Array and _rv.size() == 4:

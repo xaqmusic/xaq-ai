@@ -8880,3 +8880,22 @@ right gate for a panic that has something directed to do.
 wind-up exactly, but not the floor (0/6 vs the base's 3/6, p ≈ 0.18 at n = 6) and not the walls. Gain 0 byte-
 identical. Walking ties except the pyramid escape (faster, 6 tip-overs vs 2). Lesson: amplitude is not the gap;
 undirected thrash rights the robot by chance. Re-use context: behind a directed exploration.
+
+### 2026-10-22 — HONEST LEG–CHASSIS COLLISION (`OGMA_PICRAWLER_LEG_SELF_COLLIDE=1`): self-righting 9/30 → 27/30 is a PHYSICS ARTIFACT — the depenetration of a toe sunk into the chassis flings the body over (tilt 0.9–2.2 rad in one tick) — `TAUTOLOGY`-class measurement outcome, not a verdict
+
+*Plan §7.25.* The lower capsules mask the world only, so a folded toe passes through the chassis (geometric probe:
+5.5 % of inverted leg-ticks on the shaped config). With the lower legs also masking `_LAYER_CHASSIS`, every floor
+and wall righting followed toe–chassis contacts with a single-tick tilt change of 0.9–2.2 rad; without the
+collision no run, righted or not, exceeds 0.18 rad/tick, and the pyramid rightings (no chassis contact) roll at
+0.08–0.14. At 6.0 rad/s the toe moves ~10 mm a tick, the capsule radius, so it sinks deep into the 41 mm base box
+before the contact resolves. Batch stopped. Re-use context: the collision is usable for a verdict only after a
+fidelity fix (continuous collision detection on the lower legs, or a gentler contact bias) passes a tilt-rate gate
+(max single-tick tilt change under ~0.2 rad, as without it). Instrument kept: `OGMA_PICRAWLER_SELFCOL_PROBE=1`
+(`sci` = legs overlapping the chassis, geometry only; agrees with the physics contacts 39/51 with collision on).
+
+### 2026-10-23 — SELF-COLLISION KEEP-OUT (`selfcol_knee_max`, knee fold capped against hip2 from the body's own FK map): toe-in-chassis while inverted 5.28 % → 0.14 %, walking ties, self-righting 9/30 → 6/30 within n = 6 — `WORKING` (signal) as a body limit, PROMOTED by the operator
+
+*Plan §7.25.* Clean A/B without the sim collision (parked, see the entry above), geometric probe on both arms; the
+control reproduced the shaped arm to the digit. Only 1 of the control's 9 rightings used a toe-in-chassis pose, so
+the lower count is not a removed cheat. Residual intrusions: the cap reads the commanded hip2, which leads the joint.
+Re-use context: the curve is per body; re-map for cad (no electronics block) and for any leg change.

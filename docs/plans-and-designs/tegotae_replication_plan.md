@@ -1039,6 +1039,38 @@ a directed exploration (reach synergies kept while uprightness improves) would g
 suspending the handover for. (Base and shaped rows here are the scores taken before 148 raw logs were lost on
 2026-10-22; their re-scores now run on fewer seeds.)
 
+### 7.25 Self-collision: the map, an honest collision that catapults, and the keep-out (2026-10-22/23)
+
+Operator: with hip2 down and the knee folded the toe hits the chassis, so the search must not drive into it. The sim
+let it through: the lower capsules mask the world only. **Map** (`OGMA_PICRAWLER_SELFCOL_MAP=1`, print-only): the body's
+own FK swept over hip1 × hip2 × knee against the chassis boxes. measured_fsr: hip2 u = +1 is DOWN; the largest knee
+fold command that clears the shell is 1.00 for hip2 ≤ −0.6, 0.88 at 0, 0.80 at +0.5, **0.68 at +1**; hip1 does not
+change the envelope (the worst case is the neutral diagonal).
+
+**Honest collision** (`OGMA_PICRAWLER_LEG_SELF_COLLIDE=1`, lower legs also mask `_LAYER_CHASSIS`; foot contact code 4)
+gave 27/30 self-righting against 9/30 — an artifact: every floor and wall righting followed toe–chassis contacts
+with the tilt changing 0.9–2.2 rad in ONE tick (no run without the collision exceeds 0.18). At 6 rad/s the toe
+travels ~10 mm a tick, the capsule radius, and the depenetration throws the body. Parked until a fidelity fix
+passes a tilt-rate gate. **Probe** (`OGMA_PICRAWLER_SELFCOL_PROBE=1`, `sci`): legs whose capsule overlaps the chassis,
+from the actual transforms, no physics; agrees with the contacts 39/51 when the collision is on.
+
+**Keep-out** (`selfcol_knee_max`, 21 knee caps over hip2 u −1..+1, applied to the final command; empty = off). A/B on
+the shaped config, no collision, probe on both arms, n = 6 (the control reproduces the shaped arm to the digit):
+
+| | shaped | keep-out |
+|---|---|---|
+| inverted leg-ticks with the toe in the chassis | 5.28 % | **0.14 %** |
+| self-righting | 9/30 | 6/30 |
+| wall climb | 3/6 | 4/6 |
+| flat | 9.69 ± 1.34 m, 0 falls | 9.65 ± 1.48 m, 0 falls |
+| corridor flat / hump ticks, rough reached | 817 / 780, 4/6 | 953 / 560, 5/6 |
+
+Of the control's nine rightings only one had the toe in the chassis in the 200 ticks before, so the 9 → 6 is not the
+keep-out removing an impossible move (and is within n = 6). The cap bites on < 1 % of walking ticks. **Verdict:
+`WORKING` (signal) as a body limit; PROMOTED by the operator after observation** (`…_conf_noise_shaped_ko.json`).
+Residual 0.14 %: the cap reads the commanded hip2, which leads the joint as hip2 swings down. The curve is body
+geometry: the cad body (no electronics block, different links) needs its own map.
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |
