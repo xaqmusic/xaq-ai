@@ -76,6 +76,7 @@ BRAIN_PORT = 7400                             # ogma_host's inspector control po
 SPEED_STEP_RAD_S = 0.25                       # the live servo-speed keys' step
 PERIOD_STEP_TICKS = 5                         # the live LPG-period keys' step
 PERIOD_MIN, PERIOD_MAX = 20, 120
+LIVE_SLEW_MIN, LIVE_SLEW_MAX = 20, 60               # benchd's slew.set band (kLiveSlewMin/Max)
 VBAT_WARN = 7.0                               # limp is 6.4 sustained; belly-up draws ~1.5 A
 
 
@@ -441,8 +442,13 @@ class RunState:
 class RunController:
     def __init__(self, io, cfg: ConfigEntry, pose: str = "stand",
                  countdown_s: float = COUNTDOWN_S, ready_extra_s: float = 4.0,
-                 run_mode: str = "autonomous"):
+                 run_mode: str = "autonomous", slew_us: Optional[int] = None,
+                 lpg_period: Optional[float] = None):
         self.io, self.cfg, self.pose, self.run_mode = io, cfg, pose, run_mode
+        # The operator's speed and period from the dash (set between runs or carried over from the last
+        # one), else the config's.  The period is hot-patched once the brain is up, before RESUME.
+        self.slew_target: Optional[int] = slew_us or cfg.slew_us
+        self.period_target: Optional[float] = lpg_period if lpg_period is not None else cfg.lpg_period
         self.countdown_s, self.ready_extra_s = countdown_s, ready_extra_s
         self.st = RunState()
         self._abort = threading.Event()        # before the brain has the servos: abort
@@ -487,7 +493,7 @@ class RunController:
     def nudge_speed(self, steps: int) -> str:
         """Servo speed +/- SPEED_STEP_RAD_S, as benchd's brain slew (slew.set: allowed in the brain
         modes, banded by benchd).  The pre-run slew is restored at the end, as for the config's."""
-        cur = self.st.slew_us or self.cfg.slew_us or (self.io.bench.call("slew.set", confirm=True) or {}).get("slew_us")
+        cur = self.st.slew_us or self.slew_target or (self.io.bench.call("slew.set", confirm=True) or {}).get("slew_us")
         if not cur:
             return "servo speed: benchd's slew unknown"
         spd = cur * TICK_HZ / US_PER_RAD + steps * SPEED_STEP_RAD_S
@@ -508,7 +514,7 @@ class RunController:
         """LoadPhaseGait period +/- PERIOD_STEP_TICKS ticks, hot-patched through ogma_host's set_param."""
         if not self.cfg.lpg_id:
             return "LPG period: this config has no LoadPhaseGait"
-        cur = self.st.lpg_period if self.st.lpg_period is not None else self.cfg.lpg_period
+        cur = self.st.lpg_period if self.st.lpg_period is not None else self.period_target
         if cur is None:
             return "LPG period: unknown"
         want = float(min(PERIOD_MAX, max(PERIOD_MIN, cur + steps * PERIOD_STEP_TICKS)))
@@ -670,21 +676,21 @@ class RunController:
             if self._sync_taps(us) is None:
                 return False
         # ---- the config's servo speed, as benchd's brain slew (bench mode only) ----
-        if self.cfg.slew_us:
+        if self.slew_target:
             cur = self.io.bench.call("limits.set", confirm=True)        # no fields: reports the current values
             prev = (cur or {}).get("slew_us") if cur and cur.get("ok") else None
             if prev is None:
                 self._ev(f"could not read benchd's slew: {(cur or {}).get('error', 'no reply')} — not starting")
                 return False
-            if prev != self.cfg.slew_us:
-                r = self.io.bench.call("limits.set", slew_us=self.cfg.slew_us, confirm=True)
+            if prev != self.slew_target:
+                r = self.io.bench.call("limits.set", slew_us=self.slew_target, confirm=True)
                 if not r or not r.get("ok"):
-                    self._ev(f"servo slew {self.cfg.slew_us} us/tick refused: {(r or {}).get('error', 'no reply')}")
+                    self._ev(f"servo slew {self.slew_target} us/tick refused: {(r or {}).get('error', 'no reply')}")
                     return False
                 self._slew_restore = prev
-            self.st.slew_us = self.cfg.slew_us
-            self._ev(f"servo speed {self.cfg.speed_rad_s:.2f} rad/s = benchd slew {self.cfg.slew_us} us/tick"
-                     + (f" (was {prev}; restored at the end)" if prev != self.cfg.slew_us else ""))
+            self.st.slew_us = self.slew_target
+            self._ev(f"servo speed {self.slew_target * TICK_HZ / US_PER_RAD:.2f} rad/s = benchd slew {self.slew_target} us/tick"
+                     + (f" (was {prev}; restored at the end)" if prev != self.slew_target else ""))
         # ---- brain mode, latched STOP, then the brain ----
         m = self.io.ctl.call("mode.set", mode=self.run_mode)
         if not m or not m.get("ok"):
@@ -727,6 +733,16 @@ class RunController:
         # The IMU's gyro bias seeds from the first still window; the robot is frozen now.
         if self._wait(lambda: False, self.ready_extra_s) is None:
             return False
+        # The operator's LPG period, if it is not the config's: hot-patched while the robot is still frozen.
+        if self.cfg.lpg_id and self.period_target is not None and self.period_target != self.cfg.lpg_period:
+            r = self.io.brain_call("set_param", id=self.cfg.lpg_id, key="period_ticks", value=float(self.period_target))
+            if r and r.get("status") == "ok":
+                self.st.lpg_period = float(self.period_target)
+                self._ev(f"LPG period {self.period_target:.0f} ticks (config {self.cfg.lpg_period:.0f})")
+            else:
+                self._ev(f"LPG period {self.period_target:.0f} refused: {(r or {}).get('message', 'no reply')} — running the config's")
+        elif self.cfg.lpg_period is not None:
+            self.st.lpg_period = self.cfg.lpg_period
         r = self.io.ctl.call("resume")
         if not r or not r.get("ok"):
             self._ev(f"resume refused: {(r or {}).get('error', 'no reply')}")

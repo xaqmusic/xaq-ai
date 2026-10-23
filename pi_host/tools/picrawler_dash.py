@@ -258,6 +258,12 @@ class Dash:
         self.info: Optional[dict] = None      # host_info: fetched once, it is static
         self.t0 = time.time()
         self.line = LineSpeed()
+        # ---- tuning (operator, 2026-10-23): servo speed and LPG period.  None = the run config's own.
+        # Set between runs with [ ] - = (sent nothing until the next run starts), or live during a run;
+        # a live change carries over so the next run starts where the last one was left.
+        self.tune_slew: Optional[int] = None
+        self.tune_period: Optional[float] = None
+        self.bench_slew: Optional[int] = None    # benchd's brain slew right now (slew.set read-back)
 
     def known_stopped(self) -> bool:
         """Is the robot KNOWN to be stopped right now?  Only fresh evidence counts; when it
@@ -290,6 +296,8 @@ class Dash:
     def poll(self) -> None:
         st = self.bench.status()
         self.st, self.st_time = st, time.time()
+        sl = self.bench.call("slew.set", confirm=True)          # no slew_us: reads the current slew, sets nothing
+        self.bench_slew = int(sl["slew_us"]) if sl and sl.get("ok") and "slew_us" in sl else None
         self.brain = self.control.call("ping")
         if self.brain is not None:
             # Static for the life of the process, so fetch it once — and re-fetch after a
@@ -343,9 +351,40 @@ class Dash:
         self.checks = dash_run.preflight(io, self.poses[self.pose_idx])
         io.bench.close(); io.ctl.close()
 
+    def tune_between_runs(self, ch: int) -> None:
+        """[ ] - = while monitoring: the speed and period the NEXT run starts with.  Nothing is sent."""
+        if ch in (ord("["), ord("]")):
+            base = self.tune_slew or self.bench_slew or 40
+            spd = base * dash_run.TICK_HZ / dash_run.US_PER_RAD + (1 if ch == ord("]") else -1) * dash_run.SPEED_STEP_RAD_S
+            us = int(round(spd * dash_run.US_PER_RAD / dash_run.TICK_HZ))
+            self.tune_slew = max(dash_run.LIVE_SLEW_MIN, min(dash_run.LIVE_SLEW_MAX, us))
+            self.msg, self.msg_bad = (f"next run: servo speed {self.tune_slew * dash_run.TICK_HZ / dash_run.US_PER_RAD:.2f} rad/s "
+                                      f"({self.tune_slew} µs/tick)"), False
+        else:
+            base = self.tune_period if self.tune_period is not None else 70.0
+            p = base + (-1 if ch == ord("-") else 1) * dash_run.PERIOD_STEP_TICKS
+            self.tune_period = float(max(dash_run.PERIOD_MIN, min(dash_run.PERIOD_MAX, p)))
+            self.msg, self.msg_bad = f"next run: LPG period {self.tune_period:.0f} ticks", False
+
+    def tune_readout(self) -> str:
+        """The current servo speed and LPG period, and where each comes from."""
+        def spd(us):
+            return f"{us * dash_run.TICK_HZ / dash_run.US_PER_RAD:.2f} rad/s ({us} µs/tick)"
+        c = self.ctrl
+        if c is not None and c.st.phase in ("prepare", "running"):
+            sl = c.st.slew_us or c.slew_target
+            per = c.st.lpg_period if c.st.lpg_period is not None else c.period_target
+            return (f"servo {spd(sl) if sl else '—'} LIVE    LPG period "
+                    + (f"{per:.0f} ticks = {per / dash_run.TICK_HZ:.2f} s/stride LIVE" if per is not None else "— (no LPG)"))
+        now = f"benchd now {spd(self.bench_slew)}" if self.bench_slew else "benchd slew unknown"
+        nxt_s = spd(self.tune_slew) if self.tune_slew else "config's"
+        nxt_p = f"{self.tune_period:.0f} ticks = {self.tune_period / dash_run.TICK_HZ:.2f} s/stride" if self.tune_period is not None else "config's"
+        return f"servo {now}    next run: servo {nxt_s}, LPG period {nxt_p}"
+
     def start_run(self) -> None:
         cfg = self.configs[self.sel]
-        self.ctrl = dash_run.RunController(dash_run.RobotIo(), cfg, self.poses[self.pose_idx])
+        self.ctrl = dash_run.RunController(dash_run.RobotIo(), cfg, self.poses[self.pose_idx],
+                                           slew_us=self.tune_slew, lpg_period=self.tune_period)
         self.ctrl.start()
         self.ui = "run"
 
@@ -390,10 +429,14 @@ class Dash:
                 if ch in (ord("["), ord("]")):
                     self.msg = self.ctrl.nudge_speed(1 if ch == ord("]") else -1)
                     self.msg_bad = "refused" in self.msg or "unknown" in self.msg
+                    if self.ctrl.st.slew_us:
+                        self.tune_slew = self.ctrl.st.slew_us          # the next run starts here
                     return True
                 if ch in (ord("-"), ord("="), ord("+")):
                     self.msg = self.ctrl.nudge_period(-1 if ch == ord("-") else 1)
                     self.msg_bad = "refused" in self.msg or "no LoadPhaseGait" in self.msg or "unknown" in self.msg
+                    if self.ctrl.st.lpg_period is not None:
+                        self.tune_period = self.ctrl.st.lpg_period
                     return True
                 if ch in (ord("r"), ord("R")):
                     self.ctrl.reset()
@@ -431,11 +474,17 @@ class Dash:
             self._line(scr, y, 3, "⚠ SIM INPUTS: tuned on inputs the robot cannot publish (achieved joint "
                                   "angles, god's-eye signals). On hardware it runs partly blind.",
                        C(BAD) | curses.A_BOLD); y += 2
-        if c.slew_us:
-            fast = c.slew_us > 40
-            self._line(scr, y, 3, f"servo speed: {c.speed_rad_s:.2f} rad/s = benchd slew {c.slew_us} µs/tick for this run"
+        sl = self.tune_slew or c.slew_us
+        if sl:
+            fast = sl > 40
+            src = "set on the dash" if self.tune_slew else "the config's"
+            self._line(scr, y, 3, f"servo speed: {sl * dash_run.TICK_HZ / dash_run.US_PER_RAD:.2f} rad/s = benchd slew {sl} µs/tick for this run ({src})"
                                   + ("  (FASTER than the deployed 40 — a brownout lever; restored after)" if fast else ""),
                        C(WARN if fast else OK)); y += 1
+        per = self.tune_period if self.tune_period is not None else c.lpg_period
+        if per is not None:
+            src_p = "set on the dash" if self.tune_period is not None else "the config's"
+            self._line(scr, y, 3, f"LPG period: {per:.0f} ticks = {per / dash_run.TICK_HZ:.2f} s/stride ({src_p})", C(OK)); y += 1
         self._line(scr, y, 3, f"start pose: {self.poses[self.pose_idx]}   (P cycles saved poses)", C(OK)); y += 1
         self._line(scr, y, 3, f"mode: autonomous — after a HAT reset the robot returns to '{self.poses[self.pose_idx]}' "
                               f"and the run continues (warning shown)", C(DIM)); y += 1
@@ -478,13 +527,7 @@ class Dash:
                        C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
         if st.hat_warning:
             self._line(scr, y, 3, st.hat_warning, C(BAD) | curses.A_BOLD); y += 1
-        if st.phase in ("prepare", "running"):
-            sl = st.slew_us or self.ctrl.cfg.slew_us
-            per = st.lpg_period if st.lpg_period is not None else self.ctrl.cfg.lpg_period
-            spd = f"{sl * dash_run.TICK_HZ / dash_run.US_PER_RAD:.2f} rad/s ({sl} µs/tick)" if sl else "—"
-            pe = f"{per:.0f} ticks = {per / dash_run.TICK_HZ:.2f} s/stride" if per is not None else "— (no LPG)"
-            self._line(scr, y, 3, f"servo speed {spd}  [ / ]      LPG period {pe}  - / =", C(HEAD)); y += 1
-        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)"
+        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   [ ] speed   - = period"
                 if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
         self._line(scr, y, 3, keys, C(DIM)); y += 1
@@ -516,6 +559,10 @@ class Dash:
         self._line(scr, y, 0, left + " " * pad + right, C(HEAD) | curses.A_BOLD)
         y += 1
         self._line(scr, y, 0, "─" * max(0, w - 1), C(DIM)); y += 1
+
+        # ---- tuning readout: the servo speed and LPG period (operator, 2026-10-23) ----
+        self._line(scr, y, 1, "TUNE ", C(HEAD) | curses.A_BOLD)
+        self._line(scr, y, 7, self.tune_readout(), C(OK)); y += 1
 
         # ---- STOP / mode: the first thing on the screen ----
         st = self.st
@@ -742,8 +789,8 @@ class Dash:
         self._line(scr, h - 2, 36,
                    "— EPM amber = under 30% baked (still earning its vocabulary)", C(DIM))
         self._line(scr, h - 1, 1,
-                   f"SPACE stop/resume   C run config   q quit   r refresh   every {self.interval:.1f}s"
-                   f"   baked = visits >= baking_threshold", C(DIM))
+                   f"SPACE stop/resume   C run config   [ ] speed -/+   - = LPG period -/+   q quit   r refresh"
+                   f"   every {self.interval:.1f}s", C(DIM))
         scr.refresh()
 
     def run(self, scr) -> None:
@@ -795,6 +842,9 @@ class Dash:
                 draw()
             elif ch in (ord("c"), ord("C")):
                 self.open_picker()
+                draw()
+            elif ch in (ord("["), ord("]"), ord("-"), ord("="), ord("+")):
+                self.tune_between_runs(ch)
                 draw()
             elif ch in (ord("q"), ord("Q"), 27):
                 quit_.set(); wake.set()

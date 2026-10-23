@@ -195,7 +195,7 @@ TEST_CONFIGS = [_P + "honest__nohomeo.json", _P + "honest__nohomeo__spd600.json"
                 _P + "ref_servo6.json"]
 
 
-def test_configs():
+def configs_for_tests():
     import tempfile
     lg = Path(tempfile.mkdtemp()) / "launcher.gd"
     lg.write_text("const _PICRAWLER_CONFIG_ALLOWLIST: Array = [\n" + "".join(f'\t"{f}",\n' for f in TEST_CONFIGS) + "]\n")
@@ -203,7 +203,7 @@ def test_configs():
 
 
 def cfg():
-    return next(c for c in test_configs() if c.file.endswith("__fsrleg__honest__nohomeo.json"))
+    return next(c for c in configs_for_tests() if c.file.endswith("__fsrleg__honest__nohomeo.json"))
 
 
 def make(tmp_path, monkeypatch, **kw):
@@ -224,7 +224,7 @@ def wait_phase(ctrl, phases, t=5.0):
 
 def test_allowlist_is_the_launchers_and_robot_faithful_configs_come_first():
     assert len(dash_run.list_configs()) >= 1          # the real launcher list parses
-    cs = test_configs()
+    cs = configs_for_tests()
     assert any(c.file.endswith("__fsrleg__honest__nohomeo.json") and c.faithful for c in cs)
     flags = [c.faithful for c in cs]
     assert flags == sorted(flags, reverse=True)          # all faithful before any sim-input
@@ -435,7 +435,7 @@ def test_the_run_is_recorded_from_before_the_first_motion_until_after_the_rescue
 
 def test_a_fast_config_sets_the_slew_in_bench_mode_and_restores_it(tmp_path, monkeypatch):
     monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
-    fast = next(c for c in test_configs() if c.file.endswith("__nohomeo__spd600.json"))
+    fast = next(c for c in configs_for_tests() if c.file.endswith("__nohomeo__spd600.json"))
     assert fast.slew_us == 65 and abs(fast.speed_rad_s - 6.0) < 1e-9
     robot = FakeRobot(tmp_path)
     ctrl = dash_run.RunController(robot, fast, "stand", countdown_s=0.3, ready_extra_s=0.0)
@@ -462,7 +462,7 @@ def test_the_deployed_speed_config_leaves_the_slew_alone(tmp_path, monkeypatch):
 
 
 def lpg_cfg():
-    return next(c for c in test_configs() if c.file.endswith("__lpgn_r05_e0d0_ref300.json"))
+    return next(c for c in configs_for_tests() if c.file.endswith("__lpgn_r05_e0d0_ref300.json"))
 
 
 def test_live_speed_keys_ride_slew_set_in_the_brain_mode_and_the_slew_is_restored(tmp_path, monkeypatch):
@@ -503,3 +503,67 @@ def test_the_period_keys_say_so_when_the_config_has_no_lpg(tmp_path, monkeypatch
     robot, ctrl = make(tmp_path, monkeypatch)
     assert "no LoadPhaseGait" in ctrl.nudge_period(1)
     assert not any(c.startswith("brain set_param") for c in robot.calls)
+
+
+def test_a_run_starts_from_the_operators_speed_and_period(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    robot = FakeRobot(tmp_path)
+    c = lpg_cfg()
+    ctrl = dash_run.RunController(robot, c, "stand", countdown_s=0.3, ready_extra_s=0.0, slew_us=45, lpg_period=60.0)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    calls = list(robot.calls)
+    assert robot.slew == 45 and calls.index("slew=45") < calls.index("mode.set=autonomous")
+    assert "brain set_param load_phase.period_ticks=60.0" in calls
+    assert calls.index("brain set_param load_phase.period_ticks=60.0") < calls.index("resume")   # while frozen
+    assert ctrl.st.lpg_period == 60.0 and ctrl.st.slew_us == 45
+    ctrl.end()
+    ctrl.join(10)
+    assert robot.slew == 40
+
+
+def test_the_configs_own_period_sends_no_patch(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    robot = FakeRobot(tmp_path)
+    ctrl = dash_run.RunController(robot, lpg_cfg(), "stand", countdown_s=0.3, ready_extra_s=0.0)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    assert not any(x.startswith("brain set_param") for x in robot.calls)
+    assert ctrl.st.lpg_period == 70.0
+    ctrl.end()
+    ctrl.join(10)
+
+
+class _Scr:
+    def __init__(self, h=50, w=160):
+        self.h, self.w, self.lines = h, w, {}
+    def getmaxyx(self):
+        return self.h, self.w
+    def addnstr(self, y, x, s, n, attr=0):
+        assert 0 <= y < self.h, (y, s)
+        self.lines[y] = self.lines.get(y, "") + s
+    def addstr(self, y, x, s, attr=0):
+        self.addnstr(y, x, s, len(s), attr)
+    def erase(self): self.lines = {}
+    def refresh(self): pass
+    def clrtoeol(self): pass
+    def move(self, y, x): pass
+
+
+def test_the_dash_shows_the_tuning_readout_and_the_keys(monkeypatch):
+    import picrawler_dash as pd
+    monkeypatch.setattr(pd.curses, "color_pair", lambda n: 0)
+    d = pd.Dash("127.0.0.1", 1, 2, 1.0)
+    d.bench_slew = 40
+    d.tune_between_runs(ord("]"))
+    d.tune_between_runs(ord("-"))
+    assert d.tune_slew == int(round((40 * 50 / dash_run.US_PER_RAD + 0.25) * dash_run.US_PER_RAD / 50))
+    assert d.tune_period == 65.0
+    for _ in range(40):
+        d.tune_between_runs(ord("]"))
+    assert d.tune_slew == dash_run.LIVE_SLEW_MAX
+    scr = _Scr()
+    d.draw(scr)
+    text = "\n".join(scr.lines.values())
+    assert "TUNE" in text and "next run: servo" in text and "65 ticks" in text
+    assert "[ ] speed" in scr.lines[scr.h - 1] and "LPG period" in scr.lines[scr.h - 1]

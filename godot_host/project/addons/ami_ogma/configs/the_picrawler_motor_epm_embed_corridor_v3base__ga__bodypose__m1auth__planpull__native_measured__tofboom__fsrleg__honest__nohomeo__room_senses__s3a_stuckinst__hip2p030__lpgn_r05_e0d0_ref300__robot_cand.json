@@ -1,7 +1,7 @@
 {
  "metadata": {
-  "name": "CANDIDATE \u00b7 ROBOT \u00b7 promoted LPG stack at 4.5 rad/s (live speed [ ] and period - = keys)",
-  "description": "WATCH: the promoted sim stack (femur level, shaped-noise handover, self-collision keep-out, gravity-referenced panic push, corner integrator) for the real robot at 4.5 rad/s (benchd slew 49 us/tick) with the LPG period at 50 ticks (1.0 s/stride), a starting point pending the sim period sweep at 4.5 rad/s. On the dash: [ / ] servo speed -/+ 0.25 rad/s (benchd band 1.8-5.5), - / = LPG period -/+ 5 ticks. The robot keeps its pause on inversion (tilt guard). Check the FSR-flicker risk to the handover (search noise on confidence dips) before long runs.",
+  "name": "CANDIDATE \u00b7 ROBOT \u00b7 promoted LPG stack (starts at 3.67 rad/s, period 70; tune on the dash)",
+  "description": "WATCH: the promoted sim stack (femur level, shaped-noise handover, self-collision keep-out, gravity-referenced panic push, corner integrator) for the real robot. Starts at the deployed speed, 3.67 rad/s (benchd slew 40 us/tick), and the robot LPG period, 70 ticks (1.4 s/stride): at 4.5 rad/s the servo rail browned out often (operator, 2026-10-23). On picrawler-dash: [ / ] servo speed -/+ 0.25 rad/s (benchd band 1.8-5.5), - / = LPG period -/+ 5 ticks, live during a run or set for the next one. The robot keeps its pause on inversion (tilt guard).",
   "env_target": "picrawler",
   "gym_mode": "room",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -36,7 +36,7 @@
    "OGMA_PICRAWLER_TOF_BOOM": "1",
    "OGMA_PICRAWLER_TOF_TILT_COMP": "0",
    "OGMA_PICRAWLER_CHASSIS_COLLIDE": "1",
-   "OGMA_PICRAWLER_MAX_SERVO_SPEED": "4.5",
+   "OGMA_PICRAWLER_MAX_SERVO_SPEED": "3.668",
    "OGMA_PICRAWLER_HONEST_JOINTS": "1",
    "OGMA_PICRAWLER_HONEST_IMU": "1",
    "OGMA_PICRAWLER_HONEST_UPRIGHT": "1",
@@ -116,7 +116,7 @@
      "rhythm.leg.rr"
     ],
     "n_legs": 4,
-    "period_ticks": 50,
+    "period_ticks": 70,
     "sigma_ratio": 2.0,
     "load_floor": 0.02,
     "seed": 1234,
