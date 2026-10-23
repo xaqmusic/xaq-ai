@@ -1,6 +1,6 @@
 {
  "metadata": {
-  "name": "EXP \u00b7 LPG femur level + handover + shaped noise + SELF-COLLISION KEEP-OUT (sim)",
+  "name": "PROMOTED \u00b7 SIM \u00b7 LPG femur level + shaped-noise handover + self-collision keep-out",
   "description": "PROMOTED (operator, 2026-10-23): the shaped-noise handover with the knee fold capped against hip2 so the toe cannot fold into the chassis (plan 7.25): fold cap 1.0 at hip2-up falling to 0.68 at hip2-down, measured on the body's own kinematics. Toe-in-chassis while inverted 5.3 % -> 0.14 % of leg-ticks; walking ties (9.65 m, 0 falls); self-righting 6/30 vs 9/30 (within noise at n=6).",
   "env_target": "picrawler",
   "gym_mode": "room",

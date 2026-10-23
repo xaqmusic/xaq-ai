@@ -42,37 +42,23 @@ const _CONFIG_DIR := "res://addons/ami_ogma/configs/"
 # Operator-driven UI diagnosis is first-class (CLAUDE.md §4); the dropdown is an
 # instrument panel, and an entry whose name needs the filename decoded is a
 # broken instrument.
+# ⚠ PRUNED AGAIN 2026-10-23 (operator): baselines and current work only; the Tegotae experiment arms, the handover
+# variants and the earlier LPG terrain arms left the list (all still load by path).
 # ⚠ PRUNED 2026-10-10 (operator): only what runs on the robot.  The thirteen research entries that
 # were here (V3 base, native benchmarks, P-c/P-d/P-e and its variants, the PART IV demo, ...) are
 # still in configs/ and still load by path for scripts and A/B runs; this list is only what the
 # dropdown and picrawler-dash's "run config" offer.  Their annotated entries are in git history
 # (launcher.gd before this commit).
 const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
-	# ---- REFERENCE (2026-10-20, operator): the best config before the robot-faithful limits, for performance on future / modified robots.
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__ref_servo6.json",  # P-e at 6.0 rad/s: 8.61 m arena, 0 falls (ledger 2026-10-01/02)
-	# ---- BENCHMARKS: the original gait mechanism (the dropdown shows metadata.name; keep it short, the long form is in metadata.description) ----
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo.json",  # P-e·h0: robot-faithful inputs, height homeostat OFF (2026-10-02)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030.json",  # P-e·h0 + hip2 rest +0.3 (the sim base of the gait audit, 2026-10-12)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030.json",  # THE ROBOT STACK: reflexes + stuck sense as instrument + hip2 +0.3 (promoted on the robot 2026-10-12)
-	# ---- PROMOTED (2026-10-18): the load-held leg phase (LoadPhaseGait) stack — the best of the gait audit in each world. The push-gate
-	# ---- experiments (stall / current / range) are SUSPENDED until the servo rail has its hardware fix; their configs stay on disk (ledger 2026-10-18).
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpg_sl4s_st07_int.json",  # SIM: robot stack + LPG + level gate (push and steer) + stroke 0.7 + the planted-leg corner integrator: room falls 10.2 -> 0.33, roll levelled, corridor +11 % (ledger 2026-10-13)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300.json",  # ROBOT: LPG with per-foot normalised FSR shares + the level gate on the running attitude + noise off + heading D off + avoid 50 cm: +40 % speed, FR thrash halved (ledger 2026-10-18)
-	# ---- EXPERIMENT (2026-10-20): terrain adaptation on the robot LPG config (Tegotae plan 7.15-7.16), sim only, GainEvolver removed.
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach.json",  # + stance reach: frees the high-centred robot (pyramid i2 0/6 -> 5/6)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach_servo6_p30.json",  # + stance reach at 6.0 rad/s, period 30: 8.95 m flat (plan 7.19)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach_servo6_p30_tuck0.json",  # ... + femur level (tuck 0): floor -> wall 5/6 (plan 7.20)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach_servo6_p30_tuck0_conf.json",  # ... + confidence handover (plan 7.22: REGRESSION on self-righting)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach_servo6_p30_tuck0_conf_noise.json",  # ... + handover + white search noise (7.22, superseded)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach_servo6_p30_tuck0_conf_noise_shaped.json",  # ... + handover + SHAPED search noise (plan 7.23)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach_servo6_p30_tuck0_conf_noise_shaped_ko.json",  # ... + SELF-COLLISION KEEP-OUT (plan 7.25, PROMOTED)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_lvint.json",  # + planted-leg corner integrator
-	# ---- EXPERIMENT (2026-10-18): Tegotae replication (docs/plans-and-designs/tegotae_replication_plan.md). The bare load rule with every
-	# ---- other joint writer off and no GainEvolver — a measurement scaffold, sim only. Same brain, two bodies: the CAD body the batches ran on, and the measured one.
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030__lpg_tegotae_trot.json",  # SIM, CAD body: the bare rule; arena 5.32 m at 2 mm / 256 iterations (plan 7.14)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030__lpg_tegotae_trot_measured.json",  # SIM, measured body: the bare rule; rear feet clear at 256 iterations, arena 6.24 m (plan 7.14)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__hip2p030__lpg_tegotae_trot_press.json",  # SIM, measured body + the robot's stance press (the weight shift); 2 mm + 256 iterations
+	# ---- BASELINES ----
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__ref_servo6.json",  # the original walker at 6.0 rad/s: the best config before the robot-faithful limits (8.61 m arena)
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030.json",  # the original gait, robot stack (promoted on the robot 2026-10-12)
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300.json",  # the LPG robot config (what runs on the Pi)
+	# ---- CURRENT WORK (Tegotae plan 7.19-7.27, sim) ----
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach_servo6_p30_tuck0_conf_noise_shaped_ko.json",  # PROMOTED: LPG 6.0 rad/s, period 30, femur level, shaped-noise handover, self-collision keep-out
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach_servo6_p30_tuck0_conf_noise_shaped_ko_orient_lvint.json",  # under test: + gravity-referenced panic push + corner integrator (7.26/7.27)
 ]
+
 
 
 # 2026-06-13 — curriculum dropdown allowlist (same rationale as the config one).
