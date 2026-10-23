@@ -633,3 +633,16 @@ def test_the_restart_key_needs_a_second_press_and_refuses_during_a_run(monkeypat
     d.restarting = False
     d.request_restart(); d.request_restart()
     assert started == [1] and "only on the robot" in d.msg
+
+
+def test_picking_a_config_resets_the_tuning(monkeypatch):
+    import picrawler_dash as pd
+    d = pd.Dash("127.0.0.1", 1, 2, 1.0)
+    d.tune_slew, d.tune_period, d.tune_other = 34, 30.0, {"height": 0.03}
+    class IO:
+        bench = type("B", (), {"call": lambda self, *a, **k: {"poses": ["stand"]}, "close": lambda self: None})()
+        ctl = type("C", (), {"close": lambda self: None})()
+    monkeypatch.setattr(pd.dash_run, "RobotIo", lambda: IO())
+    monkeypatch.setattr(pd.dash_run, "preflight", lambda io, pose: [])
+    d.open_confirm()
+    assert d.tune_slew is None and d.tune_period is None and d.tune_other == {}

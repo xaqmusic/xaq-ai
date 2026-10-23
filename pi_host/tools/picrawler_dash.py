@@ -348,6 +348,11 @@ class Dash:
         self.ui = "pick"
 
     def open_confirm(self) -> None:
+        # Picking a config resets the tuning to the config's own values (operator, 2026-10-23): a carried-over
+        # speed/period/knob was easy to lose track of (a period-30, 3.12 rad/s run thrashed and reset the HAT 9
+        # times).  Settings worth keeping become a new config.  Live keys still carry within a run, and the
+        # between-run keys still set the next run once a config is picked.
+        self.tune_slew, self.tune_period, self.tune_other = None, None, {}
         io = dash_run.RobotIo()
         self.poses = (io.bench.call("pose.list") or {}).get("poses") or ["stand"]
         self.pose_idx = self.poses.index("stand") if "stand" in self.poses else 0
