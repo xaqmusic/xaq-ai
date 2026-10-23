@@ -32,6 +32,7 @@ Usage:
   An arm with no ':' is the base itself.  Arm-level env: NAME:mods;ENV=K=V;ENV=K2=V2.
 """
 import argparse, concurrent.futures as cf, copy, glob, json, math, os, pathlib, statistics, subprocess, sys
+from _logio import open_log, log_glob
 
 PROJ = pathlib.Path(__file__).resolve().parents[1]
 CFGDIR = PROJ / "addons/ami_ogma/configs"
@@ -78,7 +79,7 @@ def circ(vals):
 # ---------------------------------------------------------------------------------- analysis
 def analyse(path, period_ticks=None):
     rows, params = [], {}
-    for line in open(path, errors="replace"):
+    for line in open_log(path):
         if not line.startswith("{"):
             continue
         try:
@@ -360,7 +361,7 @@ def run_one(cfgpath, body_env, arm_env, extra_env, seed, steps, gym, difficulty,
 def check_landed(logpath, sets):
     params = {}
     seed_line = None
-    for line in open(logpath, errors="replace"):
+    for line in open_log(logpath):
         if line.startswith('{"event": "PARAMS"') or line.startswith('{"event":"PARAMS"'):
             try:
                 d = json.loads(line); params[d["module"]] = d.get("params", {})
@@ -400,7 +401,7 @@ def main():
     args = ap.parse_args()
 
     if args.cmd == "analyse":
-        res = [analyse(p) for g in args.logs for p in sorted(glob.glob(g))]
+        res = [analyse(p) for g in args.logs for p in log_glob(g)]
         summarise("logs", res)
         return
 
@@ -437,6 +438,10 @@ def main():
             res = analyse(lp)
             res["seed"] = s; res["landed"] = not bad; res["world"] = seed_line
             results.setdefault(name, []).append(res)
+            # Compress once scored: a 16 200-tick per-tick log is ~120 MB and the disk filled (2026-10-22).
+            # gzip writes the .gz beside it and removes the original only after a successful close.
+            if os.environ.get("SWEEP_KEEP_RAW") != "1":
+                subprocess.run(["gzip", "-6", "-f", str(lp)], check=False)
     summary = {}
     for name, *_ in arms:
         summary[name] = summarise(name, [r for r in results[name] if r["landed"]])

@@ -8841,3 +8841,42 @@ when no foot is planted; inverted it reported 0.76 m/s (true 0.01). **Fix**: `Di
 stance count (`OGMA_PICRAWLER_DISTRESS_PLANTED=0` restores). Tests `test_distress` 3/3. Result: 9/30 righted, panic
 70–85 % while inverted; flat and corridor byte-identical, walking panic 0 %. Open: the tall pyramid inverted (0/6 vs
 the reference's 4/6); the robot host must pass its FSR count; the confidence handover is next.
+
+### 2026-10-22 — CONFIDENCE HANDOVER: the LPG terms scaled by support × upright, + white search noise — self-righting 9/30 → 2/30 (3/30 with noise); walking ties — `REGRESSION` (signal) on self-righting
+
+*Plan §7.22.* `conf_gain` 1 scales stance press, stance reach, leg-phase lift and phase stroke by
+`ramp(support EMA) × ramp(upright)`; `conf_noise` 0.2 adds `(1−conf)·0.2` to the babble sigma. conf_gain 0
+byte-identical (6 seeds). Withdrawing the LPG terms at low confidence REDUCED leg motion while inverted (sd 0.65 →
+0.46 rad): the walking terms writing into an inverted body were part of the thrash. Only the tall pyramid improved
+(0 → 2/6). Flat 9.53 m vs 9.26, wall climb 4/6 all arms, escapes and corridor within a seed. **Later found**: the
+upright factor was `DEAD_CODE` here — the LPG lineage never subscribes motor_epm to `reality.proprio.upright` and
+`publish_tilt` is false, so `upright_` sat at 1.0; confidence fell through the support term alone (§7.23). Re-use
+context: the handover is the right frame once the search it hands over to is shaped (below).
+
+### 2026-10-22 — SHAPED SEARCH NOISE (OU tau 15, knee fold side ×0.27, escalation ×1→×3) on the handover: self-righting 3/30 → 9/30, both pyramids 4/6; flat ties, corridor slower — `PARTIAL` (signal). Inversion-triggered panic: `DEAD_CODE` (no upright subscription)
+
+*Plan §7.23.* Operator: the noise ramps too slowly, pulls the knees inward, and rarely reaches hip2-up + knee-extend.
+Causes: white noise in command units (the servo slew averages it away) and the knee command's asymmetric map (fold
+×3.20 rad, extend ×0.85) making symmetric command noise a 3.8× inward bias in radians. `conf_noise_shaped` 1: per
+joint OU process, knee fold-side scaled 0.27, amplitude ×(1 + low-confidence ticks/50) capped at 3. Inverted: tall
+pyramid 4/6 (median 170 ticks, = reference), pyramid i0 4/6 (reference 0/6), floor 0/6, walls 1/6 + 0/6; total 9/30
+vs 3/30 white, 9/30 gated base, 5/30 reference. Flat 9.69 ± 1.34 m, 0 falls. Corridor: flat zone 817 vs 666 ticks,
+hump 780 vs 381, rough zone reached 4/6 vs 5/6 with one fall — short confidence dips on rough ground now draw
+stronger noise. `conf_panic_upright` −0.2 matched handover+noise and shaped to the digit: the upright input never
+arrived (see above). Re-use context for the corridor cost: an onset delay on the noise so short dips do not draw it.
+
+### 2026-10-22 — UPRIGHT INPUT + INVERSION PANIC on the shaped handover (round 2): panic latches 94–100 % of inverted ticks, righting 7/30 and 6/30 vs 9/30 — `NULL` (signal)
+
+*Plan §7.23.* `upright_topic: reality.proprio.upright` makes the handover's upright factor and `conf_panic_upright`
+live (round 1's were `DEAD_CODE`). Confidence 0 on every inverted tick; panic engaged; no gain in righting. Flat
+byte-identical; corridor 630 / 376 ticks, 5/6, 0 falls (shaped 817 / 780, 4/6, 1 fall; base 666 / 381, 5/6, 0) — the
+shaped arm's corridor cost did not reproduce here, cause not traced. Re-use context: the inversion trigger is the
+right gate for a panic that has something directed to do.
+
+### 2026-10-22 — PANIC-SUSPENDED HANDOVER (`conf_panic_suspend` 1): the learned layer's full-range wind-up restored (hip1 clipped 8 % → 60–63 %), self-righting 9/30 = shaped 9/30 = gated base 9/30 — `NULL` (signal), mechanism verified
+
+*Plan §7.24.* Diagnosis first: the original's thrash is HK winding up on the LPG terms (pre-clamp |u| hip2 7.4 at
+10 000 ticks inverted, HK share 0.98); the handover starved it. Suspending the handover in panic restores the
+wind-up exactly, but not the floor (0/6 vs the base's 3/6, p ≈ 0.18 at n = 6) and not the walls. Gain 0 byte-
+identical. Walking ties except the pyramid escape (faster, 6 tip-overs vs 2). Lesson: amplitude is not the gap;
+undirected thrash rights the robot by chance. Re-use context: behind a directed exploration.

@@ -1135,6 +1135,24 @@ ParamSchema MotorEPMv2::params_schema() const {
          "robot the raw flag flickers at the FSR threshold and every flicker toggles a bias (2026-10-13: 30-45 command "
          "reversals a stride on hip2/knee against the sim's 6-20).",
          ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"conf_gain", ParamMutability::HotMutable,
+         "CONFIDENCE HANDOVER (Tegotae plan 7.22): the LPG terms (phase stroke, swing lift, stance press, stance reach) are scaled "
+         "by 1 - gain * (1 - conf), conf = ramp(support) * ramp(upright); support = smoothed share of stance-phase legs whose foot "
+         "touches. Needs leg_phase_topics, contact_topic and the tilt (or upright) topic. 0 = byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"conf_tau", ParamMutability::HotMutable, "Ticks of the support EMA.", ParamValue{25.0}, std::nullopt, std::nullopt},
+        {"conf_support_lo", ParamMutability::HotMutable, "Support at which confidence is 0.", ParamValue{0.2}, std::nullopt, std::nullopt},
+        {"conf_support_hi", ParamMutability::HotMutable, "Support at which confidence is 1.", ParamValue{0.6}, std::nullopt, std::nullopt},
+        {"conf_upright_lo", ParamMutability::HotMutable, "Upright (basis y.y) at which confidence is 0.", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"conf_upright_hi", ParamMutability::HotMutable, "Upright at which confidence is 1.", ParamValue{0.7}, std::nullopt, std::nullopt},
+        {"conf_noise", ParamMutability::HotMutable, "Extra undirected motor noise sigma, times the lost confidence (1 - conf_eff).", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"conf_noise_shaped", ParamMutability::HotMutable, "1 = the shaped handover search (7.23: OU, knee-symmetric, escalating); 0 = the 7.22 white form.", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"conf_noise_tau", ParamMutability::HotMutable, "Shaped search: OU hold time (ticks); 0 = white.", ParamValue{15.0}, std::nullopt, std::nullopt},
+        {"conf_noise_knee_fold", ParamMutability::HotMutable, "Shaped search: scale on the knee's fold-side noise (0.27 = symmetric in radians on this body).", ParamValue{0.27}, std::nullopt, std::nullopt},
+        {"conf_noise_esc_max", ParamMutability::HotMutable, "Shaped search: amplitude multiplier reached after conf_noise_esc_ticks of low confidence.", ParamValue{1.0}, std::nullopt, std::nullopt},
+        {"conf_noise_esc_ticks", ParamMutability::HotMutable, "Shaped search: ticks of low confidence per +1 of escalation.", ParamValue{50.0}, std::nullopt, std::nullopt},
+        {"conf_panic_upright", ParamMutability::HotMutable, "Panic latches while upright (basis y.y) is below this (on its back); -2 = never (7.23).", ParamValue{-2.0}, std::nullopt, std::nullopt},
+        {"conf_panic_suspend", ParamMutability::HotMutable, "Panic suspends the handover: conf_eff -> 1 as panic engages (x panic_eff), so inverted/hard-stuck the LPG terms and the learned layer they feed run as without it, and the search noise stops; 0 = off (7.24).", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"reach_load_topic", ParamMutability::ConstructionOnly,
          "STANCE REACH input: per-foot load (reality.proprio.foot_load). Empty = off (no subscription).", ParamValue{std::string("")}},
         {"reach_rate", ParamMutability::HotMutable,
@@ -1508,6 +1526,10 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_lift_lead"] = leg_phase_lift_lead_;
     m["leg_phase_late_press"] = leg_phase_late_press_;
     m["wshift_rate"] = wshift_rate_; m["wshift_leak"] = wshift_leak_; m["wshift_max"] = wshift_max_; m["wshift_hip2"] = wshift_hip2_;
+    m["conf_gain"] = conf_gain_; m["conf_tau"] = conf_tau_; m["conf_support_lo"] = conf_support_lo_; m["conf_support_hi"] = conf_support_hi_;
+    m["conf_upright_lo"] = conf_upright_lo_; m["conf_upright_hi"] = conf_upright_hi_; m["conf_noise"] = conf_noise_;
+    m["conf_noise_shaped"] = conf_noise_shaped_; m["conf_noise_tau"] = conf_noise_tau_; m["conf_noise_knee_fold"] = conf_noise_knee_fold_;
+    m["conf_noise_esc_max"] = conf_noise_esc_max_; m["conf_noise_esc_ticks"] = conf_noise_esc_ticks_; m["conf_panic_upright"] = conf_panic_upright_; m["conf_panic_suspend"] = conf_panic_suspend_;
     m["reach_load_topic"] = reach_load_topic_; m["reach_rate"] = reach_rate_; m["reach_target"] = reach_target_;
     m["reach_leak"] = reach_leak_; m["reach_max"] = reach_max_; m["reach_leak_min"] = reach_leak_min_; m["reach_hip2"] = reach_hip2_; m["reach_ref_tau"] = reach_ref_tau_;
     m["leg_phase_late_press_hip2"] = leg_phase_late_press_hip2_;
@@ -1775,6 +1797,20 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "leg_phase_late_press", [&](auto const& v){ leg_phase_late_press_ = get_double(v, "leg_phase_late_press"); });
     apply_param(params, "wshift_rate", [&](auto const& v){ wshift_rate_ = get_double(v, "wshift_rate"); });
     apply_param(params, "reach_load_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) reach_load_topic_ = *p; });
+    apply_param(params, "conf_gain",       [&](auto const& v){ conf_gain_       = get_double(v, "conf_gain"); });
+    apply_param(params, "conf_tau",        [&](auto const& v){ conf_tau_        = get_double(v, "conf_tau"); });
+    apply_param(params, "conf_support_lo", [&](auto const& v){ conf_support_lo_ = get_double(v, "conf_support_lo"); });
+    apply_param(params, "conf_support_hi", [&](auto const& v){ conf_support_hi_ = get_double(v, "conf_support_hi"); });
+    apply_param(params, "conf_upright_lo", [&](auto const& v){ conf_upright_lo_ = get_double(v, "conf_upright_lo"); });
+    apply_param(params, "conf_upright_hi", [&](auto const& v){ conf_upright_hi_ = get_double(v, "conf_upright_hi"); });
+    apply_param(params, "conf_noise",      [&](auto const& v){ conf_noise_      = get_double(v, "conf_noise"); });
+    apply_param(params, "conf_noise_shaped",    [&](auto const& v){ conf_noise_shaped_    = get_double(v, "conf_noise_shaped"); });
+    apply_param(params, "conf_noise_tau",       [&](auto const& v){ conf_noise_tau_       = get_double(v, "conf_noise_tau"); });
+    apply_param(params, "conf_noise_knee_fold", [&](auto const& v){ conf_noise_knee_fold_ = get_double(v, "conf_noise_knee_fold"); });
+    apply_param(params, "conf_noise_esc_max",   [&](auto const& v){ conf_noise_esc_max_   = get_double(v, "conf_noise_esc_max"); });
+    apply_param(params, "conf_noise_esc_ticks", [&](auto const& v){ conf_noise_esc_ticks_ = get_double(v, "conf_noise_esc_ticks"); });
+    apply_param(params, "conf_panic_upright",   [&](auto const& v){ conf_panic_upright_   = get_double(v, "conf_panic_upright"); });
+    apply_param(params, "conf_panic_suspend",   [&](auto const& v){ conf_panic_suspend_   = get_double(v, "conf_panic_suspend"); });
     apply_param(params, "reach_rate",    [&](auto const& v){ reach_rate_    = get_double(v, "reach_rate"); });
     apply_param(params, "reach_target",  [&](auto const& v){ reach_target_  = get_double(v, "reach_target"); });
     apply_param(params, "reach_leak",    [&](auto const& v){ reach_leak_    = get_double(v, "reach_leak"); });
@@ -3380,6 +3416,20 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "leg_phase_late_press") leg_phase_late_press_ = get_double(value, "leg_phase_late_press");
     else if (key == "wshift_rate") wshift_rate_ = get_double(value, "wshift_rate");
     else if (key == "reach_rate")    reach_rate_    = get_double(value, "reach_rate");
+    else if (key == "conf_gain")       conf_gain_       = get_double(value, "conf_gain");
+    else if (key == "conf_tau")        conf_tau_        = get_double(value, "conf_tau");
+    else if (key == "conf_support_lo") conf_support_lo_ = get_double(value, "conf_support_lo");
+    else if (key == "conf_support_hi") conf_support_hi_ = get_double(value, "conf_support_hi");
+    else if (key == "conf_upright_lo") conf_upright_lo_ = get_double(value, "conf_upright_lo");
+    else if (key == "conf_upright_hi") conf_upright_hi_ = get_double(value, "conf_upright_hi");
+    else if (key == "conf_noise")      conf_noise_      = get_double(value, "conf_noise");
+    else if (key == "conf_noise_shaped")    conf_noise_shaped_    = get_double(value, "conf_noise_shaped");
+    else if (key == "conf_noise_tau")       conf_noise_tau_       = get_double(value, "conf_noise_tau");
+    else if (key == "conf_noise_knee_fold") conf_noise_knee_fold_ = get_double(value, "conf_noise_knee_fold");
+    else if (key == "conf_noise_esc_max")   conf_noise_esc_max_   = get_double(value, "conf_noise_esc_max");
+    else if (key == "conf_noise_esc_ticks") conf_noise_esc_ticks_ = get_double(value, "conf_noise_esc_ticks");
+    else if (key == "conf_panic_upright")   conf_panic_upright_   = get_double(value, "conf_panic_upright");
+    else if (key == "conf_panic_suspend")   conf_panic_suspend_   = get_double(value, "conf_panic_suspend");
     else if (key == "reach_target")  reach_target_  = get_double(value, "reach_target");
     else if (key == "reach_leak")    reach_leak_    = get_double(value, "reach_leak");
     else if (key == "reach_max")     reach_max_     = get_double(value, "reach_max");
@@ -3895,8 +3945,12 @@ void MotorEPMv2::tick(uint64_t tick_id) {
     // below panic_off it resumes.  panic_ ramps smoothly so the transition isn't a
     // jerk.  pe ∈ [0,1] is the effective override applied to the gait knobs below.
     if (panic_strength_ > 0.0) {
-        if (!panic_latched_ && distress_ > float(panic_on_))  panic_latched_ = true;
-        else if (panic_latched_ && distress_ < float(panic_off_)) panic_latched_ = false;
+        // INVERSION PANIC (conf_panic_upright; Tegotae plan 7.23): on its back is unambiguous, so it does not wait
+        // for the stall accumulator.  Below the threshold panic latches; it releases only when the body is
+        // upright again AND distress has fallen.  Default -2 = never (the original latch, byte-identical).
+        const bool inverted_now = conf_panic_upright_ > -1.5 && upright_ < float(conf_panic_upright_);
+        if (!panic_latched_ && (distress_ > float(panic_on_) || inverted_now))  panic_latched_ = true;
+        else if (panic_latched_ && distress_ < float(panic_off_) && !inverted_now) panic_latched_ = false;
     } else {
         panic_latched_ = false;
     }
@@ -4628,6 +4682,38 @@ void MotorEPMv2::tick(uint64_t tick_id) {
 
     // Cruse stance/swing bookkeeping (once per tick, before the per-leg output).
     if (cruse_gain_ != 0.0 || cruse_rule5_gain_ != 0.0 || stance_lift_gain_ != 0.0) update_cruse_state();
+    // CONFIDENCE HANDOVER (conf_gain; Tegotae plan 7.22).  How well the load-held gait's own assumptions hold:
+    // SUPPORT = the share of legs whose phase says stance that actually touch the ground (smoothed), times UPRIGHT
+    // (+1 on its feet, -1 on its back, from the IMU tilt).  Walking: ~1.  Inverted or high-centred: low.  The LPG
+    // terms (phase stroke, swing lift, stance press, stance reach) are scaled by conf_eff_ = 1 - gain * (1 - conf),
+    // so as the gait's predictions fail its authority passes to what stays: the learned layer, the posture spring,
+    // panic, and (conf_noise) undirected search.  conf_gain 0 => conf_eff_ = 1 exactly, byte-identical.
+    if (conf_gain_ > 0.0 && ext_all_seen() && have_contact_ && int(foot_contact_.size()) == n_legs_) {
+        int n_st = 0, n_sup = 0;
+        for (int j = 0; j < n_legs_; ++j)
+            if (ext_sin_[size_t(j)] < -0.2f) { ++n_st; if (foot_contact_[size_t(j)] > 0.5f) ++n_sup; }
+        if (n_st > 0) {
+            const float sup = float(n_sup) / float(n_st);
+            conf_support_ema_ += (1.0f / float(std::max(1.0, conf_tau_))) * (sup - conf_support_ema_);
+        }
+        auto ramp = [](float v, double lo, double hi) {
+            return hi > lo ? std::clamp((v - float(lo)) / float(hi - lo), 0.0f, 1.0f) : (v >= float(hi) ? 1.0f : 0.0f);
+        };
+        const float c = ramp(conf_support_ema_, conf_support_lo_, conf_support_hi_) * ramp(upright_, conf_upright_lo_, conf_upright_hi_);
+        float withdraw = float(std::min(1.0, conf_gain_)) * (1.0f - c);
+        // PANIC-SUSPENDED HANDOVER (conf_panic_suspend; Tegotae plan 7.24).  Without the handover the learned layer,
+        // amplified x4 in panic, winds up on the LPG terms still writing into an inverted body until it drives the
+        // joints stop to stop (hip1 clipped 64 % of ticks): that is the thrash that rights the robot.  Withdrawing
+        // those terms starved it (hip1 clipped 8 %).  So the handover yields to panic: upright-but-stalled keeps it,
+        // inverted or hard-stuck runs the old path.  0 = off, byte-identical.
+        if (conf_panic_suspend_ > 0.0)
+            withdraw *= 1.0f - float(std::min(1.0, conf_panic_suspend_)) * std::clamp(panic_ * float(panic_strength_), 0.0f, 1.0f);
+        conf_eff_ = 1.0f - withdraw;
+        conf_eff_ema_ += 0.01 * (double(conf_eff_) - conf_eff_ema_);
+        conf_low_ticks_ = conf_eff_ < 0.5f ? conf_low_ticks_ + 1 : 0;
+    } else {
+        conf_eff_ = 1.0f;
+    }
     // Stroke-to-step lock: advance each leg's touchdown-referenced step clock.  Must run
     // BEFORE the per-leg output loop (the stroke reads L.step_phase) and AFTER the contact
     // /torque handlers have landed this tick's sensor values.  Skipped entirely at the
@@ -5843,11 +5929,11 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     ++sr_release_ticks_;
                 }
             }
-            y[m - 1] += press * float(stance_lift_gain_);
+            y[m - 1] += press * float(stance_lift_gain_) * conf_eff_;
             // Same sign to hip2 — see stance_lift_hip2.  On a PLANTED foot hip2+ presses
             // down and levers the chassis up; it is the other half of the same raise.
             if (stance_lift_hip2_ != 0.0)
-                y[1] += press * float(stance_lift_hip2_) * float(stance_lift_gain_);
+                y[1] += press * float(stance_lift_hip2_) * float(stance_lift_gain_) * conf_eff_;
         } else if (stance_release_frac_ > 0.0 && leg < int(sr_was_stance_.size())
                    && int(in_swing_.size()) == n_legs_ && in_swing_[leg]) {
             sr_was_stance_[leg] = false;             // swing: arm the next bout's reset
@@ -5898,7 +5984,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 e += float(reach_rate_) * st_w * std::max(0.0f, float(reach_target_) - n)
                    - float(reach_leak_) * std::max(float(reach_leak_min_), std::min(1.0f, n)) * e;   // floor: a body whose loads stay low still unwinds
                 e = std::clamp(e, 0.0f, float(reach_max_));
-                const float a = e * std::min(1.0f, 3.0f * st_w);        // ramps in over early stance
+                const float a = e * std::min(1.0f, 3.0f * st_w) * conf_eff_;   // ramps in over early stance
                 y[m - 1] += a;
                 y[1]     += a * float(reach_hip2_);
             }
@@ -5916,7 +6002,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // foot path rises before liftoff).  0 = max(0, sin phi), byte-identical.
             const float s_lift = leg_phase_lift_lead_ == 0.0 ? ext_sin_[size_t(leg)]
                 : ext_sin_[size_t(leg)] * float(std::cos(leg_phase_lift_lead_)) + ext_cos_[size_t(leg)] * float(std::sin(leg_phase_lift_lead_));
-            const float lift = std::max(0.0f, s_lift);
+            const float lift = std::max(0.0f, s_lift) * conf_eff_;
             // SWING CLEARANCE (swing_clear_*; see the header): the commanded-FK clearance of
             // this swing foot above the planted plane scales its lift toward the target.
             float lscale = 1.0f;
@@ -6099,6 +6185,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // shakes loose (alongside the coord phase-search enlargement above).
         float noise_sigma = float(explore_noise_) * (1.0f + float(stuck_explore_gain_) * stuck_boost_) * explore_mult
                           + pe * float(panic_noise_);   // C damps explore_noise (not panic)
+        if (conf_gain_ > 0.0 && conf_noise_ > 0.0 && conf_noise_shaped_ <= 0.0)
+            noise_sigma += float(conf_noise_) * (1.0f - conf_eff_);   // handover search (7.22), white, in command units
         if (state_prior_calm_ > 0.0) noise_sigma *= calm_mult_;   // annealed with the storm
         if (!warmup && noise_sigma > 0.0f) {
             if (explore_noise_tau_ > 0.0) {
@@ -6115,6 +6203,28 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             } else {
                 std::normal_distribution<float> nz(0.0f, noise_sigma);
                 for (int j = 0; j < m; ++j) y[j] += nz(L.babble_rng);
+            }
+        }
+        // SHAPED HANDOVER SEARCH (conf_noise_shaped; Tegotae plan 7.23).  The 7.22 search noise was white in COMMAND
+        // units: per-tick jitter the servo slew averages away, and on the knee a +1 command folds 3.20 rad but -1
+        // extends only 0.85, so symmetric command noise drifted the knees INWARD.  Shaped: an OU process per joint
+        // (hold conf_noise_tau ticks) so excursions reach full range; the knee's fold-side noise scaled by
+        // conf_noise_knee_fold (0.27 = 0.85/3.20 makes it symmetric in radians); amplitude escalating while the
+        // confidence stays low (x1 -> conf_noise_esc_max over conf_noise_esc_ticks).  Separate RNG draws only when on.
+        if (!warmup && conf_gain_ > 0.0 && conf_noise_ > 0.0 && conf_noise_shaped_ > 0.0) {
+            if (int(conf_ou_.size()) != n_legs_ * m) conf_ou_.assign(size_t(n_legs_ * m), 0.0f);
+            const float esc = std::min(float(conf_noise_esc_max_),
+                                       1.0f + float(conf_low_ticks_) / float(std::max(1.0, conf_noise_esc_ticks_)));
+            const float amp = float(conf_noise_) * (1.0f - conf_eff_) * esc;
+            const float rho = conf_noise_tau_ > 0.0 ? std::exp(-1.0f / float(conf_noise_tau_)) : 0.0f;
+            const float kin = std::sqrt(1.0f - rho * rho);
+            std::normal_distribution<float> nz(0.0f, 1.0f);
+            for (int j = 0; j < m; ++j) {
+                float& o = conf_ou_[size_t(leg * m + j)];
+                o = rho * o + kin * nz(L.babble_rng);
+                float v = amp * o;
+                if (j == m - 1 && v > 0.0f) v *= float(conf_noise_knee_fold_);   // fold side, in radians symmetric
+                y[j] += v;
             }
         }
         // INTER-LEG PLV accumulation — one sample per tick per leg pair, over the whole run.
@@ -6363,7 +6473,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 stroke_off = float(leg_phase_offset_);
                 ++ext_stroke_ticks_;
             }
-            y[0] += (1.0f - pe) * amp * std::sin(stroke_ph + stroke_off);
+            y[0] += (1.0f - pe) * amp * std::sin(stroke_ph + stroke_off) * (leg_phase_stroke_ > 0.0 ? conf_eff_ : 1.0f);
         }
         // --- Per-leg propulsive-credit homeostat (functional L/R propulsion balance).
         // Credit = the hip1 motion component phase-aligned with the fore-aft power
@@ -7164,6 +7274,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["wshift_a"]               = wshift_a_;
     mod["wshift_u"]               = float(wshift_u_ema_);
     mod["reach_e"]                = reach_e_;
+    mod["conf_eff"]               = conf_eff_;
+    mod["conf_eff_mean"]          = float(conf_eff_ema_);
     mod["reach_n"]                = reach_n_;
     mod["stuck_score"]            = stuck_score_;
     mod["stuck_gate_in"]          = stuck_gate_in_;
@@ -7618,6 +7730,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["wshift_a"]            = wshift_a_;
     j["wshift_u"]            = float(wshift_u_ema_);
     j["reach_e"]             = reach_e_;
+    j["conf_eff"]            = conf_eff_;
     j["reach_n"]             = reach_n_;
     j["stuck_score"]         = stuck_score_;
     j["stuck_gate_in"]       = stuck_gate_in_;

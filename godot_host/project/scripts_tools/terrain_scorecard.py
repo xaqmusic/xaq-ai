@@ -25,6 +25,7 @@ Per zone, mean over seeds that entered it:
 Usage: terrain_scorecard.py NAME=<glob of logs> [NAME=<glob> ...]
 """
 import glob, json, math, statistics as st, sys
+from _logio import open_log, log_glob
 
 ZONES = [("flat", 0.3, 1.9), ("hump_up", 2.0, 3.0), ("hump_down", 3.0, 4.0), ("rumble", 4.2, 6.3)]
 
@@ -38,7 +39,7 @@ def zone_of(z):
 
 def one(path):
     rows = []
-    for l in open(path, errors="replace"):
+    for l in open_log(path):
         if l.startswith("{") and '"con"' in l and '"x"' in l:
             try:
                 rows.append(json.loads(l))
@@ -99,7 +100,7 @@ def main():
     keys = ["ticks", "belly", "belly_p05", "pitch", "roll_abs", "tilt_sd", "posture", "stride_cv", "falls"]
     for spec in sys.argv[1:]:
         name, _, pat = spec.partition("=")
-        res = [one(p) for p in sorted(glob.glob(pat))]
+        res = [one(p) for p in log_glob(pat)]
         print(f"\n=== {name}  (n={len(res)})")
         print(f"  {'zone':10s} {'reach':>5s} " + " ".join(f"{k:>10s}" for k in keys))
         for zn, _, _ in ZONES:

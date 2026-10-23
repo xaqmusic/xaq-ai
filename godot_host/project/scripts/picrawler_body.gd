@@ -13020,6 +13020,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				for _v in _wa: _waa.append(snappedf(float(_v), 0.001))
 				line["ws_a"] = _waa
 			line["ws_u"] = snappedf(float(_mm.get("wshift_u", 0.0)), 0.0001)
+			line["conf"] = snappedf(float(_mm.get("conf_eff", 1.0)), 0.001)
 			for _rk in [["reach_e", "rc_e"], ["reach_n", "rc_n"]]:
 				var _rv = _mm.get(_rk[0], [])
 				if _rv is Array and _rv.size() == 4:

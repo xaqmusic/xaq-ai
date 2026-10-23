@@ -953,6 +953,92 @@ ticks), and the LPG terms (lift, stance press, stance reach) keep writing a walk
 confidence handover (gait authority scaled by its own phase-vs-contact agreement and the upright estimate) is the next
 lever.
 
+### 7.22 The confidence handover (2026-10-22)
+
+The gait's authority scaled by its own agreement with the body: `conf = ramp(support) × ramp(upright)`, where support
+is an EMA (tau 25) of the fraction of stance-phase legs whose foot is touching, and upright the IMU's own up estimate.
+`conf_gain` blends it in; conf_eff multiplies the stance press, stance reach, leg-phase lift and phase stroke.
+`conf_noise` adds `conf_noise·(1−conf_eff)` to the babble sigma (search noise). Config `…_tuck0_conf.json`
+(conf_gain 1) and `…_conf_noise.json` (+ conf_noise 0.2); base = the planted-gated distress stack (§7.21). n = 6.
+
+| inverted on | reference | gated base | handover | handover + noise |
+|---|---|---|---|---|
+| channel floor | 0/6 | 3/6 | 0/6 | 0/6 |
+| tall pyramid i2 | 4/6 | 0/6 | 2/6 | 2/6 |
+| pyramid i0 | 0/6 | 2/6 | 0/6 | 1/6 |
+| left / right wall | 0/6, 1/6 | 2/6, 2/6 | 0/6, 0/6 | 0/6, 0/6 |
+| **total** | 5/30 | **9/30** | 2/30 | 3/30 |
+| leg sd while inverted (rad) | 0.56–0.63 | 0.63–0.70 | 0.45–0.49 | 0.45–0.51 |
+
+Walking: conf_gain 0 is byte-identical to the base (6 seeds). Flat 9.53 / 9.60 m vs 9.26 (0 falls), wall climb 4/6
+for all three, escapes within a seed (pyramid i2 6/6 but more falls), corridor ties. **Verdict: `REGRESSION` (signal)
+on self-righting, ties on walking.** Withdrawing the LPG terms at low confidence *reduced* the leg motion while
+inverted (sd 0.65 → 0.46): the lift, press and reach writing into an inverted body were part of the thrash, and 0.2 of
+white search noise does not replace them. The tall pyramid (0 → 2/6) is the one placement it helps. Operator
+observation of the noise arm: the noise works but ramps too slowly, its knee component pulls the feet inward (the knee
+command's fold side is ×3.20 rad against ×0.85 extend, so symmetric noise in command units is a 3.8× fold bias in
+radians), hip2-up with knee-extend (reaching behind to flip) is rare, and hip2-down with full knee fold puts the toe
+into the chassis. Re-use context: the handover is the right shape for a body whose search noise is directed; retry it
+behind the mechanical fixes (§7.23) and a directed exploration.
+
+### 7.23 The search noise, shaped (2026-10-22)
+
+Operator, watching §7.22's noise arm: it ramps too slowly, pulls the knees inward, and rarely puts hip2 up with the
+knee extended (reaching behind to flip); and hip2 down with the knee fully folded puts the toe into the chassis.
+`conf_noise_shaped` 1 replaces the white command-unit noise with a per-joint OU process (`conf_noise_tau` 15 ticks),
+scales the knee's fold-side noise by `conf_noise_knee_fold` 0.27 (= 0.85/3.20, symmetric in radians), and escalates
+the amplitude ×(1 + low-confidence ticks / `conf_noise_esc_ticks` 50) up to `conf_noise_esc_max` 3. Separate RNG
+draws, only when on. `conf_panic_upright` latches panic while upright < threshold (−2 = never).
+
+| inverted on | gated base | handover + white noise | **shaped** | shaped + upright input | + inversion panic |
+|---|---|---|---|---|---|
+| channel floor | 3/6 | 0/6 | 0/6 | 0/6 | 0/6 |
+| tall pyramid i2 | 0/6 | 2/6 | **4/6** (median 170) | 5/6 (112) | 3/6 |
+| pyramid i0 | 2/6 | 1/6 | **4/6** (470) | 1/6 | 1/6 |
+| left / right wall | 2/6, 2/6 | 0/6, 0/6 | 1/6, 0/6 | 0/6, 1/6 | 1/6, 1/6 |
+| **total** | 9/30 | 3/30 | **9/30** | 7/30 | 6/30 |
+
+Joint coverage while inverted (5th–95th percentile, rad; floor and walls): the knee fold end moved off full tuck
+(+1.60 → +1.07) and extension grew (−0.93 → −1.27) — the outward reach the operator asked for; the hips swept
+about half the gated base's range (hip1 1.29 vs 2.39 rad). Walking: flat 9.69 ± 1.34 m, 0 falls (base 9.26);
+corridor flat zone 817 vs 666 ticks, hump 780 vs 381, rough zone 4/6 with one fall (base 5/6, 0).
+
+**The inversion trigger was `DEAD_CODE` in round 1**, and so was the handover's upright factor: the LPG lineage
+never subscribes motor_epm to `reality.proprio.upright` and `publish_tilt` is false, so `upright_` sat at its 1.0
+init (round-1 arms matched to the digit). Round 2 adds `upright_topic`: conf reads exactly 0 on every inverted tick
+(97.6 % before, through support alone) and panic latches 94–100 % of inverted ticks, but righting does not improve
+(7/30, 6/30). Flat walking byte-identical; the corridor back at the base's level (630 / 376 ticks, 5/6, 0 falls) for
+a reason not yet traced. **Verdict: shaped noise `PARTIAL` (signal)** — triples white noise's self-righting and
+gives both pyramids 4/6, ties the gated base's total, a corridor cost that round 2 did not reproduce.
+
+### 7.24 Why the handover could not thrash, and the panic-suspended handover (2026-10-22)
+
+The full-range thrash that rights the original walker is the learned layer (HK, ×4 in panic) WINDING UP, not
+noise. Inverted on the floor, gated base: pre-clamp mean |u| hip1/hip2/knee 0.28/0.23/0.49 at 500 ticks, 1.23/1.43/
+1.40 at 3000, **2.76/7.36/3.24** at 10 000; HK's share of the command 0.49 → 0.98; hip1 at its clamp 64 % of ticks.
+Shaped handover: 0.44/0.52/0.58 at 10 000, HK share 0.35, hip1 clipped 8 %. HK amplifies what already moves the leg;
+the handover zeroes the LPG terms that fed it. (Servo slew was checked as the cause and accounts for ~10 %.)
+
+`conf_panic_suspend` 1: the withdrawal is multiplied by `1 − panic_eff`, so in panic the LPG terms return and the
+search noise stops; upright-but-stalled keeps the handover. Gain 0 per-tick byte-identical to the shaped arm (6
+seeds). **Mechanism verified**: windup restored (hip1 clipped 60–63 %, HK share 0.97–0.98, leg sd 0.45–0.72 rad).
+
+| inverted on | gated base | shaped | **panic-suspended** |
+|---|---|---|---|
+| floor | 3/6 | 0/6 | 0/6 |
+| tall pyramid i2 | 0/6 | 4/6 | 4/6 (median 170) |
+| pyramid i0 | 2/6 | 4/6 | 3/6 (252) |
+| left / right wall | 2/6, 2/6 | 1/6, 0/6 | 0/6, 2/6 |
+| **total** | 9/30 | 9/30 | 9/30 |
+
+Walking: flat, wall climb (3/6), wall and hump escapes identical to shaped; pyramid escape faster (510 vs 1135
+ticks) with more tip-overs (6 vs 2); corridor flat zone 947 vs 817, hump 550 vs 780. **Verdict: `NULL` (signal),
+mechanism verified.** Restored thrash amplitude did not restore the floor; all three arms tie at 9/30 and none is
+loud. Amplitude is not the gap — undirected thrash, noise or saturated HK, finds the flip by chance. Re-use context:
+a directed exploration (reach synergies kept while uprightness improves) would give panic a vocabulary worth
+suspending the handover for. (Base and shaped rows here are the scores taken before 148 raw logs were lost on
+2026-10-22; their re-scores now run on fewer seeds.)
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |

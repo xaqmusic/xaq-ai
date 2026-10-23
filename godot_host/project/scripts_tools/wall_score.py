@@ -12,13 +12,14 @@ Corridor geometry (picrawler_body.gd _build_corridor): flat floor |x| < 0.75, th
 Usage: wall_score.py NAME=<glob> [NAME=<glob> ...]
 """
 import glob, json, math, re, statistics as st, sys
+from _logio import open_log, log_glob
 
 ON_X = 0.95
 
 
 def one(path):
     rows = []
-    for l in open(path, errors="replace"):
+    for l in open_log(path):
         if l.startswith("{") and '"x"' in l and '"t"' in l and '"con"' in l:
             try:
                 rows.append(json.loads(l))
@@ -26,7 +27,7 @@ def one(path):
                 pass
     drop = None
     tp = None                                   # the drop tick, from the body's own "[teleport] ... tick N" line
-    for l in open(path, errors="replace"):
+    for l in open_log(path):
         mm = re.search(r"\[teleport\] dropped.* tick (\d+)", l)
         if mm:
             tp = int(mm.group(1)); break
@@ -55,7 +56,7 @@ def one(path):
 def main():
     for spec in sys.argv[1:]:
         name, _, pat = spec.partition("=")
-        res = [r for r in (one(p) for p in sorted(glob.glob(pat))) if r]
+        res = [r for r in (one(p) for p in log_glob(pat)) if r]
         if not res:
             print(f"  {name:28s} no drop found"); continue
         on = [r for r in res if r["onto"]]
