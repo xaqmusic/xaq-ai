@@ -492,12 +492,20 @@ def test_live_period_keys_hot_patch_the_lpg_and_are_bounded(tmp_path, monkeypatc
     c = lpg_cfg()
     assert c.lpg_id == "load_phase" and c.lpg_period == 70.0
     ctrl = dash_run.RunController(robot, c, "stand", countdown_s=0.3, ready_extra_s=0.0)
-    ctrl.nudge_period(-2)
-    assert ctrl.st.lpg_period == 60.0
-    assert "brain set_param load_phase.period_ticks=60.0" in robot.calls
+    ctrl.nudge_period(-2)                               # before the brain takes over: queued, not sent
+    assert ctrl.st.lpg_period == 60.0 and ctrl.period_target == 60.0
+    assert not any(x.startswith("brain set_param") for x in robot.calls)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    assert "brain set_param load_phase.period_ticks=60.0" in robot.calls   # sent at the start, before RESUME
+    assert ctrl.st.lpg_period == 60.0                    # and not overwritten by the config's 70
+    ctrl.nudge_period(-1)
+    assert "brain set_param load_phase.period_ticks=55.0" in robot.calls   # live once running
     for _ in range(30):
         ctrl.nudge_period(-1)
     assert ctrl.st.lpg_period == dash_run.PERIOD_MIN
+    ctrl.end()
+    ctrl.join(10)
 
 
 def test_the_period_keys_say_so_when_the_config_has_no_lpg(tmp_path, monkeypatch):
@@ -666,5 +674,18 @@ def test_the_swing_lift_moves_femur_and_knee_together_live_and_for_the_next_run(
     for _ in range(30):
         ctrl.nudge("lift", -1)
     assert ctrl.st.tuned["lift"] == 0.0
+    ctrl.end()
+    ctrl.join(10)
+
+
+def test_a_knob_turned_before_the_brain_takes_over_is_kept_not_reset(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    robot = FakeRobot(tmp_path)
+    ctrl = dash_run.RunController(robot, tl_cfg(), "stand", countdown_s=0.3, ready_extra_s=0.0)
+    ctrl.nudge("lift", +2)                               # 0.30 -> 0.40 during the countdown
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    assert abs(ctrl.st.tuned["lift"] - 0.40) < 1e-9
+    assert any("leg_phase_lift_hip2=-0.4" in x for x in robot.calls)
     ctrl.end()
     ctrl.join(10)

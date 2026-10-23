@@ -554,6 +554,11 @@ class RunController:
         self.period_target: Optional[float] = lpg_period if lpg_period is not None else cfg.lpg_period
         # Every other TUNABLES row: the operator's value for this run, else the config's.
         self.tune_targets: dict = {n: v for n, v in (tune or {}).items() if n in cfg.tunables and n != "period"}
+        # Set once the run's tunables have been sent to the brain (just before RESUME).  Until then a key press only
+        # changes the target that will be sent; after, it goes live.  (2026-10-24: presses during "prepare" reached
+        # the brain, then the start step overwrote the dash's record with the config's value — the TUNE line showed
+        # 0.30 for a minute while the motor ran 0.40.)
+        self._tune_applied = False
         self.countdown_s, self.ready_extra_s = countdown_s, ready_extra_s
         self.st = RunState()
         self._abort = threading.Event()        # before the brain has the servos: abort
@@ -611,6 +616,7 @@ class RunController:
         if self._slew_restore is None and r.get("was") is not None and r["was"] != want:
             self._slew_restore = int(r["was"])       # put back whatever ran before this run
         self.st.slew_us = want
+        self.slew_target = want                      # a press before the run's own slew.set is not undone by it
         msg = f"servo speed {want * TICK_HZ / US_PER_RAD:.2f} rad/s = slew {want} us/tick (was {r.get('was')})"
         self._ev(msg)
         return msg
@@ -623,6 +629,12 @@ class RunController:
         if cur is None:
             return "LPG period: unknown"
         want = float(min(PERIOD_MAX, max(PERIOD_MIN, cur + steps * PERIOD_STEP_TICKS)))
+        if not self._tune_applied:
+            self.period_target = want
+            self.st.lpg_period = want
+            msg = f"LPG period {want:.0f} ticks for this run (sent when the brain takes over; was {cur:.0f})"
+            self._ev(msg)
+            return msg
         r = self.io.brain_call("set_param", id=self.cfg.lpg_id, key="period_ticks", value=want)
         if not r or r.get("status") != "ok":
             msg = f"LPG period {want:.0f} refused: {(r or {}).get('message', 'no reply from ogma_host')}"
@@ -654,6 +666,12 @@ class RunController:
         if cur is None:
             return f"{t.label}: unknown"
         want = float(min(t.hi, max(t.lo, round((cur + steps * t.step) / t.step) * t.step)))
+        if not self._tune_applied:
+            self.tune_targets[name] = want
+            self.st.tuned[name] = want
+            msg = f"{t.label} {fmt_tunable(t, want)} for this run (sent when the brain takes over; was {fmt_tunable(t, cur)})"
+            self._ev(msg)
+            return msg
         r = self._send_tunable(name, want)
         if not r or r.get("status") != "ok":
             msg = f"{t.label} {fmt_tunable(t, want)} refused: {(r or {}).get('message', 'no reply from ogma_host')}"
@@ -892,6 +910,7 @@ class RunController:
                          else f"{t.label} {fmt_tunable(t, want)} refused — running the config's")
             else:
                 self.st.tuned[name] = cfg_v
+        self._tune_applied = True
         r = self.io.ctl.call("resume")
         if not r or not r.get("ok"):
             self._ev(f"resume refused: {(r or {}).get('error', 'no reply')}")

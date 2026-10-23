@@ -8923,3 +8923,12 @@ than stepping") ran at 3.12 rad/s and period 30 carried over from earlier tuning
 p10 7 mm — the cadence outran the servos and the low target lowered the stance; not a test of the learner. Re-use
 context: belly height wants more than one actuator (hip2 alone); a learner over the stance press or the knee would
 share the load.
+
+### 2026-10-24 — ROBOT PROMOTED (operator): `…__robot_p1.json` — the promoted sim stack + learned stance height, 4.22 rad/s, period 50, swing lift 0.40, belly target 60 mm, as tuned live on the bench
+
+Bench run 2026-10-24 00:06 (5.7 min): with swing lift 0.35–0.50, the swinging foot still touches during 33–69 % of
+swing samples per 15 s window (best 33 %, worst 69 %), and the belly falls over the run (63 → 34–38 mm) while the femur sits
+at its 0.45 limit from ~150 s: the 60 mm target is not reached on this robot; the body sags (servo give or pack
+voltage, not measured here). Dragging tracks the low belly. Rail min 2.8–3.3 V, current p95 2.1–2.8 A, 0 HAT resets.
+The previous robot promoted config is relabelled BASE. Next: make the swing lift and stance height adapt
+(discussion with the operator).
