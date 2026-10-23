@@ -72,6 +72,10 @@ COUNTDOWN_S = 10.0
 TILT_LIMIT_DEG = 80.0                         # operator, 2026-10-03: 60 was too tight
 TILT_LIMIT_UP_Y = math.cos(math.radians(TILT_LIMIT_DEG))
 BENCH_PORT, CTL_PORT, CMD_PORT = 5590, 5593, 5594
+BRAIN_PORT = 7400                             # ogma_host's inspector control port
+SPEED_STEP_RAD_S = 0.25                       # the live servo-speed keys' step
+PERIOD_STEP_TICKS = 5                         # the live LPG-period keys' step
+PERIOD_MIN, PERIOD_MAX = 20, 120
 VBAT_WARN = 7.0                               # limp is 6.4 sustained; belly-up draws ~1.5 A
 
 
@@ -91,6 +95,9 @@ class ConfigEntry:
     # OGMA_PICRAWLER_ULTRASONIC -> --range, _CAMERA_ROBOT -> --camera, _ODOM -> --odom
     # (--odom-scale from _ODOM_SCALE), _HONEST_VEL_EGO -> --vel-ego, _CMD_FK_SOURCE -> --cmd-fk.
     host_flags: tuple = ()
+    # The LoadPhaseGait module's id and its configured period (ticks), for the live period keys.
+    lpg_id: Optional[str] = None
+    lpg_period: Optional[float] = None
 
 
 def allowlist(launcher_gd: Path = LAUNCHER_GD) -> list[str]:
@@ -114,9 +121,19 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
     for f in allowlist(launcher_gd):
         p = config_dir / f
         try:
-            md = json.loads(p.read_text()).get("metadata", {})
+            doc = json.loads(p.read_text())
+            md = doc.get("metadata", {})
         except (OSError, ValueError):
             continue                                    # listed but absent: not offered
+        lpg_id, lpg_period = None, None
+        for mod in doc.get("modules", []) if isinstance(doc.get("modules"), list) else []:
+            if isinstance(mod, dict) and mod.get("type") == "LoadPhaseGait":
+                lpg_id = str(mod.get("id", "")) or None
+                try:
+                    lpg_period = float((mod.get("params") or {}).get("period_ticks", 70))
+                except (TypeError, ValueError):
+                    lpg_period = None
+                break
         be = md.get("body_env") or {}
         try:
             spd = float(be["OGMA_PICRAWLER_MAX_SERVO_SPEED"])
@@ -137,7 +154,7 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
                                faithful=str(be.get("OGMA_PICRAWLER_HONEST_JOINTS", "")) == "1",
                                phase=str(md.get("phase_tag", "")), speed_rad_s=spd,
                                slew_us=int(round(spd * US_PER_RAD / TICK_HZ)) if spd else None,
-                               host_flags=tuple(flags)))
+                               host_flags=tuple(flags), lpg_id=lpg_id, lpg_period=lpg_period))
     # Robot-faithful first; otherwise the launcher's own order.
     return sorted(out, key=lambda c: not c.faithful)
 
@@ -186,6 +203,23 @@ class RobotIo:
     def new_ctl(self) -> "Rpc":
         """A second control socket, for the UI thread (REQ sockets are single-threaded)."""
         return Rpc(CTL_PORT)
+
+    def brain_call(self, verb: str, port: int = BRAIN_PORT, **kw: Any) -> Optional[dict]:
+        """One request to ogma_host's inspector control port (newline JSON over TCP), on a fresh
+        connection so the UI thread never shares a socket with the brain-diag poller."""
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.5) as sock:
+                sock.sendall((json.dumps({"verb": verb, **kw}) + "\n").encode())
+                buf = b""
+                while b"\n" not in buf:
+                    c = sock.recv(65536)
+                    if not c:
+                        return None
+                    buf += c
+                return json.loads(buf.partition(b"\n")[0].decode())
+        except (OSError, ValueError):
+            return None
 
     def systemctl(self, action: str, unit: str) -> bool:
         r = subprocess.run(["sudo", "-n", "systemctl", action, unit],
@@ -400,6 +434,8 @@ class RunState:
     tilt_deg: Optional[float] = None
     vbat: Optional[float] = None
     stopped: Optional[bool] = None
+    slew_us: Optional[int] = None         # the brain's live servo slew (benchd), when known
+    lpg_period: Optional[float] = None    # the live LoadPhaseGait period, when set or known
 
 
 class RunController:
@@ -446,6 +482,45 @@ class RunController:
         self._end.set()
         self._abort.set()
         self._ev("E pressed: end requested")
+
+    # ---- live tuning (operator, 2026-10-23): servo speed and the LPG period during a run ----
+    def nudge_speed(self, steps: int) -> str:
+        """Servo speed +/- SPEED_STEP_RAD_S, as benchd's brain slew (slew.set: allowed in the brain
+        modes, banded by benchd).  The pre-run slew is restored at the end, as for the config's."""
+        cur = self.st.slew_us or self.cfg.slew_us or (self.io.bench.call("slew.set", confirm=True) or {}).get("slew_us")
+        if not cur:
+            return "servo speed: benchd's slew unknown"
+        spd = cur * TICK_HZ / US_PER_RAD + steps * SPEED_STEP_RAD_S
+        want = int(round(spd * US_PER_RAD / TICK_HZ))
+        r = self.io.bench.call("slew.set", slew_us=want, confirm=True)
+        if not r or not r.get("ok"):
+            msg = f"servo speed {spd:.2f} rad/s refused: {(r or {}).get('error', 'no reply')}"
+            self._ev(msg)
+            return msg
+        if self._slew_restore is None and r.get("was") is not None and r["was"] != want:
+            self._slew_restore = int(r["was"])       # put back whatever ran before this run
+        self.st.slew_us = want
+        msg = f"servo speed {want * TICK_HZ / US_PER_RAD:.2f} rad/s = slew {want} us/tick (was {r.get('was')})"
+        self._ev(msg)
+        return msg
+
+    def nudge_period(self, steps: int) -> str:
+        """LoadPhaseGait period +/- PERIOD_STEP_TICKS ticks, hot-patched through ogma_host's set_param."""
+        if not self.cfg.lpg_id:
+            return "LPG period: this config has no LoadPhaseGait"
+        cur = self.st.lpg_period if self.st.lpg_period is not None else self.cfg.lpg_period
+        if cur is None:
+            return "LPG period: unknown"
+        want = float(min(PERIOD_MAX, max(PERIOD_MIN, cur + steps * PERIOD_STEP_TICKS)))
+        r = self.io.brain_call("set_param", id=self.cfg.lpg_id, key="period_ticks", value=want)
+        if not r or r.get("status") != "ok":
+            msg = f"LPG period {want:.0f} refused: {(r or {}).get('message', 'no reply from ogma_host')}"
+            self._ev(msg)
+            return msg
+        self.st.lpg_period = want
+        msg = f"LPG period {want:.0f} ticks = {want / TICK_HZ:.2f} s per stride (was {cur:.0f})"
+        self._ev(msg)
+        return msg
 
     def ending_started(self) -> bool:
         return self._cleanup_started
@@ -607,6 +682,7 @@ class RunController:
                     self._ev(f"servo slew {self.cfg.slew_us} us/tick refused: {(r or {}).get('error', 'no reply')}")
                     return False
                 self._slew_restore = prev
+            self.st.slew_us = self.cfg.slew_us
             self._ev(f"servo speed {self.cfg.speed_rad_s:.2f} rad/s = benchd slew {self.cfg.slew_us} us/tick"
                      + (f" (was {prev}; restored at the end)" if prev != self.cfg.slew_us else ""))
         # ---- brain mode, latched STOP, then the brain ----

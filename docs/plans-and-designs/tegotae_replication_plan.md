@@ -1004,8 +1004,8 @@ about half the gated base's range (hip1 1.29 vs 2.39 rad). Walking: flat 9.69 ±
 corridor flat zone 817 vs 666 ticks, hump 780 vs 381, rough zone 4/6 with one fall (base 5/6, 0).
 
 **The inversion trigger was `DEAD_CODE` in round 1**, and so was the handover's upright factor: the LPG lineage
-never subscribes motor_epm to `reality.proprio.upright` and `publish_tilt` is false, so `upright_` sat at its 1.0
-init (round-1 arms matched to the digit). Round 2 adds `upright_topic`: conf reads exactly 0 on every inverted tick
+never subscribes motor_epm to `reality.proprio.upright`, and the honest tilt estimate reads BOTH pitch and roll as 180° on its back (`pitch_roll_from_up`, full-range atan2), so the motor's tilt fallback `upright_ = cos(pitch)·cos(roll)` reads +1 inverted (corrected 2026-10-23: an earlier
+version of this note blamed `publish_tilt`; tilt IS published — `tilt_p` is live) (round-1 arms matched to the digit). Round 2 adds `upright_topic`: conf reads exactly 0 on every inverted tick
 (97.6 % before, through support alone) and panic latches 94–100 % of inverted ticks, but righting does not improve
 (7/30, 6/30). Flat walking byte-identical; the corridor back at the base's level (630 / 376 ticks, 5/6, 0 falls) for
 a reason not yet traced. **Verdict: shaped noise `PARTIAL` (signal)** — triples white noise's self-righting and

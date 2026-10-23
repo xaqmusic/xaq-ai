@@ -1658,6 +1658,26 @@ json handle(State& S, const json& req) {   // caller holds m
         S.record("tof_stall_injected", {{"by", "verb"}});
         return ok();
     }
+    if (verb == "slew.set") {
+        // LIVE servo speed during a brain run (operator, 2026-10-23: "make that limit a tuneable
+        // parameter at runtime").  limits.set stays refused in the brain modes -- it also moves the
+        // pose slew and the stagger -- so this verb touches ONLY the slew the brain's commands ride,
+        // inside a fixed band, and every change is recorded.  20..60 us/tick = 1.8..5.5 rad/s at
+        // the measured 545.2 us/rad; the ceiling is the speed the ledger holds back until the
+        // servo rail's hardware fix (bulk capacitor or separate supply).
+        constexpr int kLiveSlewMin = 20, kLiveSlewMax = 60;
+        if (!req.value("confirm", false))
+            return err("slew.set needs confirm=true — the slew is a brownout lever");
+        if (!req.contains("slew_us")) return ok({{"slew_us", g_normal_slew_us}, {"min", kLiveSlewMin}, {"max", kLiveSlewMax}});
+        const int v = req.value("slew_us", g_normal_slew_us);
+        if (v < kLiveSlewMin || v > kLiveSlewMax)
+            return err("slew.set: slew_us out of " + std::to_string(kLiveSlewMin) + "-" + std::to_string(kLiveSlewMax));
+        const int was = g_normal_slew_us;
+        g_normal_slew_us = v;
+        S.driver.set_slew_us_per_tick(v);
+        S.record("slew.set", {{"slew_us", v}, {"was", was}, {"mode", ogma::hw::brain::mode_name(S.mode)}});
+        return ok({{"slew_us", v}, {"was", was}, {"min", kLiveSlewMin}, {"max", kLiveSlewMax}});
+    }
     if (verb == "limits.set") {
         // Bench-only: slew and pose stagger at runtime, so a ceiling sweep does not need a
         // service restart per point.  These were command-line flags only (--normal-slew,

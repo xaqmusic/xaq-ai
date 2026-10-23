@@ -8850,7 +8850,7 @@ byte-identical (6 seeds). Withdrawing the LPG terms at low confidence REDUCED le
 0.46 rad): the walking terms writing into an inverted body were part of the thrash. Only the tall pyramid improved
 (0 → 2/6). Flat 9.53 m vs 9.26, wall climb 4/6 all arms, escapes and corridor within a seed. **Later found**: the
 upright factor was `DEAD_CODE` here — the LPG lineage never subscribes motor_epm to `reality.proprio.upright` and
-`publish_tilt` is false, so `upright_` sat at 1.0; confidence fell through the support term alone (§7.23). Re-use
+the honest tilt estimate reads BOTH pitch and roll as 180° on its back (`pitch_roll_from_up`, full-range atan2), so the motor's tilt fallback `upright_ = cos(pitch)·cos(roll)` reads +1 inverted (corrected 2026-10-23; first written as `publish_tilt` false — tilt is published); confidence fell through the support term alone (§7.23). Re-use
 context: the handover is the right frame once the search it hands over to is shaped (below).
 
 ### 2026-10-22 — SHAPED SEARCH NOISE (OU tau 15, knee fold side ×0.27, escalation ×1→×3) on the handover: self-righting 3/30 → 9/30, both pyramids 4/6; flat ties, corridor slower — `PARTIAL` (signal). Inversion-triggered panic: `DEAD_CODE` (no upright subscription)

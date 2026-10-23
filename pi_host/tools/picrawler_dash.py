@@ -386,6 +386,15 @@ class Dash:
                         return True
                     self.toggle_stop()
                     return True
+                # Live tuning: [ ] servo speed -/+ 0.25 rad/s (benchd slew.set, banded), - = LPG period -/+ 5 ticks.
+                if ch in (ord("["), ord("]")):
+                    self.msg = self.ctrl.nudge_speed(1 if ch == ord("]") else -1)
+                    self.msg_bad = "refused" in self.msg or "unknown" in self.msg
+                    return True
+                if ch in (ord("-"), ord("="), ord("+")):
+                    self.msg = self.ctrl.nudge_period(-1 if ch == ord("-") else 1)
+                    self.msg_bad = "refused" in self.msg or "no LoadPhaseGait" in self.msg or "unknown" in self.msg
+                    return True
                 if ch in (ord("r"), ord("R")):
                     self.ctrl.reset()
                 elif ch in (ord("e"), ord("E")):
@@ -469,6 +478,12 @@ class Dash:
                        C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
         if st.hat_warning:
             self._line(scr, y, 3, st.hat_warning, C(BAD) | curses.A_BOLD); y += 1
+        if st.phase in ("prepare", "running"):
+            sl = st.slew_us or self.ctrl.cfg.slew_us
+            per = st.lpg_period if st.lpg_period is not None else self.ctrl.cfg.lpg_period
+            spd = f"{sl * dash_run.TICK_HZ / dash_run.US_PER_RAD:.2f} rad/s ({sl} µs/tick)" if sl else "—"
+            pe = f"{per:.0f} ticks = {per / dash_run.TICK_HZ:.2f} s/stride" if per is not None else "— (no LPG)"
+            self._line(scr, y, 3, f"servo speed {spd}  [ / ]      LPG period {pe}  - / =", C(HEAD)); y += 1
         keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)"
                 if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")

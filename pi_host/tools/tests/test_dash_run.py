@@ -109,6 +109,16 @@ class FakeRobot:
             return {"ok": True, "eta_ms": 100}
         if verb == "limp":
             return {"ok": True}
+        if verb == "slew.set":
+            if not kw.get("confirm"):
+                return {"ok": False, "error": "needs confirm"}
+            if "slew_us" not in kw:
+                return {"ok": True, "slew_us": self.slew, "min": 20, "max": 60}
+            if not 20 <= kw["slew_us"] <= 60:
+                return {"ok": False, "error": "slew.set: slew_us out of 20-60"}
+            was, self.slew = self.slew, kw["slew_us"]
+            self.log(f"slew={self.slew}")
+            return {"ok": True, "slew_us": self.slew, "was": was}
         if verb == "limits.set":
             if self.mode != "bench":
                 return {"ok": False, "error": "refused in a brain mode"}
@@ -146,6 +156,12 @@ class FakeRobot:
     def new_ctl(self):
         return FakeRpc(self, "ctl")
 
+    def brain_call(self, verb, port=7400, **kw):
+        self.log(f"brain {verb} {kw.get('id')}.{kw.get('key')}={kw.get('value')}")
+        if verb == "set_param" and kw.get("id") == "load_phase":
+            return {"status": "ok", "batch_id": 1}
+        return {"status": "error", "message": "unknown module: " + str(kw.get("id"))}
+
     def systemctl(self, action, unit):
         self.log(f"systemctl {action} {unit}"); return True
 
@@ -171,9 +187,23 @@ class FakeRobot:
         time.sleep(min(s, 0.01))
 
 
+# The controller tests pick their configs from THIS list, not the launcher's: the dropdown is pruned
+# by the operator (2026-10-10, 2026-10-23) and a pruned dropdown must not break the run controller.
+_P = "the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__"
+TEST_CONFIGS = [_P + "honest__nohomeo.json", _P + "honest__nohomeo__spd600.json",
+                _P + "honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300.json",
+                _P + "ref_servo6.json"]
+
+
+def test_configs():
+    import tempfile
+    lg = Path(tempfile.mkdtemp()) / "launcher.gd"
+    lg.write_text("const _PICRAWLER_CONFIG_ALLOWLIST: Array = [\n" + "".join(f'\t"{f}",\n' for f in TEST_CONFIGS) + "]\n")
+    return dash_run.list_configs(launcher_gd=lg)
+
+
 def cfg():
-    cs = dash_run.list_configs()
-    return next(c for c in cs if c.file.endswith("__fsrleg__honest__nohomeo.json"))
+    return next(c for c in test_configs() if c.file.endswith("__fsrleg__honest__nohomeo.json"))
 
 
 def make(tmp_path, monkeypatch, **kw):
@@ -193,8 +223,8 @@ def wait_phase(ctrl, phases, t=5.0):
 
 
 def test_allowlist_is_the_launchers_and_robot_faithful_configs_come_first():
-    cs = dash_run.list_configs()
-    assert len(cs) >= 1
+    assert len(dash_run.list_configs()) >= 1          # the real launcher list parses
+    cs = test_configs()
     assert any(c.file.endswith("__fsrleg__honest__nohomeo.json") and c.faithful for c in cs)
     flags = [c.faithful for c in cs]
     assert flags == sorted(flags, reverse=True)          # all faithful before any sim-input
@@ -405,7 +435,7 @@ def test_the_run_is_recorded_from_before_the_first_motion_until_after_the_rescue
 
 def test_a_fast_config_sets_the_slew_in_bench_mode_and_restores_it(tmp_path, monkeypatch):
     monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
-    fast = next(c for c in dash_run.list_configs() if c.file.endswith("__nohomeo__spd600.json"))
+    fast = next(c for c in test_configs() if c.file.endswith("__nohomeo__spd600.json"))
     assert fast.slew_us == 65 and abs(fast.speed_rad_s - 6.0) < 1e-9
     robot = FakeRobot(tmp_path)
     ctrl = dash_run.RunController(robot, fast, "stand", countdown_s=0.3, ready_extra_s=0.0)
@@ -429,3 +459,47 @@ def test_the_deployed_speed_config_leaves_the_slew_alone(tmp_path, monkeypatch):
     ctrl.end()
     ctrl.join(10)
     assert not any(c.startswith("slew=") for c in robot.calls)
+
+
+def lpg_cfg():
+    return next(c for c in test_configs() if c.file.endswith("__lpgn_r05_e0d0_ref300.json"))
+
+
+def test_live_speed_keys_ride_slew_set_in_the_brain_mode_and_the_slew_is_restored(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    robot = FakeRobot(tmp_path)
+    ctrl = dash_run.RunController(robot, lpg_cfg(), "stand", countdown_s=0.3, ready_extra_s=0.0)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    assert robot.mode == "autonomous"
+    msg = ctrl.nudge_speed(+3)                          # 3.67 + 0.75 = 4.42 rad/s -> 49 us/tick
+    assert robot.slew == int(round((40 * 50 / dash_run.US_PER_RAD + 0.75) * dash_run.US_PER_RAD / 50)), msg
+    assert ctrl.st.slew_us == robot.slew
+    for _ in range(10):
+        ctrl.nudge_speed(+1)                            # benchd's band stops it at 60
+    assert robot.slew <= 60
+    ctrl.end()
+    ctrl.join(10)
+    assert robot.slew == 40                             # the pre-run slew is back
+    calls = list(robot.calls)
+    assert calls.index("mode.set=bench") < calls.index("slew=40")
+
+
+def test_live_period_keys_hot_patch_the_lpg_and_are_bounded(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    robot = FakeRobot(tmp_path)
+    c = lpg_cfg()
+    assert c.lpg_id == "load_phase" and c.lpg_period == 70.0
+    ctrl = dash_run.RunController(robot, c, "stand", countdown_s=0.3, ready_extra_s=0.0)
+    ctrl.nudge_period(-2)
+    assert ctrl.st.lpg_period == 60.0
+    assert "brain set_param load_phase.period_ticks=60.0" in robot.calls
+    for _ in range(30):
+        ctrl.nudge_period(-1)
+    assert ctrl.st.lpg_period == dash_run.PERIOD_MIN
+
+
+def test_the_period_keys_say_so_when_the_config_has_no_lpg(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    assert "no LoadPhaseGait" in ctrl.nudge_period(1)
+    assert not any(c.startswith("brain set_param") for c in robot.calls)

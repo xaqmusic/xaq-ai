@@ -358,6 +358,29 @@ int main(int argc, char** argv) {
                             {"topic_prefix", "diag." + std::to_string(sub_id) + "."}};
                 }
                 if (verb == "unsubscribe") { diag.unsubscribe(req.value("sub_id", 0)); return {{"status","ok"}}; }
+                if (verb == "set_param") {
+                    // Live hot-mutation of one module param, the Godot host's verb and shape (OgmaBrain.cpp):
+                    // queued on the scheduler's hot-patch path, so it lands between ticks, never mid-tick.
+                    // The dash's period keys ride this (LoadPhaseGait.period_ticks).  Scalars only.
+                    const std::string id  = req.value("id", std::string());
+                    const std::string key = req.value("key", std::string());
+                    if (!instance->module(id)) return {{"status","error"},{"message","unknown module: " + id}};
+                    if (!req.contains("value")) return {{"status","error"},{"message","set_param requires 'value'"}};
+                    ogma::SetParamOp s;
+                    s.target_id = id;
+                    s.key       = key;
+                    auto const& jv = req["value"];
+                    if      (jv.is_boolean())        s.value = jv.get<bool>();
+                    else if (jv.is_number_integer()) s.value = int64_t(jv.get<int64_t>());
+                    else if (jv.is_number())         s.value = jv.get<double>();
+                    else if (jv.is_string())         s.value = jv.get<std::string>();
+                    else return {{"status","error"},{"message","set_param: unsupported value type"}};
+                    ogma::GraphPatchBatch batch;
+                    batch.source = "tcp";
+                    batch.ops.emplace_back(std::move(s));
+                    const auto bid = instance->enqueue_hot_patch(std::move(batch));
+                    return {{"status","ok"}, {"batch_id", int64_t(bid)}, {"id", id}, {"key", key}};
+                }
                 if (verb == "host_info") {
                     // "What is actually running here" — asked of the process itself
                     // rather than inferred from a repo the operator is standing in,
