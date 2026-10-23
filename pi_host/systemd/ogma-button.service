@@ -1,0 +1,21 @@
+# usr_button — the Robot HAT's USR button starts the last dash run, for demos.  Install with
+# pi_host/systemd/install.sh.  Power on, wait for the boot, press USR: no picrawler-dash needed.
+#
+# It drives the robot only through dash_run's RunController (preflight, tilt guard, HAT-reset recovery, rescue
+# pose), refuses when benchd is not in bench mode, and repeats only a config still in the launcher's allowlist.
+[Unit]
+Description=xaq PiCrawler USR button (start / end the last dash run, for demos)
+After=ogma-benchd.service ogma-host.service
+Wants=ogma-benchd.service
+
+[Service]
+User=xaqmusic
+WorkingDirectory=/home/xaqmusic/xaq-ai/pi_host/tools
+ExecStart=/usr/bin/python3 /home/xaqmusic/xaq-ai/pi_host/tools/usr_button.py
+Restart=always
+RestartSec=3
+StandardOutput=append:/home/xaqmusic/xaq-ai/pi_host/log/usr_button.stdout
+StandardError=append:/home/xaqmusic/xaq-ai/pi_host/log/usr_button.stdout
+
+[Install]
+WantedBy=multi-user.target

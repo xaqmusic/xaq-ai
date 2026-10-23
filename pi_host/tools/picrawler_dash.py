@@ -266,6 +266,8 @@ class Dash:
         self.tune_other: dict = {}               # TUNABLES name -> next run's value (beyond speed and period)
         self.live_diag: dict = {}                # motor_epm's learner state during a run (tuck_learned, belly_ema)
         self.bench_slew: Optional[int] = None    # benchd's brain slew right now (slew.set read-back)
+        self.restart_armed_at = 0.0              # S pressed once; S again within 3 s restarts the services
+        self.restarting = False
 
     def known_stopped(self) -> bool:
         """Is the robot KNOWN to be stopped right now?  Only fresh evidence counts; when it
@@ -358,6 +360,48 @@ class Dash:
         self.checks = dash_run.preflight(io, self.poses[self.pose_idx])
         io.bench.close(); io.ctl.close()
 
+    # ---- service restart (operator, 2026-10-23): S, then S again within 3 s ----
+    SERVICES = ("ogma-benchd", "ogma-host")
+
+    def request_restart(self) -> None:
+        if self.restarting:
+            self.msg, self.msg_bad = "restart already in progress", True
+            return
+        if self.ctrl is not None and self.ctrl.st.phase not in ("done", "aborted", "idle"):
+            self.msg, self.msg_bad = "a run is live: E ends it first, then S restarts the services", True
+            return
+        mode = str((self.st or {}).get("mode", "bench"))
+        if mode != "bench":
+            self.msg, self.msg_bad = f"benchd is in '{mode}' mode (a brain holds the servos): not restarting", True
+            return
+        if not os.path.exists("/etc/systemd/system/ogma-benchd.service"):
+            self.msg, self.msg_bad = "the services are not on this machine: restart works only on the robot", True
+            return
+        now = time.time()
+        if now - self.restart_armed_at > 3.0:
+            self.restart_armed_at = now
+            self.msg, self.msg_bad = "press S again within 3 s to restart ogma-benchd and ogma-host (servos go limp)", True
+            return
+        self.restart_armed_at = 0.0
+        self.restarting = True
+        self.msg, self.msg_bad = "restarting ogma-benchd …", False
+        threading.Thread(target=self._restart_services, daemon=True).start()
+
+    def _restart_services(self) -> None:
+        io = dash_run.RobotIo()
+        try:
+            out = []
+            for i, u in enumerate(self.SERVICES):
+                if i:
+                    time.sleep(3.0)                 # benchd first: ogma_host's state feed comes from it
+                self.msg, self.msg_bad = f"restarting {u} …", False
+                out.append(f"{u} {'ok' if io.systemctl('restart', u) else 'FAILED'}")
+            self.info = None                        # re-fetch host_info: the brain may be a new binary
+            bad = any("FAILED" in o for o in out)
+            self.msg, self.msg_bad = "restarted: " + ", ".join(out), bad
+        finally:
+            self.restarting = False
+
     def tune_between_runs(self, ch: int) -> None:
         """[ ] - = while monitoring: the speed and period the NEXT run starts with.  Nothing is sent."""
         if ch in (ord("["), ord("]")):
@@ -411,6 +455,8 @@ class Dash:
         self.ctrl = dash_run.RunController(dash_run.RobotIo(), cfg, self.poses[self.pose_idx],
                                            slew_us=self.tune_slew, lpg_period=self.tune_period,
                                            tune=dict(self.tune_other))
+        # The USR button repeats this run (usr_button.py): config, pose and the operator's knobs.
+        dash_run.save_last_run(cfg, self.poses[self.pose_idx], self.tune_slew, self.tune_period, self.tune_other)
         self.ctrl.start()
         self.ui = "run"
 
@@ -821,7 +867,7 @@ class Dash:
         self._line(scr, h - 2, 36,
                    "— EPM amber = under 30% baked (still earning its vocabulary)", C(DIM))
         self._line(scr, h - 1, 1,
-                   f"SPACE stop/resume   C run config   [ ] speed -/+   - = LPG period -/+   , . belly target -/+   q quit   r refresh"
+                   f"SPACE stop/resume   C run config   [ ] speed   - = period   , . belly target   S restart services   q quit   r refresh"
                    f"   every {self.interval:.1f}s", C(DIM))
         scr.refresh()
 
@@ -874,6 +920,9 @@ class Dash:
                 draw()
             elif ch in (ord("c"), ord("C")):
                 self.open_picker()
+                draw()
+            elif ch == ord("S"):
+                self.request_restart()
                 draw()
             elif ch in (ord("["), ord("]"), ord("-"), ord("="), ord("+"), ord(","), ord(".")):
                 self.tune_between_runs(ch)

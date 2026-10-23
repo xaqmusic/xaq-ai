@@ -155,6 +155,32 @@ def allowlist(launcher_gd: Path = LAUNCHER_GD) -> list[str]:
     return files
 
 
+# ---- the last run started from the dash (operator, 2026-10-23): the USR button repeats it ----
+def last_run_path() -> Path:
+    return LOG_DIR / "last_run.json"
+
+
+def save_last_run(cfg: "ConfigEntry", pose: str, slew_us: Optional[int], lpg_period: Optional[float],
+                  tune: Optional[dict]) -> None:
+    """What the button needs to start the same run without the dash: the config FILE (looked up in the
+    launcher's allowlist again at press time), the start pose and the operator's speed/period/knobs."""
+    try:
+        last_run_path().write_text(json.dumps({"file": cfg.file, "name": cfg.name, "pose": pose,
+                                               "slew_us": slew_us, "lpg_period": lpg_period,
+                                               "tune": dict(tune or {}), "saved": time.strftime("%Y-%m-%d %H:%M:%S")},
+                                              indent=1))
+    except OSError:
+        pass
+
+
+def load_last_run() -> Optional[dict]:
+    try:
+        d = json.loads(last_run_path().read_text())
+        return d if isinstance(d, dict) and d.get("file") else None
+    except (OSError, ValueError):
+        return None
+
+
 def config_tunables(doc: dict) -> dict:
     """{name: (module id, configured value)} for the TUNABLES rows present in a config."""
     out = {}

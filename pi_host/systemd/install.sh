@@ -3,7 +3,7 @@
 #   sudo pi_host/systemd/install.sh [unit ...]      (default: all of them)
 set -e
 DIR=$(cd "$(dirname "$0")" && pwd)
-UNITS=${*:-"ogma-benchd.service ogma-host.service"}
+UNITS=${*:-"ogma-benchd.service ogma-host.service ogma-button.service"}
 for u in $UNITS; do
     install -m 644 "$DIR/$u" "/etc/systemd/system/$u"
     echo "installed $u"

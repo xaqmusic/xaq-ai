@@ -567,7 +567,8 @@ def test_the_dash_shows_the_tuning_readout_and_the_keys(monkeypatch):
     d.draw(scr)
     text = "\n".join(scr.lines.values())
     assert "TUNE" in text and "next run: servo" in text and "45 ticks" in text
-    assert "[ ] speed" in scr.lines[scr.h - 1] and "LPG period" in scr.lines[scr.h - 1]
+    assert "[ ] speed" in scr.lines[scr.h - 1] and "- = period" in scr.lines[scr.h - 1]
+    assert "S restart services" in scr.lines[scr.h - 1]
     assert ", . belly target" in scr.lines[scr.h - 1]
     d.tune_between_runs(ord("."))
     assert abs(d.tune_other["height"] - 0.070) < 1e-9
@@ -602,3 +603,33 @@ def test_the_belly_target_is_live_bounded_and_carried_into_the_next_run(tmp_path
     ctrl.join(10)
     r = dash_run.RunController(robot, lpg_cfg(), "stand").nudge("height", 1)
     assert "not in this config" in r
+
+
+def test_the_last_run_is_saved_for_the_usr_button_and_read_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    assert dash_run.load_last_run() is None
+    dash_run.save_last_run(tl_cfg(), "stand", 46, 50.0, {"height": 0.07})
+    d = dash_run.load_last_run()
+    assert d["file"] == tl_cfg().file and d["pose"] == "stand" and d["slew_us"] == 46
+    assert d["lpg_period"] == 50.0 and d["tune"] == {"height": 0.07}
+
+
+def test_the_restart_key_needs_a_second_press_and_refuses_during_a_run(monkeypatch):
+    import picrawler_dash as pd
+    d = pd.Dash("127.0.0.1", 1, 2, 1.0)
+    started = []
+    monkeypatch.setattr(d, "_restart_services", lambda: started.append(1))
+    monkeypatch.setattr(pd.os.path, "exists", lambda p: True)
+    monkeypatch.setattr(pd.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda self: target()})())
+    d.st = {"mode": "autonomous"}
+    d.request_restart()
+    assert not started and "not restarting" in d.msg
+    d.st = {"mode": "bench"}
+    d.request_restart()
+    assert not started and "again" in d.msg              # armed, nothing yet
+    d.request_restart()
+    assert started == [1]
+    monkeypatch.setattr(pd.os.path, "exists", lambda p: False)
+    d.restarting = False
+    d.request_restart(); d.request_restart()
+    assert started == [1] and "only on the robot" in d.msg
