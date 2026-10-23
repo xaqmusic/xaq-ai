@@ -912,6 +912,15 @@ int main(int argc, char** argv) {
                             g->values[0] = float(ogma::body::ground_clearance(
                                                f.value("tof_m", 0.0), calib.gc_stand_m));
                             bus->publish("reality.proprio.ground_clearance", g);
+                            // belly_m (Tegotae plan 7.28) on THIS path too: with benchd owning the ToF the brain
+                            // reads the belly here, not in the --tof block above.  Missing it left the learned
+                            // stance height without an input on the robot (2026-10-23 run: it never moved).
+                            auto gm = std::make_shared<ogma::ProprioToken>();
+                            gm->tick_id = uint64_t(ticks); gm->producer_id = "host";
+                            gm->sensor = "belly_m";
+                            gm->values.resize(1);
+                            gm->values[0] = float(f.value("tof_m", 0.0));
+                            bus->publish("reality.proprio.belly_m", gm);
                             ++bi_tof_pub;
                         }
                     } catch (const std::exception&) { ++bi_bad; }
