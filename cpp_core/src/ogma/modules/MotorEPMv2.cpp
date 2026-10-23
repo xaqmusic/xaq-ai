@@ -7835,6 +7835,11 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["wshift_u"]            = float(wshift_u_ema_);
     j["reach_e"]             = reach_e_;
     j["conf_eff"]            = conf_eff_;
+    // The learned stance height (7.28) in the DIAG view too: module_diag (the robot's brain_diag, picrawler-dash's TUNE
+    // line) reads this, not snapshot_state; without it the robot never showed the learner (2026-10-23).
+    j["tuck_learned"]        = tuck_learned_;
+    j["belly_ema"]           = belly_ema_;
+    j["tuck_learn_frac"]     = tuck_ticks_ > 0.0 ? float(tuck_learn_ticks_ / tuck_ticks_) : 0.0f;
     j["reach_n"]             = reach_n_;
     j["stuck_score"]         = stuck_score_;
     j["stuck_gate_in"]       = stuck_gate_in_;
