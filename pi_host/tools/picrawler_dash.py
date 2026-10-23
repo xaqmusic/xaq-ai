@@ -375,7 +375,7 @@ class Dash:
             self.msg, self.msg_bad = (f"next run: belly target {dash_run.fmt_tunable(t, self.tune_other['height'])} "
                                       f"(configs with the learned stance height)"), False
         else:
-            base = self.tune_period if self.tune_period is not None else 70.0
+            base = self.tune_period if self.tune_period is not None else 50.0   # the robot candidates' default (2026-10-23)
             p = base + (-1 if ch == ord("-") else 1) * dash_run.PERIOD_STEP_TICKS
             self.tune_period = float(max(dash_run.PERIOD_MIN, min(dash_run.PERIOD_MAX, p)))
             self.msg, self.msg_bad = f"next run: LPG period {self.tune_period:.0f} ticks", False

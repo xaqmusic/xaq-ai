@@ -36,7 +36,7 @@
    "OGMA_PICRAWLER_TOF_BOOM": "1",
    "OGMA_PICRAWLER_TOF_TILT_COMP": "0",
    "OGMA_PICRAWLER_CHASSIS_COLLIDE": "1",
-   "OGMA_PICRAWLER_MAX_SERVO_SPEED": "3.668",
+   "OGMA_PICRAWLER_MAX_SERVO_SPEED": "4.22",
    "OGMA_PICRAWLER_HONEST_JOINTS": "1",
    "OGMA_PICRAWLER_HONEST_IMU": "1",
    "OGMA_PICRAWLER_HONEST_UPRIGHT": "1",
@@ -116,7 +116,7 @@
      "rhythm.leg.rr"
     ],
     "n_legs": 4,
-    "period_ticks": 70,
+    "period_ticks": 50,
     "sigma_ratio": 2.0,
     "load_floor": 0.02,
     "seed": 1234,

@@ -559,14 +559,14 @@ def test_the_dash_shows_the_tuning_readout_and_the_keys(monkeypatch):
     d.tune_between_runs(ord("]"))
     d.tune_between_runs(ord("-"))
     assert d.tune_slew == int(round((40 * 50 / dash_run.US_PER_RAD + 0.25) * dash_run.US_PER_RAD / 50))
-    assert d.tune_period == 65.0
+    assert d.tune_period == 45.0
     for _ in range(40):
         d.tune_between_runs(ord("]"))
     assert d.tune_slew == dash_run.LIVE_SLEW_MAX
     scr = _Scr()
     d.draw(scr)
     text = "\n".join(scr.lines.values())
-    assert "TUNE" in text and "next run: servo" in text and "65 ticks" in text
+    assert "TUNE" in text and "next run: servo" in text and "45 ticks" in text
     assert "[ ] speed" in scr.lines[scr.h - 1] and "LPG period" in scr.lines[scr.h - 1]
     assert ", . belly target" in scr.lines[scr.h - 1]
     d.tune_between_runs(ord("."))
