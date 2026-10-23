@@ -786,6 +786,14 @@ int main(int argc, char** argv) {
                         f2->values[0] = float(ogma::body::ground_clearance(
                                             r.distance_m, calib.gc_stand_m));
                         bus->publish("reality.proprio.ground_clearance", f2);
+                        // belly_m (Tegotae plan 7.28): the same reading in metres, unclipped, for the learned
+                        // stance height; ground_clearance clips at gc_stand_m and the stance can sit above it.
+                        auto f3 = std::make_shared<ogma::ProprioToken>();
+                        f3->tick_id = uint64_t(ticks); f3->producer_id = "host";
+                        f3->sensor = "belly_m";
+                        f3->values.resize(1);
+                        f3->values[0] = float(r.distance_m);
+                        bus->publish("reality.proprio.belly_m", f3);
                     }
                 }
             }

@@ -158,7 +158,7 @@ class FakeRobot:
 
     def brain_call(self, verb, port=7400, **kw):
         self.log(f"brain {verb} {kw.get('id')}.{kw.get('key')}={kw.get('value')}")
-        if verb == "set_param" and kw.get("id") == "load_phase":
+        if verb == "set_param" and kw.get("id") in ("load_phase", "motor_epm"):
             return {"status": "ok", "batch_id": 1}
         return {"status": "error", "message": "unknown module: " + str(kw.get("id"))}
 
@@ -192,7 +192,8 @@ class FakeRobot:
 _P = "the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__"
 TEST_CONFIGS = [_P + "honest__nohomeo.json", _P + "honest__nohomeo__spd600.json",
                 _P + "honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300.json",
-                _P + "ref_servo6.json"]
+                _P + "ref_servo6.json",
+                _P + "honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_cand_tl.json"]
 
 
 def configs_for_tests():
@@ -567,3 +568,37 @@ def test_the_dash_shows_the_tuning_readout_and_the_keys(monkeypatch):
     text = "\n".join(scr.lines.values())
     assert "TUNE" in text and "next run: servo" in text and "65 ticks" in text
     assert "[ ] speed" in scr.lines[scr.h - 1] and "LPG period" in scr.lines[scr.h - 1]
+    assert ", . belly target" in scr.lines[scr.h - 1]
+    d.tune_between_runs(ord("."))
+    assert abs(d.tune_other["height"] - 0.070) < 1e-9
+    d.draw(scr)
+    assert "belly target 70 mm" in "\n".join(scr.lines.values())
+
+
+def tl_cfg():
+    return next(c for c in configs_for_tests() if c.file.endswith("__robot_cand_tl.json"))
+
+
+def test_the_belly_target_exists_only_where_the_learner_is_on():
+    assert tl_cfg().tunables["height"] == ("motor_epm", 0.065)
+    assert "height" not in lpg_cfg().tunables              # no learner: no knob
+
+
+def test_the_belly_target_is_live_bounded_and_carried_into_the_next_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    robot = FakeRobot(tmp_path)
+    ctrl = dash_run.RunController(robot, tl_cfg(), "stand", countdown_s=0.3, ready_extra_s=0.0, tune={"height": 0.055})
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    calls = list(robot.calls)
+    assert "brain set_param motor_epm.tuck_learn_target_m=0.055" in calls
+    assert calls.index("brain set_param motor_epm.tuck_learn_target_m=0.055") < calls.index("resume")
+    ctrl.nudge("height", +1)
+    assert abs(ctrl.st.tuned["height"] - 0.060) < 1e-9
+    for _ in range(30):
+        ctrl.nudge("height", +1)
+    assert abs(ctrl.st.tuned["height"] - dash_run.TUNABLES["height"].hi) < 1e-9
+    ctrl.end()
+    ctrl.join(10)
+    r = dash_run.RunController(robot, lpg_cfg(), "stand").nudge("height", 1)
+    assert "not in this config" in r

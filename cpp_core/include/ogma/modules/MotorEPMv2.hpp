@@ -554,6 +554,14 @@ private:
     double conf_noise_shaped_ = 0.0, conf_noise_tau_ = 15.0, conf_noise_knee_fold_ = 0.27;
     double conf_noise_esc_max_ = 1.0, conf_noise_esc_ticks_ = 50.0, conf_panic_upright_ = -2.0;
     double conf_panic_suspend_ = 0.0;   // 7.24: panic restores the gait terms the handover withdrew
+    // 7.28 LEARNED STANCE HEIGHT: the femur rest angle (hip2 rest) integrated toward a target belly clearance.
+    std::string belly_topic_;                       // reality.proprio.belly_m (metres, unclipped); empty = off
+    double tuck_learn_rate_ = 0.0, tuck_learn_target_m_ = 0.065, tuck_learn_min_ = -0.1, tuck_learn_max_ = 0.5;
+    double tuck_learn_upright_ = 0.95, tuck_learn_planted_ = 3.0, tuck_learn_tau_ = 25.0;
+    float  belly_m_ = 0.0f, belly_ema_ = 0.0f, tuck_learned_ = 0.0f;
+    bool   belly_seen_ = false, tuck_init_ = false;
+    int64_t belly_tick_ = -1000000, tuck_tick_ = 0;
+    double tuck_learn_ticks_ = 0.0, tuck_ticks_ = 0.0;
     double panic_push_orient_ = 0.0;   // 7.26: panic push direction referenced to gravity (x upright)
     std::vector<double> selfcol_knee_max_;   // 7.25: knee fold cap per hip2 command, -1..+1 evenly (empty = off)
     double selfcol_capped_ = 0.0, selfcol_n_ = 0.0;   // leg-ticks the cap bit / all
@@ -728,6 +736,7 @@ private:
     std::string          upright_topic_;   // reality.proprio.upright (basis.y.y)
     bool                 have_upright_ = false;
     void handle_upright(MessagePtr payload);
+    void handle_belly(MessagePtr payload);
     void update_cruse_state();
 
     // ------------------------------------------------------------------

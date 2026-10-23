@@ -7238,8 +7238,15 @@ func _step_one() -> void:
 			# rule's count, sv_ns_sensor) the leg odometry is not progress -- inverted it coasted to a phantom
 			# 0.76 m/s and panic never engaged.  OGMA_PICRAWLER_DISTRESS_PLANTED=0 = the earlier form.
 			if OS.get_environment("OGMA_PICRAWLER_DISTRESS_PLANTED") != "0":
+				# DISTRESS_INVERTED (2026-10-23, plan 7.26; opt-in): on its back the body cannot be making
+				# progress, whatever its feet touch.  The gravity-referenced panic push reaches the toes to the
+				# ground, the stance rule then counts them planted, the odometry reads ~0.12 m/s, distress
+				# drops and panic lets go of the push.  Past 90 deg of fused tilt: no foot counts as planted.
+				var _np: int = _dbg_sv_ns_planted
+				if up_t > PI * 0.5 and OS.get_environment("OGMA_PICRAWLER_DISTRESS_INVERTED") == "1":
+					_np = 0
 				_distress = _distress_node.step_planted(_stridev_est.x, _stridev_est.y, _ego_heading, up_t,
-												TAU, tick_counter, _dbg_sv_ns_planted)
+												TAU, tick_counter, _np)
 			else:
 				_distress = _distress_node.step(_stridev_est.x, _stridev_est.y, _ego_heading, up_t,
 												TAU, tick_counter)
@@ -7703,6 +7710,12 @@ func _step_one() -> void:
 	# different standing height emits a plausible wrong number into it.
 	clearance_arr.append(_stridemath.ground_clearance(_dbg_gc_raw, GROUND_CLEARANCE_STAND))
 	brain.publish_proprio(clearance_arr, "ground_clearance")
+	# (2a) belly_m (2026-10-23, Tegotae plan 7.28): the SAME raw value, in metres and unclipped, for the learned
+	# stance height.  ground_clearance clips at stand_m (60 mm) and the stance lives above it (median 72 mm at
+	# tuck 0.3), so a height target there is invisible in the normalised topic.  The robot publishes the same.
+	var belly_arr := PackedFloat64Array()
+	belly_arr.append(_dbg_gc_raw)
+	brain.publish_proprio(belly_arr, "belly_m")
 	# (2b) the FORWARD ultrasonic (S1): cast at the driver's cadence, publish the held
 	# reading every tick on the robot's topic.  Nothing happens with the model off.
 	if ultrasonic_model:
@@ -13112,6 +13125,8 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["ws_u"] = snappedf(float(_mm.get("wshift_u", 0.0)), 0.0001)
 			line["conf"] = snappedf(float(_mm.get("conf_eff", 1.0)), 0.001)
 			line["skc"] = snappedf(float(_mm.get("selfcol_cap_frac", 0.0)), 0.0001)
+			line["tkl"] = snappedf(float(_mm.get("tuck_learned", 0.0)), 0.0001)
+			line["bem"] = snappedf(float(_mm.get("belly_ema", 0.0)), 0.0001)
 			for _rk in [["reach_e", "rc_e"], ["reach_n", "rc_n"]]:
 				var _rv = _mm.get(_rk[0], [])
 				if _rv is Array and _rv.size() == 4:

@@ -77,6 +77,42 @@ SPEED_STEP_RAD_S = 0.25                       # the live servo-speed keys' step
 PERIOD_STEP_TICKS = 5                         # the live LPG-period keys' step
 PERIOD_MIN, PERIOD_MAX = 20, 120
 LIVE_SLEW_MIN, LIVE_SLEW_MAX = 20, 60               # benchd's slew.set band (kLiveSlewMin/Max)
+
+
+# ---- LIVE BRAIN PARAMETERS (operator, 2026-10-23: "make all parameters like this dynamically adjustable so higher
+# level brain loops can leverage them").  One row per knob the dash can turn through ogma_host's set_param, live
+# during a run or set for the next one.  A param listed here must be HotMutable AND re-read every tick by its
+# module (hip2_tuck_target is not: it is read once at rest capture).  `requires` = a config param that must be
+# > 0 for the knob to exist (the target height means nothing with the learner off).
+@dataclass(frozen=True)
+class Tunable:
+    name: str
+    label: str
+    module_type: str
+    key: str
+    step: float
+    lo: float
+    hi: float
+    unit: str
+    scale: float = 1.0                      # display = value * scale
+    default: Optional[float] = None         # the module's default, when the config does not set it
+    requires: Optional[str] = None
+
+
+TUNABLES = {
+    "period": Tunable("period", "LPG period", "LoadPhaseGait", "period_ticks", PERIOD_STEP_TICKS,
+                      PERIOD_MIN, PERIOD_MAX, "ticks", default=70.0),
+    "height": Tunable("height", "belly target", "MotorEPMv2", "tuck_learn_target_m", 0.005, 0.030, 0.100, "mm",
+                      scale=1000.0, default=0.065, requires="tuck_learn_rate"),
+}
+
+
+def fmt_tunable(t: Tunable, v: Optional[float]) -> str:
+    if v is None:
+        return "—"
+    if t.name == "period":
+        return f"{v:.0f} ticks = {v / TICK_HZ:.2f} s/stride"
+    return f"{v * t.scale:.0f} {t.unit}"
 VBAT_WARN = 7.0                               # limp is 6.4 sustained; belly-up draws ~1.5 A
 
 
@@ -99,6 +135,8 @@ class ConfigEntry:
     # The LoadPhaseGait module's id and its configured period (ticks), for the live period keys.
     lpg_id: Optional[str] = None
     lpg_period: Optional[float] = None
+    # name -> (module id, configured value) for every TUNABLES row this config has.
+    tunables: dict = field(default_factory=dict)
 
 
 def allowlist(launcher_gd: Path = LAUNCHER_GD) -> list[str]:
@@ -115,6 +153,26 @@ def allowlist(launcher_gd: Path = LAUNCHER_GD) -> list[str]:
             if m:
                 files.append(m.group(1))
     return files
+
+
+def config_tunables(doc: dict) -> dict:
+    """{name: (module id, configured value)} for the TUNABLES rows present in a config."""
+    out = {}
+    mods = doc.get("modules", []) if isinstance(doc.get("modules"), list) else []
+    for t in TUNABLES.values():
+        for mod in mods:
+            if not (isinstance(mod, dict) and mod.get("type") == t.module_type):
+                continue
+            params = mod.get("params") or {}
+            try:
+                if t.requires and not float(params.get(t.requires, 0) or 0) > 0:
+                    break
+                v = float(params[t.key]) if t.key in params else t.default
+            except (TypeError, ValueError):
+                break
+            out[t.name] = (str(mod.get("id", "")), v)
+            break
+    return out
 
 
 def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD) -> list[ConfigEntry]:
@@ -155,7 +213,8 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
                                faithful=str(be.get("OGMA_PICRAWLER_HONEST_JOINTS", "")) == "1",
                                phase=str(md.get("phase_tag", "")), speed_rad_s=spd,
                                slew_us=int(round(spd * US_PER_RAD / TICK_HZ)) if spd else None,
-                               host_flags=tuple(flags), lpg_id=lpg_id, lpg_period=lpg_period))
+                               host_flags=tuple(flags), lpg_id=lpg_id, lpg_period=lpg_period,
+                               tunables=config_tunables(doc)))
     # Robot-faithful first; otherwise the launcher's own order.
     return sorted(out, key=lambda c: not c.faithful)
 
@@ -437,18 +496,21 @@ class RunState:
     stopped: Optional[bool] = None
     slew_us: Optional[int] = None         # the brain's live servo slew (benchd), when known
     lpg_period: Optional[float] = None    # the live LoadPhaseGait period, when set or known
+    tuned: dict = field(default_factory=dict)   # TUNABLES name -> live value
 
 
 class RunController:
     def __init__(self, io, cfg: ConfigEntry, pose: str = "stand",
                  countdown_s: float = COUNTDOWN_S, ready_extra_s: float = 4.0,
                  run_mode: str = "autonomous", slew_us: Optional[int] = None,
-                 lpg_period: Optional[float] = None):
+                 lpg_period: Optional[float] = None, tune: Optional[dict] = None):
         self.io, self.cfg, self.pose, self.run_mode = io, cfg, pose, run_mode
         # The operator's speed and period from the dash (set between runs or carried over from the last
         # one), else the config's.  The period is hot-patched once the brain is up, before RESUME.
         self.slew_target: Optional[int] = slew_us or cfg.slew_us
         self.period_target: Optional[float] = lpg_period if lpg_period is not None else cfg.lpg_period
+        # Every other TUNABLES row: the operator's value for this run, else the config's.
+        self.tune_targets: dict = {n: v for n, v in (tune or {}).items() if n in cfg.tunables and n != "period"}
         self.countdown_s, self.ready_extra_s = countdown_s, ready_extra_s
         self.st = RunState()
         self._abort = threading.Event()        # before the brain has the servos: abort
@@ -525,6 +587,28 @@ class RunController:
             return msg
         self.st.lpg_period = want
         msg = f"LPG period {want:.0f} ticks = {want / TICK_HZ:.2f} s per stride (was {cur:.0f})"
+        self._ev(msg)
+        return msg
+
+    def nudge(self, name: str, steps: int) -> str:
+        """Any TUNABLES row -/+ its step, hot-patched through ogma_host's set_param."""
+        if name == "period":
+            return self.nudge_period(steps)
+        t = TUNABLES[name]
+        if name not in self.cfg.tunables:
+            return f"{t.label}: not in this config" + (f" ({t.requires} is off)" if t.requires else "")
+        mid, cfg_v = self.cfg.tunables[name]
+        cur = self.st.tuned.get(name, self.tune_targets.get(name, cfg_v))
+        if cur is None:
+            return f"{t.label}: unknown"
+        want = float(min(t.hi, max(t.lo, round((cur + steps * t.step) / t.step) * t.step)))
+        r = self.io.brain_call("set_param", id=mid, key=t.key, value=want)
+        if not r or r.get("status") != "ok":
+            msg = f"{t.label} {fmt_tunable(t, want)} refused: {(r or {}).get('message', 'no reply from ogma_host')}"
+            self._ev(msg)
+            return msg
+        self.st.tuned[name] = want
+        msg = f"{t.label} {fmt_tunable(t, want)} (was {fmt_tunable(t, cur)})"
         self._ev(msg)
         return msg
 
@@ -743,6 +827,19 @@ class RunController:
                 self._ev(f"LPG period {self.period_target:.0f} refused: {(r or {}).get('message', 'no reply')} — running the config's")
         elif self.cfg.lpg_period is not None:
             self.st.lpg_period = self.cfg.lpg_period
+        for name, (mid, cfg_v) in self.cfg.tunables.items():
+            if name == "period":
+                continue
+            t = TUNABLES[name]
+            want = self.tune_targets.get(name)
+            if want is not None and want != cfg_v:
+                r = self.io.brain_call("set_param", id=mid, key=t.key, value=float(want))
+                ok = bool(r and r.get("status") == "ok")
+                self.st.tuned[name] = float(want) if ok else cfg_v
+                self._ev(f"{t.label} {fmt_tunable(t, want)} (config {fmt_tunable(t, cfg_v)})" if ok
+                         else f"{t.label} {fmt_tunable(t, want)} refused — running the config's")
+            else:
+                self.st.tuned[name] = cfg_v
         r = self.io.ctl.call("resume")
         if not r or not r.get("ok"):
             self._ev(f"resume refused: {(r or {}).get('error', 'no reply')}")

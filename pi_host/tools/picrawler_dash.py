@@ -263,6 +263,8 @@ class Dash:
         # a live change carries over so the next run starts where the last one was left.
         self.tune_slew: Optional[int] = None
         self.tune_period: Optional[float] = None
+        self.tune_other: dict = {}               # TUNABLES name -> next run's value (beyond speed and period)
+        self.live_diag: dict = {}                # motor_epm's learner state during a run (tuck_learned, belly_ema)
         self.bench_slew: Optional[int] = None    # benchd's brain slew right now (slew.set read-back)
 
     def known_stopped(self) -> bool:
@@ -296,6 +298,11 @@ class Dash:
     def poll(self) -> None:
         st = self.bench.status()
         self.st, self.st_time = st, time.time()
+        c = self.ctrl
+        if c is not None and "height" in c.cfg.tunables and c.st.phase == "running":
+            r = self.control.call("module_diag", id=c.cfg.tunables["height"][0])
+            dg = (r or {}).get("diag") if isinstance(r, dict) else None
+            self.live_diag = {k: dg[k] for k in ("tuck_learned", "belly_ema", "tuck_learn_frac") if isinstance(dg, dict) and k in dg}
         sl = self.bench.call("slew.set", confirm=True)          # no slew_us: reads the current slew, sets nothing
         self.bench_slew = int(sl["slew_us"]) if sl and sl.get("ok") and "slew_us" in sl else None
         self.brain = self.control.call("ping")
@@ -360,6 +367,13 @@ class Dash:
             self.tune_slew = max(dash_run.LIVE_SLEW_MIN, min(dash_run.LIVE_SLEW_MAX, us))
             self.msg, self.msg_bad = (f"next run: servo speed {self.tune_slew * dash_run.TICK_HZ / dash_run.US_PER_RAD:.2f} rad/s "
                                       f"({self.tune_slew} µs/tick)"), False
+        elif ch in (ord(","), ord(".")):
+            t = dash_run.TUNABLES["height"]
+            base = self.tune_other.get("height", t.default)
+            v = round((base + (-1 if ch == ord(",") else 1) * t.step) / t.step) * t.step
+            self.tune_other["height"] = float(min(t.hi, max(t.lo, v)))
+            self.msg, self.msg_bad = (f"next run: belly target {dash_run.fmt_tunable(t, self.tune_other['height'])} "
+                                      f"(configs with the learned stance height)"), False
         else:
             base = self.tune_period if self.tune_period is not None else 70.0
             p = base + (-1 if ch == ord("-") else 1) * dash_run.PERIOD_STEP_TICKS
@@ -374,17 +388,29 @@ class Dash:
         if c is not None and c.st.phase in ("prepare", "running"):
             sl = c.st.slew_us or c.slew_target
             per = c.st.lpg_period if c.st.lpg_period is not None else c.period_target
-            return (f"servo {spd(sl) if sl else '—'} LIVE    LPG period "
-                    + (f"{per:.0f} ticks = {per / dash_run.TICK_HZ:.2f} s/stride LIVE" if per is not None else "— (no LPG)"))
+            out = (f"servo {spd(sl) if sl else '—'} LIVE    LPG period "
+                   + (f"{per:.0f} ticks = {per / dash_run.TICK_HZ:.2f} s/stride LIVE" if per is not None else "— (no LPG)"))
+            if "height" in c.cfg.tunables:
+                t = dash_run.TUNABLES["height"]
+                h = c.st.tuned.get("height", c.tune_targets.get("height", c.cfg.tunables["height"][1]))
+                out += f"    belly target {dash_run.fmt_tunable(t, h)}"
+                d = self.live_diag
+                if "tuck_learned" in d:
+                    out += f" (belly {1000 * float(d.get('belly_ema', 0)):.0f} mm, femur {float(d['tuck_learned']):+.2f})"
+            return out
         now = f"benchd now {spd(self.bench_slew)}" if self.bench_slew else "benchd slew unknown"
         nxt_s = spd(self.tune_slew) if self.tune_slew else "config's"
         nxt_p = f"{self.tune_period:.0f} ticks = {self.tune_period / dash_run.TICK_HZ:.2f} s/stride" if self.tune_period is not None else "config's"
-        return f"servo {now}    next run: servo {nxt_s}, LPG period {nxt_p}"
+        out = f"servo {now}    next run: servo {nxt_s}, LPG period {nxt_p}"
+        if "height" in self.tune_other:
+            out += f", belly target {dash_run.fmt_tunable(dash_run.TUNABLES['height'], self.tune_other['height'])}"
+        return out
 
     def start_run(self) -> None:
         cfg = self.configs[self.sel]
         self.ctrl = dash_run.RunController(dash_run.RobotIo(), cfg, self.poses[self.pose_idx],
-                                           slew_us=self.tune_slew, lpg_period=self.tune_period)
+                                           slew_us=self.tune_slew, lpg_period=self.tune_period,
+                                           tune=dict(self.tune_other))
         self.ctrl.start()
         self.ui = "run"
 
@@ -437,6 +463,12 @@ class Dash:
                     self.msg_bad = "refused" in self.msg or "no LoadPhaseGait" in self.msg or "unknown" in self.msg
                     if self.ctrl.st.lpg_period is not None:
                         self.tune_period = self.ctrl.st.lpg_period
+                    return True
+                if ch in (ord(","), ord(".")):
+                    self.msg = self.ctrl.nudge("height", -1 if ch == ord(",") else 1)
+                    self.msg_bad = "refused" in self.msg or "not in this config" in self.msg
+                    if "height" in self.ctrl.st.tuned:
+                        self.tune_other["height"] = self.ctrl.st.tuned["height"]
                     return True
                 if ch in (ord("r"), ord("R")):
                     self.ctrl.reset()
@@ -527,7 +559,7 @@ class Dash:
                        C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
         if st.hat_warning:
             self._line(scr, y, 3, st.hat_warning, C(BAD) | curses.A_BOLD); y += 1
-        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   [ ] speed   - = period"
+        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   [ ] speed   - = period   , . belly target"
                 if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
         self._line(scr, y, 3, keys, C(DIM)); y += 1
@@ -789,7 +821,7 @@ class Dash:
         self._line(scr, h - 2, 36,
                    "— EPM amber = under 30% baked (still earning its vocabulary)", C(DIM))
         self._line(scr, h - 1, 1,
-                   f"SPACE stop/resume   C run config   [ ] speed -/+   - = LPG period -/+   q quit   r refresh"
+                   f"SPACE stop/resume   C run config   [ ] speed -/+   - = LPG period -/+   , . belly target -/+   q quit   r refresh"
                    f"   every {self.interval:.1f}s", C(DIM))
         scr.refresh()
 
@@ -843,7 +875,7 @@ class Dash:
             elif ch in (ord("c"), ord("C")):
                 self.open_picker()
                 draw()
-            elif ch in (ord("["), ord("]"), ord("-"), ord("="), ord("+")):
+            elif ch in (ord("["), ord("]"), ord("-"), ord("="), ord("+"), ord(","), ord(".")):
                 self.tune_between_runs(ch)
                 draw()
             elif ch in (ord("q"), ord("Q"), 27):
