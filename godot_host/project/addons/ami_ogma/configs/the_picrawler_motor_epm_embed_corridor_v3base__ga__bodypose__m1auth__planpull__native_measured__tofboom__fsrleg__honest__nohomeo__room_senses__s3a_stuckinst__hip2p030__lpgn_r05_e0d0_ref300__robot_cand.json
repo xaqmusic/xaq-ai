@@ -1,7 +1,7 @@
 {
  "metadata": {
   "name": "CANDIDATE \u00b7 ROBOT \u00b7 promoted LPG stack (starts at 3.67 rad/s, period 70; tune on the dash)",
-  "description": "WATCH: the promoted sim stack (femur level, shaped-noise handover, self-collision keep-out, gravity-referenced panic push, corner integrator) for the real robot. Starts at the deployed speed, 3.67 rad/s (benchd slew 40 us/tick), and the robot LPG period, 70 ticks (1.4 s/stride): at 4.5 rad/s the servo rail browned out often (operator, 2026-10-23). On picrawler-dash: [ / ] servo speed -/+ 0.25 rad/s (benchd band 1.8-5.5), - / = LPG period -/+ 5 ticks, live during a run or set for the next one. The robot keeps its pause on inversion (tilt guard).",
+  "description": "WATCH: the promoted sim stack (shaped-noise handover, self-collision keep-out, gravity-referenced panic push, corner integrator) for the real robot, with the robot's femur angle (hip2_tuck_target 0.3): the sim's femur-level 0.0 splayed the legs and put the chassis near the floor on the robot (operator, 2026-10-23). Starts at the deployed speed, 3.67 rad/s (benchd slew 40 us/tick), and the robot LPG period, 70 ticks (1.4 s/stride): at 4.5 rad/s the servo rail browned out often (operator, 2026-10-23). On picrawler-dash: [ / ] servo speed -/+ 0.25 rad/s (benchd band 1.8-5.5), - / = LPG period -/+ 5 ticks, live during a run or set for the next one. The robot keeps its pause on inversion (tilt guard).",
   "env_target": "picrawler",
   "gym_mode": "room",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -235,7 +235,7 @@
     "speed_topic": "reality.proprio.speed_cmd",
     "goal_bearing_topic": "reality.proprio.goal_bearing",
     "goal_bearing_rezero_hold": 1.0,
-    "hip2_tuck_target": 0.0,
+    "hip2_tuck_target": 0.3,
     "leg_phase_topics": [
      "rhythm.leg.fl",
      "rhythm.leg.fr",

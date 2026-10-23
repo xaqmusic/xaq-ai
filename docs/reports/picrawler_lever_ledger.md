@@ -8899,3 +8899,12 @@ fidelity fix (continuous collision detection on the lower legs, or a gentler con
 control reproduced the shaped arm to the digit. Only 1 of the control's 9 rightings used a toe-in-chassis pose, so
 the lower count is not a removed cheat. Residual intrusions: the cap reads the commanded hip2, which leads the joint.
 Re-use context: the curve is per body; re-map for cad (no electronics block) and for any leg change.
+
+### 2026-10-23 — ROBOT: the sim's femur level (`hip2_tuck_target` 0.0) splays the real robot's legs and puts the chassis near the floor; the robot candidate goes back to 0.3 — a sim–robot posture mismatch, recorded, not yet explained
+
+*Operator, on the robot with `…__robot_cand.json`:* "the legs splayed out … in the previous LPG config on the robot
+the femur was more perpendicular with the ground … the chassis very close to the floor." The candidate had inherited
+the sim's 0.0 (plan 7.20: chassis 101 → 89 mm in the sim, floor→wall 5/6). Robot candidate set back to the robot
+config's 0.3; the sim configs keep 0.0. Open: why the same command sits lower on the robot (load sag in the real
+servos, or a hip2 zero offset) — measure the real chassis height and femur angle at 0.0 and 0.3 against the sim's
+before treating any sim posture result as transferable.
