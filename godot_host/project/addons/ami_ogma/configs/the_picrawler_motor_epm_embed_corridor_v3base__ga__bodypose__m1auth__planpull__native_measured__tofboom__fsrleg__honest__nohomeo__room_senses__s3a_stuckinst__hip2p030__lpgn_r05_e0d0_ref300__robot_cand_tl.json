@@ -1,7 +1,7 @@
 {
  "metadata": {
   "name": "CANDIDATE \u00b7 ROBOT \u00b7 + LEARNED STANCE HEIGHT (belly target 65 mm; , . to tune)",
-  "description": "WATCH: the robot candidate with the femur rest angle LEARNED from the belly ToF toward a target belly clearance (plan 7.28): starts at hip2 0.3, moves within -0.1..0.5 while upright, level and on >= 3 feet, frozen otherwise; target 65 mm, live on picrawler-dash with , / . (5 mm steps), with the learned femur angle and belly reading in the TUNE line. Sim smoke run: from 0.0 and 0.3 the angle heads to ~0.12-0.18 at 64-70 mm. Long-run sim safety test pending. Same speed/period keys as the candidate.",
+  "description": "WATCH: the robot candidate with the femur rest angle LEARNED from the belly ToF toward a target belly clearance (plan 7.28): starts at hip2 0.3, moves within 0.15..0.45 with a leak (0.002/tick) back to 0.3 (plan 7.28b: unleaked it ran to -0.1, the splayed stance, on half the sim seeds) while upright, level and on >= 3 feet, frozen otherwise; target 65 mm, live on picrawler-dash with , / . (5 mm steps), with the learned femur angle and belly reading in the TUNE line. Sim smoke run: from 0.0 and 0.3 the angle heads to ~0.12-0.18 at 64-70 mm. Long-run sim safety test pending. Same speed/period keys as the candidate.",
   "env_target": "picrawler",
   "gym_mode": "room",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -291,7 +291,10 @@
     "level_int_planted_only": 1,
     "belly_topic": "reality.proprio.belly_m",
     "tuck_learn_rate": 0.02,
-    "tuck_learn_target_m": 0.065
+    "tuck_learn_target_m": 0.065,
+    "tuck_learn_min": 0.15,
+    "tuck_learn_max": 0.45,
+    "tuck_learn_leak": 0.002
    }
   },
   {

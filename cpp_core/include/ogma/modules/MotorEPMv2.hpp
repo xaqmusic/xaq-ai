@@ -558,6 +558,7 @@ private:
     std::string belly_topic_;                       // reality.proprio.belly_m (metres, unclipped); empty = off
     double tuck_learn_rate_ = 0.0, tuck_learn_target_m_ = 0.065, tuck_learn_min_ = -0.1, tuck_learn_max_ = 0.5;
     double tuck_learn_upright_ = 0.95, tuck_learn_planted_ = 3.0, tuck_learn_tau_ = 25.0;
+    double tuck_learn_leak_ = 0.0;   // 7.28b: per-tick pull of the learned angle back to hip2_tuck_target
     float  belly_m_ = 0.0f, belly_ema_ = 0.0f, tuck_learned_ = 0.0f;
     bool   belly_seen_ = false, tuck_init_ = false;
     int64_t belly_tick_ = -1000000, tuck_tick_ = 0;

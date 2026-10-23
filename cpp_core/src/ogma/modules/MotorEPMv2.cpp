@@ -1163,6 +1163,7 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"tuck_learn_max", ParamMutability::HotMutable, "Upper bound of the learned hip2 rest (u) (7.28).", ParamValue{0.5}, std::nullopt, std::nullopt},
         {"tuck_learn_upright", ParamMutability::HotMutable, "Learn only while upright (basis y.y, needs upright_topic) exceeds this; on a slope, wedged or inverted the belly reading is not stance height (7.28).", ParamValue{0.95}, std::nullopt, std::nullopt},
         {"tuck_learn_planted", ParamMutability::HotMutable, "Learn only with at least this many feet touching (7.28).", ParamValue{3.0}, std::nullopt, std::nullopt},
+        {"tuck_learn_leak", ParamMutability::HotMutable, "Per-tick leak of the learned hip2 rest back toward hip2_tuck_target, so an error the femur angle cannot correct settles at rate*err/leak from it instead of winding into a bound. 0 = off (7.28b).", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"tuck_learn_tau", ParamMutability::HotMutable, "EMA (readings) on the belly clearance the learner compares with its target (7.28).", ParamValue{25.0}, std::nullopt, std::nullopt},
         {"panic_push_orient", ParamMutability::HotMutable, "Reference the panic push to gravity: its hip2/knee drive is multiplied by (1 - k) + k * upright (basis y.y, needs upright_topic), so inverted it reaches hip2-up / knee-extend toward the ground instead of pressing the feet at the sky; 0 = off, the body-frame push (7.26).", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"selfcol_knee_max", ParamMutability::HotMutable, "SELF-COLLISION KEEP-OUT: the largest knee FOLD command (u) whose lower leg clears the chassis, at hip2 commands evenly spaced over -1..+1 (linear between); the knee command is capped against the commanded hip2. Measured with OGMA_PICRAWLER_SELFCOL_MAP=1 on the body's own FK. Empty = off (7.25).", std::nullopt, std::nullopt, std::nullopt},
@@ -1544,7 +1545,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["conf_noise_shaped"] = conf_noise_shaped_; m["conf_noise_tau"] = conf_noise_tau_; m["conf_noise_knee_fold"] = conf_noise_knee_fold_;
     m["conf_noise_esc_max"] = conf_noise_esc_max_; m["conf_noise_esc_ticks"] = conf_noise_esc_ticks_; m["conf_panic_upright"] = conf_panic_upright_; m["conf_panic_suspend"] = conf_panic_suspend_; m["selfcol_knee_max"] = selfcol_knee_max_; m["panic_push_orient"] = panic_push_orient_; m["belly_topic"] = belly_topic_; m["tuck_learn_rate"] = tuck_learn_rate_; m["tuck_learn_target_m"] = tuck_learn_target_m_;
     m["tuck_learn_min"] = tuck_learn_min_; m["tuck_learn_max"] = tuck_learn_max_; m["tuck_learn_upright"] = tuck_learn_upright_;
-    m["tuck_learn_planted"] = tuck_learn_planted_; m["tuck_learn_tau"] = tuck_learn_tau_;
+    m["tuck_learn_planted"] = tuck_learn_planted_; m["tuck_learn_tau"] = tuck_learn_tau_; m["tuck_learn_leak"] = tuck_learn_leak_;
     m["reach_load_topic"] = reach_load_topic_; m["reach_rate"] = reach_rate_; m["reach_target"] = reach_target_;
     m["reach_leak"] = reach_leak_; m["reach_max"] = reach_max_; m["reach_leak_min"] = reach_leak_min_; m["reach_hip2"] = reach_hip2_; m["reach_ref_tau"] = reach_ref_tau_;
     m["leg_phase_late_press_hip2"] = leg_phase_late_press_hip2_;
@@ -1836,6 +1837,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "tuck_learn_upright",   [&](auto const& v){ tuck_learn_upright_   = get_double(v, "tuck_learn_upright"); });
     apply_param(params, "tuck_learn_planted",   [&](auto const& v){ tuck_learn_planted_   = get_double(v, "tuck_learn_planted"); });
     apply_param(params, "tuck_learn_tau",       [&](auto const& v){ tuck_learn_tau_       = get_double(v, "tuck_learn_tau"); });
+    apply_param(params, "tuck_learn_leak",      [&](auto const& v){ tuck_learn_leak_      = get_double(v, "tuck_learn_leak"); });
     apply_param(params, "reach_rate",    [&](auto const& v){ reach_rate_    = get_double(v, "reach_rate"); });
     apply_param(params, "reach_target",  [&](auto const& v){ reach_target_  = get_double(v, "reach_target"); });
     apply_param(params, "reach_leak",    [&](auto const& v){ reach_leak_    = get_double(v, "reach_leak"); });
@@ -3482,6 +3484,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "tuck_learn_upright")   tuck_learn_upright_   = get_double(value, "tuck_learn_upright");
     else if (key == "tuck_learn_planted")   tuck_learn_planted_   = get_double(value, "tuck_learn_planted");
     else if (key == "tuck_learn_tau")       tuck_learn_tau_       = get_double(value, "tuck_learn_tau");
+    else if (key == "tuck_learn_leak")      tuck_learn_leak_      = get_double(value, "tuck_learn_leak");
     else if (key == "reach_target")  reach_target_  = get_double(value, "reach_target");
     else if (key == "reach_leak")    reach_leak_    = get_double(value, "reach_leak");
     else if (key == "reach_max")     reach_max_     = get_double(value, "reach_max");
@@ -4760,6 +4763,13 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         if (learn) {
             tuck_learned_ += float(tuck_learn_rate_) * (float(tuck_learn_target_m_) - belly_ema_);
             tuck_learn_ticks_ += 1.0;
+        }
+        // LEAK (tuck_learn_leak; plan 7.28b).  As a pure integrator the angle ran into a bound whenever the femur
+        // could not close the belly error (sim: -0.1 on half the flat seeds, 0.5 over 100k ticks; on the robot the
+        // low bound is the splayed stance).  The leak anchors it to the configured angle.  0 = off, byte-identical.
+        if (tuck_learn_leak_ > 0.0) {
+            const float anchor = hip2_tuck_target_ > -90.0 ? float(hip2_tuck_target_) : 0.0f;
+            tuck_learned_ += float(tuck_learn_leak_) * (anchor - tuck_learned_);
         }
         tuck_learned_ = std::clamp(tuck_learned_, float(tuck_learn_min_), float(tuck_learn_max_));
         tuck_ticks_ += 1.0;

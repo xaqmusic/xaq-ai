@@ -8908,3 +8908,18 @@ the sim's 0.0 (plan 7.20: chassis 101 → 89 mm in the sim, floor→wall 5/6). R
 config's 0.3; the sim configs keep 0.0. Open: why the same command sits lower on the robot (load sag in the real
 servos, or a hip2 zero offset) — measure the real chassis height and femur angle at 0.0 and 0.3 against the sim's
 before treating any sim posture result as transferable.
+
+### 2026-10-23 — LEARNED STANCE HEIGHT (`tuck_learn_*`, plan 7.28) and its LEAK (7.28b): no fall cost in the sim, but as a pure integrator it ran the femur into its bounds; the leak keeps it off them — `PARTIAL` (signal) for the learner, `WORKING` (mechanism) for the leak
+
+*Robot config `…__robot_cand_tl` at 4.22 rad/s, period 50, measured body, n = 6 × 9000.* Learner on vs off: flat
+8.64 ± 1.96 vs 8.48 ± 1.30 m, corridor 3.62 vs 3.66 m, resets 1 vs 1 and 1 vs 0; 100k ticks (8 seeds, cut at ~90k by a
+machine crash) 6 vs 11 resets. But the unleaked integrator pinned the femur at −0.1 (near level, the splayed stance
+the operator rejected on the robot) on 3 of 6 flat seeds and at 0.5 over 100k ticks: the femur angle alone cannot
+always close the belly error. Narrowed range 0.15–0.45: ties, still at its bound on 3 flat seeds. **Range + leak
+0.002 toward 0.3: never at a bound, femur 0.21–0.32**, belly 71–77 mm (it tracks the 65 mm target less), flat
+7.46 ± 1.43 m with tilt_sd 0.093 vs 0.073 and 2 resets vs 1 (within n = 6), corridor 4.23 vs 3.62. Gain 0 per-tick
+identical (6 seeds). The robot config takes range + leak. Robot run 2026-10-23 21:02 (operator: "thrashing rather
+than stepping") ran at 3.12 rad/s and period 30 carried over from earlier tuning, target 30–40 mm: 9 HAT resets, belly
+p10 7 mm — the cadence outran the servos and the low target lowered the stance; not a test of the learner. Re-use
+context: belly height wants more than one actuator (hip2 alone); a learner over the stance press or the knee would
+share the load.
