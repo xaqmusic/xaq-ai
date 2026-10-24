@@ -245,6 +245,7 @@ add_library(ogma_core
     src/ogma/modules/ScentCompass.cpp
     src/ogma/modules/SensorBundle.cpp
     src/ogma/modules/KeyframeAverager.cpp
+    src/ogma/modules/Generator.cpp
     src/ogma/modules/KeyframePeakDetector.cpp
     src/ogma/modules/EventConjunction.cpp
     src/ogma/modules/ChunkAbortGate.cpp
@@ -330,6 +331,8 @@ add_executable(test_bearing_to_intent tests/ogma/test_bearing_to_intent.cpp)
 target_link_libraries(test_bearing_to_intent PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_load_phase_gait tests/ogma/test_load_phase_gait.cpp)
 target_link_libraries(test_load_phase_gait PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_generator tests/ogma/test_generator.cpp)
+target_link_libraries(test_generator PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_distress tests/ogma/test_distress.cpp)
 target_link_libraries(test_distress PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_stuck_sense tests/ogma/test_stuck_sense.cpp)
@@ -600,6 +603,7 @@ gtest_discover_tests(test_dead_reckon)
 gtest_discover_tests(test_prox_memory)
 gtest_discover_tests(test_bearing_to_intent)
 gtest_discover_tests(test_load_phase_gait)
+gtest_discover_tests(test_generator)
 gtest_discover_tests(test_distress)
 gtest_discover_tests(test_stuck_sense)
 gtest_discover_tests(test_stuck_escape)

@@ -25,6 +25,9 @@
 //                                              → inverse-variance weights;
 //                                                 arms: --dead_at, --placeholder_at,
 //                                                 --subrate
+//   S9   K clusters, Markov visitation (as S1m), plus a TARGET channel: a value per cluster + noise; a Generator
+//        decodes the EPM's nodes into the target `--horizon` ticks ahead → the exact floor is
+//        target noise + the spread the switching adds over the horizon (generator_and_belief_filter.md, G1)
 //   S6   a ring of K poses visited IN ORDER (dwell ticks each), the whole ring
 //        rotating slowly (--omega rad/tick)   → the gait-like stream the picrawler
 //                                                 body_pose EPM sees; measures
@@ -66,6 +69,7 @@
 #include "ogma/modules/DescendingPredictor.hpp"
 #include "ogma/modules/EPM.hpp"
 #include "ogma/modules/LateralVoter.hpp"
+#include "ogma/modules/Generator.hpp"
 
 using json = nlohmann::json;
 
@@ -79,6 +83,8 @@ struct Args {
     int         dim        = 8;
     double      sigma      = 0.1;     // expected noise norm
     int         K          = 3;       // S1m clusters
+    int         horizon    = 0;       // S9 generator horizon (ticks)
+    double      target_sigma = 0.1;   // S9 target noise (sd)
     double      p_stay     = 0.9;     // S1m Markov self-probability
     double      q          = 0.0;     // S2/S5 random-walk variance per tick (norm²); S3 process noise
     double      p_switch   = 0.02;    // S4 teleport probability per transition
@@ -114,6 +120,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--dim")            a.dim = std::stoi(need(i));
         else if (k == "--sigma")          a.sigma = std::stod(need(i));
         else if (k == "--K")              a.K = std::stoi(need(i));
+        else if (k == "--horizon")        a.horizon = std::stoi(need(i));
+        else if (k == "--target_sigma")   a.target_sigma = std::stod(need(i));
         else if (k == "--p_stay")         a.p_stay = std::stod(need(i));
         else if (k == "--q")              a.q = std::stod(need(i));
         else if (k == "--p_switch")       a.p_switch = std::stod(need(i));
@@ -339,6 +347,79 @@ int run_S1m(Args const& a, Emitter& em) {
         Eigen::VectorXf x = mus[k] + gauss(rng, a.dim, sd);
         s.step(uint64_t(t), x, json{{"k", k}});
     }
+    return 0;
+}
+
+// ---- S9: decode a target from the EPM's nodes (Generator, stage G1) ----------
+
+int run_S9(Args const& a, Emitter& em) {
+    std::mt19937_64 rng(a.seed);
+    const double sd = a.sigma / std::sqrt(double(a.dim));
+    const int K = a.K, h = a.horizon;
+    std::vector<Eigen::VectorXf> mus;
+    std::vector<double> tv;
+    std::uniform_real_distribution<double> u(0.0, 1.0);
+    std::uniform_int_distribution<int> pick(0, K - 1);
+    for (int k = 0; k < K; ++k) { mus.push_back(unit_vec(rng, a.dim)); tv.push_back(2.0 * u(rng) - 1.0); }
+    // The exact floor: knowing the true cluster c, the best prediction of the target h ticks on is
+    // m_c = sum_j P^h(c, j) t_j, and its mean squared error is target noise + sum_j P^h(c, j) (t_j - m_c)^2.
+    Eigen::MatrixXd T = Eigen::MatrixXd::Constant(K, K, (1.0 - a.p_stay) / double(K - 1));
+    for (int k = 0; k < K; ++k) T(k, k) = a.p_stay;
+    Eigen::MatrixXd Ph = Eigen::MatrixXd::Identity(K, K);
+    for (int i = 0; i < h; ++i) Ph = Ph * T;
+    double floor = 0.0, var_all = 0.0, mean_all = 0.0;
+    for (int k = 0; k < K; ++k) mean_all += tv[size_t(k)] / K;
+    for (int c = 0; c < K; ++c) {
+        double m = 0.0; for (int j = 0; j < K; ++j) m += Ph(c, j) * tv[size_t(j)];
+        double v = 0.0; for (int j = 0; j < K; ++j) v += Ph(c, j) * (tv[size_t(j)] - m) * (tv[size_t(j)] - m);
+        floor += v / K;
+        var_all += (tv[size_t(c)] - mean_all) * (tv[size_t(c)] - mean_all) / K;
+    }
+    floor += a.target_sigma * a.target_sigma;
+    const double mean_base = var_all + a.target_sigma * a.target_sigma;
+    em.line(header(a, json{{"K", K}, {"p_stay", a.p_stay}, {"horizon", h}, {"target_sigma", a.target_sigma},
+                           {"targets", tv}, {"floor_mse", floor}, {"mean_baseline_mse", mean_base}}));
+    ogma::InProcessBus bus;
+    ogma::EPM epm; epm.set_id("epm");
+    epm.on_setup(&bus, epm_params(a, "epm", "bench", "s", "obs.s", a.dim, /*subtract=*/false));
+    ogma::Generator gen; gen.set_id("gen");
+    gen.on_setup(&bus, ogma::ParamMap{{"reality_topic", std::string("reality.bench.s")},
+                                      {"target_topics", std::vector<std::string>{"target.s"}},
+                                      {"horizon", int64_t(h)}, {"warmup", int64_t(20)}});
+    std::normal_distribution<double> tn(0.0, a.target_sigma);
+    std::map<int, std::vector<int>> wc;   // winner -> counts per true cluster (purity, second half)
+    double se2 = 0.0; int n2 = 0;         // second-half squared error of the published prediction (horizon 0 only)
+    int k = pick(rng);
+    for (int t = 1; t <= a.ticks; ++t) {
+        if (u(rng) > a.p_stay) { int nk = pick(rng); if (nk == k) nk = (nk + 1) % K; k = nk; }
+        Eigen::VectorXf x = mus[size_t(k)] + gauss(rng, a.dim, sd);
+        bus.begin_tick(uint64_t(t));
+        bus.publish("obs.s", make_obs(x, uint64_t(t)));
+        epm.tick(uint64_t(t));
+        auto tgt = std::make_shared<ogma::ProprioToken>();
+        tgt->tick_id = uint64_t(t); tgt->producer_id = "bench"; tgt->values.resize(1);
+        tgt->values[0] = float(tv[size_t(k)] + tn(rng));
+        bus.publish("target.s", tgt);
+        gen.tick(uint64_t(t));
+        auto gp = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus.last_value("gen.gen"));
+        bus.end_tick();
+        if (h == 0 && t > a.ticks / 2 && gp && gp->tick_id == uint64_t(t)) {
+            const double e = double(gp->values[0]) - double(tgt->values[0]); se2 += e * e; ++n2;
+        }
+        if (t > a.ticks / 2) {
+            auto tok = last_token(bus, "reality.bench.s");
+            if (tok) { auto& v = wc[tok->winner_id]; if (v.empty()) v.assign(size_t(K), 0); v[size_t(k)]++; }
+        }
+    }
+    int imp = 0, tot = 0;
+    for (auto const& [w, v] : wc) { int mx = 0, sm = 0; for (int c : v) { mx = std::max(mx, c); sm += c; } imp += sm - mx; tot += sm; }
+    auto d = gen.diag_snapshot();
+    em.line(json{{"event", "summary"}, {"gen_mse", d["mse"]}, {"floor_mse", floor}, {"mean_baseline_mse", mean_base},
+                 {"gen_mean_baseline_measured", d["mse_mean_baseline"]}, {"gen_persistence", d["mse_persistence"]},
+                 {"nis", d["nis"]}, {"nodes_tracked", d["nodes_tracked"]}, {"scored", d["scored"]},
+                 {"excess_over_floor", double(d["mse"]) / floor - 1.0},
+                 {"impure_frac", tot > 0 ? double(imp) / tot : 0.0},
+                 {"second_half_mse", n2 > 0 ? se2 / n2 : -1.0}});
     return 0;
 }
 
@@ -586,6 +667,7 @@ int main(int argc, char** argv) {
         if (a.scenario == "S4")  return run_S4(a, em);
         if (a.scenario == "S5")  return run_S5(a, em);
         if (a.scenario == "S6")  return run_S6(a, em);
+        if (a.scenario == "S9")  return run_S9(a, em);
     } catch (std::exception const& e) {
         die(std::string("exception: ") + e.what());
     }
