@@ -8955,3 +8955,17 @@ limit. Fed it, the period ran to its bounds (30 or 90). Publishing the ratio wit
 identical (6 seeds). Code kept, off. Re-use context: an instrument that does move with speed — the achieved joint
 excursion over a stride against the commanded excursion. Side note: fixed period 50 walks 8.11 ± 2.30 m at 5.0 rad/s
 vs 5.44 ± 3.33 m at 3.668.
+
+### 2026-10-24 — ROBOT BENCH TRIAL of the learned swing lift (`…__robot_p1_swl`, 407 s, learner on throughout): `NULL` on the robot (n = 1 run) — and the belly sag is NOT the pack
+
+**Sag:** pack voltage (new 1 Hz record) 7.39 → 7.30 V mean per minute (peaks 7.88 → 7.93) over 7 min, while the belly
+fell 48 → 41 mm in the first ~2 min and then held, with the learned femur at its 0.45 limit from ~80 s. The body settles
+lower under load with the battery steady: the servos give (or the stance geometry cannot hold more), not the pack.
+**Learner:** per-leg multipliers climbed to 1.6–1.95 (cap 2.0) within 80 s, yet touching in the first half of swing
+went 67/53/72/67 → 62/51/63/65 % (FL/FR/RL/RR) and by swing sixth 85/54/44/45/53/64 → 81/49/42/44/49/53 %, against
+the 00:06 run (no learner, lift 0.40–0.50 by hand). Commanded hip2 range per second rose 285 → 322 µs while the slew
+delivered ~70 % of it both times (196 → 226 µs). Mid-swing contacts are light (median 0–2 g): the toe skims at floor
+level. More lift command does not become clearance. Body: when the FL+RR diagonal swings the chassis tips roll −0.061 /
+pitch −0.071 (sin), vs +0.003 / +0.012 for FR+RL — ~4° toward one swinging diagonal, ~5–7 mm at a foot, the order of
+the clearance. Re-use context: a lift that the slew can complete (longer period or faster servo), or a within-stride
+weight shift off the swinging diagonal; the learner itself works as built (it raised the commands).
