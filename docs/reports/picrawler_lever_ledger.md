@@ -9031,3 +9031,8 @@ horizon counted in queued readings (sub-rate target), an EPM sub-rate gate that 
 no-input token clearing the generator's situation. Re-use context: G3 terrain needs features that differ between
 zones at the window's scale (or a shorter window); G4 (choosing settings) needs per-node outcome models and an
 exploration schedule — a behaviour change, for the operator.
+**G3 conditioning check:** the same instrument with the EPM commissioning its own per-channel ranges
+(`dim_autocal_ticks` 40 windows) instead of hand-set ones — corridor zones NMI 0.28 ± 0.04 vs chance 0.20, lesion
+0.49 ± 0.20 vs the control's 0.22 (6 seeds): unchanged. The commissioning flags 4 of 26 channels degenerate (the
+StuckSense score and deficit, constant in these worlds). Terrain separation is limited by the features at the
+two-stride scale, not by conditioning (CLAUDE.md §0 rule 2 checked).
