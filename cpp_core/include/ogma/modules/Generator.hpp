@@ -63,7 +63,7 @@ public:
 
 private:
     struct NodeStat { Eigen::VectorXf mu, var; double n = 0.0; double err_ema = 0.0; };
-    struct Pending  { int winner; Eigen::VectorXf mu, var, pers; };
+    struct Pending  { int winner; Eigen::VectorXf mu, var, pers; int64_t tick = 0; };
 
     void handle_reality(MessagePtr p);
     void handle_target(size_t idx, MessagePtr p);

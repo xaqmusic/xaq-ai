@@ -101,3 +101,19 @@ TEST(Generator, ItPublishesThePredictionAndItsSpread) {
     EXPECT_EQ(d["dim"].get<int>(), 2);
     EXPECT_TRUE(d.contains("skill_vs_mean") && d.contains("nis"));
 }
+
+TEST(Generator, TheHorizonIsInTicksEvenForASubRateTarget) {
+    // The target arrives every 5 ticks; it equals the winner from 10 ticks earlier.  Horizon 10 must decode it.
+    Fix f({{"horizon", int64_t{10}}, {"target_topics", std::vector<std::string>{"t.a"}}, {"warmup", int64_t{5}}});
+    std::vector<int> w;
+    std::mt19937 rng(5);
+    std::uniform_int_distribution<int> pick(0, 3);
+    for (uint64_t t = 0; t < 6000; ++t) {
+        if (t % 10 == 0) w.push_back(pick(rng)); else w.push_back(w.back());   // dwell 10 ticks
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.test.pose", rt(w.back()));
+        if (t % 5 == 0) f.bus.publish("t.a", pv({t >= 10 ? float(w[t - 10]) : 0.0f}));
+        f.g.tick(t); f.bus.end_tick();
+    }
+    EXPECT_LT(f.g.mse(), 0.1 * f.g.mse_mean_baseline()) << "horizon 10 ticks, scored against the reading that arrives 10 ticks on";
+}

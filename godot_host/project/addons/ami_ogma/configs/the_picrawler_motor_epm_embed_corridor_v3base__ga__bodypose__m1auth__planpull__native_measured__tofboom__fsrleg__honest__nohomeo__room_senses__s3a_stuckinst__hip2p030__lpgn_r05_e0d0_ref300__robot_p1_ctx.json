@@ -646,7 +646,7 @@
     "modality_name": "window",
     "max_nodes": 200,
     "baking_threshold": 20,
-    "process_every_n_ticks": 25,
+    "process_every_n_ticks": 1,
     "dim_min": [
      0,
      0,
@@ -716,7 +716,7 @@
     "horizon": 100,
     "warmup": 5,
     "report_every": 1000,
-    "trace_every": 25
+    "trace_every": 1
    }
   }
  ],

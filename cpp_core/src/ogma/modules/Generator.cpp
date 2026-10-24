@@ -79,7 +79,7 @@ ParamSchema Generator::params_schema() const {
         {"gain_floor", ParamMutability::HotMutable,
          "Lower clamp on the gain: a small process noise so a node's estimate can follow drift.", ParamValue{0.002}},
         {"trace_every", ParamMutability::HotMutable,
-         "> 0: print {\"event\":\"GEN_TRACE\", id, tick, winner, prediction} every N ticks, to join with a body log. 0 = off.",
+         "> 0: print {\"event\":\"GEN_TRACE\", id, tick, winner, prediction} every N predictions, to join with a body log. 0 = off.",
          ParamValue{int64_t{0}}},
         {"var_rel_floor", ParamMutability::HotMutable,
          "A node's variance is never below this fraction of the target's global variance: a node that saw a binary target "
@@ -144,8 +144,9 @@ void Generator::handle_reality(MessagePtr p) {
     if (!input_allowed(p->producer_id)) return;
     auto rt = std::dynamic_pointer_cast<const RealityToken>(p);
     if (!rt) return;
-    winner_ = rt->winner_id;
-    for (int k : rt->pruned_ids) nodes_.erase(k);
+    // A no-input token (winner -1: the EPM had no fresh observation this tick) does not end the situation.
+    if (rt->winner_id >= 0) winner_ = rt->winner_id;
+    for (int k : rt->pruned_ids) { nodes_.erase(k); if (winner_ == k) winner_ = -1; }
 }
 
 void Generator::handle_target(size_t idx, MessagePtr p) {
@@ -201,7 +202,7 @@ void Generator::tick(uint64_t tick_id) {
         // The PREDICTIVE variance: the node's spread plus the uncertainty of its own mean (var / n).
         const Eigen::VectorXf vfl = (g_var_ * float(var_rel_floor_)).cwiseMax(float(var_floor_));
         const Eigen::VectorXf pvar = s.var.cwiseMax(vfl) * float(1.0 + 1.0 / std::max(1.0, s.n));
-        Pending pnd{winner_, s.mu, pvar, horizon_ == 0 ? prev_target : x};
+        Pending pnd{winner_, s.mu, pvar, horizon_ == 0 ? prev_target : x, ticks_};
         if (s.n < double(warmup_)) pnd.winner = -1 - winner_;   // marks "not scored" while keeping the id
         pending_.push_back(std::move(pnd));
         auto out = std::make_shared<ProprioToken>();
@@ -213,13 +214,14 @@ void Generator::tick(uint64_t tick_id) {
         out->values.tail(dim_) = pvar.cwiseSqrt();
         bus_->publish(output_topic_, out);
         ++predicted_;
-        if (trace_every_ > 0 && ticks_ % trace_every_ == 0)
+        if (trace_every_ > 0 && predicted_ % trace_every_ == 0)
             std::cout << nlohmann::json{{"event", "GEN_TRACE"}, {"id", std::string(id())}, {"tick", ticks_},
                                         {"winner", winner_}, {"pred", to_vec(s.mu)}}.dump() << std::endl;
     }
 
-    // 2. Score and learn from the prediction made `horizon` ticks ago, now that its target is here.
-    while (int(pending_.size()) > horizon_) {
+    // 2. Score and learn from predictions made at least `horizon` TICKS ago, now that a target is here.  (Counting
+    //    queued predictions instead of ticks made the horizon N readings, not N ticks, for a sub-rate target.)
+    while (!pending_.empty() && pending_.front().tick + horizon_ <= ticks_) {
         Pending p = std::move(pending_.front());
         pending_.pop_front();
         const bool scored = p.winner >= 0;
