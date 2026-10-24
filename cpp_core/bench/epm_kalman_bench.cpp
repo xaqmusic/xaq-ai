@@ -456,6 +456,11 @@ int run_S10(Args const& a, Emitter& em) {
     double se_raw = 0, se_epm = 0, se_bf = 0, se_or = 0; int n_on = 0;
     double de_epm = 0, de_bf = 0, de_or = 0; int n_off = 0;
     double ent_on = 0, ent_off = 0;
+    // A single-hypothesis Kalman filter (random-walk state, per dimension, known measurement noise), at several process
+    // noises; the best one is reported, so the comparison favours it.
+    const std::vector<double> kq = {1e-5, 1e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1};
+    std::vector<Eigen::VectorXf> kx(kq.size(), Eigen::VectorXf::Zero(D));
+    std::vector<double> kp(kq.size(), 1.0), kse_on(kq.size(), 0.0), kse_off(kq.size(), 0.0);
     for (int t = 1; t <= a.ticks; ++t) {
         if (u(rng) > a.p_stay) { int nk = pick(rng); if (nk == k) nk = (nk + 1) % K; k = nk; }
         const bool silent = a.dropout_every > 0 && (t % a.dropout_every) < a.dropout_len && t > a.ticks / 4;
@@ -487,6 +492,17 @@ int run_S10(Args const& a, Emitter& em) {
         }
         bf.tick(uint64_t(t));
         bus.end_tick();
+        for (size_t qi = 0; qi < kq.size(); ++qi) {
+            kp[qi] += kq[qi];
+            if (!silent) {
+                const double r = sd * sd, g = kp[qi] / (kp[qi] + r);
+                kx[qi] += float(g) * (x - kx[qi]); kp[qi] *= (1.0 - g);
+            }
+            if (t > a.ticks / 2) {
+                const double e = double((kx[qi] - mus[size_t(k)]).squaredNorm()) / D;
+                if (!silent) kse_on[qi] += e; else kse_off[qi] += e;
+            }
+        }
         if (t > a.ticks / 2 && bf.estimate().size() == D) {
             const Eigen::VectorXf& m = mus[size_t(k)];
             if (!silent) {
@@ -502,6 +518,8 @@ int run_S10(Args const& a, Emitter& em) {
     json sm{{"event", "summary"}, {"n_on", n_on}, {"n_off", n_off}};
     if (n_on) { sm["mse_raw"] = se_raw / n_on; sm["mse_epm"] = se_epm / n_on; sm["mse_bf"] = se_bf / n_on; sm["mse_oracle"] = se_or / n_on; sm["entropy_on"] = ent_on / n_on; }
     if (n_off) { sm["drop_mse_epm"] = de_epm / n_off; sm["drop_mse_bf"] = de_bf / n_off; sm["drop_mse_oracle"] = de_or / n_off; sm["entropy_off"] = ent_off / n_off; }
+    if (n_on) { double b = 1e300; for (double v : kse_on) b = std::min(b, v / n_on); sm["mse_kf_best"] = b; }
+    if (n_off) { double b = 1e300; for (double v : kse_off) b = std::min(b, v / n_off); sm["drop_mse_kf_best"] = b; }
     auto d = bf.diag_snapshot();
     sm["bf_nodes"] = d["nodes"]; sm["agree_with_epm"] = d["agree_with_epm"];
     em.line(sm);
