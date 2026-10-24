@@ -1,6 +1,6 @@
 # The generator and the belief filter — the EPM's missing complement
 
-*Design note, 2026-10-24 (operator + Claude). Nothing here is built. It closes a gap that has been open since the
+*Design note, 2026-10-24 (operator + Claude). G1-G3 are built as instruments and measured (§8); G4-G5 are not built. It closes a gap that has been open since the
 EPM became the substrate: the EPM recognises, and nothing generates. It also states what the substrate needs before
 it can claim any parity with a Kalman filter, building on
 [`epm_kalman_lessons_plan.md`](epm_kalman_lessons_plan.md). Register entry: O71.*
@@ -158,3 +158,15 @@ predicting per-leg early-swing contact and belly 1 stride ahead. Robot second, f
    it by the belief.
 5. Cost on the Pi: a belief over a few hundred nodes is cheap; a generator per target per node is a few floats; the
    per-node RLS of §3.3 is the expensive part (handles × outcomes per node) and should be sized before G3.
+
+## 8. Results so far (2026-10-24)
+
+| Stage | Built | Measured | Status |
+|---|---|---|---|
+| G1 | `Generator` (+ bench S9) | bench: converged excess over the exact floor 0.9 ± 1.8 % (n = 20); body: foot contact half a stride ahead +0.79..+0.81 vs persistence, NIS 1.2-1.6; belly not predictable from pose | `WORKING` |
+| G2 | `BeliefFilter` (+ bench S10 with a true-model forward filter and a best-tuned Kalman filter) | estimate 2-3x better than the EPM winner, 1.6-6x better than the Kalman filter with readings; within 21-25 % of the optimum through silences; gap with readings = an over-tiled vocabulary | `WORKING` (bench); not yet on the body |
+| G3 | `FeatureWindow` + slow EPM + Generator | a frozen leg is its own situation (NMI 0.56 vs 0.23); terrain zones weakly (0.31 vs chance 0.22); outcome prediction modest, overconfident | `PARTIAL` |
+| G4 | — | — | not built (a behaviour change) |
+| G5 | — | — | not built |
+
+Verdicts and details: `docs/reports/picrawler_lever_ledger.md`, entry of 2026-10-24.

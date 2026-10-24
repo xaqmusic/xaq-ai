@@ -9012,3 +9012,22 @@ needs both its mechanism (its learned layer re-adapts to the body it has) and se
 the frozen leg no load, so its phase runs free and the others do not reorganise. Re-use context: the per-situation
 operating points of generator_and_belief_filter.md §3.3 (a lesion as a situation with its own settings), or a LPG
 coupling that redistributes when a leg's load share stays zero.
+
+### 2026-10-24 — THE GENERATOR AND THE BELIEF FILTER (generator_and_belief_filter.md G1-G3, instruments): the generator converges to the exact floor on the bench and predicts footfalls half a stride ahead on the body; the belief filter beats the EPM's single winner 2-3x and a best-tuned single-hypothesis Kalman filter 1.6-6x; a gait-context vocabulary separates a frozen leg (NMI 0.56 vs 0.23) but terrain zones only weakly — G1 `WORKING`, G2 `WORKING` (bench), G3 `PARTIAL` (signal)
+
+**G1 (Generator, an EPM's decoder).** Bench S9 (K 4, p_stay 0.95, n = 20): horizon 0, second half of 24 000 ticks, 0.9 ±
+1.8 % over the exact floor (range −2.5..+4.0 %); horizon 5 / 20 within 6 / 8 %; NIS 0.91-1.24. Body (robot_p1, body_pose
+EPM, 12-14 nodes): foot contact half a stride ahead +0.79..+0.81 vs persistence, +0.44..+0.51 vs the mean, NIS 1.2-1.6
+(after a relative variance floor; one channel had read 45-90); belly height ~unpredictable from pose (+0.15 / −0.10): a
+slow variable. **G2 (BeliefFilter).** Bench S10 (K 4 overlapping, p_stay 0.97, 60-tick silences every 400, n = 20, MSE of
+the estimate vs the true mean): noise 0.4 — raw 0.020, EPM winner 0.0047, filter 0.0015, best Kalman filter 0.0089,
+true-model optimum ~0; silent: stale winner 0.104, filter 0.080, Kalman 0.088, optimum 0.067. Noise 0.8 — 0.080 / 0.024 /
+0.012 / 0.020 / 0.0008; silent 0.120 / 0.083 / 0.087 / 0.067. The gap to the optimum with readings is the vocabulary
+(222-244 nodes for 4 states; insertion_autotune does not change it). **G3 (FeatureWindow → slow EPM → Generator).**
+robot_p1, 6 seeds: winner vs label NMI, lesion before/after 0.56 ± 0.10 vs the unlesioned control's 0.23 ± 0.07 (chance
+0.20 / 0.12); corridor zones 0.31 ± 0.06 vs chance 0.22. Its generator (100 ticks ahead) +0.06..+0.12 vs the mean
+unlesioned, +0.49 lesioned, NIS 16-36 (few samples per node, a drifting summary). Bugs found and fixed on the way: a
+horizon counted in queued readings (sub-rate target), an EPM sub-rate gate that dropped every off-grid input, a
+no-input token clearing the generator's situation. Re-use context: G3 terrain needs features that differ between
+zones at the window's scale (or a shorter window); G4 (choosing settings) needs per-node outcome models and an
+exploration schedule — a behaviour change, for the operator.
