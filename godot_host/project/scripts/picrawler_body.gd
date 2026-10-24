@@ -437,6 +437,18 @@ const FAIL_HEIGHT: float = 0.025     # below this = collapsed
 # FROZEN inside the deadband (output stays 0 there regardless), leak ALWAYS applied,
 # contribution clamped to ≤ SERVO_KI_AUTH_FRAC × max_torque.  0 = off, byte-identical.
 @export var servo_ki: float = 0.0
+# 2026-10-24 — SERVO COMPLIANCE (OGMA_PICRAWLER_SERVO_COMPLY, radians; 0 = off, byte-identical).  The sim servo is a
+# velocity controller that holds its target until the load exceeds its torque cap, so weakening it (leg_strength) does
+# not make it droop: at strength 0.25 the belly still rode 77 mm where the real robot settles near 41.  A hobby servo is
+# a position controller of finite stiffness and settles off target in proportion to the load.  With this set, the
+# motor's force cap scales with the tracking error up to full force at this many radians, so a loaded joint gives
+# until the error carries the load: a spring, as on the robot.  The brain cannot see it (honest joints report the
+# servo model of the command), exactly as on the robot.
+# ⚠ MEASURED INEFFECTIVE (2026-10-24, robot_p1, n = 6 at 0.05-0.3 rad, single seeds at 1-30 rad): the belly stays at
+# 65-76 mm (no load-proportional sag).  Something besides the motor impulse holds these joints (the 6-DOF joint's own
+# springs / limits / damping are the suspects); leg_strength is a cliff (0.01 walks at 63 mm, 0.003 collapses).  A
+# sag model needs the joint model understood first.  Kept, off, with that re-use context.
+var servo_comply_rad: float = 0.0
 const SERVO_KI_TAU: float = 0.4          # leak time constant, seconds
 const SERVO_KI_AUTH_FRAC: float = 0.5    # boost cap, fraction of max_torque
 var _ki_int: Array[float] = []           # 12 accumulators, [joint*4 + leg]
@@ -3618,6 +3630,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_DIAG_INTERVAL", "OGMA_PICRAWLER_MC_PERIOD",
 			  "OGMA_LEG_STRENGTH", "OGMA_RESET_MODE", "OGMA_PICRAWLER_CONFIG",
 			  "OGMA_PICRAWLER_SERVO_KI",
+			  "OGMA_PICRAWLER_SERVO_COMPLY",
 			  "OGMA_PICRAWLER_STAB_Y_NORM", "OGMA_PICRAWLER_STAB_SPEED",
 			  "OGMA_PICRAWLER_STAB_GAIN",
 			  "OGMA_PICRAWLER_ANTIROT_THRESHOLD", "OGMA_PICRAWLER_ANTIROT_SCALE",
@@ -3698,6 +3711,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_MC_PERIOD":      mc_episode_period = max(0, v.to_int())
 			"OGMA_LEG_STRENGTH":             leg_strength = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_SERVO_KI":       servo_ki = max(0.0, v.to_float())
+			"OGMA_PICRAWLER_SERVO_COMPLY":   servo_comply_rad = max(0.0, v.to_float())
 			"OGMA_RESET_MODE":               if v in _RESET_MODE_CHOICES: reset_mode = v
 			"OGMA_PICRAWLER_CONFIG":         config_path = v
 			"OGMA_PICRAWLER_STAB_Y_NORM":    stability_y_norm = clamp(v.to_float(), 0.0, 1.0)
@@ -9166,6 +9180,10 @@ func _step_one() -> void:
 		var imp_h1: float = motor_max_impulse
 		var imp_h2: float = motor_max_impulse
 		var imp_kn: float = motor_max_impulse
+		if servo_comply_rad > 0.0:
+			imp_h1 *= clampf(absf(err_h1) / servo_comply_rad, 0.0, 1.0)
+			imp_h2 *= clampf(absf(err_h2) / servo_comply_rad, 0.0, 1.0)
+			imp_kn *= clampf(absf(err_kn) / servo_comply_rad, 0.0, 1.0)
 		# P7 SERVO_KI — the force-boost integral, on the REAL force path (imp_* is what
 		# _set_motor_vf hands the joint; _powered_torque is telemetry).  eh* is already
 		# the beyond-deadband error (0 inside the band → integral frozen there by

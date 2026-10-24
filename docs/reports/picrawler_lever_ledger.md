@@ -8985,3 +8985,16 @@ resets 1 vs 1; corridor 4.88 vs 3.52 m; escapes tie. Press + femur at 1/10 rate 
 resets 0). The walking gain is mostly the lower stance (11 mm), which also doubles early-swing touching (9 → 19 %).
 Gain 0 per-tick identical (2 seeds). Re-use context: the robot's sag is not in the full-strength sim — the decisive test
 is at a servo strength calibrated to the robot (queued), then the bench.
+
+### 2026-10-24 — SIM SERVO SAG CANNOT BE EMULATED WITH THE EXISTING KNOBS: weaker servos are a cliff, and an error-proportional force cap has no effect — `NULL` (fidelity, not a lever); the joint model must be understood first
+
+*Goal: reproduce the robot's belly settling (~41 mm with the learned femur at its 0.45 limit) in the sim, to test the
+learned stance press fairly.* robot_p1 at 4.22 rad/s, period 50, femur learner at 60 mm, n = 6 × 9000. `leg_strength`
+1.0 / 0.6 / 0.4 / 0.25: late belly 68 / 76 / 78 / 77 mm, femur never pinned. New `OGMA_PICRAWLER_SERVO_COMPLY` (the
+motor's impulse cap scaled by |error| / c, so a loaded joint should give until the error carries the load): c 0 / 0.05 /
+0.1 / 0.2 / 0.3 rad → 68 / 76 / 74 / 69 / 76 mm; single seeds at c 1 / 3 / 10 / 30 → 70 / 52 / 68 / 66 mm. Strength
+0.03 / 0.01 / 0.003 (single seeds) → 71 / 63 / 26 mm (0.003 collapses, no forward motion). c 0 is per-tick identical
+to the strength 1.0 arm (2 seeds). Reading: the servo is ~100× stronger than standing needs, and something other than
+the motor impulse holds the joints (the 6-DOF joint's springs / limits / damping, cf. the motor_force_scale units
+comment in picrawler_body.gd). Re-use context: a sag model built on the joint backend itself, validated by a static
+load test (body weight on a planted leg → measured deflection vs the robot's), before any press A/B depends on it.
