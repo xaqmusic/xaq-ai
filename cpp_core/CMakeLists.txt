@@ -247,6 +247,7 @@ add_library(ogma_core
     src/ogma/modules/KeyframeAverager.cpp
     src/ogma/modules/Generator.cpp
     src/ogma/modules/BeliefFilter.cpp
+    src/ogma/modules/FeatureWindow.cpp
     src/ogma/modules/KeyframePeakDetector.cpp
     src/ogma/modules/EventConjunction.cpp
     src/ogma/modules/ChunkAbortGate.cpp
@@ -336,6 +337,8 @@ add_executable(test_generator tests/ogma/test_generator.cpp)
 target_link_libraries(test_generator PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_belief_filter tests/ogma/test_belief_filter.cpp)
 target_link_libraries(test_belief_filter PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_feature_window tests/ogma/test_feature_window.cpp)
+target_link_libraries(test_feature_window PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_distress tests/ogma/test_distress.cpp)
 target_link_libraries(test_distress PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_stuck_sense tests/ogma/test_stuck_sense.cpp)
@@ -608,6 +611,7 @@ gtest_discover_tests(test_bearing_to_intent)
 gtest_discover_tests(test_load_phase_gait)
 gtest_discover_tests(test_generator)
 gtest_discover_tests(test_belief_filter)
+gtest_discover_tests(test_feature_window)
 gtest_discover_tests(test_distress)
 gtest_discover_tests(test_stuck_sense)
 gtest_discover_tests(test_stuck_escape)

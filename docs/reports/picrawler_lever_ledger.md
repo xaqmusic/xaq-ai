@@ -8998,3 +8998,17 @@ to the strength 1.0 arm (2 seeds). Reading: the servo is ~100× stronger than st
 the motor impulse holds the joints (the 6-DOF joint's springs / limits / damping, cf. the motor_force_scale units
 comment in picrawler_body.gd). Re-use context: a sag model built on the joint backend itself, validated by a static
 load test (body weight on a planted leg → measured deflection vs the robot's), before any press A/B depends on it.
+
+### 2026-10-24 — LEG-LESION BATTERY: the original walker at 6 rad/s keeps 74 % / 43 % of its forward progress with a rear / front leg frozen; the LPG walker keeps 10-26 %, and still 20-23 % at the same 6 rad/s — the lesion weakness is the LPG mechanism, not the servo speed — `BASELINE` (signal)
+
+*Operator: the original walker recovered from total leg ablation; LPG struggles.* One leg's commands ×0 from tick 3000
+(`OGMA_PICRAWLER_LESION_*`: the leg holds its neutral pose), flat arena, n = 6 × 9000; net progress per 1000 ticks over
+ticks 4500-9000, as a share of the same config unlesioned. Original walker at 6.0 rad/s (`ref_servo6`): rear-left 74 %,
+front-left 43 %, straightness after 0.25 / 0.15. Original gait at 3.67 rad/s (BENCH robot stack): 14 % / 21 %. LPG
+promoted robot config at 4.22 rad/s: 10 % / 26 %. LPG at 6.0 rad/s, period 30 (`…__sim_s60_p30`): 20 % / 23 %, while it
+is the fastest walker unlesioned (2.35 m/1k before the lesion vs the original's 1.08). After a lesion every config's
+legs keep moving (path 2-3 m/1k); only the original at 6 rad/s still translates. Reading: the original's lesion recovery
+needs both its mechanism (its learned layer re-adapts to the body it has) and servo speed; LPG's load-held phase gives
+the frozen leg no load, so its phase runs free and the others do not reorganise. Re-use context: the per-situation
+operating points of generator_and_belief_filter.md §3.3 (a lesion as a situation with its own settings), or a LPG
+coupling that redistributes when a leg's load share stays zero.

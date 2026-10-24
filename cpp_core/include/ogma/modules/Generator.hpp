@@ -80,6 +80,7 @@ private:
     double var_rel_floor_ = 0.01;  // a node's variance never below this fraction of the target's global variance
     int    warmup_      = 0;      // updates before a node's predictions are scored
     int    report_every_ = 0;     // > 0: print a GEN_DIAG json line every N ticks (headless instrument)
+    int    trace_every_ = 0;      // > 0: print a GEN_TRACE line (winner, prediction) every N ticks
 
     // state
     int dim_ = 0;

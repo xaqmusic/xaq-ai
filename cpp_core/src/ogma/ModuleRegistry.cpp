@@ -67,6 +67,7 @@
 #include "ogma/modules/KeyframeAverager.hpp"
 #include "ogma/modules/Generator.hpp"
 #include "ogma/modules/BeliefFilter.hpp"
+#include "ogma/modules/FeatureWindow.hpp"
 #include "ogma/modules/KeyframePeakDetector.hpp"
 #include "ogma/modules/LateralVoter.hpp"
 #include "ogma/modules/MotorBus.hpp"
@@ -192,6 +193,8 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("Generator",           [](){ return std::make_unique<Generator>(); });
         // 2026-10-24 — predict-then-correct over an EPM's nodes (generator_and_belief_filter.md §3.2, G2): instrument.
         reg.register_type("BeliefFilter",        [](){ return std::make_unique<BeliefFilter>(); });
+        // 2026-10-24 — several topics summarised over a window as one vector (G3 gait-context input).
+        reg.register_type("FeatureWindow",       [](){ return std::make_unique<FeatureWindow>(); });
         // 2026-06-05 Phase H1 V7 — peak-deviation companion to KeyframeAverager.
         // Same window+input contract but publishes (max - mean) per dim, surfacing
         // transients the averager smooths away (Joseph's "purple-mountain-swings-past"

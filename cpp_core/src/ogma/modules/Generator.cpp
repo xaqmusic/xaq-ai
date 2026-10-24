@@ -78,6 +78,9 @@ ParamSchema Generator::params_schema() const {
          "Upper clamp on the per-node Kalman-schedule gain 1/(n+1) (the uncapped head chases a moving input).", ParamValue{0.2}},
         {"gain_floor", ParamMutability::HotMutable,
          "Lower clamp on the gain: a small process noise so a node's estimate can follow drift.", ParamValue{0.002}},
+        {"trace_every", ParamMutability::HotMutable,
+         "> 0: print {\"event\":\"GEN_TRACE\", id, tick, winner, prediction} every N ticks, to join with a body log. 0 = off.",
+         ParamValue{int64_t{0}}},
         {"var_rel_floor", ParamMutability::HotMutable,
          "A node's variance is never below this fraction of the target's global variance: a node that saw a binary target "
          "constant for a long time must not claim certainty that one exception turns into a huge normalised error "
@@ -97,7 +100,7 @@ ParamMap Generator::current_params() const {
         {"output_topic", ParamValue{output_topic_}},   {"horizon", ParamValue{int64_t(horizon_)}},
         {"gain_cap", ParamValue{gain_cap_}},           {"gain_floor", ParamValue{gain_floor_}},
         {"warmup", ParamValue{int64_t(warmup_)}}, {"report_every", ParamValue{int64_t(report_every_)}},
-        {"var_rel_floor", ParamValue{var_rel_floor_}},
+        {"var_rel_floor", ParamValue{var_rel_floor_}}, {"trace_every", ParamValue{int64_t(trace_every_)}},
     };
 }
 
@@ -113,6 +116,7 @@ void Generator::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "warmup",        [&](auto const& v){ warmup_        = std::max(0, int(get_int(v, "warmup"))); });
     apply_param(params, "report_every",  [&](auto const& v){ report_every_  = std::max(0, int(get_int(v, "report_every"))); });
     apply_param(params, "var_rel_floor", [&](auto const& v){ var_rel_floor_ = std::max(0.0, get_double(v, "var_rel_floor")); });
+    apply_param(params, "trace_every",   [&](auto const& v){ trace_every_ = std::max(0, int(get_int(v, "trace_every"))); });
     if (target_topics_.empty()) throw std::invalid_argument("Generator: target_topics must name at least one topic");
     if (output_topic_.empty()) output_topic_ = "gen." + (id().empty() ? std::string("generator") : std::string(id()));
     target_parts_.assign(target_topics_.size(), Eigen::VectorXf());
@@ -132,6 +136,7 @@ void Generator::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "warmup")     warmup_     = std::max(0, int(get_int(value, k)));
     else if (k == "report_every") report_every_ = std::max(0, int(get_int(value, k)));
     else if (k == "var_rel_floor") var_rel_floor_ = std::max(0.0, get_double(value, k));
+    else if (k == "trace_every") trace_every_ = std::max(0, int(get_int(value, k)));
     else throw std::invalid_argument("Generator param '" + k + "' is ConstructionOnly or unknown");
 }
 
@@ -208,6 +213,9 @@ void Generator::tick(uint64_t tick_id) {
         out->values.tail(dim_) = pvar.cwiseSqrt();
         bus_->publish(output_topic_, out);
         ++predicted_;
+        if (trace_every_ > 0 && ticks_ % trace_every_ == 0)
+            std::cout << nlohmann::json{{"event", "GEN_TRACE"}, {"id", std::string(id())}, {"tick", ticks_},
+                                        {"winner", winner_}, {"pred", to_vec(s.mu)}}.dump() << std::endl;
     }
 
     // 2. Score and learn from the prediction made `horizon` ticks ago, now that its target is here.
