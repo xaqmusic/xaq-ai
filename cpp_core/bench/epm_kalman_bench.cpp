@@ -28,6 +28,9 @@
 //   S9   K clusters, Markov visitation (as S1m), plus a TARGET channel: a value per cluster + noise; a Generator
 //        decodes the EPM's nodes into the target `--horizon` ticks ahead → the exact floor is
 //        target noise + the spread the switching adds over the horizon (generator_and_belief_filter.md, G1)
+//   S10  K overlapping clusters, sticky Markov switching, optional periodic DROPOUT (--dropout_every / --dropout_len):
+//        the BeliefFilter over the EPM's nodes vs the raw reading, the EPM winner's prototype, and the forward filter
+//        given the TRUE model (the optimum) → MSE of the estimate against the true cluster mean (G2)
 //   S6   a ring of K poses visited IN ORDER (dwell ticks each), the whole ring
 //        rotating slowly (--omega rad/tick)   → the gait-like stream the picrawler
 //                                                 body_pose EPM sees; measures
@@ -70,6 +73,7 @@
 #include "ogma/modules/EPM.hpp"
 #include "ogma/modules/LateralVoter.hpp"
 #include "ogma/modules/Generator.hpp"
+#include "ogma/modules/BeliefFilter.hpp"
 
 using json = nlohmann::json;
 
@@ -84,6 +88,8 @@ struct Args {
     double      sigma      = 0.1;     // expected noise norm
     int         K          = 3;       // S1m clusters
     int         horizon    = 0;       // S9 generator horizon (ticks)
+    int         dropout_every = 0;    // S10: a silent window starts every N ticks (0 = none)
+    int         dropout_len   = 0;    // S10: silent ticks per window
     double      target_sigma = 0.1;   // S9 target noise (sd)
     double      p_stay     = 0.9;     // S1m Markov self-probability
     double      q          = 0.0;     // S2/S5 random-walk variance per tick (norm²); S3 process noise
@@ -121,6 +127,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--sigma")          a.sigma = std::stod(need(i));
         else if (k == "--K")              a.K = std::stoi(need(i));
         else if (k == "--horizon")        a.horizon = std::stoi(need(i));
+        else if (k == "--dropout_every")  a.dropout_every = std::stoi(need(i));
+        else if (k == "--dropout_len")    a.dropout_len = std::stoi(need(i));
         else if (k == "--target_sigma")   a.target_sigma = std::stod(need(i));
         else if (k == "--p_stay")         a.p_stay = std::stod(need(i));
         else if (k == "--q")              a.q = std::stod(need(i));
@@ -423,6 +431,83 @@ int run_S9(Args const& a, Emitter& em) {
     return 0;
 }
 
+// ---- S10: the belief filter vs the true-model forward filter (G2) ------------
+
+int run_S10(Args const& a, Emitter& em) {
+    std::mt19937_64 rng(a.seed);
+    const int K = a.K, D = a.dim;
+    const double sd = a.sigma / std::sqrt(double(D));
+    std::vector<Eigen::VectorXf> mus;
+    for (int k = 0; k < K; ++k) mus.push_back(unit_vec(rng, D));
+    em.line(header(a, json{{"K", K}, {"p_stay", a.p_stay}, {"sd_per_dim", sd}, {"dropout_every", a.dropout_every},
+                           {"dropout_len", a.dropout_len}}));
+    ogma::InProcessBus bus;
+    ogma::EPM epm; epm.set_id("epm");
+    epm.on_setup(&bus, epm_params(a, "epm", "bench", "s", "obs.s", D, /*subtract=*/false));
+    ogma::BeliefFilter bf; bf.set_id("bf");
+    bf.on_setup(&bus, ogma::ParamMap{{"reality_topic", std::string("reality.bench.s")}, {"obs_topic", std::string("obs.raw")}});
+    std::uniform_real_distribution<double> u(0.0, 1.0);
+    std::uniform_int_distribution<int> pick(0, K - 1);
+    // the oracle: the forward filter with the true transition matrix, means and noise
+    std::vector<double> ob(size_t(K), 1.0 / K);
+    const double pswitch = (1.0 - a.p_stay) / double(K - 1);
+    int k = pick(rng);
+    Eigen::VectorXf last_proto = Eigen::VectorXf::Zero(D), last_obs = Eigen::VectorXf::Zero(D);
+    double se_raw = 0, se_epm = 0, se_bf = 0, se_or = 0; int n_on = 0;
+    double de_epm = 0, de_bf = 0, de_or = 0; int n_off = 0;
+    double ent_on = 0, ent_off = 0;
+    for (int t = 1; t <= a.ticks; ++t) {
+        if (u(rng) > a.p_stay) { int nk = pick(rng); if (nk == k) nk = (nk + 1) % K; k = nk; }
+        const bool silent = a.dropout_every > 0 && (t % a.dropout_every) < a.dropout_len && t > a.ticks / 4;
+        Eigen::VectorXf x = mus[size_t(k)] + gauss(rng, D, sd);
+        // oracle predict
+        std::vector<double> pr(size_t(K), 0.0);
+        for (int i = 0; i < K; ++i) for (int j = 0; j < K; ++j) pr[size_t(j)] += ob[size_t(i)] * (i == j ? a.p_stay : pswitch);
+        if (!silent) {
+            double z = 0.0;
+            for (int j = 0; j < K; ++j) {
+                const double d2 = double((x - mus[size_t(j)]).squaredNorm());
+                pr[size_t(j)] *= std::exp(-0.5 * d2 / (sd * sd)); z += pr[size_t(j)];
+            }
+            for (double& v : pr) v /= z;
+        }
+        ob = pr;
+        Eigen::VectorXf oest = Eigen::VectorXf::Zero(D);
+        for (int j = 0; j < K; ++j) oest += float(ob[size_t(j)]) * mus[size_t(j)];
+        bus.begin_tick(uint64_t(t));
+        if (!silent) {
+            bus.publish("obs.s", make_obs(x, uint64_t(t)));
+            epm.tick(uint64_t(t));
+            auto ro = std::make_shared<ogma::ProprioToken>();
+            ro->tick_id = uint64_t(t); ro->producer_id = "bench"; ro->values = x;
+            bus.publish("obs.raw", ro);
+            auto tok = last_token(bus, "reality.bench.s");
+            if (tok && tok->winner_prototype.size() == D) last_proto = tok->winner_prototype;
+            last_obs = x;
+        }
+        bf.tick(uint64_t(t));
+        bus.end_tick();
+        if (t > a.ticks / 2 && bf.estimate().size() == D) {
+            const Eigen::VectorXf& m = mus[size_t(k)];
+            if (!silent) {
+                se_raw += (x - m).squaredNorm() / D; se_epm += (last_proto - m).squaredNorm() / D;
+                se_bf += (bf.estimate() - m).squaredNorm() / D; se_or += (oest - m).squaredNorm() / D; ++n_on;
+                ent_on += bf.entropy();
+            } else {
+                de_epm += (last_proto - m).squaredNorm() / D; de_bf += (bf.estimate() - m).squaredNorm() / D;
+                de_or += (oest - m).squaredNorm() / D; ++n_off; ent_off += bf.entropy();
+            }
+        }
+    }
+    json sm{{"event", "summary"}, {"n_on", n_on}, {"n_off", n_off}};
+    if (n_on) { sm["mse_raw"] = se_raw / n_on; sm["mse_epm"] = se_epm / n_on; sm["mse_bf"] = se_bf / n_on; sm["mse_oracle"] = se_or / n_on; sm["entropy_on"] = ent_on / n_on; }
+    if (n_off) { sm["drop_mse_epm"] = de_epm / n_off; sm["drop_mse_bf"] = de_bf / n_off; sm["drop_mse_oracle"] = de_or / n_off; sm["entropy_off"] = ent_off / n_off; }
+    auto d = bf.diag_snapshot();
+    sm["bf_nodes"] = d["nodes"]; sm["agree_with_epm"] = d["agree_with_epm"];
+    em.line(sm);
+    return 0;
+}
+
 // ---- S2: drifting mean (random walk) -----------------------------------------
 
 int run_S2(Args const& a, Emitter& em) {
@@ -668,6 +753,7 @@ int main(int argc, char** argv) {
         if (a.scenario == "S5")  return run_S5(a, em);
         if (a.scenario == "S6")  return run_S6(a, em);
         if (a.scenario == "S9")  return run_S9(a, em);
+        if (a.scenario == "S10") return run_S10(a, em);
     } catch (std::exception const& e) {
         die(std::string("exception: ") + e.what());
     }

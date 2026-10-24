@@ -66,6 +66,7 @@
 #include "ogma/modules/BodyRhythmTracker.hpp"
 #include "ogma/modules/KeyframeAverager.hpp"
 #include "ogma/modules/Generator.hpp"
+#include "ogma/modules/BeliefFilter.hpp"
 #include "ogma/modules/KeyframePeakDetector.hpp"
 #include "ogma/modules/LateralVoter.hpp"
 #include "ogma/modules/MotorBus.hpp"
@@ -189,6 +190,8 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("KeyframeAverager",    [](){ return std::make_unique<KeyframeAverager>(); });
         // 2026-10-24 — the EPM's decoder (generator_and_belief_filter.md §3.1, stage G1): instrument.
         reg.register_type("Generator",           [](){ return std::make_unique<Generator>(); });
+        // 2026-10-24 — predict-then-correct over an EPM's nodes (generator_and_belief_filter.md §3.2, G2): instrument.
+        reg.register_type("BeliefFilter",        [](){ return std::make_unique<BeliefFilter>(); });
         // 2026-06-05 Phase H1 V7 — peak-deviation companion to KeyframeAverager.
         // Same window+input contract but publishes (max - mean) per dim, surfacing
         // transients the averager smooths away (Joseph's "purple-mountain-swings-past"
