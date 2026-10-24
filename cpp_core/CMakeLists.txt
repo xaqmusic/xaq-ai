@@ -707,5 +707,8 @@ target_link_libraries(epm_kalman_bench PRIVATE ogma_core pthread)
 # epm_tof_study — the real EPM over recorded duck ToF frames (the ToF studies, 2026-09-12)
 add_executable(epm_tof_study bench/epm_tof_study.cpp)
 target_link_libraries(epm_tof_study PRIVATE ogma_core pthread)
+# epm_replay — recorded input vectors through a real EPM, offline (conditioning studies, 2026-10-24)
+add_executable(epm_replay bench/epm_replay.cpp)
+target_link_libraries(epm_replay PRIVATE ogma_core pthread)
 
 endif() # OGMA_BUILD_TESTS

@@ -9036,3 +9036,41 @@ exploration schedule — a behaviour change, for the operator.
 0.49 ± 0.20 vs the control's 0.22 (6 seeds): unchanged. The commissioning flags 4 of 26 channels degenerate (the
 StuckSense score and deficit, constant in these worlds). Terrain separation is limited by the features at the
 two-stride scale, not by conditioning (CLAUDE.md §0 rule 2 checked).
+
+### 2026-10-24 — ROBOT SAG FROM THE LOGS (`pi_host/tools/sag_from_log.cpp`, runs robot_20261024 / 24b, 355 s / 416 s): with the robot standing, the commanded-kinematics height and the belly ToF differ by a near-constant ~32 mm at both command heights; walking adds ~20 mm, growing over the first 2 min and with servo current, and not with the number of planted feet — `BASELINE` (instrument, n = 2 runs)
+
+*Operator: investigate servo sag on the real robot before simulating it.* The servos report no position, so the tool
+runs the host's own kinematics (`feet_y_gravity_cmd_fk`, ServoMapping, BodyCalib) on every commanded pulse in the
+50 Hz feed: each FSR-planted foot's height below the body if the servos tracked exactly, against the belly ToF.
+**Standing still** (4 planted, commands unchanged for 0.5 s): gap 33.8 mm at a commanded 93 mm and 29.9-33.9 mm at
+45 mm — a near-constant offset across command heights: the body origin vs the belly, the foot model and the ToF's
+3.2 mm permissive offset, not load sag. **Walking** (median, both runs): 54.4 / 52.1 mm, i.e. ~20 mm more; by time
+0-30 s 36-39 mm, 30-60 s 45 mm, 60-120 s 50-52 mm, then 52-57 mm held. Current quintile 0.5-0.6 A → 2.3 A: 43-47 →
+57-59 mm. Planted feet 2 / 3 / 4: 53-56 / 50-53 / 56 mm (no dependence). Tilt cannot explain it: |pitch| and |roll|
+during walking have medians ~0.05 rad and p90 ~0.12, a few mm at the boom. One 0.2 s stand at the end of run 1 (before
+the robot was lifted) read 33.9 mm, the start's value: weak evidence that the excess exists only while moving
+(tracking lag or give under dynamic load) and is not heating. Caveats: assumes level floor; the slew delivers ~70 % of
+the commanded hip2 range (2026-10-24 swl entry), so lag and give are not separated here. Re-use context: a protocol
+run — stand 20 s at the working pose, walk 3 min, stand 20 s at the same pose, then static loads on the chassis — to
+split lag, give and drift before any sim sag model is built (the SIM SERVO SAG entry needs exactly this number).
+
+### 2026-10-24 — G3 TERRAIN FEATURES: leg posture (femur and knee mean and spread over the window) raises the context vocabulary's terrain separation above chance from 0.08 to 0.14 NMI; conditioning variants change nothing; one shared EPM dilutes strong channels with weak ones — G3 terrain still `PARTIAL` (signal)
+
+*Operator: if separation is weak the encoder may be to blame — analyse the input and its PCA.* **Input** (6 corridor
+runs, 100-tick windows every 25, 1598 windows): PC1 (27 % of variance; foot load and contact means) separates the rumble
+strip, flat and hump overlap; 2 channels are constant (StuckSense deficit mean and sd). Supervised kNN, leave-one-run-
+out, balanced accuracy: the 26 deployed channels 0.70 (recalls hump 0.57), + posture 0.82 (0.81 / 0.81 / 0.84),
+posture alone 0.72; accelerometer, stride, step-count and forward-range features add nothing. **Conditioning** (the
+recorded windows through the real EPM, new `cpp_core/bench/epm_replay`): hand-set ranges squeeze the data into ~12 % of
+each range (latent PC1 zone separation 0.23, NMI 0.20 vs chance 0.16), self-commissioned 0.79 (0.43 vs 0.29), running
+z-score 0.38, whole-run z-score 0.39; λ 5 / 2 give 41 / 98 nodes with no gain over chance. Live (6 seeds): k 1.5, and k
+1.5 with min_insertion_error 0.005 / 0.001 — 0.30 / 0.29 / 0.29 vs chance 0.22-0.23 (the k 4 baseline 0.28 vs 0.20).
+**Posture live** (`…__robot_p1_ctx_pos`, + `reality.proprio.joints:4-11`, 42 channels): corridor 0.39 ± 0.05 vs chance
+0.25; lesion 0.57 vs control 0.30. Posture only (`…__robot_p1_ctx_posonly`, 16 channels): corridor 0.44 ± 0.07 vs
+chance 0.34; lesion 0.57 vs 0.31. Offline the posture-only EPM looked best (0.57 vs 0.25); live, its chance rises
+because posture drifts with the slow learners and the corridor's zones come in a fixed order, so anything that drifts
+reads as zone. The same drift gives the unlesioned control 0.30 for a before/after split. Reading: the features
+limit separation, not conditioning (§0 rule 2 checked twice); an unsupervised vocabulary of ~10 nodes spends them on
+the largest-variance axes, so the channels that go into ONE EPM matter (kNN gains from combining, the EPM barely). Re-use
+context: one EPM per sense group fused above them (fusion_notes.md), and a terrain test whose zones repeat in varied
+order so time drift cannot pass for terrain.
