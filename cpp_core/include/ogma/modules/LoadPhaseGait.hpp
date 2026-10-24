@@ -67,6 +67,7 @@ public:
 private:
     void handle_contact(MessagePtr p);
     void handle_load(MessagePtr p);
+    void handle_track(MessagePtr p);
 
     std::string contact_topic_ = "reality.proprio.foot_contact";
     std::string load_topic_    = "";          // empty = shares from the contact flags
@@ -83,6 +84,12 @@ private:
     // before the shares are formed, so a stiff sensor and a weak one carry the same weight.
     // Adapts to the sensor rather than calibrating it (CLAUDE.md s5.5).  0 = raw shares.
     double load_norm_tau_ = 0.0;
+    // 7.30 ADAPTIVE PERIOD: the stride slows when the servos cannot follow the commands (MotorEPMv2's track_topic).
+    std::string track_topic_ = "";
+    double period_adapt_rate_ = 0.0, period_adapt_ref_ = 0.35, period_adapt_min_ = 30.0, period_adapt_max_ = 90.0;
+    double track_ratio_ = 0.0, period_eff_ = 0.0;
+    bool   have_track_ = false;
+    double period_now() const { return (period_adapt_rate_ > 0.0 && period_eff_ > 0.0) ? period_eff_ : period_ticks_; }
     // 0 = shares (deployed); 1 = absolute load, Owaki's form (see the params schema).
     int    load_mode_     = 0;
     std::vector<float> load_ref_;

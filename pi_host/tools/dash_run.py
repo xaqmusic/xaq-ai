@@ -110,6 +110,9 @@ TUNABLES = {
     # lift, as a magnitude, with the knee half moved at the config's knee/femur ratio.  Read every tick.
     "lift": Tunable("lift", "swing lift", "MotorEPMv2", "leg_phase_lift_hip2", 0.05, 0.0, 0.9, "",
                     sign=-1.0, pair_key="leg_phase_lift_knee"),
+    # The per-leg swing-lift learner's rate (plan 7.29): 0 = off, so the bench can A/B it within a run.
+    "slearn": Tunable("slearn", "lift learner", "MotorEPMv2", "swing_learn_rate", 0.005, 0.0, 0.03, "",
+                      requires="swing_learn_rising"),
 }
 
 
@@ -120,6 +123,8 @@ def fmt_tunable(t: Tunable, v: Optional[float]) -> str:
         return f"{v:.0f} ticks = {v / TICK_HZ:.2f} s/stride"
     if t.name == "lift":
         return f"{v:.2f}"
+    if t.name == "slearn":
+        return "off" if v <= 0 else f"{v:.3f}"
     return f"{v * t.scale:.0f} {t.unit}"
 VBAT_WARN = 7.0                               # limp is 6.4 sustained; belly-up draws ~1.5 A
 
@@ -427,7 +432,7 @@ class RobotIo:
                                     "lift_scale", "clear_ema", "foot_y_cmd", "sc_off", "sag", "swing_frac",
                                     "hk_share", "clip_", "pre_", "c_mass", "amp_leg", "tle_leg",   # per-leg loop state
                                     "stuck_score", "stuck_gate_in", "current_",                                 # the push gates' inputs
-                                    "tuck_", "belly_", "conf_", "selfcol_")                                    # learned stance height, handover, keep-out
+                                    "tuck_", "belly_", "conf_", "selfcol_", "swing_", "track_")                                    # learned stance height, handover, keep-out
                             r = dict(r, diag={k: v for k, v in r["diag"].items() if k.startswith(keep)})
                         if r.get("status") == "ok":
                             row["mods"][mid] = r.get("diag", {})
@@ -956,6 +961,13 @@ class RunController:
                 self.st.stopped = bool(f.get("stopped"))
                 self.st.vbat = f.get("vbat")
                 self.st.belly_mm = tof.get("m", 0) * 1000.0 if tof.get("valid") else None
+                # Pack voltage and belly once a second into the recording (2026-10-24): the robot's belly fell 63 ->
+                # ~36 mm over a run with the femur at its limit, and whether that is the servos giving way or the
+                # pack sagging was unanswerable — the feed carries the servo rail, not the pack.
+                now_m = time.monotonic()
+                if now_m - getattr(self, "_last_power_rec", 0.0) >= 1.0:
+                    self._last_power_rec = now_m
+                    self._ev_rec("power", vbat=f.get("vbat"), low_battery=f.get("low_battery"), belly_mm=self.st.belly_mm)
                 if not imu.get("ok") or not up:
                     self.st.tilt_deg = None
                     if not f.get("stopped"):

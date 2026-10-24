@@ -144,3 +144,31 @@ TEST(LoadPhaseGait, NeighbouringSixtyFourBitSeedsGiveDifferentStartPhases) {
     const int64_t s = 8409386222832229053LL;
     EXPECT_NE(start(s), start(s + 1));
 }
+TEST(LoadPhaseGait, TheAdaptivePeriodSlowsWhenTheServosLagAndSpeedsUpWhenTheyKeepUp) {
+    // Tegotae plan 7.30: the period moves by rate * (lag ratio - ref) * period per tick, within its bounds.
+    auto mk = [](double rate) {
+        return ogma::ParamMap{{"track_topic", std::string("motor.track")}, {"period_adapt_rate", rate},
+                              {"period_adapt_ref", 0.3}, {"period_adapt_min", 40.0}, {"period_adapt_max", 80.0},
+                              {"period_ticks", 50.0}};
+    };
+    auto drive = [](Fix& f, float ratio, int n) {
+        for (int t = 0; t < n; ++t) {
+            f.bus.begin_tick(uint64_t(t));
+            f.bus.publish("motor.track", pv({ratio}));
+            f.bus.publish("reality.proprio.foot_contact", pv({0, 0, 0, 0}));
+            f.m.tick(uint64_t(t)); f.bus.end_tick();
+        }
+    };
+    Fix lag(mk(0.01));
+    drive(lag, 0.5f, 50);
+    const double p1 = lag.m.diag_snapshot()["period_eff"].get<double>();
+    EXPECT_GT(p1, 50.0) << "servos trailing: a slower stride";
+    drive(lag, 0.5f, 2000);
+    EXPECT_NEAR(lag.m.diag_snapshot()["period_eff"].get<double>(), 80.0, 1e-6) << "held at the upper bound";
+    Fix fast(mk(0.01));
+    drive(fast, 0.1f, 2000);
+    EXPECT_NEAR(fast.m.diag_snapshot()["period_eff"].get<double>(), 40.0, 1e-6) << "keeping up: down to the lower bound";
+    Fix off(mk(0.0));
+    drive(off, 0.5f, 500);
+    EXPECT_DOUBLE_EQ(off.m.diag_snapshot()["period_eff"].get<double>(), 50.0) << "rate 0: the configured period";
+}

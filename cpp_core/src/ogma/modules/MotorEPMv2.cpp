@@ -124,6 +124,8 @@ std::vector<TopicSpec> MotorEPMv2::output_topics() const {
     for (auto const& t : action_topics_)
         v.emplace_back(t, std::type_index(typeid(ActionOut)),
                        SubscriptionKind::Direct, /*required=*/true);
+    if (!track_topic_.empty())
+        v.emplace_back(track_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, /*required=*/false);
     return v;
 }
 
@@ -1163,6 +1165,14 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"tuck_learn_max", ParamMutability::HotMutable, "Upper bound of the learned hip2 rest (u) (7.28).", ParamValue{0.5}, std::nullopt, std::nullopt},
         {"tuck_learn_upright", ParamMutability::HotMutable, "Learn only while upright (basis y.y, needs upright_topic) exceeds this; on a slope, wedged or inverted the belly reading is not stance height (7.28).", ParamValue{0.95}, std::nullopt, std::nullopt},
         {"tuck_learn_planted", ParamMutability::HotMutable, "Learn only with at least this many feet touching (7.28).", ParamValue{3.0}, std::nullopt, std::nullopt},
+        {"track_topic", ParamMutability::ConstructionOnly, "Publishes [ratio] each tick: how far the joints (the servo model's position) trail the previous command, over the command's stroke, mean over legs and joints, smoothed. The adaptive period (LoadPhaseGait period_adapt_*) reads it. Empty = off (7.30).", ParamValue{std::string("")}, std::nullopt, std::nullopt},
+        {"swing_learn_rate", ParamMutability::HotMutable, "LEARNED SWING LIFT (per leg): while a leg is mid-swing (sin phi > swing_learn_phase) and its foot has touched for swing_learn_debounce ticks, its swing-lift multiplier rises by this per tick; the foot touching in swing is the error the lift exists to remove. 0 = off, byte-identical (7.29).", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"swing_learn_leak", ParamMutability::HotMutable, "Per-tick pull of each leg's swing-lift multiplier back toward 1 (the configured lift) (7.29).", ParamValue{0.001}, std::nullopt, std::nullopt},
+        {"swing_learn_max", ParamMutability::HotMutable, "Upper bound of the per-leg swing-lift multiplier (7.29).", ParamValue{2.0}, std::nullopt, std::nullopt},
+        {"swing_learn_min", ParamMutability::HotMutable, "Lower bound of the per-leg swing-lift multiplier (7.29).", ParamValue{1.0}, std::nullopt, std::nullopt},
+        {"swing_learn_phase", ParamMutability::HotMutable, "sin phi above which a leg counts as mid-swing for the swing-lift learner (avoids liftoff and touchdown) (7.29).", ParamValue{0.3}, std::nullopt, std::nullopt},
+        {"swing_learn_rising", ParamMutability::HotMutable, "1 = the swing-lift learner counts contacts only while the lift is still rising (first half of swing, cos phi > 0): a foot that never leaves the floor, not a toe that lands early (sim 2026-10-24: its mid-swing contacts are early landings; the robot drags from liftoff). 0 = the whole window (7.29).", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"swing_learn_debounce", ParamMutability::HotMutable, "Consecutive touching ticks before a mid-swing contact counts (filters sensor flicker) (7.29).", ParamValue{3.0}, std::nullopt, std::nullopt},
         {"tuck_learn_leak", ParamMutability::HotMutable, "Per-tick leak of the learned hip2 rest back toward hip2_tuck_target, so an error the femur angle cannot correct settles at rate*err/leak from it instead of winding into a bound. 0 = off (7.28b).", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"tuck_learn_tau", ParamMutability::HotMutable, "EMA (readings) on the belly clearance the learner compares with its target (7.28).", ParamValue{25.0}, std::nullopt, std::nullopt},
         {"panic_push_orient", ParamMutability::HotMutable, "Reference the panic push to gravity: its hip2/knee drive is multiplied by (1 - k) + k * upright (basis y.y, needs upright_topic), so inverted it reaches hip2-up / knee-extend toward the ground instead of pressing the feet at the sky; 0 = off, the body-frame push (7.26).", ParamValue{0.0}, std::nullopt, std::nullopt},
@@ -1545,7 +1555,9 @@ ParamMap MotorEPMv2::current_params() const {
     m["conf_noise_shaped"] = conf_noise_shaped_; m["conf_noise_tau"] = conf_noise_tau_; m["conf_noise_knee_fold"] = conf_noise_knee_fold_;
     m["conf_noise_esc_max"] = conf_noise_esc_max_; m["conf_noise_esc_ticks"] = conf_noise_esc_ticks_; m["conf_panic_upright"] = conf_panic_upright_; m["conf_panic_suspend"] = conf_panic_suspend_; m["selfcol_knee_max"] = selfcol_knee_max_; m["panic_push_orient"] = panic_push_orient_; m["belly_topic"] = belly_topic_; m["tuck_learn_rate"] = tuck_learn_rate_; m["tuck_learn_target_m"] = tuck_learn_target_m_;
     m["tuck_learn_min"] = tuck_learn_min_; m["tuck_learn_max"] = tuck_learn_max_; m["tuck_learn_upright"] = tuck_learn_upright_;
-    m["tuck_learn_planted"] = tuck_learn_planted_; m["tuck_learn_tau"] = tuck_learn_tau_; m["tuck_learn_leak"] = tuck_learn_leak_;
+    m["tuck_learn_planted"] = tuck_learn_planted_; m["tuck_learn_tau"] = tuck_learn_tau_; m["tuck_learn_leak"] = tuck_learn_leak_; m["track_topic"] = track_topic_; m["swing_learn_rate"] = swing_learn_rate_; m["swing_learn_leak"] = swing_learn_leak_;
+    m["swing_learn_max"] = swing_learn_max_; m["swing_learn_min"] = swing_learn_min_; m["swing_learn_phase"] = swing_learn_phase_;
+    m["swing_learn_debounce"] = swing_learn_debounce_; m["swing_learn_rising"] = swing_learn_rising_;
     m["reach_load_topic"] = reach_load_topic_; m["reach_rate"] = reach_rate_; m["reach_target"] = reach_target_;
     m["reach_leak"] = reach_leak_; m["reach_max"] = reach_max_; m["reach_leak_min"] = reach_leak_min_; m["reach_hip2"] = reach_hip2_; m["reach_ref_tau"] = reach_ref_tau_;
     m["leg_phase_late_press_hip2"] = leg_phase_late_press_hip2_;
@@ -1830,6 +1842,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "selfcol_knee_max",     [&](auto const& v){ selfcol_knee_max_     = get_double_vec(v, "selfcol_knee_max"); });
     apply_param(params, "panic_push_orient",    [&](auto const& v){ panic_push_orient_    = get_double(v, "panic_push_orient"); });
     apply_param(params, "belly_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) belly_topic_ = *p; });
+    apply_param(params, "track_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) track_topic_ = *p; });
     apply_param(params, "tuck_learn_rate",      [&](auto const& v){ tuck_learn_rate_      = get_double(v, "tuck_learn_rate"); });
     apply_param(params, "tuck_learn_target_m",  [&](auto const& v){ tuck_learn_target_m_  = get_double(v, "tuck_learn_target_m"); });
     apply_param(params, "tuck_learn_min",       [&](auto const& v){ tuck_learn_min_       = get_double(v, "tuck_learn_min"); });
@@ -1838,6 +1851,13 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "tuck_learn_planted",   [&](auto const& v){ tuck_learn_planted_   = get_double(v, "tuck_learn_planted"); });
     apply_param(params, "tuck_learn_tau",       [&](auto const& v){ tuck_learn_tau_       = get_double(v, "tuck_learn_tau"); });
     apply_param(params, "tuck_learn_leak",      [&](auto const& v){ tuck_learn_leak_      = get_double(v, "tuck_learn_leak"); });
+    apply_param(params, "swing_learn_rate", [&](auto const& v){ swing_learn_rate_ = get_double(v, "swing_learn_rate"); });
+    apply_param(params, "swing_learn_leak", [&](auto const& v){ swing_learn_leak_ = get_double(v, "swing_learn_leak"); });
+    apply_param(params, "swing_learn_max", [&](auto const& v){ swing_learn_max_ = get_double(v, "swing_learn_max"); });
+    apply_param(params, "swing_learn_min", [&](auto const& v){ swing_learn_min_ = get_double(v, "swing_learn_min"); });
+    apply_param(params, "swing_learn_phase", [&](auto const& v){ swing_learn_phase_ = get_double(v, "swing_learn_phase"); });
+    apply_param(params, "swing_learn_debounce", [&](auto const& v){ swing_learn_debounce_ = get_double(v, "swing_learn_debounce"); });
+    apply_param(params, "swing_learn_rising", [&](auto const& v){ swing_learn_rising_ = get_double(v, "swing_learn_rising"); });
     apply_param(params, "reach_rate",    [&](auto const& v){ reach_rate_    = get_double(v, "reach_rate"); });
     apply_param(params, "reach_target",  [&](auto const& v){ reach_target_  = get_double(v, "reach_target"); });
     apply_param(params, "reach_leak",    [&](auto const& v){ reach_leak_    = get_double(v, "reach_leak"); });
@@ -3485,6 +3505,13 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "tuck_learn_planted")   tuck_learn_planted_   = get_double(value, "tuck_learn_planted");
     else if (key == "tuck_learn_tau")       tuck_learn_tau_       = get_double(value, "tuck_learn_tau");
     else if (key == "tuck_learn_leak")      tuck_learn_leak_      = get_double(value, "tuck_learn_leak");
+    else if (key == "swing_learn_rate") swing_learn_rate_ = get_double(value, "swing_learn_rate");
+    else if (key == "swing_learn_leak") swing_learn_leak_ = get_double(value, "swing_learn_leak");
+    else if (key == "swing_learn_max") swing_learn_max_ = get_double(value, "swing_learn_max");
+    else if (key == "swing_learn_min") swing_learn_min_ = get_double(value, "swing_learn_min");
+    else if (key == "swing_learn_phase") swing_learn_phase_ = get_double(value, "swing_learn_phase");
+    else if (key == "swing_learn_debounce") swing_learn_debounce_ = get_double(value, "swing_learn_debounce");
+    else if (key == "swing_learn_rising") swing_learn_rising_ = get_double(value, "swing_learn_rising");
     else if (key == "reach_target")  reach_target_  = get_double(value, "reach_target");
     else if (key == "reach_leak")    reach_leak_    = get_double(value, "reach_leak");
     else if (key == "reach_max")     reach_max_     = get_double(value, "reach_max");
@@ -6105,6 +6132,28 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 }
                 lscale = lift_scale_[size_t(leg)];
             }
+            // LEARNED SWING LIFT (swing_learn_rate; Tegotae plan 7.29).  The error a swing lift exists to remove is
+            // the swinging foot touching the floor, and the foot sensor reports it (sim: physics touch; robot: FSR >=
+            // ~4 g).  Per leg, because the corners differ (robot 2026-10-24: 33-69 % of swing samples touching).
+            // Mid-swing only (sin phi above swing_learn_phase: not liftoff, not touchdown), debounced against flicker;
+            // the multiplier leaks back to the configured lift.  0 = off, byte-identical.
+            if (swing_learn_rate_ > 0.0) {
+                if (int(swing_mult_.size()) != n_legs_) { swing_mult_.assign(size_t(n_legs_), 1.0f); swing_touch_run_.assign(size_t(n_legs_), 0); }
+                float& sm = swing_mult_[size_t(leg)];
+                const bool touching = have_contact_ && int(foot_contact_.size()) == n_legs_ && foot_contact_[size_t(leg)] > 0.5f;
+                int& run = swing_touch_run_[size_t(leg)];
+                if (ext_sin_[size_t(leg)] > float(swing_learn_phase_)
+                    && (swing_learn_rising_ <= 0.0 || ext_cos_[size_t(leg)] > 0.0f)) {
+                    run = touching ? run + 1 : 0;
+                    swing_mid_n_ += 1.0;
+                    if (run >= int(swing_learn_debounce_)) { sm += float(swing_learn_rate_); swing_touch_n_ += 1.0; }
+                } else {
+                    run = 0;
+                }
+                sm += float(swing_learn_leak_) * (1.0f - sm);
+                sm = std::clamp(sm, float(swing_learn_min_), float(swing_learn_max_));
+                lscale *= sm;
+            }
             y[1]     += float(leg_phase_lift_hip2_) * lift * lscale;
             y[m - 1] += float(leg_phase_lift_knee_) * lift * lscale;
             ext_lift_acc_ += double(lift); ++ext_lift_n_;
@@ -6828,6 +6877,38 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             if (y[m - 1] > cap) { y[m - 1] = cap; if (!warmup) selfcol_capped_ += 1.0; }
         }
         L.outmag_ema = (1.0f - kTeleEmaAlpha) * L.outmag_ema + kTeleEmaAlpha * float(y.norm());
+        // SERVO TRACKING (track_topic; Tegotae plan 7.30): the joint position this tick against the command sent last
+        // tick, over the stroke (2x the mean absolute deviation of the command from its own running mean).  Under
+        // honest joints the position is the servo model's, slew-limited at the configured speed, on both hosts.
+        if (!track_topic_.empty() && L.n >= 3 * m) {
+            if (int(trk_prev_.size()) != n_legs_) {
+                trk_prev_.assign(size_t(n_legs_), Eigen::VectorXf()); trk_mean_.assign(size_t(n_legs_), Eigen::VectorXf());
+                trk_amp_.assign(size_t(n_legs_), Eigen::VectorXf()); trk_lag_.assign(size_t(n_legs_), 0.0f);
+            }
+            auto& pv = trk_prev_[size_t(leg)]; auto& mu = trk_mean_[size_t(leg)]; auto& am = trk_amp_[size_t(leg)];
+            if (pv.size() == m) {
+                float lag = 0.0f, amp = 0.0f;
+                for (int j = 0; j < m; ++j) {
+                    lag += std::fabs(pv[j] - L.x[3 * j]);
+                    mu[j] += 0.01f * (y[j] - mu[j]);
+                    am[j] += 0.01f * (std::fabs(y[j] - mu[j]) - am[j]);
+                    amp += 2.0f * am[j];
+                }
+                trk_lag_[size_t(leg)] += 0.02f * (lag / std::max(amp, 1e-3f) - trk_lag_[size_t(leg)]);
+            } else {
+                mu = y; am = Eigen::VectorXf::Zero(m);
+            }
+            pv = y;
+            if (leg == n_legs_ - 1) {
+                float r = 0.0f;
+                for (float v : trk_lag_) r += v;
+                trk_ratio_ = r / float(n_legs_);
+                auto tk = std::make_shared<ProprioToken>();
+                tk->tick_id = tick_id; tk->producer_id = id_.empty() ? std::string("motor_epm") : id_;
+                tk->sensor = "track_ratio"; tk->values.resize(1); tk->values[0] = trk_ratio_;
+                bus_->publish(track_topic_, tk);
+            }
+        }
 
         for (int j = 0; j < m; ++j) {
             auto out = std::make_shared<ActionOut>();
@@ -7388,6 +7469,9 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["conf_eff_mean"]          = float(conf_eff_ema_);
     mod["selfcol_cap_frac"]       = selfcol_n_ > 0.0 ? float(selfcol_capped_ / selfcol_n_) : 0.0f;
     mod["tuck_learned"]           = tuck_learned_;
+    mod["swing_mult"]             = swing_mult_;
+    mod["track_ratio"]            = trk_ratio_;
+    mod["swing_touch_frac"]       = swing_mid_n_ > 0.0 ? float(swing_touch_n_ / swing_mid_n_) : 0.0f;
     mod["belly_ema"]              = belly_ema_;
     mod["tuck_learn_frac"]        = tuck_ticks_ > 0.0 ? float(tuck_learn_ticks_ / tuck_ticks_) : 0.0f;
     mod["reach_n"]                = reach_n_;
@@ -7848,6 +7932,9 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     // The learned stance height (7.28) in the DIAG view too: module_diag (the robot's brain_diag, picrawler-dash's TUNE
     // line) reads this, not snapshot_state; without it the robot never showed the learner (2026-10-23).
     j["tuck_learned"]        = tuck_learned_;
+    j["swing_mult"]          = swing_mult_;
+    j["track_ratio"]         = trk_ratio_;
+    j["swing_touch_frac"]    = swing_mid_n_ > 0.0 ? float(swing_touch_n_ / swing_mid_n_) : 0.0f;
     j["belly_ema"]           = belly_ema_;
     j["tuck_learn_frac"]     = tuck_ticks_ > 0.0 ? float(tuck_learn_ticks_ / tuck_ticks_) : 0.0f;
     j["reach_n"]             = reach_n_;

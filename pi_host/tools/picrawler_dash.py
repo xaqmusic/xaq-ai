@@ -304,7 +304,7 @@ class Dash:
         if c is not None and "height" in c.cfg.tunables and c.st.phase == "running":
             r = self.control.call("module_diag", id=c.cfg.tunables["height"][0])
             dg = (r or {}).get("diag") if isinstance(r, dict) else None
-            self.live_diag = {k: dg[k] for k in ("tuck_learned", "belly_ema", "tuck_learn_frac") if isinstance(dg, dict) and k in dg}
+            self.live_diag = {k: dg[k] for k in ("tuck_learned", "belly_ema", "tuck_learn_frac", "swing_mult") if isinstance(dg, dict) and k in dg}
         sl = self.bench.call("slew.set", confirm=True)          # no slew_us: reads the current slew, sets nothing
         self.bench_slew = int(sl["slew_us"]) if sl and sl.get("ok") and "slew_us" in sl else None
         self.brain = self.control.call("ping")
@@ -448,6 +448,12 @@ class Dash:
             if "lift" in c.cfg.tunables:
                 lv = c.st.tuned.get("lift", c.tune_targets.get("lift", c.cfg.tunables["lift"][1]))
                 out += f"    swing lift {lv:.2f}"
+            if "slearn" in c.cfg.tunables:
+                sv = c.st.tuned.get("slearn", c.tune_targets.get("slearn", c.cfg.tunables["slearn"][1]))
+                out += f"    lift learner {dash_run.fmt_tunable(dash_run.TUNABLES['slearn'], sv)}"
+                sm = self.live_diag.get("swing_mult")
+                if isinstance(sm, list) and len(sm) == 4:
+                    out += " (" + " ".join(f"{float(x):.2f}" for x in sm) + ")"
             if "height" in c.cfg.tunables:
                 t = dash_run.TUNABLES["height"]
                 h = c.st.tuned.get("height", c.tune_targets.get("height", c.cfg.tunables["height"][1]))
@@ -531,6 +537,10 @@ class Dash:
                     self.msg_bad = "refused" in self.msg or "not in this config" in self.msg
                     if "lift" in self.ctrl.st.tuned:
                         self.tune_other["lift"] = self.ctrl.st.tuned["lift"]
+                    return True
+                if ch in (ord("k"), ord("l")):
+                    self.msg = self.ctrl.nudge("slearn", -1 if ch == ord("k") else 1)
+                    self.msg_bad = "refused" in self.msg or "not in this config" in self.msg
                     return True
                 if ch in (ord(","), ord(".")):
                     self.msg = self.ctrl.nudge("height", -1 if ch == ord(",") else 1)
@@ -627,7 +637,7 @@ class Dash:
                        C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
         if st.hat_warning:
             self._line(scr, y, 3, st.hat_warning, C(BAD) | curses.A_BOLD); y += 1
-        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   [ ] speed   - = period   ; ' lift   , . belly"
+        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   [ ] speed   - = period   ; ' lift   k l learner   , . belly"
                 if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
         self._line(scr, y, 3, keys, C(DIM)); y += 1

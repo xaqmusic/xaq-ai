@@ -193,7 +193,8 @@ _P = "the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planp
 TEST_CONFIGS = [_P + "honest__nohomeo.json", _P + "honest__nohomeo__spd600.json",
                 _P + "honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300.json",
                 _P + "ref_servo6.json",
-                _P + "honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_cand_tl.json"]
+                _P + "honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_cand_tl.json",
+                _P + "honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_swl.json"]
 
 
 def configs_for_tests():
@@ -687,5 +688,21 @@ def test_a_knob_turned_before_the_brain_takes_over_is_kept_not_reset(tmp_path, m
     assert wait_phase(ctrl, {"running"}, 8.0)
     assert abs(ctrl.st.tuned["lift"] - 0.40) < 1e-9
     assert any("leg_phase_lift_hip2=-0.4" in x for x in robot.calls)
+    ctrl.end()
+    ctrl.join(10)
+
+
+def test_the_lift_learner_knob_exists_only_with_the_rising_window_and_turns_off(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    c = next(x for x in configs_for_tests() if x.file.endswith("__robot_p1_swl.json"))
+    assert c.tunables["slearn"] == ("motor_epm", 0.01)
+    assert "slearn" not in tl_cfg().tunables
+    robot = FakeRobot(tmp_path)
+    ctrl = dash_run.RunController(robot, c, "stand", countdown_s=0.3, ready_extra_s=0.0)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    ctrl.nudge("slearn", -1); ctrl.nudge("slearn", -1); ctrl.nudge("slearn", -1)
+    assert ctrl.st.tuned["slearn"] == 0.0
+    assert "brain set_param motor_epm.swing_learn_rate=0.0" in robot.calls
     ctrl.end()
     ctrl.join(10)

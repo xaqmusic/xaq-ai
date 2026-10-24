@@ -12514,6 +12514,8 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["lp_retro"] = snappedf(float(lp.get("retro", 0.0)), 0.001)
 		line["lp_agree"] = snappedf(float(lp.get("agree", 0.0)), 0.001)       # phase swing/stance vs the contact flag
 		line["lp_sw"]    = snappedf(float(lp.get("swing_frac", 0.0)), 0.001)
+		line["lp_per"]   = snappedf(float(lp.get("period_eff", 0.0)), 0.01)     # the (adaptive) period in use
+		line["lp_trk"]   = snappedf(float(lp.get("track_ratio", 0.0)), 0.001)   # servo lag / stroke, as the LPG reads it
 		line["lp_w"]     = snappedf(float(lp.get("omega_rel", 0.0)), 0.001)   # mean rate / free rate
 		line["lp_load"]  = snappedf(float(lp.get("load_mean", 0.0)), 0.001)
 		line["lp_td_n"]  = int(lp.get("touchdowns", 0))
@@ -13127,6 +13129,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["skc"] = snappedf(float(_mm.get("selfcol_cap_frac", 0.0)), 0.0001)
 			line["tkl"] = snappedf(float(_mm.get("tuck_learned", 0.0)), 0.0001)
 			line["bem"] = snappedf(float(_mm.get("belly_ema", 0.0)), 0.0001)
+			var _slm = _mm.get("swing_mult", [])
+			if _slm is Array and _slm.size() == 4:
+				var _sla := PackedFloat64Array()
+				for _v in _slm: _sla.append(snappedf(float(_v), 0.001))
+				line["slm"] = _sla
 			for _rk in [["reach_e", "rc_e"], ["reach_n", "rc_n"]]:
 				var _rv = _mm.get(_rk[0], [])
 				if _rv is Array and _rv.size() == 4:

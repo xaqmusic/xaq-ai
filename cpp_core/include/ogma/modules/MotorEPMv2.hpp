@@ -558,6 +558,17 @@ private:
     std::string belly_topic_;                       // reality.proprio.belly_m (metres, unclipped); empty = off
     double tuck_learn_rate_ = 0.0, tuck_learn_target_m_ = 0.065, tuck_learn_min_ = -0.1, tuck_learn_max_ = 0.5;
     double tuck_learn_upright_ = 0.95, tuck_learn_planted_ = 3.0, tuck_learn_tau_ = 25.0;
+    // 7.29 LEARNED SWING LIFT, per leg: the swing lift's multiplier rises while the swinging foot touches the floor.
+    // 7.30 servo tracking for the adaptive period: per joint EMAs of the command's mean and stroke, and the lag.
+    std::string track_topic_;
+    std::vector<Eigen::VectorXf> trk_prev_, trk_mean_, trk_amp_;
+    std::vector<float> trk_lag_;
+    float trk_ratio_ = 0.0f;
+    double swing_learn_rate_ = 0.0, swing_learn_leak_ = 0.001, swing_learn_max_ = 2.0, swing_learn_min_ = 1.0;
+    double swing_learn_phase_ = 0.3, swing_learn_debounce_ = 3.0, swing_learn_rising_ = 0.0;
+    std::vector<float> swing_mult_;
+    std::vector<int>   swing_touch_run_;
+    double swing_touch_n_ = 0.0, swing_mid_n_ = 0.0;
     double tuck_learn_leak_ = 0.0;   // 7.28b: per-tick pull of the learned angle back to hip2_tuck_target
     float  belly_m_ = 0.0f, belly_ema_ = 0.0f, tuck_learned_ = 0.0f;
     bool   belly_seen_ = false, tuck_init_ = false;

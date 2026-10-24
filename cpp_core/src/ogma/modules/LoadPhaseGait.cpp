@@ -51,6 +51,8 @@ std::vector<TopicSpec> LoadPhaseGait::input_topics() const {
         TopicSpec{contact_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
     if (!load_topic_.empty())
         v.push_back(TopicSpec{load_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    if (!track_topic_.empty())
+        v.push_back(TopicSpec{track_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     return v;
 }
 std::vector<TopicSpec> LoadPhaseGait::output_topics() const {
@@ -94,6 +96,18 @@ ParamSchema LoadPhaseGait::params_schema() const {
          "reference (EMA over tau ticks of its load while touching). The robot's FSRs differ 3x in sensitivity under one "
          "curve (RL 0.5 share, RR 0.05 measured 2026-10-13), which held one leg and freed another. Try 300-1000. 0 = raw.",
          ParamValue{0.0}},
+        {"track_topic", ParamMutability::ConstructionOnly,
+         "Optional ProprioToken [ratio]: how far the joints lag their commands, as a fraction of the stroke (MotorEPMv2 "
+         "track_topic). Feeds the adaptive period (7.30). Empty = no subscription.", ParamValue{std::string("")}},
+        {"period_adapt_rate", ParamMutability::HotMutable,
+         "ADAPTIVE PERIOD: the period (ticks) moves by rate * (lag ratio - period_adapt_ref) * period per tick, within "
+         "period_adapt_min..max, starting from period_ticks: slower strides when the servos cannot complete their strokes, "
+         "faster when they keep up. Setting period_ticks live re-seeds it. 0 = off, byte-identical (7.30).", ParamValue{0.0}},
+        {"period_adapt_ref", ParamMutability::HotMutable,
+         "The lag ratio the adaptive period holds (the fraction of the stroke the joints may trail the command by) (7.30).",
+         ParamValue{0.35}},
+        {"period_adapt_min", ParamMutability::HotMutable, "Lower bound of the adaptive period (ticks) (7.30).", ParamValue{30.0}},
+        {"period_adapt_max", ParamMutability::HotMutable, "Upper bound of the adaptive period (ticks) (7.30).", ParamValue{90.0}},
         {"init_phase", ParamMutability::ConstructionOnly,
          "Optional explicit starting phases (radians, one per leg). Empty = seeded random, as on Owaki's robot.",
          ParamValue{std::vector<double>{}}},
@@ -105,6 +119,9 @@ ParamMap LoadPhaseGait::current_params() const {
     m["contact_topic"] = ParamValue{contact_topic_}; m["load_topic"] = ParamValue{load_topic_};
     m["output_topics"] = ParamValue{output_topics_}; m["n_legs"] = ParamValue{int64_t(n_legs_)};
     m["period_ticks"] = ParamValue{period_ticks_}; m["sigma_ratio"] = ParamValue{sigma_ratio_};
+    m["track_topic"] = ParamValue{track_topic_}; m["period_adapt_rate"] = ParamValue{period_adapt_rate_};
+    m["period_adapt_ref"] = ParamValue{period_adapt_ref_}; m["period_adapt_min"] = ParamValue{period_adapt_min_};
+    m["period_adapt_max"] = ParamValue{period_adapt_max_};
     m["load_floor"] = ParamValue{load_floor_}; m["seed"] = ParamValue{seed_}; m["load_norm_tau"] = ParamValue{load_norm_tau_};
     m["load_mode"] = ParamValue{int64_t(load_mode_)};
     m["init_phase"] = ParamValue{init_phase_};
@@ -119,6 +136,11 @@ void LoadPhaseGait::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "output_topics", [&](auto const& v){ output_topics_ = get_string_vec(v, "output_topics"); });
     apply_param(params, "n_legs",        [&](auto const& v){ n_legs_        = std::max(1, int(get_double(v, "n_legs"))); });
     apply_param(params, "period_ticks",  [&](auto const& v){ period_ticks_  = std::max(2.0, get_double(v, "period_ticks")); });
+    apply_param(params, "track_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) track_topic_ = *p; });
+    apply_param(params, "period_adapt_rate", [&](auto const& v){ period_adapt_rate_ = get_double(v, "period_adapt_rate"); });
+    apply_param(params, "period_adapt_ref",  [&](auto const& v){ period_adapt_ref_  = get_double(v, "period_adapt_ref"); });
+    apply_param(params, "period_adapt_min",  [&](auto const& v){ period_adapt_min_  = get_double(v, "period_adapt_min"); });
+    apply_param(params, "period_adapt_max",  [&](auto const& v){ period_adapt_max_  = get_double(v, "period_adapt_max"); });
     apply_param(params, "sigma_ratio",   [&](auto const& v){ sigma_ratio_   = get_double(v, "sigma_ratio"); });
     apply_param(params, "load_floor",    [&](auto const& v){ load_floor_    = get_double(v, "load_floor"); });
     apply_param(params, "load_mode",     [&](auto const& v){ load_mode_     = int(get_double(v, "load_mode")); });
@@ -155,11 +177,18 @@ void LoadPhaseGait::on_setup(Bus* bus, ParamMap const& params) {
     if (!load_topic_.empty())
         sub_ids_.push_back(bus_->subscribe(load_topic_, SubscriptionKind::Direct,
             [this](std::string_view, MessagePtr p){ handle_load(p); }));
+    if (!track_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(track_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_track(p); }));
 }
 
 void LoadPhaseGait::on_param_change(std::string_view key, ParamValue const& value) {
     const std::string k(key);
-    if      (k == "period_ticks") period_ticks_ = std::max(2.0, get_double(value, k));
+    if      (k == "period_ticks") { period_ticks_ = std::max(2.0, get_double(value, k)); period_eff_ = period_ticks_; }
+    else if (k == "period_adapt_rate") period_adapt_rate_ = get_double(value, k);
+    else if (k == "period_adapt_ref")  period_adapt_ref_  = get_double(value, k);
+    else if (k == "period_adapt_min")  period_adapt_min_  = get_double(value, k);
+    else if (k == "period_adapt_max")  period_adapt_max_  = get_double(value, k);
     else if (k == "sigma_ratio")  sigma_ratio_  = get_double(value, k);
     else if (k == "load_floor")   load_floor_   = get_double(value, k);
     else if (k == "load_mode")    load_mode_    = int(get_double(value, k));
@@ -175,6 +204,13 @@ void LoadPhaseGait::handle_contact(MessagePtr p) {
     for (int i = 0; i < k; ++i) contact_[size_t(i)] = pt->values[i];
     have_contact_ = true;
 }
+void LoadPhaseGait::handle_track(MessagePtr p) {
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+    if (!pt || pt->values.size() < 1) return;
+    track_ratio_ = pt->values[0];
+    have_track_ = true;
+}
+
 void LoadPhaseGait::handle_load(MessagePtr p) {
     if (!input_allowed(p->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
@@ -186,7 +222,17 @@ void LoadPhaseGait::handle_load(MessagePtr p) {
 
 void LoadPhaseGait::tick(uint64_t tick_id) {
     const size_t n = size_t(n_legs_);
-    const float omega = kTwoPi / float(period_ticks_);
+    // ADAPTIVE PERIOD (period_adapt_rate; Tegotae plan 7.30).  The right period depends on how fast the servos can
+    // move (the operator settled 50 ticks at 4.22 rad/s by hand; 30 at 3.12 rad/s thrashed).  The error is the
+    // joints trailing their commands by more than period_adapt_ref of the stroke: then the stride is slower.
+    // Relative change, so the step is the same fraction at any period.  0 = off, byte-identical.
+    if (period_adapt_rate_ > 0.0) {
+        if (period_eff_ <= 0.0) period_eff_ = period_ticks_;
+        if (have_track_)
+            period_eff_ *= 1.0 + period_adapt_rate_ * (track_ratio_ - period_adapt_ref_);
+        period_eff_ = std::clamp(period_eff_, period_adapt_min_, period_adapt_max_);
+    }
+    const float omega = kTwoPi / float(period_now());
     // ---- load shares: f_i / sum f, or c_i / n_touching ----
     float total = 0.0f;
     for (size_t i = 0; i < n; ++i) {
@@ -271,7 +317,7 @@ void LoadPhaseGait::restore_state(nlohmann::json const& s) {
 }
 nlohmann::json LoadPhaseGait::diag_snapshot() const {
     const size_t n = size_t(n_legs_);
-    const float omega = kTwoPi / float(period_ticks_);
+    const float omega = kTwoPi / float(period_now());
     float td = 0.0f, lo = 0.0f, weff = 0.0f, nmean = 0.0f;
     for (size_t i = 0; i < n; ++i) {
         td += std::hypot(td_c_[i], td_s_[i]); lo += std::hypot(lo_c_[i], lo_s_[i]);
@@ -290,7 +336,7 @@ nlohmann::json LoadPhaseGait::diag_snapshot() const {
         {"agree", agree_ema_},                // phase's swing/stance vs the contact flag
         {"omega_rel", weff / float(n) / omega},  // mean effective rate / free rate
         {"load_mean", nmean / float(n)},        {"load_ref", load_ref_},
-        {"touchdowns", touchdowns_}, {"ticks", ticks_},
+        {"touchdowns", touchdowns_}, {"ticks", ticks_}, {"period_eff", period_now()}, {"track_ratio", track_ratio_},
         {"have_load", have_load_}, {"have_contact", have_contact_}};
 }
 

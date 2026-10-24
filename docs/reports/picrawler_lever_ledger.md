@@ -8932,3 +8932,26 @@ at its 0.45 limit from ~150 s: the 60 mm target is not reached on this robot; th
 voltage, not measured here). Dragging tracks the low belly. Rail min 2.8–3.3 V, current p95 2.1–2.8 A, 0 HAT resets.
 The previous robot promoted config is relabelled BASE. Next: make the swing lift and stance height adapt
 (discussion with the operator).
+
+### 2026-10-24 — LEARNED SWING LIFT, per leg (`swing_learn_*`, plan 7.29): the sim's swing contacts are early landings, the robot's are a foot that never leaves — counting only the rising lift, `PARTIAL` (signal, sim) and safe; robot bench trial pending
+
+*Robot `…__robot_p1` in the sim (4.22 rad/s, period 50, lift 0.40), n = 6 × 9000.* A leg's swing-lift multiplier
+rises while its foot touches mid-swing (debounce 3 ticks), leaks back to 1, max 2. Whole mid-swing window (sin φ > 0.3):
+touching flat 28 → 23 %, corridor 32 → 24 %, but multipliers wound to 1.4–1.8, sway 0.075 → 0.097 (corridor), resets
+0 → 1–2, pyramid escape tip-overs 5 → 8: `PARTIAL`, not promotable. Diagnosis: in the sim the touching toe sits in the
+SECOND half of swing (after the lift peak; 100 % toe, never the shank) — an early landing more lift cannot fix. On the
+robot (2026-10-24 00:06) the foot touches 85 % of samples just after liftoff and 44–54 % through mid-swing: it does not
+leave. `swing_learn_rising` 1 counts only the first half of swing: touching while the lift rises flat 22 → 16 %,
+corridor 29 → 25 %, multipliers 1.14–1.58, resets 0 and 0, sway unchanged. Gain 0 per-tick identical (2 seeds, two
+configs). Bench trial config `…__robot_p1_swl` with the rate live on picrawler-dash (k / l, 0 = off). Re-use context:
+the sim rarely has the robot's failure; the robot is the test.
+
+### 2026-10-24 — ADAPTIVE PERIOD (`period_adapt_*`, MotorEPMv2 `track_topic`, plan 7.30): the lag instrument does not see servo speed — `NULL` (the instrument, not the idea)
+
+The motor published |previous command − servo-model position| over the command's stroke; the gait lengthened its
+period when that ratio exceeded the lag at the operator's 4.22 rad/s / period 50 (1.04). With the period fixed, the
+ratio reads 1.00 at 3.668 rad/s AND 1.00 at 5.0 rad/s: it measures the command's tick-to-tick jitter, not the slew
+limit. Fed it, the period ran to its bounds (30 or 90). Publishing the ratio with the adaptation off is per-tick
+identical (6 seeds). Code kept, off. Re-use context: an instrument that does move with speed — the achieved joint
+excursion over a stride against the commanded excursion. Side note: fixed period 50 walks 8.11 ± 2.30 m at 5.0 rad/s
+vs 5.44 ± 3.33 m at 3.668.
