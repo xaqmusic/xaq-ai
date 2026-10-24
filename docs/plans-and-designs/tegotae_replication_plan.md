@@ -1071,6 +1071,43 @@ keep-out removing an impossible move (and is within n = 6). The cap bites on < 1
 Residual 0.14 %: the cap reads the commanded hip2, which leads the joint as hip2 swings down. The curve is body
 geometry: the cad body (no electronics block, different links) needs its own map.
 
+### 7.32 The diagonal weight shift (design, 2026-10-24 — nothing built)
+
+**Why a press cannot do it.** On the robot the chassis tips ~4° toward the FL+RR diagonal while it swings (roll −0.061,
+pitch −0.071 sin) and barely at all toward FR+RL; the swinging toes, already light (median 0–2 g mid-swing), are held at
+floor level by that tip. With two diagonal feet as the only support the body turns about the line between them, a
+hinge, and legs standing ON that line cannot resist rotation about it however hard they press (7.31: the phase-varying
+press did not reduce the tip and rocked the body). What sets the tip is where the centre of mass sits relative to the
+support diagonal; the cure is to put it there before the other pair lifts.
+
+**The error and its sensors.** Two egocentric readings of the same fault: (1) the IMU tip while pair p swings — a 2-D
+direction (pitch, roll) and a size, measured after the fact, honest on both hosts; (2) the FSR share left on pair p's
+feet just after its phase says swing — the early warning, but on the robot the absolute FSR load is unreliable (RL reads
+~10× the others under one curve), so only the per-foot self-normalised share (LPG `load_norm_tau`, already in each leg's
+rhythm output) is usable. The learner uses (1); (2) is the instrument.
+
+**The learned quantity.** Per diagonal pair p ∈ {FL+RR, FR+RL}, a 2-D body offset s_p (lateral, fore-aft, metres) held
+by the stance legs during the double support before p lifts and through p's swing (phase-shaped, zero elsewhere).
+Update once per p-swing: s_p ← s_p − k · tip_p (the body is moved away from the side it fell to), leaky, bounded (~±15 mm).
+Two learned numbers per pair, not a policy; gain 0 = byte-identical.
+
+**The actuation.** A body translation d with the stance feet planted is each planted foot moving −d relative to the
+chassis: through hip1 (yaw) the foot moves tangentially, Δhip1_i ≈ −(d · t_i) / R_i (t_i the tangent at leg i, R_i its
+horizontal reach), plus a small hip2/knee term to keep foot height. Signs come from the existing per-leg stroke signs
+(`stroke_signs`), and must be MEASURED before any learner: a probe that holds a fixed d during double support and reads
+the body's translation and tip (as the late-press probe did, 7.8).
+
+**Validation path.**
+1. Instrument: the per-pair tip (pitch, roll) and the liftoff share, in the sim log and the robot's brain_diag.
+2. Reproduce the robot's asymmetry in the sim with `OGMA_PICRAWLER_COM_SHIFT` (a CoM offset toward the FL/RR side,
+   10–20 mm) — the sim's measured body tips symmetrically (0.13 / 0.14) and so cannot test the learner as it is.
+3. The fixed-offset probe: sign and gain of the actuation.
+4. The learner, A/B with and without the CoM shift (the unshifted run must not get worse), n = 6, full battery.
+5. The robot, with the learner rate on picrawler-dash (0 = off) for a within-run A/B.
+**Judged on:** the per-pair tip and its asymmetry, early-swing touching, liftoff share, sway, resets, distance.
+**Ledger context:** the learned weight-shift press (`wshift_rate`, 2026-10-18) was a uniform press and wound up; this is
+a translation with a direction from the IMU — the differential form its re-use context asked for.
+
 ## 8. What it takes, as of 2026-10-18
 
 | Owaki & Ishiguro result | On this body, sim | What it needs |

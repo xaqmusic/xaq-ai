@@ -569,6 +569,11 @@ private:
     std::vector<float> swing_mult_;
     std::vector<int>   swing_touch_run_;
     double swing_touch_n_ = 0.0, swing_mid_n_ = 0.0;
+    // 7.31 LEARNED STANCE PRESS, per leg, over the gait phase: P_i(phi) = a + b cos phi + c sin phi on planted legs,
+    // driven by the corner's height deficit (belly ToF + IMU attitude x lever arm).
+    double press_learn_rate_ = 0.0, press_learn_leak_ = 0.0005, press_learn_max_ = 0.3, press_target_m_ = 0.065;
+    double press_lever_m_ = 0.08, press_knee_ = 1.0, press_phase_ = 1.0;
+    std::vector<float> press_a_, press_b_, press_c_, press_def_;
     double tuck_learn_leak_ = 0.0;   // 7.28b: per-tick pull of the learned angle back to hip2_tuck_target
     float  belly_m_ = 0.0f, belly_ema_ = 0.0f, tuck_learned_ = 0.0f;
     bool   belly_seen_ = false, tuck_init_ = false;

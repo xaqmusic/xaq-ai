@@ -8969,3 +8969,19 @@ level. More lift command does not become clearance. Body: when the FL+RR diagona
 pitch −0.071 (sin), vs +0.003 / +0.012 for FR+RL — ~4° toward one swinging diagonal, ~5–7 mm at a foot, the order of
 the clearance. Re-use context: a lift that the slew can complete (longer period or faster servo), or a within-stride
 weight shift off the swinging diagonal; the learner itself works as built (it raised the commands).
+
+### 2026-10-24 — LEARNED STANCE PRESS (`press_learn_*`, plan 7.31): over the gait phase it does not stop the diagonal tip and rocks the body; as ONE CONSTANT PER LEG it holds the belly at its target (66 vs 65 mm, where the femur learner overshoots to 77–79) with no stability cost — `WORKING` (signal, sim, full-strength servos) as the height owner
+
+*Operator: the push from the planted legs is what should be learned to hold the chassis up.* On a planted leg
+P(φ) = a + b cos φ + c sin φ is added to hip2 and the knee; a, b, c step by rate × deficit × (1, cos φ, sin φ), deficit =
+target − belly + 0.08 m × (front·pitch + left·roll) (the corner integrator's validated sign). Robot `…__robot_p1` in
+the sim, n = 6 × 9000. **Round 1, target 80 mm, phase on:** belly 79 (press) vs 75 (femur) mm, but the diagonal tip
+did not fall (0.160/0.139 vs 0.130/0.144) and sway rose (corridor 0.273 vs 0.123, resets 9 vs 6); press + femur at full
+rate fought (corridor sway 0.636). The 80 mm target itself destabilised the femur arm too (5 resets vs 0 at 60).
+Why the phase terms fail: two diagonal feet are a hinge; legs on the support line cannot resist rotation about it, so
+the tip is a centre-of-mass placement problem (§7.32), not a press. **Round 2, target 65 mm, `press_phase` 0:** belly
+66 mm (press) vs 77→79 (femur), flat 10.40 ± 1.20 vs 7.01 ± 2.01 m, straight 0.50 vs 0.32, sway 0.072 vs 0.083,
+resets 1 vs 1; corridor 4.88 vs 3.52 m; escapes tie. Press + femur at 1/10 rate cooperates (9.61 m, corridor 5.18,
+resets 0). The walking gain is mostly the lower stance (11 mm), which also doubles early-swing touching (9 → 19 %).
+Gain 0 per-tick identical (2 seeds). Re-use context: the robot's sag is not in the full-strength sim — the decisive test
+is at a servo strength calibrated to the robot (queued), then the bench.

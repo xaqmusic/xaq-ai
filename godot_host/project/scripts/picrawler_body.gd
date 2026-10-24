@@ -13129,6 +13129,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["skc"] = snappedf(float(_mm.get("selfcol_cap_frac", 0.0)), 0.0001)
 			line["tkl"] = snappedf(float(_mm.get("tuck_learned", 0.0)), 0.0001)
 			line["bem"] = snappedf(float(_mm.get("belly_ema", 0.0)), 0.0001)
+			for _prk in [["press_a", "pra"], ["press_b", "prb"], ["press_c", "prc"], ["press_def", "prd"]]:
+				var _prv = _mm.get(_prk[0], [])
+				if _prv is Array and _prv.size() == 4:
+					var _pro := PackedFloat64Array()
+					for _prx in _prv: _pro.append(snappedf(float(_prx), 0.0001))
+					line[_prk[1]] = _pro
 			var _slm = _mm.get("swing_mult", [])
 			if _slm is Array and _slm.size() == 4:
 				var _sla := PackedFloat64Array()

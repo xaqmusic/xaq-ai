@@ -1173,6 +1173,13 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"swing_learn_phase", ParamMutability::HotMutable, "sin phi above which a leg counts as mid-swing for the swing-lift learner (avoids liftoff and touchdown) (7.29).", ParamValue{0.3}, std::nullopt, std::nullopt},
         {"swing_learn_rising", ParamMutability::HotMutable, "1 = the swing-lift learner counts contacts only while the lift is still rising (first half of swing, cos phi > 0): a foot that never leaves the floor, not a toe that lands early (sim 2026-10-24: its mid-swing contacts are early landings; the robot drags from liftoff). 0 = the whole window (7.29).", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"swing_learn_debounce", ParamMutability::HotMutable, "Consecutive touching ticks before a mid-swing contact counts (filters sensor flicker) (7.29).", ParamValue{3.0}, std::nullopt, std::nullopt},
+        {"press_learn_rate", ParamMutability::HotMutable, "LEARNED STANCE PRESS (per leg, over the gait phase): on a planted leg, P(phi) = a + b cos phi + c sin phi is added to hip2 and (x press_knee) the knee; a, b, c step by rate * deficit * (1, cos phi, sin phi) per tick, where deficit (m) = press_target_m - belly + press_lever_m * (front*pitch + left*roll) is this corner's height shortfall. It learns the overshoot a sagging servo needs without its position. Needs belly_topic and upright_topic. 0 = off, byte-identical (7.31).", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"press_learn_leak", ParamMutability::HotMutable, "Per-tick leak of the press coefficients toward 0 (7.31).", ParamValue{0.0005}, std::nullopt, std::nullopt},
+        {"press_learn_max", ParamMutability::HotMutable, "Bound on |a|, |b|, |c| of the learned press (command units) (7.31).", ParamValue{0.3}, std::nullopt, std::nullopt},
+        {"press_target_m", ParamMutability::HotMutable, "Belly clearance (m) the learned press holds. Live-tunable (7.31).", ParamValue{0.065}, std::nullopt, std::nullopt},
+        {"press_lever_m", ParamMutability::HotMutable, "Lever arm (m) turning the corner's attitude error (sin) into height (7.31).", ParamValue{0.08}, std::nullopt, std::nullopt},
+        {"press_phase", ParamMutability::HotMutable, "1 = the learned press varies over the gait phase (a + b cos phi + c sin phi); 0 = one constant per leg (a only). Two diagonal feet are a hinge their own press cannot stiffen, so the phase terms cannot stop the diagonal tip (2026-10-24 A/B) (7.31).", ParamValue{1.0}, std::nullopt, std::nullopt},
+        {"press_knee", ParamMutability::HotMutable, "Knee share of the learned press (1 = equal to hip2, the corner integrator's split) (7.31).", ParamValue{1.0}, std::nullopt, std::nullopt},
         {"tuck_learn_leak", ParamMutability::HotMutable, "Per-tick leak of the learned hip2 rest back toward hip2_tuck_target, so an error the femur angle cannot correct settles at rate*err/leak from it instead of winding into a bound. 0 = off (7.28b).", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"tuck_learn_tau", ParamMutability::HotMutable, "EMA (readings) on the belly clearance the learner compares with its target (7.28).", ParamValue{25.0}, std::nullopt, std::nullopt},
         {"panic_push_orient", ParamMutability::HotMutable, "Reference the panic push to gravity: its hip2/knee drive is multiplied by (1 - k) + k * upright (basis y.y, needs upright_topic), so inverted it reaches hip2-up / knee-extend toward the ground instead of pressing the feet at the sky; 0 = off, the body-frame push (7.26).", ParamValue{0.0}, std::nullopt, std::nullopt},
@@ -1555,7 +1562,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["conf_noise_shaped"] = conf_noise_shaped_; m["conf_noise_tau"] = conf_noise_tau_; m["conf_noise_knee_fold"] = conf_noise_knee_fold_;
     m["conf_noise_esc_max"] = conf_noise_esc_max_; m["conf_noise_esc_ticks"] = conf_noise_esc_ticks_; m["conf_panic_upright"] = conf_panic_upright_; m["conf_panic_suspend"] = conf_panic_suspend_; m["selfcol_knee_max"] = selfcol_knee_max_; m["panic_push_orient"] = panic_push_orient_; m["belly_topic"] = belly_topic_; m["tuck_learn_rate"] = tuck_learn_rate_; m["tuck_learn_target_m"] = tuck_learn_target_m_;
     m["tuck_learn_min"] = tuck_learn_min_; m["tuck_learn_max"] = tuck_learn_max_; m["tuck_learn_upright"] = tuck_learn_upright_;
-    m["tuck_learn_planted"] = tuck_learn_planted_; m["tuck_learn_tau"] = tuck_learn_tau_; m["tuck_learn_leak"] = tuck_learn_leak_; m["track_topic"] = track_topic_; m["swing_learn_rate"] = swing_learn_rate_; m["swing_learn_leak"] = swing_learn_leak_;
+    m["tuck_learn_planted"] = tuck_learn_planted_; m["tuck_learn_tau"] = tuck_learn_tau_; m["tuck_learn_leak"] = tuck_learn_leak_; m["press_learn_rate"] = press_learn_rate_; m["press_learn_leak"] = press_learn_leak_; m["press_learn_max"] = press_learn_max_; m["press_target_m"] = press_target_m_; m["press_lever_m"] = press_lever_m_; m["press_knee"] = press_knee_; m["press_phase"] = press_phase_; m["track_topic"] = track_topic_; m["swing_learn_rate"] = swing_learn_rate_; m["swing_learn_leak"] = swing_learn_leak_;
     m["swing_learn_max"] = swing_learn_max_; m["swing_learn_min"] = swing_learn_min_; m["swing_learn_phase"] = swing_learn_phase_;
     m["swing_learn_debounce"] = swing_learn_debounce_; m["swing_learn_rising"] = swing_learn_rising_;
     m["reach_load_topic"] = reach_load_topic_; m["reach_rate"] = reach_rate_; m["reach_target"] = reach_target_;
@@ -1851,6 +1858,13 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "tuck_learn_planted",   [&](auto const& v){ tuck_learn_planted_   = get_double(v, "tuck_learn_planted"); });
     apply_param(params, "tuck_learn_tau",       [&](auto const& v){ tuck_learn_tau_       = get_double(v, "tuck_learn_tau"); });
     apply_param(params, "tuck_learn_leak",      [&](auto const& v){ tuck_learn_leak_      = get_double(v, "tuck_learn_leak"); });
+    apply_param(params, "press_learn_rate", [&](auto const& v){ press_learn_rate_ = get_double(v, "press_learn_rate"); });
+    apply_param(params, "press_learn_leak", [&](auto const& v){ press_learn_leak_ = get_double(v, "press_learn_leak"); });
+    apply_param(params, "press_learn_max", [&](auto const& v){ press_learn_max_ = get_double(v, "press_learn_max"); });
+    apply_param(params, "press_target_m", [&](auto const& v){ press_target_m_ = get_double(v, "press_target_m"); });
+    apply_param(params, "press_lever_m", [&](auto const& v){ press_lever_m_ = get_double(v, "press_lever_m"); });
+    apply_param(params, "press_knee", [&](auto const& v){ press_knee_ = get_double(v, "press_knee"); });
+    apply_param(params, "press_phase", [&](auto const& v){ press_phase_ = get_double(v, "press_phase"); });
     apply_param(params, "swing_learn_rate", [&](auto const& v){ swing_learn_rate_ = get_double(v, "swing_learn_rate"); });
     apply_param(params, "swing_learn_leak", [&](auto const& v){ swing_learn_leak_ = get_double(v, "swing_learn_leak"); });
     apply_param(params, "swing_learn_max", [&](auto const& v){ swing_learn_max_ = get_double(v, "swing_learn_max"); });
@@ -3505,6 +3519,13 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "tuck_learn_planted")   tuck_learn_planted_   = get_double(value, "tuck_learn_planted");
     else if (key == "tuck_learn_tau")       tuck_learn_tau_       = get_double(value, "tuck_learn_tau");
     else if (key == "tuck_learn_leak")      tuck_learn_leak_      = get_double(value, "tuck_learn_leak");
+    else if (key == "press_learn_rate") press_learn_rate_ = get_double(value, "press_learn_rate");
+    else if (key == "press_learn_leak") press_learn_leak_ = get_double(value, "press_learn_leak");
+    else if (key == "press_learn_max") press_learn_max_ = get_double(value, "press_learn_max");
+    else if (key == "press_target_m") press_target_m_ = get_double(value, "press_target_m");
+    else if (key == "press_lever_m") press_lever_m_ = get_double(value, "press_lever_m");
+    else if (key == "press_knee") press_knee_ = get_double(value, "press_knee");
+    else if (key == "press_phase") press_phase_ = get_double(value, "press_phase");
     else if (key == "swing_learn_rate") swing_learn_rate_ = get_double(value, "swing_learn_rate");
     else if (key == "swing_learn_leak") swing_learn_leak_ = get_double(value, "swing_learn_leak");
     else if (key == "swing_learn_max") swing_learn_max_ = get_double(value, "swing_learn_max");
@@ -6207,6 +6228,40 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 y[m - 1] += level_off_[size_t(leg)];
             }
         }
+        // LEARNED STANCE PRESS (press_learn_rate; Tegotae plan 7.31).  Operator, 2026-10-24: the push from the planted
+        // legs is what should be learned to hold the chassis up and let the others swing.  The servos report no
+        // position, so the press learns its OVERSHOOT from the result: this corner's height shortfall, the belly ToF
+        // (centre) plus the IMU attitude times a lever arm (the corner integrator's validated sign: + = corner low, +
+        // press raises it).  A smooth function of the leg's own phase (no bins), so it can press harder exactly when
+        // its diagonal partner is in the air (robot: ~4 deg toward one swinging diagonal).  Planted, upright and with a
+        // fresh belly reading only; leaky, bounded.  0 = off, byte-identical.
+        if (press_learn_rate_ > 0.0 && m >= 2 && leg < int(ext_seen_.size()) && ext_seen_[size_t(leg)]) {
+            if (int(press_a_.size()) != n_legs_) {
+                press_a_.assign(size_t(n_legs_), 0.0f); press_b_.assign(size_t(n_legs_), 0.0f);
+                press_c_.assign(size_t(n_legs_), 0.0f); press_def_.assign(size_t(n_legs_), 0.0f);
+            }
+            const float cph = ext_cos_[size_t(leg)], sph = ext_sin_[size_t(leg)];
+            const bool planted = have_contact_ && int(foot_contact_.size()) == n_legs_
+                                 && foot_contact_[size_t(leg)] > 0.5f && sph < 0.0f;
+            float& pa = press_a_[size_t(leg)]; float& pb = press_b_[size_t(leg)]; float& pc = press_c_[size_t(leg)];
+            if (!warmup && planted && belly_seen_ && (tuck_tick_ - belly_tick_) <= 10 && have_upright_ && upright_ > 0.9f
+                && tilt_seen_) {
+                const float front = (leg == 0 || leg == 1) ? 1.0f : -1.0f;
+                const float left  = (leg == 0 || leg == 2) ? 1.0f : -1.0f;
+                const float def = float(press_target_m_) - belly_m_ + float(press_lever_m_) * (front * tilt_pitch_ + left * tilt_roll_);
+                press_def_[size_t(leg)] += 0.05f * (def - press_def_[size_t(leg)]);
+                const float k = float(press_learn_rate_) * def;
+                pa += k;
+                if (press_phase_ > 0.0) { pb += k * cph; pc += k * sph; }
+            }
+            const float lk = float(press_learn_leak_), mx = float(press_learn_max_);
+            pa = std::clamp(pa - lk * pa, -mx, mx); pb = std::clamp(pb - lk * pb, -mx, mx); pc = std::clamp(pc - lk * pc, -mx, mx);
+            if (planted) {
+                const float P = pa + pb * cph + pc * sph;
+                y[1]     += P;
+                y[m - 1] += float(press_knee_) * P;
+            }
+        }
         // STRIDE-CENTRE HOMEOSTAT (stride_center_gain; see the header note).
         if (stride_center_gain_ > 0.0 && m >= 1 && n >= 1) {
             if (int(sc_ema_.size()) != n_legs_) { sc_ema_.assign(size_t(n_legs_), 0.0f); sc_off_.assign(size_t(n_legs_), 0.0f); }
@@ -7470,6 +7525,10 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["selfcol_cap_frac"]       = selfcol_n_ > 0.0 ? float(selfcol_capped_ / selfcol_n_) : 0.0f;
     mod["tuck_learned"]           = tuck_learned_;
     mod["swing_mult"]             = swing_mult_;
+    mod["press_a"] = press_a_;
+    mod["press_b"] = press_b_;
+    mod["press_c"] = press_c_;
+    mod["press_def"] = press_def_;
     mod["track_ratio"]            = trk_ratio_;
     mod["swing_touch_frac"]       = swing_mid_n_ > 0.0 ? float(swing_touch_n_ / swing_mid_n_) : 0.0f;
     mod["belly_ema"]              = belly_ema_;
@@ -7933,6 +7992,10 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     // line) reads this, not snapshot_state; without it the robot never showed the learner (2026-10-23).
     j["tuck_learned"]        = tuck_learned_;
     j["swing_mult"]          = swing_mult_;
+    j["press_a"] = press_a_;
+    j["press_b"] = press_b_;
+    j["press_c"] = press_c_;
+    j["press_def"] = press_def_;
     j["track_ratio"]         = trk_ratio_;
     j["swing_touch_frac"]    = swing_mid_n_ > 0.0 ? float(swing_touch_n_ / swing_mid_n_) : 0.0f;
     j["belly_ema"]           = belly_ema_;
