@@ -26,8 +26,8 @@ const US_PER_RAD := 545.2
 const VBAT_MIN := 6.0
 const VBAT_MAX := 8.4
 # The forward ultrasonic is read by ogma_host, not benchd, so it comes from ogma_host's
-# control verb host_sensors (REQ, port 7400) on a WORKER THREAD: a REQ blocks up to its
-# 500 ms timeout when ogma_host is down, and that must never freeze this window.
+# control verb host_sensors (plain-TCP newline JSON, port 7400) on a WORKER THREAD: a
+# request blocks up to its timeout when ogma_host is down, and that must never freeze this window.
 const HOST_CTRL_PORT := 7400
 const RANGE_POLL_MS := 100
 # The FSRs: HAT ADC A0-A3 = PHYSICAL FL, FR, RL, RR; the sim legs are mirrored, so sim leg i
@@ -592,8 +592,8 @@ func _update_range_row() -> void:
 		_range_graph.push(m, valid and up, hz)
 	lbl.text = "range: %s   %.1f Hz" % [("%5.3f m" % m) if valid else "no echo (>%.1f m / glancing)" % m, hz]
 	lbl.text += "\n  hip1 " + _front_hip1_text()
-	lbl.tooltip_text = "pings %s   no-echo %s   dropped %s   (ogma_host host_sensors)" % [
-		str(rd.get("pings", "—")), str(rd.get("timeouts", "—")), str(rd.get("dropped", "—"))]
+	lbl.tooltip_text = "pings %d   no-echo %d   dropped %d   (ogma_host host_sensors)" % [
+		int(rd.get("pings", 0)), int(rd.get("timeouts", 0)), int(rd.get("dropped", 0))]
 	lbl.mouse_filter = Control.MOUSE_FILTER_PASS
 	var col := Color(0.9, 0.9, 0.9)
 	if not up: col = Color(1, 0.3, 0.3)
@@ -633,19 +633,60 @@ func _range_stop() -> void:
 	_range_mutex.lock(); _range_reply = {}; _range_reply_ms = -1; _range_mutex.unlock()
 
 
-# The worker: its own client and socket, used only on this thread.  Receive-only in effect:
-# host_sensors reads the raw sensor values and changes nothing (SPEC §1.1 holds).
+# The worker: its own socket, used only on this thread.  ogma_host's ControlServer speaks
+# PLAIN TCP, one JSON object per line (picrawler_dash.py's Control) — not ZMQ like benchd.
+# host_sensors reads the raw sensor values and changes nothing (SPEC §1.1 holds).  Any
+# failure drops the socket and the next poll reconnects, so an ogma_host restart heals.
 func _range_worker() -> void:
-	var c: Object = ClassDB.instantiate("BenchClient")
-	if c == null:
-		return
-	var ok: bool = c.call("connect_to", _range_host, HOST_CTRL_PORT, HOST_CTRL_PORT + 1)
+	var tcp: StreamPeerTCP = null
+	var buf := ""
 	while _range_run:
-		var rep: Dictionary = c.call("request", {"verb": "host_sensors"}) if ok else {"error": "connect failed"}
+		var rep: Dictionary = {}
+		if tcp == null:
+			tcp = StreamPeerTCP.new()
+			buf = ""
+			if tcp.connect_to_host(_range_host_ip(), HOST_CTRL_PORT) != OK:
+				tcp = null
+				rep = {"error": "connect failed"}
+		if tcp != null:
+			var t0 := Time.get_ticks_msec()
+			while tcp.get_status() == StreamPeerTCP.STATUS_CONNECTING and Time.get_ticks_msec() - t0 < 1500:
+				tcp.poll(); OS.delay_msec(5)
+			if tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+				tcp = null
+				rep = {"error": "no connection to :%d" % HOST_CTRL_PORT}
+			else:
+				tcp.put_data(('{"verb":"host_sensors"}\n').to_utf8_buffer())
+				t0 = Time.get_ticks_msec()
+				while buf.find("\n") < 0 and Time.get_ticks_msec() - t0 < 1000:
+					tcp.poll()
+					var n := tcp.get_available_bytes()
+					if n > 0:
+						var got: Array = tcp.get_partial_data(n)
+						if int(got[0]) == OK: buf += (got[1] as PackedByteArray).get_string_from_utf8()
+					else:
+						OS.delay_msec(2)
+				var nl := buf.find("\n")
+				if nl < 0:
+					tcp.disconnect_from_host(); tcp = null
+					rep = {"error": "timeout"}
+				else:
+					var line := buf.substr(0, nl)
+					buf = buf.substr(nl + 1)
+					var parsed: Variant = JSON.parse_string(line)
+					rep = parsed if parsed is Dictionary else {"error": "bad reply"}
 		_range_mutex.lock(); _range_reply = rep; _range_reply_ms = Time.get_ticks_msec(); _range_mutex.unlock()
 		OS.delay_msec(RANGE_POLL_MS)
-	c.call("disconnect_from")
-	c.free()
+	if tcp != null:
+		tcp.disconnect_from_host()
+
+
+# StreamPeerTCP wants an address; resolve the host name once per connection attempt.
+func _range_host_ip() -> String:
+	if _range_host.is_valid_ip_address():
+		return _range_host
+	var ip := IP.resolve_hostname(_range_host, IP.TYPE_IPV4)
+	return ip if ip != "" else _range_host
 
 
 func _exit_tree() -> void:
