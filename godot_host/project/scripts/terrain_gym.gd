@@ -15,8 +15,12 @@
 #                 rough    overlapping pyramids up to the band height
 #                 control  flat, or a gentle radial hump (4 deg ring 1, 8 deg ring 3) —
 #                          the slope check: does the vocabulary split what the gait does not?
-#   field       14.5..18.5 m       overlapping pyramids 10..60 mm, taller outward
-#   edge        45 deg wedges at the floor edge (as the arena), floor 40 x 40 m
+#   field       14.5..25 m: THE BOWL — challenge until failure.  The floor rises exponentially
+#               (0 -> 1.5 m: ~4 deg at 20 m, ~24 deg at the rim) and the pyramids on it grow
+#               exponentially (60 -> 600 mm tall, faces 15 -> 40 deg), ~90 % covered at every
+#               radius.  The robot has climbed pyramids taller than its body; this finds where
+#               it stops.
+#   edge        a raised rim at the floor edge, floor 52 x 52 m
 #
 # HYBRID BUILD: steps and bars need vertical edges, so they are convex primitives (one body
 # per sector, one convex prism per arc segment).  The rough sectors, the slope controls and
@@ -39,9 +43,14 @@ const HEIGHTS: Array = [0.012, 0.018, 0.025, 0.038, 0.050]
 const SLOPE_DEG: Array = [0.0, 4.0, 0.0, 8.0, 0.0]      # control sector: 0 = flat
 const TYPES: Array = ["steps", "bars", "rough", "control"]
 const FIELD_GAP: float = 1.0
-const FIELD_R1: float = 18.5
-const FIELD_H: Array = [0.010, 0.060]
-const FLOOR_HALF: float = 20.0
+const FIELD_R1: float = 25.0
+const FIELD_H: Array = [0.060, 0.600]                   # pyramid height scale at field_r0 / FIELD_R1
+const FIELD_ANG: Array = [15.0, 40.0]                   # pyramid face angle (deg), inner / outer
+const FIELD_COVER: float = 2.3                          # pyramids per mean footprint (~90 % covered)
+const BOWL_TOP: float = 1.5                             # floor elevation at FIELD_R1 (m)
+const BOWL_L: float = 3.5                               # e-folding length of the bowl (m)
+const RIM_W: float = 0.4                                # rim band at the floor edge (m)
+const FLOOR_HALF: float = 26.0
 const GRID: float = 0.04
 const SEG_CHORD: float = 0.40                           # primitive arc segment length (m)
 
@@ -99,13 +108,26 @@ func label_at(x: float, z: float) -> Array:
 		if r >= r0 + BAND and r < r0 + BAND + BUFFER:
 			return ["flat", -1, 0]
 	if r >= field_r0() and r < FIELD_R1:
-		return ["field", -1, int(round(_field_scale(r) * FIELD_H[1] * 1000.0))]
+		return ["field", -1, int(round(field_hmax(r) * 1000.0))]
 	if r < field_r0():
 		return ["flat", -1, 0]
 	return ["edge", -1, 0]
 
-func _field_scale(r: float) -> float:
-	return lerpf(0.4, 1.0, clampf((r - field_r0()) / (FIELD_R1 - field_r0()), 0.0, 1.0))
+func _field_t(r: float) -> float:
+	return clampf((r - field_r0()) / (FIELD_R1 - field_r0()), 0.0, 1.0)
+
+## Pyramid height scale at radius r: exponential from FIELD_H[0] to FIELD_H[1].
+func field_hmax(r: float) -> float:
+	return float(FIELD_H[0]) * pow(float(FIELD_H[1]) / float(FIELD_H[0]), _field_t(r))
+
+## The bowl's floor elevation at radius r: 0 inside the field, exponential to BOWL_TOP at
+## FIELD_R1, continuing to the floor edge (the corners are capped there).
+static func bowl_at(r: float) -> float:
+	var f0: float = field_r0()
+	if r <= f0:
+		return 0.0
+	var b: float = BOWL_TOP / (exp((FIELD_R1 - f0) / BOWL_L) - 1.0)
+	return b * (exp((minf(r, FLOOR_HALF) - f0) / BOWL_L) - 1.0)
 
 # ---- heightmap ----------------------------------------------------------------------------
 
@@ -168,18 +190,39 @@ func _build_heights() -> void:
 				n_pyramids += placed
 			elif t == "control" and float(SLOPE_DEG[k]) > 0.0:
 				_raise_hump(k, sec, tan(deg_to_rad(float(SLOPE_DEG[k]))))
-	# Outer field: overlapping pyramids 10..60 mm, taller outward.
+	# The bowl: pyramids growing exponentially outward, placed shell by shell so the coverage
+	# stays ~FIELD_COVER footprints at every radius, then the bowl floor added under everything.
 	var f0: float = field_r0()
-	var farea: float = PI * (FIELD_R1 * FIELD_R1 - f0 * f0)
-	var fn: int = int(farea * 15.0)                       # ~80 % covered
-	for _i in range(fn):
-		var base: float = _rng.randf_range(0.15, 0.50)
-		var rr: float = sqrt(_rng.randf_range(pow(f0 + base * 0.75, 2), pow(FIELD_R1 - base * 0.75, 2)))
-		var a: float = _rng.randf() * 2.0 * PI
-		var hmax: float = _field_scale(rr) * float(FIELD_H[1])
-		var h: float = _rng.randf_range(float(FIELD_H[0]), maxf(float(FIELD_H[0]), hmax))
-		_raise_pyramid(rr * cos(a), rr * sin(a), base, h, _rng.randf() * 0.5 * PI)
-	n_pyramids += fn
+	var r: float = f0
+	while r < FIELD_R1:
+		var r1: float = minf(r + 0.5, FIELD_R1)
+		var hm: float = field_hmax(0.5 * (r + r1))
+		var ang: float = deg_to_rad(lerpf(float(FIELD_ANG[0]), float(FIELD_ANG[1]), _field_t(0.5 * (r + r1))))
+		var base_mean: float = 2.0 * 0.65 * hm / tan(ang)
+		var n: int = int(PI * (r1 * r1 - r * r) * FIELD_COVER / (base_mean * base_mean))
+		for _i in range(n):
+			var rr: float = sqrt(_rng.randf_range(r * r, r1 * r1))
+			var a: float = _rng.randf() * 2.0 * PI
+			var h: float = _rng.randf_range(0.3, 1.0) * field_hmax(rr)
+			var face: float = deg_to_rad(lerpf(float(FIELD_ANG[0]), float(FIELD_ANG[1]), _field_t(rr)) + _rng.randf_range(-5.0, 5.0))
+			var base: float = 2.0 * h / tan(face)
+			if rr - base * 0.75 < f0:
+				continue                                 # keep the field's inner edge clean
+			_raise_pyramid(rr * cos(a), rr * sin(a), base, h, _rng.randf() * 0.5 * PI)
+			n_pyramids += 1
+		r = r1
+	var rim_h: float = bowl_at(FLOOR_HALF) + 0.5
+	for j in range(nx):
+		var z: float = float(j) * GRID - FLOOR_HALF
+		for i in range(nx):
+			var x: float = float(i) * GRID - FLOOR_HALF
+			var idx: int = j * nx + i
+			if FLOOR_HALF - maxf(absf(x), absf(z)) < RIM_W:
+				heights[idx] = rim_h                     # containment rim
+				continue
+			var rr: float = sqrt(x * x + z * z)
+			if rr > f0:
+				heights[idx] += bowl_at(rr)
 
 # A radial hump across the band (up over the first half, down over the second), tapered to
 # zero over 0.6 m of arc at the sector's sides so there is no lateral cliff.
@@ -286,7 +329,7 @@ func _sector_body(k: int, sec: int, kind: String, contact_mat: PhysicsMaterial, 
 # ---- build --------------------------------------------------------------------------------
 
 ## Adds the whole course under `root`.  `visuals` false skips the heightmap mesh (headless).
-func build(root: Node3D, contact_mat: PhysicsMaterial, wedge_mat: PhysicsMaterial, layer: int, mask: int,
+func build(root: Node3D, contact_mat: PhysicsMaterial, _wedge_mat: PhysicsMaterial, layer: int, mask: int,
 		visuals: bool) -> void:
 	var t0: int = Time.get_ticks_msec()
 	_build_heights()
@@ -329,7 +372,6 @@ func build(root: Node3D, contact_mat: PhysicsMaterial, wedge_mat: PhysicsMateria
 			var t: String = ring_types[k][sec]
 			if t == "steps" or t == "bars":
 				root.add_child(_sector_body(k, sec, t, contact_mat, layer, mask, steps_mat if t == "steps" else bars_mat))
-	_add_edge_wedges(root, wedge_mat, layer, mask)
 	var layout: Array = []
 	for k in range(HEIGHTS.size()):
 		layout.append("%d mm @ %.0f deg: %s" % [int(round(float(HEIGHTS[k]) * 1000.0)), rad_to_deg(float(ring_offset[k])), ",".join(ring_types[k])])
@@ -338,11 +380,13 @@ func build(root: Node3D, contact_mat: PhysicsMaterial, wedge_mat: PhysicsMateria
 	for k in range(layout.size()):
 		print("PicrawlerBody: [gym] TERRAIN ring %d (r %.1f-%.1f m): %s" % [k, ring_r0(k), ring_r0(k) + BAND, layout[k]])
 
-# Contour-style ramp so height is legible at a glance: the bands' 12 / 25 / 38 / 50 mm read as
-# green -> yellow -> orange -> red, and anything taller (the slope humps) as dark red.
-const _RAMP_H: Array = [0.0, 0.012, 0.025, 0.038, 0.050, 0.080]
+# Contour-style ramp so relief is legible at a glance: the bands' 12 / 25 / 38 / 50 mm read as
+# green -> yellow -> orange -> red; the bowl's taller pyramids run purple (0.1-0.2 m) -> blue
+# (0.4 m) -> white (0.6 m).
+const _RAMP_H: Array = [0.0, 0.012, 0.025, 0.038, 0.050, 0.100, 0.200, 0.400, 0.600]
 const _RAMP_C: Array = [Color(0.30, 0.36, 0.30), Color(0.35, 0.62, 0.30), Color(0.85, 0.80, 0.25),
-	Color(0.90, 0.55, 0.20), Color(0.80, 0.25, 0.18), Color(0.45, 0.10, 0.12)]
+	Color(0.90, 0.55, 0.20), Color(0.80, 0.25, 0.18), Color(0.50, 0.15, 0.35), Color(0.30, 0.25, 0.65),
+	Color(0.55, 0.70, 0.90), Color(0.92, 0.94, 0.97)]
 
 static func _height_colour(h: float) -> Color:
 	for i in range(1, _RAMP_H.size()):
@@ -350,7 +394,9 @@ static func _height_colour(h: float) -> Color:
 			return (_RAMP_C[i - 1] as Color).lerp(_RAMP_C[i], (h - float(_RAMP_H[i - 1])) / (float(_RAMP_H[i]) - float(_RAMP_H[i - 1])))
 	return _RAMP_C[_RAMP_C.size() - 1]
 
-# Flat floor plane plus a mesh of every raised heightmap cell, coloured by height.
+# Flat floor plane plus indexed meshes of the raised heightmap: the inner course at the full
+# 4 cm grid, the bowl at 8 cm (collision stays at 4 cm everywhere).  Coloured by RELIEF above
+# the bowl floor, so pyramid size reads the same at any elevation; the bowl shows by shading.
 func _add_floor_visuals(parent: Node3D) -> void:
 	var plane := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
@@ -361,76 +407,66 @@ func _add_floor_visuals(parent: Node3D) -> void:
 	fmat.albedo_color = Color(0.3, 0.35, 0.3, 1.0)
 	plane.set_surface_override_material(0, fmat)
 	parent.add_child(plane)
-	var verts := PackedVector3Array()
-	var norms := PackedVector3Array()
-	var cols := PackedColorArray()
-	# (colour by height: _height_colour)
-	for j in range(nx - 1):
-		for i in range(nx - 1):
-			var i00: int = j * nx + i
-			var h00: float = heights[i00]; var h10: float = heights[i00 + 1]
-			var h01: float = heights[i00 + nx]; var h11: float = heights[i00 + nx + 1]
-			if h00 <= 0.0 and h10 <= 0.0 and h01 <= 0.0 and h11 <= 0.0:
+	var f0: float = field_r0()
+	var inner_half: float = f0
+	_grid_mesh(parent, 1, inner_half, f0 - 0.2, -1.0)
+	_grid_mesh(parent, 2, FLOOR_HALF, 1e9, f0 - 0.2)
+
+# One indexed mesh over the square |x|,|z| <= half at `stride` cells, drawing the cells whose
+# centre radius is in [r_min, r_max) and that are raised (any corner above 0).
+func _grid_mesh(parent: Node3D, stride: int, half: float, r_max: float, r_min: float) -> void:
+	var i0: int = maxi(0, int(floor((FLOOR_HALF - half) / GRID)))
+	var i1: int = mini(nx - 1, int(ceil((FLOOR_HALF + half) / GRID)))
+	var m: int = (i1 - i0) / stride + 1
+	var step: float = GRID * float(stride)
+	var verts := PackedVector3Array(); verts.resize(m * m)
+	var norms := PackedVector3Array(); norms.resize(m * m)
+	var cols := PackedColorArray(); cols.resize(m * m)
+	for b in range(m):
+		var j: int = i0 + b * stride
+		var z: float = float(j) * GRID - FLOOR_HALF
+		for a in range(m):
+			var i: int = i0 + a * stride
+			var x: float = float(i) * GRID - FLOOR_HALF
+			var h: float = heights[j * nx + i]
+			var hl: float = heights[j * nx + maxi(i - stride, 0)]
+			var hr: float = heights[j * nx + mini(i + stride, nx - 1)]
+			var hd: float = heights[maxi(j - stride, 0) * nx + i]
+			var hu: float = heights[mini(j + stride, nx - 1) * nx + i]
+			var v: int = b * m + a
+			verts[v] = Vector3(x, h, z)
+			norms[v] = Vector3(hl - hr, 2.0 * step, hd - hu).normalized()
+			cols[v] = _height_colour(h - bowl_at(sqrt(x * x + z * z)))
+	var idx := PackedInt32Array()
+	for b in range(m - 1):
+		for a in range(m - 1):
+			var v00: int = b * m + a
+			var v10: int = v00 + 1
+			var v01: int = v00 + m
+			var v11: int = v01 + 1
+			if verts[v00].y <= 0.0 and verts[v10].y <= 0.0 and verts[v01].y <= 0.0 and verts[v11].y <= 0.0:
 				continue
-			var x0: float = float(i) * GRID - FLOOR_HALF; var x1: float = x0 + GRID
-			var z0: float = float(j) * GRID - FLOOR_HALF; var z1: float = z0 + GRID
-			var p00 := Vector3(x0, h00, z0); var p10 := Vector3(x1, h10, z0)
-			var p01 := Vector3(x0, h01, z1); var p11 := Vector3(x1, h11, z1)
-			for tri in [[p00, p10, p11], [p00, p11, p01]]:
-				var n: Vector3 = (tri[2] - tri[0]).cross(tri[1] - tri[0]).normalized()
-				for q in tri:
-					verts.append(q)
-					norms.append(n)
-					cols.append(_height_colour(q.y))
-	if verts.is_empty():
+			var cx: float = 0.5 * (verts[v00].x + verts[v11].x)
+			var cz: float = 0.5 * (verts[v00].z + verts[v11].z)
+			var rc: float = sqrt(cx * cx + cz * cz)
+			if rc < r_min or rc >= r_max:
+				continue
+			idx.append_array([v00, v10, v11, v00, v11, v01])
+	if idx.is_empty():
 		return
 	var arr: Array = []
 	arr.resize(Mesh.ARRAY_MAX)
 	arr[Mesh.ARRAY_VERTEX] = verts
 	arr[Mesh.ARRAY_NORMAL] = norms
 	arr[Mesh.ARRAY_COLOR] = cols
+	arr[Mesh.ARRAY_INDEX] = idx
 	var am := ArrayMesh.new()
 	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	var mi := MeshInstance3D.new()
 	mi.mesh = am
-	var m := StandardMaterial3D.new()
-	m.vertex_color_use_as_albedo = true
-	m.roughness = 0.95
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mi.set_surface_override_material(0, m)
-	parent.add_child(mi)
-
-# 45 deg containment wedges along the four floor edges, as the arena's (_build_terrain).
-func _add_edge_wedges(root: Node3D, wedge_mat: PhysicsMaterial, layer: int, mask: int) -> void:
-	var run: float = 1.5
-	var thick: float = 0.3
-	var span: float = 2.0 * FLOOR_HALF
-	var slope_len: float = run * sqrt(2.0)
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.25, 0.30, 0.25, 1.0)
-	mat.roughness = 0.9
-	for e in [[Vector3(1, 0, 0), true], [Vector3(-1, 0, 0), true], [Vector3(0, 0, 1), false], [Vector3(0, 0, -1), false]]:
-		var d: Vector3 = e[0]
-		var along_z: bool = e[1]
-		var body := StaticBody3D.new()
-		body.collision_layer = layer
-		body.collision_mask = mask
-		body.physics_material_override = wedge_mat
-		var bs := BoxShape3D.new()
-		bs.size = Vector3(slope_len, thick, span) if along_z else Vector3(span, thick, slope_len)
-		var cs := CollisionShape3D.new()
-		cs.shape = bs
-		body.add_child(cs)
-		var mi := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = bs.size
-		mi.mesh = bm
-		mi.set_surface_override_material(0, mat)
-		body.add_child(mi)
-		var off: float = thick * 0.25 * sqrt(2.0)
-		var c: Vector3 = d * (FLOOR_HALF + run * 0.5 + off)
-		c.y = run * 0.5 - off
-		var t := Transform3D(Basis(), c)
-		t.basis = Basis(Vector3(0, 0, 1), d.x * deg_to_rad(45.0)) if along_z else Basis(Vector3(1, 0, 0), -d.z * deg_to_rad(45.0))
-		body.transform = t
-		root.add_child(body)
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.95
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.set_surface_override_material(0, mat)
+	parent.add_child(mi)

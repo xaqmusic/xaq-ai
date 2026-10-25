@@ -4080,8 +4080,12 @@ func _world_surface_max(x: float, z: float, half: float) -> float:
 	if ss == null:
 		return 0.0
 	var best: float = 0.0
+	# Rays exactly on a heightmap grid vertex can pass through it (Godot Physics: 273 / 4000 on-vertex
+	# vs 0 / 4000 off-grid, measured 2026-10-25), so every ray is nudged off the 4 cm grid.
 	for o in [Vector2.ZERO, Vector2(half, half), Vector2(-half, half), Vector2(half, -half), Vector2(-half, -half)]:
-		var q := PhysicsRayQueryParameters3D.create(Vector3(x + o.x, 2.0, z + o.y), Vector3(x + o.x, -1.0, z + o.y))
+		var px: float = x + o.x + 0.0137
+		var pz: float = z + o.y + 0.0091
+		var q := PhysicsRayQueryParameters3D.create(Vector3(px, 10.0, pz), Vector3(px, -1.0, pz))
 		q.collision_mask = _LAYER_WORLD
 		var h := ss.intersect_ray(q)
 		if not h.is_empty():
