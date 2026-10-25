@@ -587,10 +587,14 @@ func _update_range_row() -> void:
 	var valid := bool(rd.get("valid", false))
 	var up := bool(rd.get("up", false))
 	var hz := float(rd.get("hz", 0.0))
+	var dz := float(rd.get("deadzone_m", 0.0))
 	if rep_ms != _range_pushed_ms and _range_graph:
 		_range_pushed_ms = rep_ms
+		_range_graph.set("deadzone_m", dz)
 		_range_graph.push(m, valid and up, hz)
-	lbl.text = "range: %s   %.1f Hz" % [("%5.3f m" % m) if valid else "no echo (>%.1f m / glancing)" % m, hz]
+	# The raw reading, always; "→ deadzoned" says what the BRAIN was handed instead.
+	lbl.text = "range: %s   %.1f Hz%s" % [("%5.3f m" % m) if valid else "no echo (>%.1f m / glancing)" % m, hz,
+		("   deadzone %.3f m%s" % [dz, "  → DEADZONED (brain: no echo)" if bool(rd.get("deadzoned", false)) else ""]) if dz > 0.0 else ""]
 	lbl.text += "\n  hip1 " + _front_hip1_text()
 	lbl.tooltip_text = "pings %d   no-echo %d   dropped %d   (ogma_host host_sensors)" % [
 		int(rd.get("pings", 0)), int(rd.get("timeouts", 0)), int(rd.get("dropped", 0))]

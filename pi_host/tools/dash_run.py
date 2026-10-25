@@ -143,7 +143,8 @@ class ConfigEntry:
     # S1 of the MicroDuck port: the senses the config switches on in the sim, as ogma_host
     # flags, so one config publishes the same channels on both.  body_env
     # OGMA_PICRAWLER_ULTRASONIC -> --range, _CAMERA_ROBOT -> --camera, _ODOM -> --odom
-    # (--odom-scale from _ODOM_SCALE), _HONEST_VEL_EGO -> --vel-ego, _CMD_FK_SOURCE -> --cmd-fk.
+    # (--odom-scale from _ODOM_SCALE), _HONEST_VEL_EGO -> --vel-ego, _CMD_FK_SOURCE -> --cmd-fk,
+    # _US_DEADZONE -> --range-deadzone.
     host_flags: tuple = ()
     # The LoadPhaseGait module's id and its configured period (ticks), for the live period keys.
     lpg_id: Optional[str] = None
@@ -248,6 +249,9 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
         flags: list[str] = []
         if str(be.get("OGMA_PICRAWLER_ULTRASONIC", "")) == "1":
             flags.append("--range")
+            dz = str(be.get("OGMA_PICRAWLER_US_DEADZONE", "")).strip()
+            if dz not in ("", "0", "0.0"):
+                flags += ["--range-deadzone", dz]   # leg-occlusion deadzone (2026-10-25), as the sim reads it
         if str(be.get("OGMA_PICRAWLER_CAMERA_ROBOT", "")) == "1":
             flags.append("--camera")
         if str(be.get("OGMA_PICRAWLER_ODOM", "")) == "1":

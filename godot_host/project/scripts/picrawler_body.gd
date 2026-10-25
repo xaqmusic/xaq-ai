@@ -1660,6 +1660,13 @@ const ULTRASONIC_MIN_RANGE_M: float = 0.02338   # commissioned floor (picrawler_
 const ULTRASONIC_HZ: float = 20.0               # driver Config.hz, measured 2026-09-01
 const ULTRASONIC_GLANCE_DEG: float = 30.0       # past this incidence the echo reflects away
 const ULTRASONIC_MOUNT_ABOVE_BOTTOM: float = 0.011   # transducer centre above the chassis bottom
+# NEAR DEADZONE (operator, 2026-10-25; OGMA_PICRAWLER_US_DEADZONE, metres, 0 = off).  On the robot
+# both front legs in front of the two transducers read ~0.06 m — a jump with no approach — while a
+# real obstacle closes through the avoid reflex's 0.5 / 0.15 m first.  A valid reading closer than
+# this goes out as no echo, here exactly as ogma_host --range-deadzone does, so one config means the
+# same sensor on both bodies.  (The sim's rays do not see the legs; the deadzone still applies to
+# anything that close.)
+var ultrasonic_deadzone_m: float = 0.0
 const _US_AZ_DEG: Array = [-7.5, -3.75, 0.0, 3.75, 7.5]   # the ~15 deg lobe, 5 x 3 rays
 const _US_EL_DEG: Array = [-5.0, 0.0, 5.0]
 var _us_range: float = 1.5
@@ -3720,7 +3727,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
-			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_ROOM_SIZE",
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
 			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
@@ -3768,6 +3775,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_HONEST_TORQUE_CAP": honest_torque_cap = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_HONEST_HOLD_CAP":   honest_hold_cap   = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_ULTRASONIC":        ultrasonic_model  = (v != "0" and v != "")
+			"OGMA_PICRAWLER_US_DEADZONE":       ultrasonic_deadzone_m = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_ROOM_SIZE":         room_size         = clampf(v.to_float(), 1.0, 18.0)
 			"OGMA_PICRAWLER_CAMERA_ROBOT":      camera_robot      = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ODOM":              publish_odom      = (v != "0" and v != "")
@@ -10976,6 +10984,8 @@ func _ultrasonic_step() -> void:
 			if -dir.dot(hit.normal) < cos_glance:
 				continue   # reflects away; no echo from this ray
 			best = minf(best, d)
+	if best < INF and ultrasonic_deadzone_m > 0.0 and best < ultrasonic_deadzone_m:
+		best = INF                         # the near deadzone: no information, as on the robot
 	if best < INF:
 		_us_range = maxf(best, ULTRASONIC_MIN_RANGE_M)
 		_us_valid = 1.0

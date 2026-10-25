@@ -122,6 +122,13 @@ struct Args {
     // sensor the planted-leg integrator and the swing clearance read.  Off = the zero-pose
     // form, as P-e was validated.  The dash passes it from body_env OGMA_PICRAWLER_CMD_FK_SOURCE.
     bool   cmd_fk       = false;
+    // The forward ultrasonic's NEAR DEADZONE (operator, 2026-10-25).  The module has two
+    // transducers; when BOTH front legs swing into them it reads ~0.06 m, a jump with no
+    // approach, while a real obstacle closes through the avoid reflex's 0.5 / 0.15 m first.
+    // A valid reading closer than this is published as NO INFORMATION ([max_range, 0], the
+    // no-echo encoding); host_sensors keeps the raw reading and counts the substitutions.
+    // 0 = off.  The dash passes it from body_env OGMA_PICRAWLER_US_DEADZONE, as the sim reads it.
+    double range_deadzone_m = 0.0;
 };
 
 void usage() {
@@ -134,6 +141,7 @@ void usage() {
         "  --actuate tcp://127.0.0.1:5594 publishes the brain's actions to benchd (--cmd-port 5594); needs --brain-inputs\n"
         "  --odom [--odom-scale 2.0] publishes ego_heading / odom / place_in (dead-reckoned); --vel-ego publishes vel_ego\n"
         "  --dump-actions prints the brain's raw action targets every tick (u and target us, before benchd's slew)\n"
+        "  --range-deadzone M publishes a valid range closer than M metres as no-echo (leg occlusion); 0 = off\n"
         "  --cmd-fk publishes feet_y_gravity_cmd_imu from the COMMANDED pose (the sim's CMD_FK_SOURCE=1) instead of the zero pose\n"
         "    from stride_v; both need --brain-inputs and are what the sim's OGMA_PICRAWLER_ODOM / _HONEST_VEL_EGO publish\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
@@ -182,6 +190,7 @@ int main(int argc, char** argv) {
         else if (v == "--odom-scale" && i + 1 < argc)  a.odom_scale = std::atof(argv[++i]);
         else if (v == "--dump-actions")                a.dump_actions = true;
         else if (v == "--cmd-fk")                      a.cmd_fk = true;
+        else if (v == "--range-deadzone" && i + 1 < argc) a.range_deadzone_m = std::atof(argv[++i]);
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
@@ -316,6 +325,7 @@ int main(int argc, char** argv) {
         // fine the whole time -- what was missing was the number beside the embedding.
         struct RawSense {
             double range_m = 0, range_rate = 0; bool range_valid = false; uint64_t range_seq = 0;
+            bool range_deadzoned = false; uint64_t range_deadzoned_n = 0;
             double cam_mean = 0; uint64_t cam_frames = 0;
             double mic_peak = 0; uint64_t mic_windows = 0; uint64_t mic_delivered = 0;
         } raw;
@@ -440,7 +450,10 @@ int main(int argc, char** argv) {
                                        {"hz", per_s(rangefinder.pings() + rangefinder.timeouts())},
                                        {"pings", rangefinder.pings()},
                                        {"timeouts", rangefinder.timeouts()},
-                                       {"dropped", rangefinder.dropped()}}},
+                                       {"dropped", rangefinder.dropped()},
+                                       {"deadzone_m", a.range_deadzone_m},
+                                       {"deadzoned", raw.range_deadzoned},
+                                       {"deadzoned_n", raw.range_deadzoned_n}}},
                             {"camera", {{"mean_level", raw.cam_mean},
                                         {"up", cam.running()},
                                         {"fps", per_s(cam.frames())},
@@ -515,6 +528,7 @@ int main(int argc, char** argv) {
             builder->set_odom_scale(a.odom_scale);
             builder->set_cmd_fk(a.cmd_fk);
             if (a.cmd_fk) std::printf("ogma_host: feet_y_gravity_cmd_imu from the COMMANDED pose (--cmd-fk)\n");
+            if (a.range_deadzone_m > 0.0) std::printf("ogma_host: range deadzone %.3f m (closer valid readings published as no-echo)\n", a.range_deadzone_m);
             if (a.odom || a.vel_ego)
                 std::printf("ogma_host: S1 senses — odom %s (place_in scale %.1f m), vel_ego %s\n",
                             a.odom ? "ON" : "off", a.odom_scale, a.vel_ego ? "ON (stride_v)" : "off");
@@ -737,8 +751,18 @@ int main(int argc, char** argv) {
                     // ping and a wall at 0 m are different facts.
                     // distance_m is already max_range_m on a no-echo ping, so there is
                     // no substitution to make here -- the driver owns that meaning.
-                    f->values[0] = float(r.distance_m);
-                    f->values[1] = r.valid ? 1.0f : 0.0f;
+                    // The near deadzone (see Args::range_deadzone_m): a reading inside it is
+                    // the legs, not the world, so it goes out as no information.
+                    const bool dz = a.range_deadzone_m > 0.0 && r.valid && r.distance_m < a.range_deadzone_m;
+                    if (dz) {
+                        std::lock_guard<std::mutex> lk(inst_mtx);
+                        raw.range_deadzoned = true; ++raw.range_deadzoned_n;
+                    } else {
+                        std::lock_guard<std::mutex> lk(inst_mtx);
+                        raw.range_deadzoned = false;
+                    }
+                    f->values[0] = dz ? float(rangefinder.config().max_range_m) : float(r.distance_m);
+                    f->values[1] = (r.valid && !dz) ? 1.0f : 0.0f;
                     bus->publish("sense.range", f);
                 }
             }

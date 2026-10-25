@@ -73,6 +73,7 @@ public:
     bool start();
     void stop();
     bool running() const { return running_.load(); }
+    const Config& config() const { return cfg_; }
     bool latest(Reading& out);            // false when nothing new since last call
 
     const std::string& last_error() const { return err_; }

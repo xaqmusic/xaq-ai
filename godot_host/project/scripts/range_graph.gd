@@ -26,6 +26,7 @@ var _m: Array[float] = []
 var _ok: Array[bool] = []
 var _live := false
 var _hz := 0.0
+var deadzone_m := 0.0                  # ogma_host --range-deadzone; drawn as a band when set
 
 
 func _ready() -> void:
@@ -64,6 +65,10 @@ func _draw() -> void:
 	var y_close := _y_of(TOO_CLOSE_M, h)
 	draw_rect(Rect2(0, y_close, size.x, h - y_close), Color(0.32, 0.11, 0.11, 0.55))
 	draw_line(Vector2(0, y_close), Vector2(size.x, y_close), Color(1.0, 0.35, 0.35, 0.8), 1.0)
+	if deadzone_m > 0.0:
+		var y_dz := _y_of(deadzone_m, h)
+		draw_rect(Rect2(0, y_dz, size.x, h - y_dz), Color(0.45, 0.45, 0.6, 0.45))
+		draw_string(font, Vector2(size.x - 120, y_dz - 2), "deadzone %.0f mm" % (deadzone_m * 1000.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.75, 0.75, 0.9, 0.9))
 	var y_hor := _y_of(HORIZON_M, h)
 	draw_line(Vector2(0, y_hor), Vector2(size.x, y_hor), Color(1.0, 0.8, 0.4, 0.5), 1.0)
 	draw_string(font, Vector2(2, y_hor - 2), "0.5 m reflex horizon", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.8, 0.4, 0.8))
