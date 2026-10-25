@@ -12,7 +12,8 @@
 //
 // ⚠ The camera was once an ORACLE in this project — the sim's "camera" tested collider
 // identity and never sampled a material, and its optics were invented rather than the
-// OV5647's real 53.5 x 41.4 degrees.  This path reads photons, which is the point, but
+// OV5647's real 53.5 x 41.4 degrees (measured on this robot 2026-10-25: 56.2 x 42.1, level;
+// the 32x32 plane, centre-cropped square, is 42.1 both ways).  This path reads photons, which is the point, but
 // what is DONE with them must stay a transparent sensor reduction: grayscale downsample
 // only, no thresholding for a target, no colour keying.  Selection and belief are the
 // brain's (CLAUDE.md §5.2).

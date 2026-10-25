@@ -2798,6 +2798,13 @@ const RAY_OVERLAY_SELF_OCCLUSION_M: float = 0.12   # hit nearer than this → RE
 # range figure in the plan shifts -- change it here and re-run the Stage-0 characterisation.
 const VISION_FOV_H_RAD: float = 0.9337511          # 53.5 deg horizontal (OV5647)
 const VISION_FOV_V_RAD: float = 0.7225663          # 41.4 deg vertical   (OV5647, 4:3)
+# MEASURED on the robot (operator, 2026-10-25), camera level, belly on the floor so the lens
+# is 40 mm up: the bottom image row meets the floor 104 mm out -> vertical 2*atan(40/104) =
+# 42.1 deg; two objects at that range just entering at the sides are 111 mm apart ->
+# horizontal 2*atan(55.5/104) = 56.2 deg (ratio 1.39, ~4:3).  The robot's plane is the
+# centre-cropped square, so the robot-format camera uses 42.1 deg both ways.  The legacy
+# RGB path (publish_vision) keeps the datasheet values above.
+const CAMERA_ROBOT_FOV_RAD: float = 0.7343477      # 42.08 deg = 2*atan(40/104)
 # RESOLUTION IS THE OPTIC NERVE, NOT THE PHOTORECEPTOR ARRAY -- and it is named as such.
 # A GPU render is unavailable (Godot --headless disables the rendering server entirely, so a
 # SubViewport readback returns null pixels; the Cell hit this and documented it at
@@ -3334,7 +3341,7 @@ func _ready() -> void:
 		vision_res_h = CAMERA_ROBOT_RES
 		brain.register_source("CameraRobot", "sense.camera",
 			"uint8[32×32×1]: the robot's camera plane — luma, the 4:3 frame centre-cropped square (FOV 41.4° both ways), the retinal JL encoder's spec. Egocentric. Instrument-only until admitted.", true)
-		print("PicrawlerBody: CAMERA (robot format) ON — sense.camera 32x32x1 luma, FOV %.1f deg square, capture every %d ticks" % [rad_to_deg(VISION_FOV_V_RAD), VISION_CAPTURE_EVERY])
+		print("PicrawlerBody: CAMERA (robot format) ON — sense.camera 32x32x1 luma, FOV %.1f deg square (measured), capture every %d ticks" % [rad_to_deg(CAMERA_ROBOT_FOV_RAD), VISION_CAPTURE_EVERY])
 	if publish_odom:
 		brain.register_source("Odom", "reality.proprio.odom",
 			"float32[3]: dead-reckoned pose [x m, y m, unwrapped yaw rad] in the body frame at the last reset (x = forward then, y = body +X then), from stride_v under ego_heading (ogma::body::DeadReckon, shared with the robot). Egocentric; drifts.", true)
@@ -11382,8 +11389,8 @@ func _capture_vision() -> void:
 	# axes (the old behaviour) silently stretches the image and misreports every bearing.
 	# camera_robot: the robot's plane is the 4:3 frame centre-cropped SQUARE, so its
 	# horizontal field of view is the sensor's vertical one.
-	var tan_half_h: float = tan((VISION_FOV_V_RAD if camera_robot else VISION_FOV_H_RAD) * 0.5)
-	var tan_half_v: float = tan(VISION_FOV_V_RAD * 0.5)
+	var tan_half_h: float = tan((CAMERA_ROBOT_FOV_RAD if camera_robot else VISION_FOV_H_RAD) * 0.5)
+	var tan_half_v: float = tan((CAMERA_ROBOT_FOV_RAD if camera_robot else VISION_FOV_V_RAD) * 0.5)
 	# ⚠ NO target_collider here any more — see the colour test below.
 	var q := PhysicsRayQueryParameters3D.new()
 	q.collision_mask = 0xFFFFFFFF
@@ -12560,6 +12567,16 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["ter"]   = lab[0]
 		line["ter_k"] = lab[1]
 		line["ter_h"] = lab[2]
+		# The ground AHEAD along the body's heading (0.5 m and 1.0 m: inside the camera's view,
+		# which meets a level floor ~0.26 m out when standing) — the label for the camera study.
+		var fwd: Vector3 = _chassis.global_transform.basis.z
+		var fh: Vector2 = Vector2(fwd.x, fwd.z)
+		if fh.length() > 1e-3:
+			fh = fh.normalized()
+			var a5: Array = _terrain_gym.label_at(chassis_pos.x + 0.5 * fh.x, chassis_pos.z + 0.5 * fh.y)
+			var a10: Array = _terrain_gym.label_at(chassis_pos.x + 1.0 * fh.x, chassis_pos.z + 1.0 * fh.y)
+			line["ter_a5"] = "%s/%d" % [a5[0], a5[2]]
+			line["ter_a10"] = "%s/%d" % [a10[0], a10[2]]
 	if _gym_mode_active == "room":
 		line["wall_contact_ticks"]    = _room_contact_ticks
 		line["wall_contact_episodes"] = _room_contact_episodes
