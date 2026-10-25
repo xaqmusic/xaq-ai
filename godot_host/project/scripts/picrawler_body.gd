@@ -1669,9 +1669,14 @@ var _room_cells: Dictionary = {}                # INSTRUMENT: visited 0.25 m flo
 # sensor's VERTICAL 41.4 deg both ways.  camera_robot renders the sim's raycast camera in
 # exactly that shape and publishes it on the robot's topic, so picrawler_senses.json's
 # epm_vision runs unchanged on both.  It forces vision_res to 32x32; the RGB
-# host.video.color path (publish_vision) is otherwise untouched.  The mount is the sim's
-# "loom eye" (chassis + 0.08 m up); the robot's camera position is not yet measured.
+# host.video.color path (publish_vision) is otherwise untouched.
+# MOUNT (measured on the robot 2026-10-25): the lens is on the chassis FRONT face, 40 mm
+# above the chassis bottom, fixed to the body (it pitches and rolls with it).  Before that
+# the sim used the "loom eye" (chassis origin + 0.08 m world-up) — ~70 mm too high and at the
+# body centre.  Pitch assumed level; FOV is the OV5647 datasheet's (not yet measured).
 @export var camera_robot: bool = false          # OGMA_PICRAWLER_CAMERA_ROBOT=1
+const CAMERA_MOUNT_ABOVE_BOTTOM: float = 0.040  # lens centre above the chassis bottom (m)
+const CAMERA_MOUNT_PROUD: float = 0.003         # lens ahead of the front face (m): rays start outside the chassis
 const CAMERA_ROBOT_RES: int = 32
 var _cam_luma: PackedByteArray = PackedByteArray()
 var _cam_mean: float = 0.0                      # INSTRUMENT: mean luma of the last frame
@@ -11356,6 +11361,10 @@ func _capture_vision() -> void:
 		_last_vision_depth.resize(nw * nh)
 	var chassis_xf: Transform3D = _chassis.global_transform
 	var origin: Vector3  = chassis_xf.origin + Vector3(0.0, 0.08, 0.0)
+	if camera_robot:
+		# The robot's camera, where it is on the robot (see CAMERA_MOUNT_ABOVE_BOTTOM).
+		origin = chassis_xf * Vector3(0.0, _chassis_bottom_local + CAMERA_MOUNT_ABOVE_BOTTOM,
+			CHASSIS_Z * 0.5 + CAMERA_MOUNT_PROUD)
 	var forward: Vector3
 	var right: Vector3
 	var up: Vector3
@@ -11380,6 +11389,8 @@ func _capture_vision() -> void:
 	q.collision_mask = 0xFFFFFFFF
 	q.collide_with_areas = false
 	q.collide_with_bodies = true
+	if camera_robot:
+		q.exclude = [_chassis.get_rid()]   # the lens sits on the chassis face; its own legs stay visible
 	var beacon_hits: int = 0
 	for j in range(nh):
 		var v: float = 1.0 - 2.0 * (float(j) + 0.5) / float(nh)   # top row first
