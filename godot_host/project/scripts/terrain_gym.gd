@@ -338,6 +338,18 @@ func build(root: Node3D, contact_mat: PhysicsMaterial, wedge_mat: PhysicsMateria
 	for k in range(layout.size()):
 		print("PicrawlerBody: [gym] TERRAIN ring %d (r %.1f-%.1f m): %s" % [k, ring_r0(k), ring_r0(k) + BAND, layout[k]])
 
+# Contour-style ramp so height is legible at a glance: the bands' 12 / 25 / 38 / 50 mm read as
+# green -> yellow -> orange -> red, and anything taller (the slope humps) as dark red.
+const _RAMP_H: Array = [0.0, 0.012, 0.025, 0.038, 0.050, 0.080]
+const _RAMP_C: Array = [Color(0.30, 0.36, 0.30), Color(0.35, 0.62, 0.30), Color(0.85, 0.80, 0.25),
+	Color(0.90, 0.55, 0.20), Color(0.80, 0.25, 0.18), Color(0.45, 0.10, 0.12)]
+
+static func _height_colour(h: float) -> Color:
+	for i in range(1, _RAMP_H.size()):
+		if h <= float(_RAMP_H[i]):
+			return (_RAMP_C[i - 1] as Color).lerp(_RAMP_C[i], (h - float(_RAMP_H[i - 1])) / (float(_RAMP_H[i]) - float(_RAMP_H[i - 1])))
+	return _RAMP_C[_RAMP_C.size() - 1]
+
 # Flat floor plane plus a mesh of every raised heightmap cell, coloured by height.
 func _add_floor_visuals(parent: Node3D) -> void:
 	var plane := MeshInstance3D.new()
@@ -352,8 +364,7 @@ func _add_floor_visuals(parent: Node3D) -> void:
 	var verts := PackedVector3Array()
 	var norms := PackedVector3Array()
 	var cols := PackedColorArray()
-	var lo_c := Color(0.36, 0.40, 0.32)
-	var hi_c := Color(0.85, 0.78, 0.55)
+	# (colour by height: _height_colour)
 	for j in range(nx - 1):
 		for i in range(nx - 1):
 			var i00: int = j * nx + i
@@ -370,7 +381,7 @@ func _add_floor_visuals(parent: Node3D) -> void:
 				for q in tri:
 					verts.append(q)
 					norms.append(n)
-					cols.append(lo_c.lerp(hi_c, clampf(q.y / 0.06, 0.0, 1.0)))
+					cols.append(_height_colour(q.y))
 	if verts.is_empty():
 		return
 	var arr: Array = []
