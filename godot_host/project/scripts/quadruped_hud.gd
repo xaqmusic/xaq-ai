@@ -465,7 +465,7 @@ func _process(_delta: float) -> void:
 	if gym_v != null:
 		var gm: String = str(gym_v)
 		if gm == "" or gm == "donut": gm = "arena"
-		gym_hint = "   [1/2] gym: %s" % gm
+		gym_hint = "   [1/2/5/6] gym: %s" % gm
 	# 2026-07-23 — [P] walking-path trail (red X every metre travelled, both gyms).
 	var trail_v: Variant = body.get("_walking_trail")
 	var path_hint: String = ""

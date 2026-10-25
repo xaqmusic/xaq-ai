@@ -3985,6 +3985,10 @@ func _resolve_env() -> void:
 var _world_root: Node3D = null
 var _gym_mode_active: String = ""
 var _gym_mode_override: String = ""   # set by the KEY_1/KEY_2 hotkeys; wins over config/env
+# THE TERRAIN ARENA (gym "terrain", KEY_6) — see scripts/terrain_gym.gd.  Holds the seeded
+# layout, so the per-tick log can label the ground under the chassis from the same spec.
+const _TerrainGym = preload("res://scripts/terrain_gym.gd")
+var _terrain_gym = null
 
 func _build_world() -> void:
 	_world_root = Node3D.new()
@@ -3993,6 +3997,13 @@ func _build_world() -> void:
 	_rebuild_world_contents()
 
 func _rebuild_world_contents() -> void:
+	# The terrain arena builds its own floor (a heightmap); every other gym keeps the box below.
+	var mode0: String = _gym_mode_override if _gym_mode_override != "" \
+		else ExperimentConfig.resolve_picrawler_gym_mode("").to_lower()
+	if mode0 == "terrain":
+		_gym_mode_active = mode0
+		_build_terrain_gym()
+		return
 	var floor_body := StaticBody3D.new()
 	floor_body.set_meta("ogma_floor", true)       # instrument tag (load_log `fcol`); no physics effect
 	floor_body.collision_layer = _LAYER_WORLD
@@ -4044,6 +4055,38 @@ func _rebuild_world_contents() -> void:
 	# terrain seed (0) so all body seeds see the SAME layout — preserves
 	# paired-seed A/B comparability.
 	_build_terrain()
+
+func _build_terrain_gym() -> void:
+	_pyramid_xz_positions.clear()
+	_pyramid_xz_radii.clear()
+	_pyramid_engagement_counts.clear()
+	_pyramid_meshes.clear()
+	_pyramid_default_mats.clear()
+	var sv: String = OS.get_environment("OGMA_PICRAWLER_TERRAIN_SEED")
+	var seed_v: int = 0
+	if sv == "seed":
+		seed_v = OS.get_environment("OGMA_SEED").to_int()
+	elif sv != "":
+		seed_v = sv.to_int()
+	_terrain_gym = _TerrainGym.new(seed_v)
+	_terrain_gym.build(_world_root, _make_contact_mat(), _make_wedge_mat(), _LAYER_WORLD,
+		_world_collision_mask(), DisplayServer.get_name() != "headless")
+	_build_floor_rings()
+
+# Highest world surface under a square of half-width `half` around (x, z), world layer only
+# (the robot is never hit).  Used to drop an in-place reset ONTO raised terrain.
+func _world_surface_max(x: float, z: float, half: float) -> float:
+	var ss := get_world_3d().direct_space_state
+	if ss == null:
+		return 0.0
+	var best: float = 0.0
+	for o in [Vector2.ZERO, Vector2(half, half), Vector2(-half, half), Vector2(half, -half), Vector2(-half, -half)]:
+		var q := PhysicsRayQueryParameters3D.create(Vector3(x + o.x, 2.0, z + o.y), Vector3(x + o.x, -1.0, z + o.y))
+		q.collision_mask = _LAYER_WORLD
+		var h := ss.intersect_ray(q)
+		if not h.is_empty():
+			best = maxf(best, float(h.position.y))
+	return best
 
 func _build_floor_rings() -> void:
 	var ring_radii: PackedFloat32Array = PackedFloat32Array(
@@ -4641,6 +4684,7 @@ func _switch_gym(mode: String) -> void:
 	_pyramid_meshes.clear()
 	_pyramid_default_mats.clear()
 	_nearest_pyramid_idx = -1
+	_terrain_gym = null
 	# Rebuild the world in the new mode.
 	_world_root = Node3D.new()
 	_world_root.name = "WorldRoot"
@@ -6332,6 +6376,9 @@ func _input(event: InputEvent) -> void:
 	elif key == KEY_5:
 		# Live gym swap — drop the experienced robot (brain intact) into the walled ROOM.
 		_switch_gym("room")
+	elif key == KEY_6:
+		# Live gym swap — drop the experienced robot (brain intact) into the TERRAIN arena.
+		_switch_gym("terrain")
 	elif key == KEY_3:
 		# Controlled belly-on-ramp test — drop the experienced robot onto the corridor hump.
 		_teleport_to_ramp()
@@ -6925,7 +6972,15 @@ func _step_one() -> void:
 				var chassis_pos: Vector3 = _chassis.global_transform.origin
 				var chassis_xz: Vector2 = Vector2(chassis_pos.x, chassis_pos.z)
 				var in_place: bool = false
-				if chassis_xz.length() > RING_OUTERMOST_RADIUS:
+				if _gym_mode_active == "terrain" and chassis_xz.length() > RING_OUTERMOST_RADIUS:
+					# Terrain arena: reset where it fell, set down ON the local surface (a
+					# plateau or pyramid under the spawn would otherwise start the legs inside it).
+					var tr: float = minf(chassis_xz.length(), _TerrainGym.FLOOR_HALF - 1.0)
+					var txz: Vector2 = chassis_xz.normalized() * tr
+					_pending_reset_offset = Vector3(txz.x, _world_surface_max(txz.x, txz.y, 0.18), txz.y) \
+						- Vector3(_chassis_rest_xform.origin.x, 0.0, _chassis_rest_xform.origin.z)
+					in_place = true
+				elif chassis_xz.length() > RING_OUTERMOST_RADIUS:
 					var safe_xz: Vector2 = _safe_reset_xz_near(chassis_xz)
 					if not is_inf(safe_xz.x):
 						_pending_reset_offset = Vector3(safe_xz.x, 0.0,
@@ -6959,9 +7014,11 @@ func _step_one() -> void:
 	if auto_reset_on_outer_wall and not _pending_manual_reset:
 		var chassis_pos: Vector3 = _chassis.global_transform.origin
 		var chassis_r: float = Vector2(chassis_pos.x, chassis_pos.z).length()
-		if chassis_r > AUTO_RESET_OUTER_WALL_RADIUS:
+		var wall_r: float = AUTO_RESET_OUTER_WALL_RADIUS if _gym_mode_active != "terrain" \
+			else _TerrainGym.FLOOR_HALF - 0.5
+		if chassis_r > wall_r:
 			print("PicrawlerBody: auto-reset (outer wall: r=%.2f m, threshold=%.2f m)" % [
-				chassis_r, AUTO_RESET_OUTER_WALL_RADIUS])
+				chassis_r, wall_r])
 			auto_reset_count += 1
 			_pending_manual_reset = true
 			_ui_notify("[OUTER WALL] auto-reset at r=%.2f m" % chassis_r)
@@ -12481,6 +12538,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["us_v"]     = _us_valid
 		line["us_true"]  = snappedf(_us_true, 0.0001)
 		line["us_pings"] = _us_pings
+	if _gym_mode_active == "terrain" and _terrain_gym != null:
+		# Scoring-only ground truth (god's-eye; never published to the brain): the terrain
+		# type, band and height under the chassis, from the spec that built the course.
+		var lab: Array = _terrain_gym.label_at(chassis_pos.x, chassis_pos.z)
+		line["ter"]   = lab[0]
+		line["ter_k"] = lab[1]
+		line["ter_h"] = lab[2]
 	if _gym_mode_active == "room":
 		line["wall_contact_ticks"]    = _room_contact_ticks
 		line["wall_contact_episodes"] = _room_contact_episodes
