@@ -25,6 +25,19 @@ const SEND_THROTTLE_S := 0.05
 const US_PER_RAD := 545.2
 const VBAT_MIN := 6.0
 const VBAT_MAX := 8.4
+# The forward ultrasonic is read by ogma_host, not benchd, so it comes from ogma_host's
+# control verb host_sensors (REQ, port 7400) on a WORKER THREAD: a REQ blocks up to its
+# 500 ms timeout when ogma_host is down, and that must never freeze this window.
+const HOST_CTRL_PORT := 7400
+const RANGE_POLL_MS := 100
+# The FSRs: HAT ADC A0-A3 = PHYSICAL FL, FR, RL, RR; the sim legs are mirrored, so sim leg i
+# reads A[FSR_CH_FOR_SIM[i]] (BrainInputs.hpp kFsrChannelForSimLeg).  Contact at 200 counts,
+# grams through the divider's curve, body 598 g — the FsrModel the brain's inputs use.
+const FSR_CH_FOR_SIM := [1, 0, 3, 2]
+const FSR_CONTACT_COUNTS := 200
+const FSR_CURVE := [[60, 0.0], [1536, 30.0], [1920, 50.0], [2118, 100.0], [2362, 175.0], [2603, 300.0], [2925, 500.0]]
+const BODY_MASS_G := 598.0
+const IMU_WHO_AM_I := 0xEA
 
 # physical → sim (the mirror), sim → index, sim colours (keyed by SIM leg, as in
 # picrawler_servo_panel.gd: fl red · fr green · rl blue · rr yellow).
@@ -100,9 +113,30 @@ var _power_seq := -1              # _update_labels runs per FRAME; the graph wan
 var _belly_graph: Control
 var _belly_seq := -1
 var _video: Node                     # VideoClient — receive-only, see VideoClient.hpp
-var _view_tex: TextureRect           # what the CAMERA sees
+
 var _brain_tex: TextureRect          # what the BRAIN sees (the encoder's actual input)
 var _video_lbl: Label
+# Robot POV: the camera in its own movable, resizable window (operator 2026-10-25).
+var _pov_win: Window
+var _pov_tex: TextureRect
+var _pov_lbl: Label
+var _pov_btn: Button
+# Forward ultrasonic (see HOST_CTRL_PORT): the worker writes, the frame reads, under the mutex.
+var _range_graph: Control
+var _range_thread: Thread
+var _range_mutex := Mutex.new()
+var _range_run := false
+var _range_host := ""
+var _range_reply: Dictionary = {}
+var _range_reply_ms := -1
+var _range_pushed_ms := -1
+# Bottom-right POWER panel, fed from the ROBOT (INA219, A4, rail) — the same lines as
+# picrawler-dash's power rows.  In this scene the body's own panel would show the SIM's power
+# model of a suspended body, so the body's model is switched off (_enter_calibrate_mode).
+var _pw_panel: VBoxContainer
+var _pw_lbls: Array = []
+var _pw_prev_us: Array = []
+var _pw_prev_ms := -1
 
 
 func _ready() -> void:
@@ -124,6 +158,17 @@ func _enter_calibrate_mode() -> void:
 	_body.set_process_unhandled_input(false)
 	_body.set_process_unhandled_key_input(false)
 	if _body == null: return
+	# The body's power model ticks while its _power object exists (windowed runs create it),
+	# and its panel would show the SIM's current for a suspended body.  Drop both, and the
+	# label references, so nothing writes into the freed panel.
+	_body.set("power_model", false)
+	_body.set("_power", null)
+	var sim_pw: Variant = _body.get("_pw_panel")
+	if sim_pw is Node and is_instance_valid(sim_pw):
+		(sim_pw as Node).queue_free()
+	_body.set("_pw_panel", null)
+	_body.set("_pw_lbl", [])
+	_body.set("foot_display_external", true)     # the lower legs show the ROBOT's FSRs
 	_body.set("_calibrate_mode", true)
 	_body.set("_calibrate_step", 0)
 	_body.set("_pending_chassis_freeze", 1)
@@ -184,7 +229,10 @@ func _build_ui() -> void:
 	var topv := VBoxContainer.new(); top.add_child(topv)
 	var row := HBoxContainer.new(); topv.add_child(row)
 	row.add_child(_lbl("ogma_benchd @"))
-	_host_edit = LineEdit.new(); _host_edit.text = "picrawler.local"; _host_edit.custom_minimum_size.x = 160
+	_host_edit = LineEdit.new()
+	# OGMA_BENCH_HOST overrides the default (a preview or screenshot run points it somewhere
+	# that does not exist, so the window cannot reach the robot by accident).
+	_host_edit.text = OS.get_environment("OGMA_BENCH_HOST") if OS.get_environment("OGMA_BENCH_HOST") != "" else "picrawler.local"; _host_edit.custom_minimum_size.x = 160
 	row.add_child(_host_edit)
 	row.add_child(_lbl(":%d / :%d" % [REP_PORT, PUB_PORT]))
 	var cb := Button.new(); cb.text = "CONNECT"; cb.pressed.connect(_on_connect); row.add_child(cb)
@@ -201,6 +249,11 @@ func _build_ui() -> void:
 	_imu_btn.toggle_mode = true
 	_imu_btn.pressed.connect(_on_imu_toggle)
 	row.add_child(_imu_btn)
+	_pov_btn = Button.new()
+	_pov_btn.text = "CAMERA POV"
+	_pov_btn.toggle_mode = true
+	_pov_btn.pressed.connect(_on_pov_toggle)
+	row.add_child(_pov_btn)
 	lb.add_theme_color_override("font_color", Color(1, 0.8, 0.3))
 	_link_lbl = _lbl("link: disconnected"); row.add_child(_link_lbl)
 	var banner := HBoxContainer.new(); topv.add_child(banner)
@@ -236,18 +289,18 @@ func _build_ui() -> void:
 	_tele_min_btn = Button.new(); _tele_min_btn.text = "▼"; _tele_min_btn.custom_minimum_size.x = 26
 	_tele_min_btn.pressed.connect(_on_tele_min); lhdr.add_child(_tele_min_btn)
 	var lv := VBoxContainer.new(); lroot.add_child(lv); _tele_content = lv
-	for key in ["vbat", "power", "belly", "adc", "tick_hz", "cost", "cost_split", "mem", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
+	for key in ["range", "belly", "adc", "tick_hz", "cost", "cost_split", "mem", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
 		var l := _lbl(key + ": —"); _tele_lbls[key] = l; lv.add_child(l)
 		if key == "cost":
 			_tick_meter = (load("res://scripts/tick_meter.gd") as Script).new()
 			_tick_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			lv.add_child(_tick_meter)
-		# Sits directly under vbat: the pair is the diagnostic. Sag without draw is a
-		# tired pack; draw without sag is a healthy one. Either alone is ambiguous.
-		if key == "power":
-			_power_graph = (load("res://scripts/current_graph.gd") as Script).new()
-			_power_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			lv.add_child(_power_graph)
+		# The forward ultrasonic, beside the belly ToF it must never be confused with.  Vbat
+		# and current moved to the bottom-right POWER panel (2026-10-25: the two were redundant).
+		if key == "range":
+			_range_graph = (load("res://scripts/range_graph.gd") as Script).new()
+			_range_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			lv.add_child(_range_graph)
 		# Belly contact is a TRANSIENT — a chassis that touches down mid-step and lifts
 		# again is invisible in a mean. The trace is where that shows.
 		if key == "belly":
@@ -269,15 +322,9 @@ func _build_ui() -> void:
 	# because nothing ever displayed what the encoder was actually handed.)
 	lv.add_child(_lbl(" "))
 	lv.add_child(_lbl("CAMERA  (ogma_host :%d — view only)" % VIDEO_PORT, 13))
+	# What the camera sees is in its own window (CAMERA POV); the brain's plane stays here,
+	# small, so the PAIR can still be compared at a glance.
 	var vrow := HBoxContainer.new(); lv.add_child(vrow)
-	var vcol := VBoxContainer.new(); vrow.add_child(vcol)
-	vcol.add_child(_lbl("what the camera sees", 11))
-	_view_tex = TextureRect.new()
-	_view_tex.custom_minimum_size = Vector2(160, 120)
-	_view_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
-	_view_tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	vcol.add_child(_view_tex)
-	vrow.add_child(_lbl(" "))
 	var bcol := VBoxContainer.new(); vrow.add_child(bcol)
 	var blab := _lbl("the BRAIN sees", 11)
 	blab.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
@@ -287,6 +334,7 @@ func _build_ui() -> void:
 	_brain_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
 	_brain_tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # show the pixels, do not smooth them
 	bcol.add_child(_brain_tex)
+	vrow.add_child(_lbl("   the camera itself: CAMERA POV (top bar)", 11))
 	_video_lbl = _lbl("not connected", 11); lv.add_child(_video_lbl)
 
 	# The floating "3-D view = COMMANDED pose" caption used to live here, centred over the
@@ -337,6 +385,65 @@ func _build_ui() -> void:
 	# Draw the scope LAST so it survives the calibration panel being re-opened: siblings
 	# paint in tree order and the scope is created before the panels, so it would
 	# otherwise be buried the moment the operator un-folds calibration.
+	_ui.move_child(_imu_scope, -1)
+	_build_pov_window()
+	_build_power_panel()
+
+
+# The robot's point of view, in a window that moves and resizes inside this one.  Hidden
+# until CAMERA POV; the video is only polled while something shows it.
+func _build_pov_window() -> void:
+	_pov_win = Window.new()
+	_pov_win.title = "Robot POV — what the camera sees (ogma_host :%d)" % VIDEO_PORT
+	_pov_win.size = Vector2i(640, 520)
+	_pov_win.min_size = Vector2i(200, 180)
+	_pov_win.position = Vector2i(320, 110)
+	_pov_win.visible = false
+	_pov_win.close_requested.connect(func(): _pov_win.hide(); _pov_btn.button_pressed = false)
+	add_child(_pov_win)
+	var bg := ColorRect.new(); bg.color = Color(0.06, 0.06, 0.07)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_pov_win.add_child(bg)
+	var vb := VBoxContainer.new()
+	vb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_pov_win.add_child(vb)
+	_pov_tex = TextureRect.new()
+	_pov_tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_pov_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_pov_tex.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_pov_tex.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.add_child(_pov_tex)
+	_pov_lbl = _lbl("not connected", 11)
+	vb.add_child(_pov_lbl)
+
+
+func _on_pov_toggle() -> void:
+	_pov_win.visible = _pov_btn.button_pressed
+
+
+# Bottom-right POWER panel from the robot's telemetry (see _pw_panel).
+func _build_power_panel() -> void:
+	var mono := SystemFont.new()
+	mono.font_names = PackedStringArray(["DejaVu Sans Mono", "Liberation Mono", "Monospace"])
+	_pw_panel = VBoxContainer.new()
+	_pw_panel.name = "RobotPowerPanel"
+	_pw_panel.anchor_left = 1.0; _pw_panel.anchor_right = 1.0
+	_pw_panel.anchor_top = 1.0; _pw_panel.anchor_bottom = 1.0
+	_pw_panel.offset_right = -14; _pw_panel.offset_left = -14 - 560
+	_pw_panel.offset_bottom = -38; _pw_panel.offset_top = -38 - 150
+	_pw_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ui.add_child(_pw_panel)
+	var title := _lbl("POWER — the robot (INA219 · A4 pack divider · rail)", 11)
+	title.add_theme_color_override("font_color", Color(0.7, 0.7, 0.75))
+	_pw_panel.add_child(title)
+	for _k in range(3):
+		var l := _lbl("", 12)
+		l.add_theme_font_override("font", mono)
+		_pw_panel.add_child(l)
+		_pw_lbls.append(l)
+	_power_graph = (load("res://scripts/current_graph.gd") as Script).new()
+	_power_graph.custom_minimum_size = Vector2(560, 76)
+	_pw_panel.add_child(_power_graph)
 	_ui.move_child(_imu_scope, -1)
 
 
@@ -394,13 +501,17 @@ func _fmt_ms(ms: float) -> String:
 	return "%.0f ns" % (ms * 1000000.0)
 
 
-# Whole-robot current (BOM §3). Instrument only — nothing in the brain consumes it yet.
+# Whole-robot current (BOM §3), in the bottom-right panel. Instrument only.
 func _update_power_row() -> void:
+	if _pw_lbls.size() != 3:
+		return
 	var ina_v: Variant = _tele.get("ina")
+	var vbat := float(_tele.get("vbat", 0.0))
+	var rail: Dictionary = _tele.get("rail", {}) if _tele.get("rail") is Dictionary else {}
 	if not (ina_v is Dictionary) or not bool((ina_v as Dictionary).get("ok", false)):
-		_tele_lbls["power"].text = ("power: —   (no INA219, or a daemon that predates it)"
-			if ina_v == null else "power: INA219 not reading")
-		_tele_lbls["power"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		_pw_lbls[0].text = ("power —   pack %5.3f V (A4)   %s" % [vbat, "no INA219, or a daemon that predates it" if ina_v == null else "INA219 not reading"]) if _connected else "power —   not connected"
+		_pw_lbls[0].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		_pw_lbls[1].text = ""; _pw_lbls[2].text = ""
 		return
 	var ina: Dictionary = ina_v
 	var amps := float(ina.get("i_a", 0.0))
@@ -412,20 +523,144 @@ func _update_power_row() -> void:
 	# 10 Hz daemon the trace would be six copies of every sample and the window would
 	# cover 10 s while claiming 60.
 	var seq := int(_tele.get("seq", -1))
-	if _power_graph and seq != _power_seq:
+	var new_frame := seq != _power_seq
+	if _power_graph and new_frame:
 		_power_seq = seq
 		_power_graph.push(amps, ema, peak, charging, busy)
-	# Spent energy belongs on the label, not the graph: it only ever rises, so as a
-	# trace it would say nothing, while as a number it is the budget itself.
-	_tele_lbls["power"].text = "power: %+.3f A  %.3f V   spent %.3f kJ / %.1f A·s%s" % [
-		amps, float(ina.get("v", 0.0)),
-		float(ina.get("energy_j", 0.0)) / 1000.0, float(ina.get("charge_as", 0.0)),
+	# Same lines, same formats as picrawler-dash's power rows (and the sim's panel).  Pack is
+	# the INA219's bus voltage; A4 (the divider) rides beside it — they are two paths to one
+	# number, and the self-check below gates their agreement.
+	_pw_lbls[0].text = "power %+6.3f A   pack %5.3f V (A4 %5.3f)   rail %4.2f V (min1s %4.2f)%s" % [
+		amps, float(ina.get("v", 0.0)), vbat, float(rail.get("v", 0.0)), float(rail.get("min_1s", 0.0)),
 		"   CHARGING" if charging else ""]
+	_pw_lbls[1].text = "slow  ema30 %+6.3f A   peak60 %5.3f   max %5.3f   spent %+7.1f A·s" % [
+		ema, peak, float(ina.get("i_max", 0.0)), float(ina.get("charge_as", 0.0))]
+	# Joint line speed from the daemon's CURRENT pulses (after slew) — the same 10 Hz
+	# measure as the sim panel's, here in commanded µs because the servos report nothing.
+	var servos: Array = _tele.get("servos", [])
+	if new_frame and servos.size() == 12:
+		var now := Time.get_ticks_msec()
+		var us: Array = []
+		var at_lim := 0
+		for s in servos:
+			var d: Dictionary = s if s is Dictionary else {}
+			var c := int(d.get("current_us", 0))
+			us.append(c)
+			if c > 0 and (c <= int(d.get("min_us", 0)) or c >= int(d.get("max_us", 9999))): at_lim += 1
+		if _pw_prev_us.size() == 12 and _pw_prev_ms > 0 and now > _pw_prev_ms:
+			var dt := float(now - _pw_prev_ms) / 1000.0
+			var spd := 0.0
+			var spd_max := 0.0
+			for k in range(12):
+				var v := absf(float(us[k]) - float(_pw_prev_us[k])) / US_PER_RAD / dt
+				spd += v / 12.0
+				spd_max = maxf(spd_max, v)
+			_pw_lbls[2].text = "joints  line speed %4.2f rad/s mean, %4.2f max (10 Hz)   at limit %d" % [spd, spd_max, at_lim]
+		_pw_prev_us = us
+		_pw_prev_ms = now
 	var col := Color(0.9, 0.9, 0.9)
 	if charging: col = Color(0.55, 0.95, 0.55)
 	elif amps >= 3.0: col = Color(1, 0.3, 0.3)
 	elif amps >= 2.25: col = Color(1, 0.85, 0.4)
-	_tele_lbls["power"].add_theme_color_override("font_color", col)
+	_pw_lbls[0].add_theme_color_override("font_color", col)
+
+
+# Forward ultrasonic (from ogma_host, see HOST_CTRL_PORT).  The front legs' hip1 rides on the
+# same row because the question it serves is a GATE: at what hip1 does a leg enter the beam?
+func _update_range_row() -> void:
+	_range_mutex.lock()
+	var rep: Dictionary = _range_reply
+	var rep_ms := _range_reply_ms
+	_range_mutex.unlock()
+	var lbl: Label = _tele_lbls["range"]
+	var r: Variant = rep.get("range")
+	if not _range_run:
+		lbl.text = "range: —   (connect; read from ogma_host :%d)" % HOST_CTRL_PORT
+		lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		return
+	if not (r is Dictionary):
+		lbl.text = "range: no reply from ogma_host :%d (%s)" % [HOST_CTRL_PORT, str(rep.get("error", "waiting"))]
+		lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		return
+	var rd: Dictionary = r
+	var m := float(rd.get("m", 0.0))
+	var valid := bool(rd.get("valid", false))
+	var up := bool(rd.get("up", false))
+	var hz := float(rd.get("hz", 0.0))
+	if rep_ms != _range_pushed_ms and _range_graph:
+		_range_pushed_ms = rep_ms
+		_range_graph.push(m, valid and up, hz)
+	lbl.text = "range: %s   %.1f Hz" % [("%5.3f m" % m) if valid else "no echo (>%.1f m / glancing)" % m, hz]
+	lbl.text += "\n  hip1 " + _front_hip1_text()
+	lbl.tooltip_text = "pings %s   no-echo %s   dropped %s   (ogma_host host_sensors)" % [
+		str(rd.get("pings", "—")), str(rd.get("timeouts", "—")), str(rd.get("dropped", "—"))]
+	lbl.mouse_filter = Control.MOUSE_FILTER_PASS
+	var col := Color(0.9, 0.9, 0.9)
+	if not up: col = Color(1, 0.3, 0.3)
+	elif Time.get_ticks_msec() - rep_ms > 1500: col = Color(1, 0.85, 0.4)
+	lbl.add_theme_color_override("font_color", col)
+
+
+# The physical front legs' hip1, from the map rows (LOAD MAP names the channels): the pulse
+# the daemon is driving now, and the angle it means through that row's sign and origin.
+func _front_hip1_text() -> String:
+	var servos: Array = _tele.get("servos", [])
+	var parts: Array = []
+	for leg in ["FL", "FR"]:
+		for ch in range(12):
+			var d: Dictionary = _rows[ch]
+			if _row_phys(d) == leg and JOINT_OPTIONS[_row_joint_idx(d)] == "hip1":
+				var us: float = d["slider"].value
+				if ch < servos.size() and servos[ch] is Dictionary and int(servos[ch].get("current_us", 0)) > 0:
+					us = float(servos[ch].get("current_us", us))
+				parts.append("%s %4dµs %+.2f" % [leg, int(us), _row_sign(d) * (us - _row_origin(d)) / US_PER_RAD])
+	return ("  ".join(parts) + " rad") if parts.size() else "— LOAD MAP to name the channels"
+
+
+func _range_start(host: String) -> void:
+	_range_stop()
+	_range_host = host
+	_range_run = true
+	_range_thread = Thread.new()
+	_range_thread.start(_range_worker)
+
+
+func _range_stop() -> void:
+	_range_run = false
+	if _range_thread != null and _range_thread.is_started():
+		_range_thread.wait_to_finish()
+	_range_thread = null
+	_range_mutex.lock(); _range_reply = {}; _range_reply_ms = -1; _range_mutex.unlock()
+
+
+# The worker: its own client and socket, used only on this thread.  Receive-only in effect:
+# host_sensors reads the raw sensor values and changes nothing (SPEC §1.1 holds).
+func _range_worker() -> void:
+	var c: Object = ClassDB.instantiate("BenchClient")
+	if c == null:
+		return
+	var ok: bool = c.call("connect_to", _range_host, HOST_CTRL_PORT, HOST_CTRL_PORT + 1)
+	while _range_run:
+		var rep: Dictionary = c.call("request", {"verb": "host_sensors"}) if ok else {"error": "connect failed"}
+		_range_mutex.lock(); _range_reply = rep; _range_reply_ms = Time.get_ticks_msec(); _range_mutex.unlock()
+		OS.delay_msec(RANGE_POLL_MS)
+	c.call("disconnect_from")
+	c.free()
+
+
+func _exit_tree() -> void:
+	_range_stop()
+
+
+# Counts -> grams through FSR_CURVE (BrainInputs FsrModel; below 30 g the curve is unmeasured).
+func _fsr_grams(counts: float) -> float:
+	if counts <= float(FSR_CURVE[0][0]): return 0.0
+	for k in range(1, FSR_CURVE.size()):
+		if counts <= float(FSR_CURVE[k][0]):
+			var p: Array = FSR_CURVE[k - 1]; var q: Array = FSR_CURVE[k]
+			return float(p[1]) + (float(q[1]) - float(p[1])) * (counts - float(p[0])) / (float(q[0]) - float(p[0]))
+	var p2: Array = FSR_CURVE[FSR_CURVE.size() - 2]; var q2: Array = FSR_CURVE[FSR_CURVE.size() - 1]
+	return float(q2[1]) + (float(q2[1]) - float(p2[1])) * (counts - float(q2[0])) / (float(q2[0]) - float(p2[0]))
 
 
 # Belly clearance (BOM §2 #4). Instrument only — the height homeostat this will
@@ -617,12 +852,14 @@ func _on_connect() -> void:
 		_set_status("connect failed: %s" % str(_client.call("last_error")))
 	if _connected:
 		_refresh_poses()
+		_range_start(_host_edit.text)
 
 func _on_disconnect() -> void:
 	# Disconnect is an ACTION, not a closed window (SPEC §4.2.2).  In bench mode the
 	# daemon's deadman limps the robot when the pings stop — say so.
 	var mode := str(_tele.get("mode", "bench"))     # read BEFORE the frame is cleared
 	_client.call("disconnect_from")
+	_range_stop()
 	_connected = false
 	_tele = {}; _tele_ms = -1
 	for d in _rows: d["armed"] = false
@@ -756,13 +993,14 @@ func _update_video() -> void:
 	# Minimised: skip entirely rather than build an ImageTexture nobody draws. Safe to
 	# stop polling because the SUB socket is ZMQ_CONFLATE — at most one frame is ever
 	# queued, so nothing backs up while the panel is closed.
-	if _tele_content != null and not _tele_content.visible:
+	var pov_on := _pov_win != null and _pov_win.visible
+	if not pov_on and _tele_content != null and not _tele_content.visible:
 		return
 	if not bool(_video.call("poll")):
 		return
 	var vi: Image = _video.call("view_image")
-	if vi != null and not vi.is_empty():
-		_view_tex.texture = ImageTexture.create_from_image(vi)
+	if pov_on and vi != null and not vi.is_empty():
+		_pov_tex.texture = ImageTexture.create_from_image(vi)
 	var bi: Image = _video.call("brain_image")
 	if bi != null and not bi.is_empty():
 		_brain_tex.texture = ImageTexture.create_from_image(bi)
@@ -770,6 +1008,8 @@ func _update_video() -> void:
 	_video_lbl.text = "frame %s   %dx%d source   %.1f kB" % [
 		str(info.get("seq", "—")), int(info.get("src_w", 0)), int(info.get("src_h", 0)),
 		float(info.get("bytes", 0)) / 1024.0]
+	if pov_on:
+		_pov_lbl.text = "  " + _video_lbl.text + "   (OV5647 measured 56.2 x 42.1 deg; the brain gets the centre 42.1 deg square)"
 
 
 func _process(delta: float) -> void:
@@ -799,6 +1039,11 @@ func _on_imu_toggle() -> void:
 	if _imu_scope == null:
 		return
 	_imu_scope.visible = _imu_btn.button_pressed
+	# The POWER panel shares the bottom-right corner: step it left while the scope is up.
+	if _pw_panel != null:
+		var shift := (_imu_scope.offset_right - _imu_scope.offset_left + 12.0) if _imu_scope.visible else 0.0
+		_pw_panel.offset_right = -14 - shift
+		_pw_panel.offset_left = -14 - 560 - shift
 	# Say WHY it is empty rather than drawing an idle panel: an absent part and a
 	# disconnected daemon look identical on a scope showing zeros.
 	if _imu_btn.button_pressed and (_imu_src == null or not bool(_imu_src.call("has_data"))):
@@ -875,19 +1120,23 @@ func _update_labels() -> void:
 		_avg = {}
 		for k in _avg_sum: _avg[k] = _avg_sum[k] / float(_avg_n)
 		_avg_sum = {}; _avg_n = 0; _avg_started = now
-		var vbat_avg := float(_avg.get("vbat", 0.0))
-		_tele_lbls["vbat"].text = "Vbat: %.2f V   (min 6.0 V; 1 s mean)" % vbat_avg
-		_tele_lbls["vbat"].add_theme_color_override("font_color", Color(1, 0.3, 0.3) if (vbat_avg > 0.0 and vbat_avg < VBAT_MIN) else Color(0.9, 0.9, 0.9))
+		# FSRs by physical leg, counts and grams (the lower legs in the 3-D view show the
+		# same thing as colour); A4 is the pack divider.
 		var parts: Array = []
+		var legs := ["FL", "FR", "RL", "RR"]
 		for i in range(adc.size()):
 			var a := float(_avg.get("adc%d" % i, 0.0))
-			parts.append("A%d %4d/%.2fV" % [i, int(a), a * 3.3 / 4095.0])
-		_tele_lbls["adc"].text = "adc: " + ("  ".join(parts) if parts.size() else "—")
+			if i < 4:
+				parts.append("%s %4d=%3.0fg" % [legs[i], int(a), _fsr_grams(a)])
+			else:
+				parts.append("A%d %.2fV" % [i, a * 3.3 / 4095.0])
+		_tele_lbls["adc"].text = "fsr: " + ("  ".join(parts) if parts.size() else "—") + "   (1 s mean)"
 		_tele_lbls["tick_hz"].text = "tick_hz: %.2f   (HAT frame 49.95 Hz — a different clock)" % float(_avg.get("tick_hz", 0.0))
 		_tele_lbls["deadman_ms_left"].text = ("deadman_ms_left: %d" % int(_avg.get("deadman", 0.0))) if _tele.get("deadman_ms_left") != null else "deadman: none (brain mode — SPEC §4.2)"
 		_tele_lbls["age"].text = "frame seq %s   age %d ms (1 s mean)" % [str(_tele.get("seq", "—")), int(_avg.get("age", 0.0))]
 	_update_cost_rows()
 	_update_power_row()
+	_update_range_row()
 	_update_belly_row()
 	_tele_lbls["overruns"].text = "overruns: %s   bus_errors: %s" % [str(_tele.get("overruns", "—")), str(_tele.get("bus_errors", "—"))]
 	_tele_lbls["watchdog_trips"].text = "watchdog_trips: %s   low_battery: %s   pi_throttled: %s" % [str(_tele.get("watchdog_trips", "—")), str(_tele.get("low_battery", "—")), str(_tele.get("pi_throttled", "—"))]
@@ -932,8 +1181,36 @@ func _update_labels() -> void:
 	else:
 		_check_lbls["ToF plausible"].text = "○ ToF plausible — not fitted"
 		_check_lbls["ToF plausible"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-	for item in ["IMU WHO_AM_I = 0xEA", "FSR sum ≈ 1.0 BW"]:
-		_check_lbls[item].text = "○ %s — not fitted" % item
+	# IMU: the part answered its identity register and the filter is running.  These were
+	# hard-wired "not fitted" from before the ICM-20948 and the FSRs were on the robot.
+	var chk_imu: Variant = _tele.get("imu")
+	if chk_imu is Dictionary:
+		var im: Dictionary = chk_imu
+		var who := int(im.get("who_am_i", -1))
+		_set_check("IMU WHO_AM_I = 0xEA", _tele_fresh() and bool(im.get("ok", false)) and who == IMU_WHO_AM_I,
+			"0x%02X   |a| %.3f g   disagree %.1f°   bias %s" % [who & 0xFF, float(im.get("a_norm_g", 0.0)),
+				float(im.get("disagree_deg", 0.0)), "ok" if bool(im.get("bias_valid", false)) else "seeding (keep still)"])
+	else:
+		_check_lbls["IMU WHO_AM_I = 0xEA"].text = "○ IMU WHO_AM_I = 0xEA — no imu block (part absent, or a daemon that predates it)"
+		_check_lbls["IMU WHO_AM_I = 0xEA"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	# FSR: standing still on the floor, the four feet should carry about one body weight.
+	# Only meaningful then — on a stand every foot is unloaded, and that is said, not failed.
+	if adc.size() >= 4:
+		var g := 0.0
+		var touching := 0
+		for i in range(4):
+			g += _fsr_grams(float(adc[i]))
+			if int(adc[i]) >= FSR_CONTACT_COUNTS: touching += 1
+		var bw := g / BODY_MASS_G
+		if touching == 0:
+			_check_lbls["FSR sum ≈ 1.0 BW"].text = "○ FSR sum ≈ 1.0 BW — all four feet unloaded (on a stand?)"
+			_check_lbls["FSR sum ≈ 1.0 BW"].add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+		else:
+			_set_check("FSR sum ≈ 1.0 BW", _tele_fresh() and bw >= 0.75 and bw <= 1.25,
+				"%.2f BW (%.0f g of %.0f), %d feet in contact — valid standing still" % [bw, g, BODY_MASS_G, touching])
+	else:
+		_check_lbls["FSR sum ≈ 1.0 BW"].text = "○ FSR sum ≈ 1.0 BW — no adc in telemetry"
+		_check_lbls["FSR sum ≈ 1.0 BW"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 
 	# rows: reflect the daemon's view of each channel
 	var servos: Array = _tele.get("servos", [])
@@ -963,6 +1240,13 @@ func _drive_body() -> void:
 	# hardware is being told, after slew), the slider for the rest.  Only rows with a
 	# known physical leg reach the model.
 	if _body == null: return
+	# The lower legs show the robot's foot sensors: leg colour unloaded, purple at contact
+	# (200 counts), brighter with load.  Stale telemetry clears them rather than freezing.
+	var adc: Array = _tele.get("adc", []) if _tele_fresh() else []
+	if _body.has_method("set_foot_force_display"):
+		for i in range(4):
+			var counts := float(adc[FSR_CH_FOR_SIM[i]]) if adc.size() >= 4 else 0.0
+			_body.call("set_foot_force_display", i, counts >= FSR_CONTACT_COUNTS, _fsr_grams(counts) / BODY_MASS_G)
 	var targets: Variant = _body.get("servo_targets")
 	if not (targets is Array) or targets.size() < 12: return
 	var servos: Array = _tele.get("servos", [])

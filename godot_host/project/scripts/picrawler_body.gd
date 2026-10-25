@@ -370,6 +370,19 @@ const LEG_COLORS: Array = [
 	Color(0.30, 0.50, 0.95, 1.0),   # RL (rear-left)   blue
 	Color(0.95, 0.85, 0.20, 1.0),   # RR (rear-right)  yellow
 ]
+# ---- FOOT FORCE ON THE LOWER LEG (2026-10-25, operator) -----------------------------------
+# A raw FSR count is hard to read, so the lower-leg segment itself shows it: its leg colour
+# while the foot is unloaded, PURPLE once contact is sensed, brighter as the load rises
+# (full at FOOT_SHOW_FULL_LOAD of body weight).  The sim drives it from its own contact and
+# foot_load; the bench dashboard sets foot_display_external and drives it from the robot's
+# FSRs (BrainInputs FsrModel: contact at 200 counts, grams through the divider curve).
+# Visual only — no physics, no brain input; skipped headless.
+const FOOT_SHOW_PURPLE := Color(0.62, 0.25, 0.95)
+const FOOT_SHOW_FULL_LOAD := 0.5
+var foot_display_external: bool = false
+var _foot_show_mats: Array = []        # StandardMaterial3D of each lower-leg mesh
+var _foot_show_base: Array = []        # its leg colour
+var _foot_show_state: Array = [-1.0, -1.0, -1.0, -1.0]   # last shown level (skip redundant writes)
 
 # Episode failure thresholds (chassis-COM-relative).  No paired
 # "alive" thresholds — the reward is graded by chassis_y via the
@@ -6045,6 +6058,35 @@ func _make_segment(mass: float, radius: float, center: Vector3, color: Color) ->
 	add_child(b)
 	return b
 
+## Show one foot's sensed force on its lower-leg segment (see FOOT_SHOW_PURPLE).  `touching`
+## is the contact decision, `load_frac` the load as a fraction of body weight.
+func set_foot_force_display(i: int, touching: bool, load_frac: float) -> void:
+	if _foot_show_mats.size() != 4:
+		_foot_show_mats.clear(); _foot_show_base.clear()
+		for k in range(min(4, _lowers.size())):
+			var mat: StandardMaterial3D = null
+			for c in _lowers[k].get_children():
+				if c is MeshInstance3D:
+					mat = (c as MeshInstance3D).get_surface_override_material(0) as StandardMaterial3D
+					break
+			_foot_show_mats.append(mat)
+			_foot_show_base.append(mat.albedo_color if mat != null else Color.WHITE)
+	if i < 0 or i >= _foot_show_mats.size() or _foot_show_mats[i] == null:
+		return
+	var level: float = clampf(load_frac / FOOT_SHOW_FULL_LOAD, 0.0, 1.0) if touching else -1.0
+	if absf(level - float(_foot_show_state[i])) < 0.02:
+		return
+	_foot_show_state[i] = level
+	var m: StandardMaterial3D = _foot_show_mats[i]
+	if not touching:
+		m.albedo_color = _foot_show_base[i]
+		m.emission_enabled = false
+		return
+	m.albedo_color = FOOT_SHOW_PURPLE.darkened(0.45 * (1.0 - level))
+	m.emission_enabled = true
+	m.emission = FOOT_SHOW_PURPLE
+	m.emission_energy_multiplier = 0.15 + 1.6 * level
+
 func _make_capsule(mass: float, radius: float, height: float, center: Vector3,
 				   color: Color, long_axis_dir: Vector3 = Vector3.UP) -> RigidBody3D:
 	# The rigid body's basis stays IDENTITY (joints depend on it).  We
@@ -8096,6 +8138,9 @@ func _step_one() -> void:
 	var fload := PackedFloat64Array()
 	for i in range(4): fload.append(clamp(_foot_load_ema[i] / _fl_norm(), -2.0, 2.0))
 	brain.publish_proprio(fload, "foot_load")
+	if not foot_display_external and DisplayServer.get_name() != "headless" and _last_foot_contact.size() == 4:
+		for i in range(4):
+			set_foot_force_display(i, _last_foot_contact[i] > 0.5, fload[i])
 	# 2026-08-03 — GROUND-FORCE / AUTHORITY instrument.  jtorque is already normalized to
 	# +-1 against MAX_SERVO_TORQUE, so |t| -> 1 IS saturation.  Two questions this answers:
 	#   tq_mag  — how hard are the legs actually pushing?  (the operator observed the pure-HK
