@@ -9074,3 +9074,21 @@ limit separation, not conditioning (§0 rule 2 checked twice); an unsupervised v
 the largest-variance axes, so the channels that go into ONE EPM matter (kNN gains from combining, the EPM barely). Re-use
 context: one EPM per sense group fused above them (fusion_notes.md), and a terrain test whose zones repeat in varied
 order so time drift cannot pass for terrain.
+
+### 2026-10-25 — TERRAIN ARENA CAPABILITY MAP (gym "terrain", terrain seed = run seed 1-6, 24 000 ticks): both walkers stall at 38-50 mm VERTICAL edges (steps, bars); the bowl is barely reached; the forward ultrasonic's avoid turn costs a third of the reach — `BASELINE` (signal)
+
+Promoted robot config (`…__robot_p1`, 4.22 rad/s) and the ideal-servo reference (`…__sim_s60_p30`, 6 rad/s),
+deployed stack vs ultrasonic OFF (`OGMA_PICRAWLER_ULTRASONIC=0`; operator call, memory
+ultrasonic-off-for-walking-tests). Farthest radius: robot_p1 7.8 ± 2.5 m with the sensor vs 12.1 ± 2.2 m
+without; sim_s60 10.4 ± 5.0 vs 12.0 ± 1.5. Bands entered (of 5): robot 4/1/2/3/4/4 vs 5/5/4/4/4/5. With the
+sensor on, 3 of 6 robot runs spend their last 6000 ticks on flat ground (turned away); off, the failure
+points are 38 mm steps (4 runs), 50 mm steps or bars, and the runs that stall sit on that edge for most of
+the remaining time (steps 41 % of robot ticks, bars 44 % of sim ticks). Bowl: one run per arm entered it
+(robot 16.7 m at the 96 mm pyramid scale; sim 17.5 m at 116 mm, sensor on). 6 rad/s buys path (82-89 m vs
+63-66 m) but not terrain reach (12.0 vs 12.1 m off). Rough sectors (pyramids ≤ band height) and the slope
+humps did not stop either walker: sloped faces are climbable, vertical edges are the limit — a swing-
+clearance problem, the setting a per-terrain choice (G4) would act on. Caveats: the walkers do not choose
+sectors (whatever lies along their heading), so a failure point is "the first impassable feature met";
+the belly-strike count from gc_raw is not yet a validated metric and is not reported. Re-use context: the
+baseline for any per-terrain setting (swing lift on 38-50 mm edges first), and for an ultrasonic gate
+(O72): a gate should recover the sensor-off reach while keeping the walls.
