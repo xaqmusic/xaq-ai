@@ -380,13 +380,12 @@ func build(root: Node3D, contact_mat: PhysicsMaterial, _wedge_mat: PhysicsMateri
 	for k in range(layout.size()):
 		print("PicrawlerBody: [gym] TERRAIN ring %d (r %.1f-%.1f m): %s" % [k, ring_r0(k), ring_r0(k) + BAND, layout[k]])
 
-# Contour-style ramp so relief is legible at a glance: the bands' 12 / 25 / 38 / 50 mm read as
-# green -> yellow -> orange -> red; the bowl's taller pyramids run purple (0.1-0.2 m) -> blue
-# (0.4 m) -> white (0.6 m).
-const _RAMP_H: Array = [0.0, 0.012, 0.025, 0.038, 0.050, 0.100, 0.200, 0.400, 0.600]
-const _RAMP_C: Array = [Color(0.30, 0.36, 0.30), Color(0.35, 0.62, 0.30), Color(0.85, 0.80, 0.25),
-	Color(0.90, 0.55, 0.20), Color(0.80, 0.25, 0.18), Color(0.50, 0.15, 0.35), Color(0.30, 0.25, 0.65),
-	Color(0.55, 0.70, 0.90), Color(0.92, 0.94, 0.97)]
+# Hypsometric ramp by ABSOLUTE height (operator 2026-10-26): the lowest ground is the flat floor's own dark grey, rising
+# through olive, browns and tans; only the highest peaks of the bowl reach pale grey and white.  The bright colours are
+# at the top, where there is least of them.  Thresholds (m) are compressed low so the inner course still shades.
+const _RAMP_H: Array = [0.0, 0.03, 0.10, 0.30, 0.70, 1.20, 1.70, 2.25, 2.50]
+const _RAMP_C: Array = [Color(0.30, 0.35, 0.30), Color(0.31, 0.32, 0.25), Color(0.34, 0.30, 0.22), Color(0.38, 0.31, 0.22),
+	Color(0.45, 0.36, 0.26), Color(0.52, 0.44, 0.33), Color(0.60, 0.53, 0.43), Color(0.76, 0.74, 0.70), Color(0.95, 0.95, 0.95)]
 
 static func _height_colour(h: float) -> Color:
 	for i in range(1, _RAMP_H.size()):
@@ -395,8 +394,8 @@ static func _height_colour(h: float) -> Color:
 	return _RAMP_C[_RAMP_C.size() - 1]
 
 # Flat floor plane plus indexed meshes of the raised heightmap: the inner course at the full
-# 4 cm grid, the bowl at 8 cm (collision stays at 4 cm everywhere).  Coloured by RELIEF above
-# the bowl floor, so pyramid size reads the same at any elevation; the bowl shows by shading.
+# 4 cm grid, the bowl at 8 cm (collision stays at 4 cm everywhere).  Coloured by absolute height
+# (_RAMP_H / _RAMP_C), dark at the floor, white only at the highest peaks.
 func _add_floor_visuals(parent: Node3D) -> void:
 	var plane := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
@@ -436,7 +435,7 @@ func _grid_mesh(parent: Node3D, stride: int, half: float, r_max: float, r_min: f
 			var v: int = b * m + a
 			verts[v] = Vector3(x, h, z)
 			norms[v] = Vector3(hl - hr, 2.0 * step, hd - hu).normalized()
-			cols[v] = _height_colour(h - bowl_at(sqrt(x * x + z * z)))
+			cols[v] = _height_colour(h)
 	var idx := PackedInt32Array()
 	for b in range(m - 1):
 		for a in range(m - 1):
@@ -466,6 +465,7 @@ func _grid_mesh(parent: Node3D, stride: int, half: float, r_max: float, r_min: f
 	mi.mesh = am
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true     # the ramp is written in sRGB like every albedo here; read linear it washed out
 	mat.roughness = 0.95
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mi.set_surface_override_material(0, mat)

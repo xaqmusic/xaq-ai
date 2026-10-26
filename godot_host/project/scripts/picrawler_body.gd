@@ -4134,6 +4134,53 @@ func _world_surface_max(x: float, z: float, half: float) -> float:
 			best = maxf(best, float(h.position.y))
 	return best
 
+# TERRAIN TEST AIDS (instruments, off unless set).  OGMA_PICRAWLER_TERRAIN_SPAWN="x,z[,yaw_deg]": at tick 60 the body is
+# reset to that point, set down on the surface (the in-place reset path).  OGMA_PICRAWLER_PENETRATION=N: every N ticks
+# print {"event":"PEN", ...}: each lower leg's capsule tip against the ground straight under it (an off-grid ray — rays
+# exactly on a heightmap vertex can pass through, 2026-10-25), negative = the tip is below the surface.
+var _ter_spawn_done: bool = false
+func _terrain_test_aids() -> void:
+	if not _ter_spawn_done and tick_counter == 60:
+		_ter_spawn_done = true
+		var sp: String = OS.get_environment("OGMA_PICRAWLER_TERRAIN_SPAWN")
+		if sp != "":
+			var parts := sp.split(",")
+			if parts.size() >= 2:
+				var sx: float = parts[0].to_float()
+				var sz: float = parts[1].to_float()
+				_pending_reset_offset = Vector3(sx, _world_surface_max(sx, sz, 0.18), sz) \
+					- Vector3(_chassis_rest_xform.origin.x, 0.0, _chassis_rest_xform.origin.z)
+				_pending_manual_reset = true
+				print("PicrawlerBody: [terrain] test spawn at (%.2f, %.2f)" % [sx, sz])
+	var pen_every: int = OS.get_environment("OGMA_PICRAWLER_PENETRATION").to_int()
+	if pen_every <= 0 or tick_counter % pen_every != 0:
+		return
+	var ss := get_world_3d().direct_space_state
+	if ss == null:
+		return
+	var tips: Array = []
+	var worst: float = 1.0
+	for i in range(_lowers.size()):
+		var tip: Vector3 = _lowers[i].global_transform.origin
+		for c in _lowers[i].get_children():
+			if c is CollisionShape3D and (c as CollisionShape3D).shape is CapsuleShape3D:
+				var gt: Transform3D = (c as CollisionShape3D).global_transform
+				var half: float = ((c as CollisionShape3D).shape as CapsuleShape3D).height * 0.5
+				var a: Vector3 = gt.origin + gt.basis.y * half
+				var b: Vector3 = gt.origin - gt.basis.y * half
+				tip = a if a.y < b.y else b
+				break
+		var q := PhysicsRayQueryParameters3D.create(Vector3(tip.x + 0.0137, 5.0, tip.z + 0.0091), Vector3(tip.x + 0.0137, -1.0, tip.z + 0.0091))
+		q.collision_mask = _LAYER_WORLD
+		var h := ss.intersect_ray(q)
+		var ground: float = float(h.position.y) if not h.is_empty() else -1.0
+		var gap: float = tip.y - ground
+		worst = minf(worst, gap)
+		tips.append([snappedf(tip.x, 0.001), snappedf(tip.z, 0.001), snappedf(gap, 0.0001)])
+	var cp: Vector3 = _chassis.global_transform.origin
+	print(JSON.stringify({"event": "PEN", "t": tick_counter, "r": snappedf(Vector2(cp.x, cp.z).length(), 0.01),
+		"worst": snappedf(worst, 0.0001), "tips": tips}))
+
 func _build_floor_rings() -> void:
 	var ring_radii: PackedFloat32Array = PackedFloat32Array(
 		[0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0])
@@ -6844,6 +6891,8 @@ func _step_one() -> void:
 	tick_counter += 1
 	if _body_swap_at_tick > 0 and tick_counter == _body_swap_at_tick:
 		_swap_body_geometry()
+	if _gym_mode_active == "terrain":
+		_terrain_test_aids()
 	step_in_episode += 1
 	# Controlled belly-on-ramp test: auto-drop onto the hump at the configured tick
 	# (headless; e.g. after the gait develops).  One-shot.
