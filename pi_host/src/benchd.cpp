@@ -397,6 +397,9 @@ struct State {
     json poses = json::object();                 // name -> {us:[12], saved_at}
     std::string poses_path;
     std::ofstream log;
+    // The record's own lock (2026-10-26).  record() is called with S.m held from many places, and once WITHOUT it — the
+    // telemetry thread's 10 Hz line — so the stream needs a lock of its own.  See the telemetry loop for why.
+    std::mutex log_m;
 
     State(const std::string& dev, const std::string& body_, const std::string& map_path_, const std::string& poses_path_, const std::string& log_path)
         : bus(dev), hat(bus), driver(hat, ServoDriverConfig{40, int(TICK_HZ / 2), TICK_HZ}),
@@ -408,8 +411,9 @@ struct State {
     }
 
     void record(const char* kind, const json& j) {
-        if (!log) return;
         json line = {{"t_mono_ms", mono_ms()}, {"kind", kind}, {"data", j}};
+        std::lock_guard<std::mutex> lk(log_m);
+        if (!log) return;
         log << line.dump() << '\n';
         log.flush();
     }
@@ -826,15 +830,24 @@ struct State {
     void limp_all(const char* why) { rescue(why); }
     // Record the pulses last written to the HAT (caller holds m).  Atomic (write + rename),
     // and only on change, so the 10 Hz telemetry thread costs a tmpfs write at most.
-    void save_known_pulses() {
+    // The pulses to persist, read under S.m; write_known_pulses() then does the file I/O WITHOUT it (see the telemetry
+    // loop).  Returns null when nothing changed since the last write.
+    json known_pulses_snapshot() const {
         json us = json::array();
         for (int c = 0; c < ServoDriver::N; ++c) us.push_back(driver.last_sent_us(c));
-        if (us == last_saved_pulses) return;
+        if (us == last_saved_pulses) return json();
+        return us;
+    }
+    // Called by the telemetry thread only, without S.m.  last_saved_pulses is that thread's own (save_known_pulses,
+    // the locked form, is kept for the rare callers outside the loop and also runs on that thread or before it starts).
+    void write_known_pulses(const json& us) {
+        if (us.is_null()) return;
         const json f = {{"boot_id", read_boot_id()}, {"t_mono_ms", mono_ms()}, {"us", us}};
         const std::string tmp = std::string(kPulseStatePath) + ".tmp";
         { std::ofstream o(tmp); if (!o) return; o << f.dump(); }
         if (std::rename(tmp.c_str(), kPulseStatePath) == 0) last_saved_pulses = us;
     }
+    void save_known_pulses() { write_known_pulses(known_pulses_snapshot()); }
 
     // Begin a staggered, gentle move of many channels.  Channels are ordered by distance
     // to travel (shortest first) so the big swings start last, one every stagger period.
@@ -1450,9 +1463,19 @@ void telemetry_thread(State& S, void* pub) {
         // tick thread waits would make the instrument a cause of what it measures.
         HostSample fresh; bool have_fresh = false;
         if (++host_poll >= 10) { host_poll = 0; fresh = hs.sample(); have_fresh = fresh.ok; }
+        // ⚠ NO DISK I/O UNDER S.m (2026-10-26).  The 50 Hz servo tick needs S.m.  This loop used to append the telemetry
+        // line AND rewrite the pulse-state file (create + rename) while holding it, 10 times a second; on the SD card a
+        // write or a rename can block for 0.1 s to seconds (journal commits, writeback behind the run's audio file), and
+        // the servo tick waited the whole time — the servos froze, then slewed flat out to catch the brain's target
+        // (robot runs 2026-10-26: benchd's state feed paused 0.62, 1.17 and 5.55 s with its seq advancing by 1 — benchd
+        // itself stopped — and ~20 pauses of 115-130 ms per run, no bus errors).  Snapshot under the lock, write after.
         std::string body;
+        json frame, pulses;
         { std::lock_guard<std::mutex> lk(S.m); if (have_fresh) S.host = fresh;
-          json f = S.frame(); body = f.dump(); S.record("telemetry", f); S.save_known_pulses(); }
+          frame = S.frame(); pulses = S.known_pulses_snapshot(); }
+        body = frame.dump();
+        S.record("telemetry", frame);
+        S.write_known_pulses(pulses);
         // ONE frame: "bench " + JSON.  ZMQ_CONFLATE on the subscriber does not support
         // multi-part messages, and SUB filtering is a prefix match, so the topic rides in-band.
         const std::string msg = "bench " + body;
