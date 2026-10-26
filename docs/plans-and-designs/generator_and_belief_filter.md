@@ -135,6 +135,29 @@ re-acquisition must be fast). Both close-form-scored like S1–S6.
 **First creature instrument (G1).** The picrawler sim, robot-faithful inputs: the existing proprio EPM's generator
 predicting per-leg early-swing contact and belly 1 stride ahead. Robot second, from a bench run's brain_diag.
 
+### 5.1 G4 decisions (operator, 2026-10-25)
+
+- **Handle: swing lift**, one handle. Reason: the terrain-arena capability map (ledger 2026-10-25) — both walkers stall
+  at 38-50 mm vertical edges while pyramids and slope humps pass; it is also the robot's dragging problem, and it is
+  already live-tunable.
+- **Situation: terrain edges** (high edges vs flat) first. Depends on G3 separating terrain types on the terrain arena
+  (re-test running 2026-10-25, 20 varied worlds); if it does not, G4 would be measuring the vocabulary, not selection.
+  The frozen leg (already separated, NMI 0.57) is the natural second lever.
+- **Model: continuous, per situation.** A linear outcome model alone always predicts a bound as optimal (no interior
+  minimum), so selection is a **local descent**, not an argmin: each node keeps an operating point u_k; trials dither
+  u_k ± δ (held, see below); RLS fits the local slope β_k of the outcome; u_k steps downhill by a bounded amount;
+  δ anneals with the slope's certainty (count/variance-annealed, CLAUDE.md §5.5). A new node starts from its
+  neighbours' operating point (or the global one).
+- **Outcome (prediction errors, never reward):** early-swing contact (phase predicted air, the foot touched) and the
+  progress deficit (StuckSense, expected vs measured for the commanded speed); tilt variability as the complement
+  (blind-metric check: "always lift high" would also lower early-swing contact).
+- **Exploration: conservative.** Change only when the belief is confident and stable; hold each trial a few hundred
+  ticks; discard a trial whose situation changed mid-way (open question 4, answered); known-safe bounds on u; never
+  explore during distress or recovery. Gain-0 / default off.
+- **Gate:** as §5 — A/B vs the fixed promoted settings on the terrain arena, n ≥ 20 varied worlds, full battery,
+  plus the (d) test (mid-run terrain change / frozen leg: belief switches, setting switches, gait recovers). Sim only
+  until it passes.
+
 ## 6. What "parity with a Kalman filter" would and would not mean
 
 - **Not optimality.** A Kalman filter is optimal only for a linear-Gaussian world with a known model. The substrate's
