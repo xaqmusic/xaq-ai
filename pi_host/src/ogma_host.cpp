@@ -59,6 +59,8 @@
 #include <fstream>
 #include <string>
 #include <sched.h>
+#include <sys/resource.h>
+#include "ogma/hw/AsyncStdout.hpp"
 #include <time.h>
 
 namespace {
@@ -167,6 +169,9 @@ bool try_realtime() {
 } // namespace
 
 int main(int argc, char** argv) {
+    // First, so it is destroyed last: every line printed below reaches the file (see AsyncStdout.hpp for why).
+    ogma::hw::AsyncStdout async_stdout;
+    const bool async_out = async_stdout.start();
     Args a;
     for (int i = 1; i < argc; ++i) {
         const std::string v = argv[i];
@@ -625,6 +630,15 @@ int main(int argc, char** argv) {
         timespec next{};
         clock_gettime(CLOCK_MONOTONIC, &next);
         long ticks = 0, overruns = 0;
+        // THE STALL WITNESS and the re-anchor (2026-10-26; benchd has the same pair).  A tick that wakes more than 80 ms
+        // late prints where the time went: the previous tick's body (w0 -> w1), its tail (w1 -> back at the sleep: the
+        // periodic prints), and how late the sleep returned, with this thread's voluntary (blocked on I/O or a lock)
+        // and involuntary (preempted) context switches since the last tick.  Then, if more than two periods behind,
+        // the deadline re-anchors on now: the missed ticks are dropped, not run back to back on stale inputs.
+        long host_stalls = 0, host_ticks_dropped = 0;
+        double host_stall_max_ms = 0.0, prev_body_ms = 0.0;
+        timespec prev_w1{};
+        rusage ru_prev{}; getrusage(RUSAGE_THREAD, &ru_prev);
         // ⚠ A SENSOR THAT PUBLISHED NOTHING LOOKS EXACTLY LIKE A HEALTHY ONE from
         // outside the process, so the belly channel counts itself and says so at exit.
         // "It ran with --tof and did not crash" is not evidence that a reading reached
@@ -700,6 +714,7 @@ int main(int argc, char** argv) {
         while (g_run && (a.max_ticks == 0 || ticks < a.max_ticks)) {
             next.tv_nsec += period_ns;
             while (next.tv_nsec >= 1000000000L) { next.tv_nsec -= 1000000000L; ++next.tv_sec; }
+            timespec pre_sleep; clock_gettime(CLOCK_MONOTONIC, &pre_sleep);
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, nullptr);
 
             timespec w0, c0;
@@ -707,6 +722,20 @@ int main(int argc, char** argv) {
             clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c0);
             const long late_ns = (w0.tv_sec - next.tv_sec) * 1000000000L + (w0.tv_nsec - next.tv_nsec);
             if (late_ns > period_ns) ++overruns;
+            {
+                rusage ru; getrusage(RUSAGE_THREAD, &ru);
+                const double late_ms = late_ns / 1e6;
+                if (late_ms > 80.0 && ticks > 0) {
+                    const double tail_ms = (pre_sleep.tv_sec - prev_w1.tv_sec) * 1e3 + (pre_sleep.tv_nsec - prev_w1.tv_nsec) / 1e6;
+                    ++host_stalls; host_stall_max_ms = std::max(host_stall_max_ms, late_ms);
+                    std::printf("{\"kind\":\"host_stall\",\"tick\":%ld,\"late_ms\":%.1f,\"prev_body_ms\":%.1f,"
+                                "\"prev_tail_ms\":%.1f,\"vcsw\":%ld,\"ivcsw\":%ld}\n",
+                                ticks, late_ms, prev_body_ms, tail_ms,
+                                ru.ru_nvcsw - ru_prev.ru_nvcsw, ru.ru_nivcsw - ru_prev.ru_nivcsw);
+                }
+                ru_prev = ru;
+                if (late_ns > 2 * period_ns) { host_ticks_dropped += late_ns / period_ns; next = w0; }
+            }
             bool brain_paused = false, inputs_this_tick = false;
 
             // Bridge whatever is NEW onto the Bus, then tick.  Nothing stale is
@@ -1119,6 +1148,8 @@ int main(int argc, char** argv) {
             timespec w1, c1;
             clock_gettime(CLOCK_MONOTONIC, &w1);
             clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c1);
+            prev_w1 = w1;
+            prev_body_ms = (w1.tv_sec - w0.tv_sec) * 1e3 + (w1.tv_nsec - w0.tv_nsec) / 1e6;
             if (budget.sample((w1.tv_sec - w0.tv_sec) * 1000000000L + (w1.tv_nsec - w0.tv_nsec),
                               (c1.tv_sec - c0.tv_sec) * 1000000000L + (c1.tv_nsec - c0.tv_nsec))
                 && !a.quiet && (ticks % int(a.hz * 5) < 25)) {
@@ -1171,6 +1202,10 @@ int main(int argc, char** argv) {
         if (!cam.last_error().empty())         std::fprintf(stderr, "ogma_host: camera died: %s\n", cam.last_error().c_str());
         if (!rangefinder.last_error().empty()) std::fprintf(stderr, "ogma_host: rangefinder died: %s\n", rangefinder.last_error().c_str());
         std::printf("ogma_host: stopped after %ld ticks (%ld overruns)\n", ticks, overruns);
+        std::printf("ogma_host: stalls — %ld ticks woke > 80 ms late (worst %.0f ms), %ld missed ticks dropped; stdout %s "
+                    "(%ld writes > 80 ms, worst %.0f ms, backlog peak %ld B)\n",
+                    host_stalls, host_stall_max_ms, host_ticks_dropped, async_out ? "via the writer thread" : "direct",
+                    async_stdout.slow_writes(), async_stdout.max_write_ms(), async_stdout.max_backlog());
         if (imu) {
             // Same reason the belly channel counts itself: from outside the process an
             // IMU publishing nothing looks exactly like one publishing well.  bias_valid
