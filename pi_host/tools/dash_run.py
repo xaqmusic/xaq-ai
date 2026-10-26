@@ -452,7 +452,8 @@ class RobotIo:
                                     "lift_scale", "clear_ema", "foot_y_cmd", "sc_off", "sag", "swing_frac",
                                     "hk_share", "clip_", "pre_", "c_mass", "amp_leg", "tle_leg",   # per-leg loop state
                                     "stuck_score", "stuck_gate_in", "current_",                                 # the push gates' inputs
-                                    "tuck_", "belly_", "conf_", "selfcol_", "swing_", "track_")                                    # learned stance height, handover, keep-out
+                                    "tuck_", "belly_", "conf_", "selfcol_", "swing_", "track_",                                     # learned stance height, handover, keep-out
+                                    "press_")                                                                                     # the learned stance press (per leg) and its deficit
                             r = dict(r, diag={k: v for k, v in r["diag"].items() if k.startswith(keep)})
                         if r.get("status") == "ok":
                             row["mods"][mid] = r.get("diag", {})
