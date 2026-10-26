@@ -21,6 +21,16 @@
 #               radius.  The robot has climbed pyramids taller than its body; this finds where
 #               it stops.
 #   edge        a raised rim at the floor edge, floor 52 x 52 m
+#   slip        OPTIONAL (2026-10-26, operator: the robot walks off carpet onto slippery vinyl): with
+#               OGMA_PICRAWLER_TERRAIN_SLIP=<mu> a flat low-friction annulus, a 2 mm sheet (top +2 mm), replaces
+#               the rings it overlaps — by default r 2.0-4.5 m, ring 1 and its buffer, so the walker leaves the
+#               grippy spawn straight onto it.  OGMA_PICRAWLER_TERRAIN_SLIP_R="r0,r1" moves it.  The other rings
+#               keep their layouts (every spec is still drawn; only the covered ones are not built).
+#               ⚠ GODOT'S FRICTION RULE (measured, slide test 2026-10-26): when either material is `rough` the
+#               contact takes the rough one's friction (the higher, if both are rough); only two smooth materials
+#               take the lower.  The feet were rough 1.5, so a low-friction floor could never be felt.  With the
+#               sheet on, the body gives its leg segments SMOOTH materials (picrawler_body.gd), and every floor
+#               stays rough: each contact then takes the floor's friction — 1.5 everywhere it was, mu on the sheet.
 #
 # SOLID BUILD (2026-10-26): every piece of ground is a THICK convex solid — a box floor, convex pyramids, the bowl and
 # the slope humps as thick sloped cells (each the convex hull of its corner heights over a bottom far below), steps and
@@ -57,6 +67,18 @@ const FLOOR_HALF: float = 26.0
 const SEG_CHORD: float = 0.40                           # primitive arc segment length (m)
 
 var seed_used: int = 0
+const SLIP_H: float = 0.002                             # the sheet's thickness above the floor (m)
+var slip_mu: float = 0.0                                # 0 = no sheet
+var slip_r: Vector2 = Vector2.ZERO                      # inner, outer radius (m)
+
+## The sheet's friction from the environment; 0 = off.  Read by the body too (its leg materials).
+static func slip_mu_env() -> float:
+	var v: String = OS.get_environment("OGMA_PICRAWLER_TERRAIN_SLIP")
+	return maxf(0.0, v.to_float()) if v != "" else 0.0
+
+## True when ring k is covered by the sheet (not built; labelled slip).
+func ring_covered(k: int) -> bool:
+	return slip_mu > 0.0 and ring_r0(k) < slip_r.y and ring_r0(k) + BAND > slip_r.x
 var ring_offset: Array = []      # per ring: rotation of sector 0 (rad)
 var ring_types: Array = []       # per ring: [type of sector 0..3]
 var n_prisms: int = 0
@@ -70,6 +92,13 @@ static func field_r0() -> float:
 
 func _init(seed_v: int) -> void:
 	seed_used = seed_v
+	slip_mu = slip_mu_env()
+	if slip_mu > 0.0:
+		slip_r = Vector2(CENTRE_R, ring_r0(1))
+		var sr: PackedStringArray = OS.get_environment("OGMA_PICRAWLER_TERRAIN_SLIP_R").split(",")
+		if sr.size() == 2:
+			slip_r = Vector2(sr[0].to_float(), sr[1].to_float())
+		slip_r.y = minf(slip_r.y, field_r0())       # the sheet is flat; the bowl is not
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(seed_v) & 0x7fffffff
 	for _k in range(HEIGHTS.size()):
@@ -94,6 +123,8 @@ func _sector_of(k: int, x: float, z: float) -> int:
 ## peak for slope, the local field height for field).
 func label_at(x: float, z: float) -> Array:
 	var r: float = Vector2(x, z).length()
+	if slip_mu > 0.0 and r >= slip_r.x and r < slip_r.y:
+		return ["slip", -1, int(round(slip_mu * 100.0))]      # "height" carries mu x 100 for the log
 	if r < CENTRE_R:
 		return ["flat", -1, 0]
 	for k in range(HEIGHTS.size()):
@@ -412,7 +443,15 @@ func build(root: Node3D, contact_mat: PhysicsMaterial, _wedge_mat: PhysicsMateri
 	_tv = PackedVector3Array(); _tn = PackedVector3Array(); _tc = PackedColorArray()
 	_build_cells()
 	for p in pyramids:
-		_add_solid(_pyramid_points(p), Vector2(p[0], p[1]))
+		var pr: float = Vector2(p[0], p[1]).length()
+		var covered: bool = false
+		for k in range(HEIGHTS.size()):
+			if ring_covered(k) and pr >= ring_r0(k) and pr < ring_r0(k) + BAND:
+				covered = true
+		if not covered:
+			_add_solid(_pyramid_points(p), Vector2(p[0], p[1]))
+	if slip_mu > 0.0:
+		root.add_child(_slip_body(layer, mask))
 	# The rim: four thick boxes at the floor edge.
 	var rim_h: float = bowl_at(FLOOR_HALF) + 0.5
 	var rim_body := StaticBody3D.new()
@@ -445,7 +484,7 @@ func build(root: Node3D, contact_mat: PhysicsMaterial, _wedge_mat: PhysicsMateri
 	for k in range(HEIGHTS.size()):
 		for sec in range(4):
 			var t: String = ring_types[k][sec]
-			if t == "steps" or t == "bars":
+			if (t == "steps" or t == "bars") and not ring_covered(k):
 				root.add_child(_sector_body(k, sec, t, contact_mat, layer, mask, steps_mat if t == "steps" else bars_mat))
 	var layout: Array = []
 	for k in range(HEIGHTS.size()):
@@ -453,7 +492,58 @@ func build(root: Node3D, contact_mat: PhysicsMaterial, _wedge_mat: PhysicsMateri
 	print("PicrawlerBody: [gym] TERRAIN seed %d: %d prisms, %d pyramids, %d ground cells, %d bodies (solid build), built in %d ms" % [
 		seed_used, n_prisms, n_pyramids, n_cells, _chunks.size() + 2, Time.get_ticks_msec() - t0])
 	for k in range(layout.size()):
-		print("PicrawlerBody: [gym] TERRAIN ring %d (r %.1f-%.1f m): %s" % [k, ring_r0(k), ring_r0(k) + BAND, layout[k]])
+		print("PicrawlerBody: [gym] TERRAIN ring %d (r %.1f-%.1f m): %s%s" % [k, ring_r0(k), ring_r0(k) + BAND, layout[k],
+			"  — COVERED by the slip sheet, not built" if ring_covered(k) else ""])
+	if slip_mu > 0.0:
+		print("PicrawlerBody: [gym] TERRAIN SLIP sheet r %.1f-%.1f m, mu %.2f (rough; the legs are smooth, so the floor's mu applies)" % [
+			slip_r.x, slip_r.y, slip_mu])
+
+# The slip sheet: annular prism segments, top SLIP_H above the floor, bottom sunk into it (static bodies do not collide
+# with each other, and a foot resting on the sheet never reaches the floor's top 2 mm below).  Rough, at slip_mu.
+func _slip_body(layer: int, mask: int) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	body.name = "TerrainSlip"
+	body.collision_layer = layer
+	body.collision_mask = mask
+	var m := PhysicsMaterial.new()
+	m.friction = slip_mu
+	m.rough = true
+	m.bounce = 0.0
+	m.absorbent = true
+	body.physics_material_override = m
+	_pv = PackedVector3Array()
+	_pn = PackedVector3Array()
+	var n_seg: int = maxi(24, int(ceil(2.0 * PI * slip_r.y / SEG_CHORD)))
+	for s in range(n_seg):
+		var a0: float = 2.0 * PI * float(s) / float(n_seg)
+		var a1: float = 2.0 * PI * float(s + 1) / float(n_seg)
+		# Outer radius over cos(half-angle): the chord stays outside slip_r.y, so the polygon covers the annulus.
+		var ro: float = slip_r.y / cos(PI / float(n_seg))
+		var v: PackedVector3Array = _prism(slip_r.x, ro, slip_r.x, ro, SLIP_H, a0, a1)
+		var shape := ConvexPolygonShape3D.new()
+		shape.points = v
+		var cs := CollisionShape3D.new()
+		cs.shape = shape
+		body.add_child(cs)
+		if _vis:
+			_add_prism_mesh(v)
+	if _vis:
+		var arr: Array = []
+		arr.resize(Mesh.ARRAY_MAX)
+		arr[Mesh.ARRAY_VERTEX] = _pv
+		arr[Mesh.ARRAY_NORMAL] = _pn
+		var am := ArrayMesh.new()
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		var vm := StandardMaterial3D.new()
+		vm.albedo_color = Color(0.55, 0.60, 0.66)      # cool grey-blue vinyl, glossy: reads as "slick" at a glance
+		vm.roughness = 0.15
+		vm.metallic_specular = 0.8
+		vm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		var mi := MeshInstance3D.new()
+		mi.mesh = am
+		mi.set_surface_override_material(0, vm)
+		body.add_child(mi)
+	return body
 
 # Hypsometric ramp by ABSOLUTE height (operator 2026-10-26): the lowest ground is the flat floor's own dark grey, rising
 # through olive, browns and tans; only the highest peaks of the bowl reach pale grey and white.  The bright colours are

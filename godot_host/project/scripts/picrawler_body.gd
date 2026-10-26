@@ -304,7 +304,7 @@ var _limb_mat: PhysicsMaterial = null
 func _make_limb_mat() -> PhysicsMaterial:
 	if _limb_mat == null:
 		_limb_mat = PhysicsMaterial.new()
-		_limb_mat.rough     = true
+		_limb_mat.rough     = _TerrainGym.slip_mu_env() <= 0.0   # smooth under the slip sheet (see _make_leg_contact_mat)
 		_limb_mat.bounce    = 0.0
 		_limb_mat.absorbent = true
 	_limb_mat.friction = limb_friction    # re-read so the slider works live
@@ -324,6 +324,23 @@ func set_limb_friction(v: float) -> void:
 	limb_friction = clampf(v, 0.0, 3.0)
 	if _limb_mat != null:
 		_limb_mat.friction = limb_friction
+
+# THE LEGS UNDER THE SLIP SHEET (terrain_gym.gd, OGMA_PICRAWLER_TERRAIN_SLIP).  Godot gives a contact the `rough`
+# side's friction whenever either side is rough (slide test, 2026-10-26), so rough feet at 1.5 grip any floor at 1.5 at
+# least.  With the sheet on, the leg segments are SMOOTH (same mu): against every rough floor the contact takes the
+# floor's friction — 1.5 on all the old ground, identical — and the sheet's own mu on the sheet.  Off: the shared
+# rough contact material, unchanged.
+var _leg_smooth_mat: PhysicsMaterial = null
+func _make_leg_contact_mat() -> PhysicsMaterial:
+	if _TerrainGym.slip_mu_env() <= 0.0:
+		return _make_contact_mat()
+	if _leg_smooth_mat == null:
+		_leg_smooth_mat = PhysicsMaterial.new()
+		_leg_smooth_mat.friction  = _make_contact_mat().friction
+		_leg_smooth_mat.rough     = false
+		_leg_smooth_mat.bounce    = 0.0
+		_leg_smooth_mat.absorbent = true
+	return _leg_smooth_mat
 
 var _slick_mat: PhysicsMaterial = null
 func _make_slick_mat() -> PhysicsMaterial:
@@ -6104,7 +6121,7 @@ func _make_segment(mass: float, radius: float, center: Vector3, color: Color) ->
 	b.collision_mask  = _LAYER_WORLD
 	b.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
 	b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
-	b.physics_material_override = _make_contact_mat()
+	b.physics_material_override = _make_leg_contact_mat()
 	var cs := CollisionShape3D.new()
 	var sp := SphereShape3D.new()
 	sp.radius = radius
@@ -6164,7 +6181,7 @@ func _make_capsule(mass: float, radius: float, height: float, center: Vector3,
 	b.collision_mask  = _LAYER_WORLD
 	b.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
 	b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
-	b.physics_material_override = _make_contact_mat()
+	b.physics_material_override = _make_leg_contact_mat()
 	var orient: Basis = Basis.IDENTITY
 	if long_axis_dir.distance_to(Vector3.UP) > 0.001:
 		orient = Basis(Quaternion(Vector3.UP, long_axis_dir.normalized()))
@@ -6318,7 +6335,7 @@ func _input(event: InputEvent) -> void:
 		# Slick feet so hip1 yaw isn't blocked by floor friction; zero
 		# body damping so motor impulse isn't bled off before it
 		# produces angular velocity.
-		var mat: PhysicsMaterial = _make_slick_mat() if _motor_test_mode else _make_contact_mat()
+		var mat: PhysicsMaterial = _make_slick_mat() if _motor_test_mode else _make_leg_contact_mat()
 		for lower in _lowers:
 			lower.physics_material_override = mat
 		var damp_value: float = 0.0 if _motor_test_mode else BODY_ANGULAR_DAMP

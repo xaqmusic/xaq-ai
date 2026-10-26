@@ -9220,3 +9220,49 @@ reach the handle, solved by IK (the open proposal).
 > **benchd, same deploy:** once off the lock, the 10 Hz `vcgencmd get_throttled` that follows each 1 Hz `pmic_read_adc`
 > takes 104–105 ms, every time, at idle. With the poll under S.m that was a ~5-tick servo freeze every second, plus the
 > catch-up burst after it. New benchd: 0 stalls, 0 overruns, 0 dropped ticks in the first minute.
+
+### 2026-10-26 — ROBOT: `level_int_zero_mean` lets the press hold the belly — median 48–52 → 61–63 mm (target 60), stance shins 32° → 22° from vertical, belly drops below 30 mm on vinyl 9.2 → 1.4 % — `WORKING` (signal, n = 2 runs against 1); and the remaining pauses are ogma_host's own stalls, not benchd's
+
+**Robot (robot_p1_presskin_lz, two runs, 193 s and ~226 s, carpet then vinyl).** The two integrators no longer fight.
+`level_off` stays differential (sum ~0, |offset| ≤ 0.27), `press_a` stays within ±0.11, and the press deficit sits
+near zero. Belly ToF median: 62.2 / 61.2 mm over the first 100 s and 61.2 / 63.2 mm after (the presskin run: 52.2 /
+48.2). Stance shin tilt, median over planted legs: 21–26° (presskin 32°). On vinyl in the second run the belly fell
+below 30 mm in 1.4 % of frames, with the 10th percentile at 44 mm (presskin: 9.2 %, 30 mm). The operator saw clean
+steps on the vinyl by 134 s. The first run's vinyl section is less clean (7.8 % below 30 mm). Two runs is a signal,
+not a finding.
+
+**Pauses.** benchd recorded 0 stalls, 0 overruns and 0 dropped ticks in both runs; its 50 Hz feed has no gap over 100
+ms. ogma_host itself froze 0.7–3.6 s eight times (brain_diag: one 3.58 s gap with a single tick). After each freeze it
+ran the missed ticks at roughly twice the normal rate, the same replay benchd had. Its stdout, one JSON line per tick,
+goes to a file on the SD card. Fix built (`AsyncStdout`: stdout through a pipe and a writer thread; a stall witness; missed
+ticks dropped), not yet deployed.
+
+**Power-off.** The second run's files were cut short: meta.json 0 bytes, events and log truncated. The operator
+powered off ~4 s after the end, inside Linux's 30 s writeback window. picrawler-dash now calls `sync` at the end of
+every run and shows SAFE TO POWER OFF.
+
+### 2026-10-26 — SIM: a slippery floor could not exist — Godot gives a contact the `rough` material's friction, and the feet were rough at 1.5; the SLIP SHEET (terrain gym, `OGMA_PICRAWLER_TERRAIN_SLIP`) — fidelity fix and instrument, not a lever
+
+**The rule, measured** (`scripts_tools/friction_slide/`, a box launched at 2 m/s, mu = decel / g). When either material
+is rough, the contact takes the rough one's friction (the higher, if both are rough). Only two smooth materials take
+the lower. smooth 0.3 on rough 1.5 → 1.52; rough 1.5 on smooth 0.3 → 1.52; rough 1.5 on rough 0.3 → 1.52; smooth 1.5
+on smooth 0.3 → 0.31. **Two older instruments were inert because of it.** The chassis material (smooth, 0.20) drags at
+the floor's 1.5. The per-foot slick ablation (smooth 0.05 on one lower leg) left that foot gripping at 1.5. Treat any
+verdict that leaned on either as `DEAD_CODE` until re-measured (a separate task is open for the chassis).
+
+**The sheet.** A 2 mm rough sheet at mu over r 2.0–4.5 m (default) replaces ring 1 and its buffer; `_R="r0,r1"` moves
+it. With it on, every leg segment (sphere and capsule) is smooth at 1.5, so each contact takes the floor's friction:
+1.5 on all the old ground, mu on the sheet. Inert when off and identical when on but unused: arena run with the env
+set vs unset, 32 body-log lines byte-identical. **First build was a harness defect:** only the sphere segments got the
+smooth material, the lower-leg capsules kept the rough one, and the sheet at mu 0.05 and 0.3 gave identical runs to the
+last digit. The capsule fix made it act.
+
+**What the sim gait does on it** (robot_p1_presskin_lz, spawn on a wide sheet r 2–8 m, 2 seeds × 3000 ticks, speed on
+the sheet): mu 0.25 → 9.9 cm/s, 0.20 → 8.9, 0.16 → 7.8, 0.12 → 7.4, 0.08 → 5.5, 0.05 → barely moves (1.5 m in a run
+that covers 5–6 m at mu 0.3). The belly does not drop at any mu (67–70 mm): the sim's legs do not splay the way the
+robot's do, so the sim reproduces the loss of traction but not the robot's sinking. `BASELINE` (n = 2 per mu).
+Config `…robot_p1_presskin_lz_slipsim.json` (mu 0.1) is in the launcher; press [6] for the terrain gym.
+
+**Re-use context.** A study of slip adaptation needs a percept of slip first (CLAUDE.md §1 step 2): the yaw the
+planted feet predict against the gyro, or the stride odometry against vision. A sim belly that sinks on low friction
+would need the robot's splay mechanism (servo compliance under a sprawled stance) in the servo model.
