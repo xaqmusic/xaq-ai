@@ -9211,3 +9211,12 @@ femur and shin tilt per leg.
 **Re-use context.** If `_lz` still cannot raise the belly, the next suspect is the press's own reach. A planted leg
 whose shin is 30–40° off vertical turns more of its push into splay on a low-friction floor. That would make stance
 reach the handle, solved by IK (the open proposal).
+
+> **Addendum (same day).** The operator puts the carpet → vinyl change at ~100 s of run time. The belly ToF agrees.
+> Over 50–100 s: median ~52 mm, 10th percentile ~38 mm, 4 % of frames below 30 mm. Over 100–300 s: median ~47 mm,
+> 10th percentile ~31 mm, 10 % below 30 mm, with 10 s bins at 16–20 %. The upward excursions also stop (90th percentile
+> 62–69 → 53–61 mm). So on vinyl the chassis drops more often and never rises, which fits feet sliding out under a
+> splayed stance. The commanded geometry cannot show a slide (no joint feedback); the drops can.
+> **benchd, same deploy:** once off the lock, the 10 Hz `vcgencmd get_throttled` that follows each 1 Hz `pmic_read_adc`
+> takes 104–105 ms, every time, at idle. With the poll under S.m that was a ~5-tick servo freeze every second, plus the
+> catch-up burst after it. New benchd: 0 stalls, 0 overruns, 0 dropped ticks in the first minute.
