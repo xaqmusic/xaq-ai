@@ -1,32 +1,35 @@
-# Offline check of the terrain arena spec (no physics): heightmap coverage and peaks per label,
-# and that label_at agrees with where the heights are.  godot4 --headless --path . -s scripts_tools/terrain_gym_check.gd
+# Offline check of the terrain arena's solid build (no physics stepping): how many pyramids sit in each labelled region
+# and how tall they reach, the ground cells, and the build times with and without visuals.
+# godot4 --headless --path . -s scripts_tools/terrain_gym_check.gd   (OGMA_PICRAWLER_TERRAIN_SEED picks the layout)
 extends SceneTree
 func _init() -> void:
 	var G = load("res://scripts/terrain_gym.gd")
 	var seed_v: int = int(OS.get_environment("OGMA_PICRAWLER_TERRAIN_SEED")) if OS.get_environment("OGMA_PICRAWLER_TERRAIN_SEED") != "" else 0
 	var g = G.new(seed_v)
-	g._build_heights()
+	var root := Node3D.new()
+	get_root().add_child(root)
+	var pm := PhysicsMaterial.new()
+	var t0 := Time.get_ticks_msec()
+	g.build(root, pm, pm, 1, 1, false)
+	print("build without visuals: %d ms" % (Time.get_ticks_msec() - t0))
 	var stats: Dictionary = {}
-	for j in range(0, g.nx, 2):
-		for i in range(0, g.nx, 2):
-			var x: float = float(i) * G.GRID - G.FLOOR_HALF
-			var z: float = float(j) * G.GRID - G.FLOOR_HALF
-			var lab: Array = g.label_at(x, z)
-			var key: String = "%s/%d" % [lab[0], lab[1]]
-			if not stats.has(key):
-				stats[key] = [0, 0, 0.0]
-			var h: float = g.heights[j * g.nx + i]
-			stats[key][0] += 1
-			if h > 0.0:
-				stats[key][1] += 1
-			stats[key][2] = maxf(stats[key][2], h)
+	for p in g.pyramids:
+		var lab: Array = g.label_at(p[0], p[1])
+		var key: String = "%s/%d" % [lab[0], lab[1]]
+		if not stats.has(key):
+			stats[key] = [0, 0.0]
+		stats[key][0] += 1
+		stats[key][1] = maxf(stats[key][1], p[4] - g.ground_h(p[0], p[1]))
 	var keys: Array = stats.keys()
 	keys.sort()
 	for k in keys:
-		print("%-12s cells %7d  raised %5.1f %%  peak %.1f mm" % [k, stats[k][0], 100.0 * stats[k][1] / stats[k][0], stats[k][2] * 1000.0])
-	var t0: int = Time.get_ticks_msec()
-	var holder := Node3D.new()
-	g._add_floor_visuals(holder)
-	print("visual mesh built in %d ms" % (Time.get_ticks_msec() - t0))
-	holder.free()
+		print("%-12s pyramids %6d   tallest above the ground %.1f mm" % [k, stats[k][0], stats[k][1] * 1000.0])
+	print("ground cells %d, bowl at 20 m %.3f m, at the rim %.3f m" % [g.n_cells, G.bowl_at(20.0), G.bowl_at(25.0)])
+	root.free()
+	var g2 = G.new(seed_v)
+	var root2 := Node3D.new()
+	get_root().add_child(root2)
+	t0 = Time.get_ticks_msec()
+	g2.build(root2, pm, pm, 1, 1, true)
+	print("build with visuals: %d ms" % (Time.get_ticks_msec() - t0))
 	quit()

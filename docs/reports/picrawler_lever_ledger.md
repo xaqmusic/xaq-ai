@@ -9149,3 +9149,18 @@ differ much between edges and flat (swing contact 35-45 % on both), so no vocabu
 the walker is not terrain-sensitive at the two-stride scale. Re-use context: the faster servo (rear binding is loud at
 6 rad/s, 57 vs 31 %), event-scale features (the contact error AT an edge rather than over two strides), or the camera's
 look-ahead; on the robot the height/press and power problems come first.
+
+### 2026-10-26 — TERRAIN ARENA REBUILT FROM SOLIDS: the heightmap ground let a fast foot through (the operator's front-leg fall-through and physics explosion at the bowl's edge); thick convex solids hold — fidelity fix, not a lever
+
+Godot Physics' HeightMapShape3D is a zero-thickness surface. Leg-sized capsules (r 12 mm, 75 mm, 0.15 kg) launched down
+at 3 m/s from 15 mm above flat heightmap ground went through 6 / 300 times; a 0.1 m box floor stopped all of them up to
+5 m/s; gentle footfalls held on both (0 / 1600 on the heightmap). (A first drop test pressed a 25 g capsule with 3 N —
+12 g — and "showed" every shape leaking; a test that exceeds the foot's real speeds measures tunnelling, not the
+ground.) The arena is now a box floor, every pyramid a convex solid (base 1 cm under the ground beneath it), the bowl and
+slope humps thick convex cells (0.5 / 0.25 m), a box rim, in 66 static bodies; the same random draws keep every seed's
+layout (17 294 pyramids at seed 0); build 0.5 s; drawn from the same solids. Drops: 0 deep failures on flat ground, the
+inner rings and the inner bowl at 0 / 3 / 5 m/s; on the steep outer bowl 1 / 1800 capsules wedged into the seam between
+two cells down to the floor box (a seam between adjacent convex cells, not a thin surface). Robot walk-outs from the
+bowl's edge (5 × 8000 ticks, press at 80 mm, to r 21.3 m): worst leg tip 13 mm below the surface, 0 resets. Capability
+and G3 numbers on the terrain arena before this date were measured on the heightmap ground. Re-use context: larger bowl
+cells (fewer seams) if the outer-bowl seam ever shows in a run.
