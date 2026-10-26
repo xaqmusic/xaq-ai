@@ -40,6 +40,7 @@ const _SLIDERS: Array = [
 	{"key": "press_target_m",      "label": "press target (m)",           "min": 0.03, "max": 0.10, "step": 0.005},
 	{"key": "press_learn_rate",    "label": "press learner rate (0 off)", "min": 0.0,  "max": 0.05, "step": 0.005},
 	{"key": "press_phase",         "label": "press over phase (0/1)",     "min": 0.0,  "max": 1.0,  "step": 1.0},
+	{"key": "press_kin",           "label": "press follows leg kinematics (0/1)", "min": 0.0, "max": 1.0, "step": 1.0},
 	{"key": "tuck_learn_target_m", "label": "femur target (m)",           "min": 0.03, "max": 0.10, "step": 0.005},
 	{"key": "tuck_learn_rate",     "label": "femur learner rate (0 off)", "min": 0.0,  "max": 0.05, "step": 0.002},
 	{"section": "LEARNERS / LEVELLING"},
