@@ -9235,7 +9235,7 @@ not a finding.
 ms. ogma_host itself froze 0.7–3.6 s eight times (brain_diag: one 3.58 s gap with a single tick). After each freeze it
 ran the missed ticks at roughly twice the normal rate, the same replay benchd had. Its stdout, one JSON line per tick,
 goes to a file on the SD card. Fix built (`AsyncStdout`: stdout through a pipe and a writer thread; a stall witness; missed
-ticks dropped), not yet deployed.
+ticks dropped), deployed 2026-10-26 23:04 (Pi smoke test: 250 ticks, 0 stalls, every line delivered); the next run's summary line reads it.
 
 **Power-off.** The second run's files were cut short: meta.json 0 bytes, events and log truncated. The operator
 powered off ~4 s after the end, inside Linux's 30 s writeback window. picrawler-dash now calls `sync` at the end of
