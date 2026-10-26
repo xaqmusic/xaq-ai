@@ -1179,6 +1179,20 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"press_target_m", ParamMutability::HotMutable, "Belly clearance (m) the learned press holds. Live-tunable (7.31).", ParamValue{0.065}, std::nullopt, std::nullopt},
         {"press_lever_m", ParamMutability::HotMutable, "Lever arm (m) turning the corner's attitude error (sin) into height (7.31).", ParamValue{0.08}, std::nullopt, std::nullopt},
         {"press_phase", ParamMutability::HotMutable, "1 = the learned press varies over the gait phase (a + b cos phi + c sin phi); 0 = one constant per leg (a only). Two diagonal feet are a hinge their own press cannot stiffen, so the phase terms cannot stop the diagonal tip (2026-10-24 A/B) (7.31).", ParamValue{1.0}, std::nullopt, std::nullopt},
+        {"jac_topic", ParamMutability::ConstructionOnly,
+         "Per-leg lift gains from the host, [d depth/d hip2, d depth/d knee] x 4 (m of foot depth below the body per rad, "
+         "from the commanded angles and the body's kinematics; reality.proprio.feet_jac).  Empty = no subscription.",
+         ParamValue{std::string("")}, std::nullopt, std::nullopt},
+        {"press_kin", ParamMutability::HotMutable,
+         "KINEMATICS-AWARE PRESS (operator 2026-10-26): 1 = the learned press is applied along the (hip2, knee) direction "
+         "that deepens the planted foot fastest (needs jac_topic), and a leg with no lift left may not grow its press; "
+         "0 = the fixed split (press_knee), byte-identical.", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"press_kin_min", ParamMutability::HotMutable,
+         "Lift gain (m of foot depth per unit u) below which a leg is out of lift: its press may only relax.",
+         ParamValue{0.015}, std::nullopt, std::nullopt},
+        {"press_hip2_range", ParamMutability::HotMutable, "rad of hip2 per unit u (the body's HIP_TARGET_RANGE).", ParamValue{1.40}, std::nullopt, std::nullopt},
+        {"press_knee_fold", ParamMutability::HotMutable, "rad of knee per unit u when u >= 0 (KNEE_RANGE_FOLD).", ParamValue{3.20}, std::nullopt, std::nullopt},
+        {"press_knee_hyperext", ParamMutability::HotMutable, "rad of knee per unit u when u < 0 (KNEE_RANGE_HYPEREXT).", ParamValue{0.85}, std::nullopt, std::nullopt},
         {"press_knee", ParamMutability::HotMutable, "Knee share of the learned press (1 = equal to hip2, the corner integrator's split) (7.31).", ParamValue{1.0}, std::nullopt, std::nullopt},
         {"tuck_learn_leak", ParamMutability::HotMutable, "Per-tick leak of the learned hip2 rest back toward hip2_tuck_target, so an error the femur angle cannot correct settles at rate*err/leak from it instead of winding into a bound. 0 = off (7.28b).", ParamValue{0.0}, std::nullopt, std::nullopt},
         {"tuck_learn_tau", ParamMutability::HotMutable, "EMA (readings) on the belly clearance the learner compares with its target (7.28).", ParamValue{25.0}, std::nullopt, std::nullopt},
@@ -1566,6 +1580,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_lift_knee"] = leg_phase_lift_knee_;
     m["leg_phase_lift_rear_mult"] = leg_phase_lift_rear_mult_;
     m["lift_handle_topic"] = lift_handle_topic_;
+    m["jac_topic"] = jac_topic_; m["press_kin"] = press_kin_; m["press_kin_min"] = press_kin_min_;
+    m["press_hip2_range"] = press_hip2_range_; m["press_knee_fold"] = press_knee_fold_; m["press_knee_hyperext"] = press_knee_hyperext_;
     m["leg_phase_lift_lead"] = leg_phase_lift_lead_;
     m["leg_phase_late_press"] = leg_phase_late_press_;
     m["wshift_rate"] = wshift_rate_; m["wshift_leak"] = wshift_leak_; m["wshift_max"] = wshift_max_; m["wshift_hip2"] = wshift_hip2_;
@@ -1842,6 +1858,12 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "leg_phase_lift_knee", [&](auto const& v){ leg_phase_lift_knee_ = get_double(v, "leg_phase_lift_knee"); });
     apply_param(params, "leg_phase_lift_rear_mult", [&](auto const& v){ leg_phase_lift_rear_mult_ = get_double(v, "leg_phase_lift_rear_mult"); });
     apply_param(params, "lift_handle_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) lift_handle_topic_ = *p; });
+    apply_param(params, "jac_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) jac_topic_ = *p; });
+    apply_param(params, "press_kin", [&](auto const& v){ press_kin_ = get_double(v, "press_kin"); });
+    apply_param(params, "press_kin_min", [&](auto const& v){ press_kin_min_ = get_double(v, "press_kin_min"); });
+    apply_param(params, "press_hip2_range", [&](auto const& v){ press_hip2_range_ = get_double(v, "press_hip2_range"); });
+    apply_param(params, "press_knee_fold", [&](auto const& v){ press_knee_fold_ = get_double(v, "press_knee_fold"); });
+    apply_param(params, "press_knee_hyperext", [&](auto const& v){ press_knee_hyperext_ = get_double(v, "press_knee_hyperext"); });
     apply_param(params, "leg_phase_lift_lead", [&](auto const& v){ leg_phase_lift_lead_ = get_double(v, "leg_phase_lift_lead"); });
     apply_param(params, "leg_phase_late_press", [&](auto const& v){ leg_phase_late_press_ = get_double(v, "leg_phase_late_press"); });
     apply_param(params, "wshift_rate", [&](auto const& v){ wshift_rate_ = get_double(v, "wshift_rate"); });
@@ -2186,6 +2208,17 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(
             objective_topics_[leg], SubscriptionKind::Feedback,
             [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective(leg, p); }));
+    }
+    // Per-leg lift gains for the kinematics-aware press: Direct, empty = no subscription → byte-identical.
+    if (!jac_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            jac_topic_, SubscriptionKind::Direct,
+            [this](std::string_view /*topic*/, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+                if (!pt || pt->values.size() < 8) return;
+                jac_.assign(pt->values.data(), pt->values.data() + 8); jac_seen_ = true;
+            }));
     }
     // G4a lift handle (LiftDescent): Feedback, empty = no subscription → byte-identical.
     if (!lift_handle_topic_.empty()) {
@@ -3363,6 +3396,23 @@ void MotorEPMv2::update_cruse_state() {
     cruse_bias_n_   = 0;
 }
 
+// Kinematics-aware press (press_kin): the lift gain of leg `leg`'s (hip2, knee) command in metres of foot depth per
+// unit u, from the host's per-radian gains (jac_topic) and the action-to-angle ranges; the knee's range depends on
+// which side of rest its command is (fold >= 0, hyperextend < 0).  Returns the gain's norm; d2, d3 its unit direction.
+float MotorEPMv2::press_lift_dir(int leg, float u_knee, float& d2, float& d3) const {
+    d2 = 1.0f; d3 = 0.0f;
+    if (!jac_seen_ || leg < 0 || 2 * leg + 1 >= int(jac_.size())) return 0.0f;
+    const float g2 = jac_[size_t(2 * leg)]     * float(press_hip2_range_);
+    const float g3 = jac_[size_t(2 * leg + 1)] * float(u_knee >= 0.0f ? press_knee_fold_ : press_knee_hyperext_);
+    const float nrm = std::sqrt(g2 * g2 + g3 * g3);
+    if (nrm > 1e-6f) { d2 = g2 / nrm; d3 = g3 / nrm; }
+    return nrm;
+}
+float MotorEPMv2::press_lift_gain(int leg, float u_knee) const {
+    float d2, d3;
+    return press_lift_dir(leg, u_knee, d2, d3);
+}
+
 void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) {
     if (key == "model_lr")  model_lr_  = get_double(value, "model_lr");
     else if (key == "ctrl_lr")   ctrl_lr_   = get_double(value, "ctrl_lr");
@@ -3517,6 +3567,11 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "leg_phase_lift_hip2") leg_phase_lift_hip2_ = get_double(value, "leg_phase_lift_hip2");
     else if (key == "leg_phase_lift_knee") leg_phase_lift_knee_ = get_double(value, "leg_phase_lift_knee");
     else if (key == "leg_phase_lift_rear_mult") leg_phase_lift_rear_mult_ = get_double(value, "leg_phase_lift_rear_mult");
+    else if (key == "press_kin") press_kin_ = get_double(value, "press_kin");
+    else if (key == "press_kin_min") press_kin_min_ = get_double(value, "press_kin_min");
+    else if (key == "press_hip2_range") press_hip2_range_ = get_double(value, "press_hip2_range");
+    else if (key == "press_knee_fold") press_knee_fold_ = get_double(value, "press_knee_fold");
+    else if (key == "press_knee_hyperext") press_knee_hyperext_ = get_double(value, "press_knee_hyperext");
     else if (key == "leg_phase_lift_lead") leg_phase_lift_lead_ = get_double(value, "leg_phase_lift_lead");
     else if (key == "leg_phase_late_press") leg_phase_late_press_ = get_double(value, "leg_phase_late_press");
     else if (key == "wshift_rate") wshift_rate_ = get_double(value, "wshift_rate");
@@ -6278,7 +6333,10 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 const float left  = (leg == 0 || leg == 2) ? 1.0f : -1.0f;
                 const float def = float(press_target_m_) - belly_m_ + float(press_lever_m_) * (front * tilt_pitch_ + left * tilt_roll_);
                 press_def_[size_t(leg)] += 0.05f * (def - press_def_[size_t(leg)]);
-                const float k = float(press_learn_rate_) * def;
+                float k = float(press_learn_rate_) * def;
+                // KINEMATICS-AWARE: a leg whose press direction can no longer lift its corner (lift gain below
+                // press_kin_min) may only relax its press, never grow it — growing it would fold the leg further.
+                if (press_kin_ > 0.0 && jac_seen_ && k > 0.0f && press_lift_gain(leg, y[m - 1]) < float(press_kin_min_)) k = 0.0f;
                 pa += k;
                 if (press_phase_ > 0.0) { pb += k * cph; pc += k * sph; }
             }
@@ -6286,8 +6344,25 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             pa = std::clamp(pa - lk * pa, -mx, mx); pb = std::clamp(pb - lk * pb, -mx, mx); pc = std::clamp(pc - lk * pc, -mx, mx);
             if (planted) {
                 const float P = pa + pb * cph + pc * sph;
-                y[1]     += P;
-                y[m - 1] += float(press_knee_) * P;
+                if (press_kin_ > 0.0 && jac_seen_) {
+                    // KINEMATICS-AWARE PRESS (operator 2026-10-26): push along the (hip2, knee) direction that deepens
+                    // this foot fastest, from the host's lift gains (d depth / d angle) and the action-to-angle ranges.
+                    // A leg folded under the body has a NEGATIVE knee gain, so the press extends its knee instead of
+                    // folding it further (robot run 2026-10-26: the equal hip2+knee press lifted nothing in 36 % of
+                    // the tucked rear-right leg's planted frames).
+                    // Only a LIFTING press (P > 0) follows the lift direction; a relaxing one (P < 0, the body above its
+                    // target) goes through the femur alone, as press_knee 0 — pulling down along the lift direction
+                    // drives the knees too and rocked the body in the sim (2026-10-26, 1 seed of 4: 2 falls).
+                    float d2 = 0.0f, d3 = 0.0f;
+                    const float cap = press_lift_dir(leg, y[m - 1], d2, d3);
+                    if (int(press_cap_.size()) != n_legs_) press_cap_.assign(size_t(n_legs_), 0.0f);
+                    press_cap_[size_t(leg)] = cap;
+                    if (P > 0.0f) { y[1] += P * d2; y[m - 1] += P * d3; }
+                    else          { y[1] += P; }
+                } else {
+                    y[1]     += P;
+                    y[m - 1] += float(press_knee_) * P;
+                }
             }
         }
         // STRIDE-CENTRE HOMEOSTAT (stride_center_gain; see the header note).
@@ -7557,6 +7632,7 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["press_b"] = press_b_;
     mod["press_c"] = press_c_;
     mod["press_def"] = press_def_;
+    mod["press_cap"] = press_cap_;
     mod["track_ratio"]            = trk_ratio_;
     mod["swing_touch_frac"]       = swing_mid_n_ > 0.0 ? float(swing_touch_n_ / swing_mid_n_) : 0.0f;
     mod["belly_ema"]              = belly_ema_;
@@ -8024,6 +8100,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["press_b"] = press_b_;
     j["press_c"] = press_c_;
     j["press_def"] = press_def_;
+    j["press_cap"] = press_cap_;
     j["track_ratio"]         = trk_ratio_;
     j["swing_touch_frac"]    = swing_mid_n_ > 0.0 ? float(swing_touch_n_ / swing_mid_n_) : 0.0f;
     j["belly_ema"]           = belly_ema_;

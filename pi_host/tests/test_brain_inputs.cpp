@@ -121,6 +121,28 @@ TEST(BrainBodyCalib, CommandedFkAtZeroIsTheZeroPoseAndALiftedFemurRaisesItsFoot)
     EXPECT_GT(cp[0], cp[2]);
 }
 
+TEST(BrainBodyCalib, LiftGainFemurDeepensTheFootAndAFoldedUnderKneeReversesIts) {
+    // The kinematics-aware press's input (feet_lift_gain; operator 2026-10-26).  At the robot's walking pose (hip2 ~+0.25,
+    // knee ~-0.6, robot run 2026-10-26) pressing the femur down deepens every foot and the knee adds a little; with the
+    // knee folded the other way (+0.28, the rear-right leg tucked under the body in that run) folding it further RAISES
+    // the foot: the gain changes sign, which is what the fixed hip2+knee press could not see.
+    const BodyCalib b = real_body();
+    ASSERT_TRUE(b.ok) << b.why;
+    const Vec3f up(0.0f, 1.0f, 0.0f);
+    std::array<double, 12> walk{};
+    for (int i = 0; i < 4; ++i) { walk[size_t(i * 3 + 1)] = 0.25; walk[size_t(i * 3 + 2)] = -0.6; }
+    const auto g = feet_lift_gain(b, walk, up);
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_GT(g[size_t(2 * i)], 0.03) << "leg " << i << ": femur down deepens the foot (m/rad)";
+        EXPECT_GT(g[size_t(2 * i + 1)], 0.0) << "leg " << i << ": knee fold adds depth at the walking pose";
+    }
+    std::array<double, 12> tucked = walk;
+    tucked[size_t(2 * 3 + 2)] = 0.28;                     // sim rl = physical rear-right, knee folded under
+    const auto gt = feet_lift_gain(b, tucked, up);
+    EXPECT_LT(gt[5], 0.0) << "folded under, more knee fold lifts the foot instead of pressing it down";
+    EXPECT_LT(gt[4], g[4]) << "and the femur's own gain is smaller there";
+}
+
 TEST(BrainJoints, NormalisationMatchesTheSimAndIsJointMajor) {
     const BodyCalib b = real_body();
     ASSERT_TRUE(b.ok) << b.why;

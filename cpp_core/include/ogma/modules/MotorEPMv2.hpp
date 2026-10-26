@@ -539,6 +539,15 @@ private:
     std::string lift_handle_topic_;
     float lift_handle_front_ = 1.0f, lift_handle_rear_ = 1.0f;
     bool  lift_handle_seen_ = false;
+    // Kinematics-aware press (press_kin): the host's per-leg lift gains and the action-to-angle ranges.
+    std::string jac_topic_;
+    std::vector<float> jac_;
+    bool   jac_seen_ = false;
+    double press_kin_ = 0.0, press_kin_min_ = 0.015;
+    double press_hip2_range_ = 1.40, press_knee_fold_ = 3.20, press_knee_hyperext_ = 0.85;
+    std::vector<float> press_cap_;   // diag: each planted leg's lift gain along its press direction
+    float press_lift_dir(int leg, float u_knee, float& d2, float& d3) const;
+    float press_lift_gain(int leg, float u_knee) const;
     double leg_phase_lift_lead_ = 0.0;   // rad; lift = max(0, sin(phi + lead)); 0 = byte-identical
     double leg_phase_late_press_ = 0.0;      // probe: fixed late-stance press; 0 = byte-identical
     double leg_phase_late_press_hip2_ = 1.0;

@@ -129,6 +129,9 @@ struct Args {
     // no-echo encoding); host_sensors keeps the raw reading and counts the substitutions.
     // 0 = off.  The dash passes it from body_env OGMA_PICRAWLER_US_DEADZONE, as the sim reads it.
     double range_deadzone_m = 0.0;
+    // Per-leg lift gains (feet_lift_gain) on reality.proprio.feet_jac, for the kinematics-aware press.  The dash passes
+    // it from body_env OGMA_PICRAWLER_FEET_JAC, as the sim reads it.  Off = not published.
+    bool   feet_jac = false;
 };
 
 void usage() {
@@ -141,6 +144,7 @@ void usage() {
         "  --actuate tcp://127.0.0.1:5594 publishes the brain's actions to benchd (--cmd-port 5594); needs --brain-inputs\n"
         "  --odom [--odom-scale 2.0] publishes ego_heading / odom / place_in (dead-reckoned); --vel-ego publishes vel_ego\n"
         "  --dump-actions prints the brain's raw action targets every tick (u and target us, before benchd's slew)\n"
+        "  --feet-jac publishes each leg's lift gain [d depth/d hip2, d depth/d knee] x 4 on reality.proprio.feet_jac\n"
         "  --range-deadzone M publishes a valid range closer than M metres as no-echo (leg occlusion); 0 = off\n"
         "  --cmd-fk publishes feet_y_gravity_cmd_imu from the COMMANDED pose (the sim's CMD_FK_SOURCE=1) instead of the zero pose\n"
         "    from stride_v; both need --brain-inputs and are what the sim's OGMA_PICRAWLER_ODOM / _HONEST_VEL_EGO publish\n"
@@ -191,6 +195,7 @@ int main(int argc, char** argv) {
         else if (v == "--dump-actions")                a.dump_actions = true;
         else if (v == "--cmd-fk")                      a.cmd_fk = true;
         else if (v == "--range-deadzone" && i + 1 < argc) a.range_deadzone_m = std::atof(argv[++i]);
+        else if (v == "--feet-jac")                    a.feet_jac = true;
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
@@ -988,6 +993,7 @@ int main(int argc, char** argv) {
                     pub("foot_load", t.foot_load.data(), t.foot_load.size());
                     pub("joint_torque", t.joint_torque.data(), t.joint_torque.size());
                     pub("feet_y_gravity_cmd_imu", t.feet_y_gravity_cmd_imu.data(), t.feet_y_gravity_cmd_imu.size());
+                    if (a.feet_jac) pub("feet_jac", t.feet_jac.data(), t.feet_jac.size());
                     pub("distress", &t.distress, 1);
                     if (a.odom) {
                         pub("ego_heading", &t.ego_heading, 1);

@@ -1667,6 +1667,11 @@ const ULTRASONIC_MOUNT_ABOVE_BOTTOM: float = 0.011   # transducer centre above t
 # same sensor on both bodies.  (The sim's rays do not see the legs; the deadzone still applies to
 # anything that close.)
 var ultrasonic_deadzone_m: float = 0.0
+# Per-leg LIFT GAINS (OGMA_PICRAWLER_FEET_JAC=1; operator 2026-10-26): metres of foot depth below the body per radian of
+# hip2 and of knee at the commanded (slew-limited) pose, along the fused gravity — [g_hip2, g_knee] x 4 on
+# reality.proprio.feet_jac, the same numbers ogma_host --feet-jac publishes (BrainInputs feet_lift_gain).  Read by
+# MotorEPMv2's kinematics-aware press (press_kin).  Off = not published.
+var publish_feet_jac: bool = false
 const _US_AZ_DEG: Array = [-7.5, -3.75, 0.0, 3.75, 7.5]   # the ~15 deg lobe, 5 x 3 rays
 const _US_EL_DEG: Array = [-5.0, 0.0, 5.0]
 var _us_range: float = 1.5
@@ -3301,6 +3306,9 @@ func _ready() -> void:
 	brain.register_source("FeetYGravityCmdImu", "reality.proprio.feet_y_gravity_cmd_imu",
 		"float32[4]: commanded-FK foot height on a GYRO-FUSED gravity estimate (complementary " +
 		"filter) — fully hardware-realizable, no exact attitude anywhere.", true)
+	if publish_feet_jac:
+		brain.register_source("FeetJac", "reality.proprio.feet_jac",
+			"float32[8]: per leg [d depth/d hip2, d depth/d knee] (m per rad) at the commanded pose along the fused gravity — the lift gains the kinematics-aware press reads (ogma_host --feet-jac publishes the same).", true)
 	brain.register_source("FeetYGravityCmd", "reality.proprio.feet_y_gravity_cmd",
 		"float32[4]: feet_y_gravity computed from COMMANDED servo angles instead of achieved " +
 		"pose — what a hobby-servo robot can actually compute (no position feedback).", true)
@@ -3727,7 +3735,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
-			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_ROOM_SIZE",
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
 			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
@@ -3776,6 +3784,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_HONEST_HOLD_CAP":   honest_hold_cap   = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_ULTRASONIC":        ultrasonic_model  = (v != "0" and v != "")
 			"OGMA_PICRAWLER_US_DEADZONE":       ultrasonic_deadzone_m = maxf(0.0, v.to_float())
+			"OGMA_PICRAWLER_FEET_JAC":          publish_feet_jac  = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ROOM_SIZE":         room_size         = clampf(v.to_float(), 1.0, 18.0)
 			"OGMA_PICRAWLER_CAMERA_ROBOT":      camera_robot      = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ODOM":              publish_odom      = (v != "0" and v != "")
@@ -7701,6 +7710,21 @@ func _step_one() -> void:
 			imu_arr.append(_stridemath.feet_y_gravity(foot_b, _up_est_body, L3))
 		brain.publish_proprio(acc_arr, "feet_y_gravity_cmd_acc")
 		brain.publish_proprio(imu_arr, "feet_y_gravity_cmd_imu")
+		if publish_feet_jac:
+			# Lift gains at the slew-limited commanded pose (what the robot's driver knows), by finite difference on
+			# the shared FK — BrainInputs feet_lift_gain's numbers.
+			var jac := PackedFloat64Array()
+			var eps: float = 0.01
+			for i in range(4):
+				var e1: float = _eff_target_hip1[i]
+				var e2: float = _eff_target_hip2[i]
+				var e3: float = _eff_target_knee[i]
+				var d0: float = -_stridemath.feet_y_gravity(rest_inv * _fk_leg(i, e1, e2, e3)[2].origin, _up_est_body, L3)
+				var dh: float = -_stridemath.feet_y_gravity(rest_inv * _fk_leg(i, e1, e2 + eps, e3)[2].origin, _up_est_body, L3)
+				var dk: float = -_stridemath.feet_y_gravity(rest_inv * _fk_leg(i, e1, e2, e3 + eps)[2].origin, _up_est_body, L3)
+				jac.append((dh - d0) / eps)
+				jac.append((dk - d0) / eps)
+			brain.publish_proprio(jac, "feet_jac")
 		# (attitude-error diagnostics are set in _imu_substep, at the sensor's own rate)
 
 		# ---- STRIDE-ODOMETRY INSTRUMENT (2026-08-25, PART V stage A) -----------------
@@ -13298,7 +13322,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["skc"] = snappedf(float(_mm.get("selfcol_cap_frac", 0.0)), 0.0001)
 			line["tkl"] = snappedf(float(_mm.get("tuck_learned", 0.0)), 0.0001)
 			line["bem"] = snappedf(float(_mm.get("belly_ema", 0.0)), 0.0001)
-			for _prk in [["press_a", "pra"], ["press_b", "prb"], ["press_c", "prc"], ["press_def", "prd"]]:
+			for _prk in [["press_a", "pra"], ["press_b", "prb"], ["press_c", "prc"], ["press_def", "prd"], ["press_cap", "prk"]]:
 				var _prv = _mm.get(_prk[0], [])
 				if _prv is Array and _prv.size() == 4:
 					var _pro := PackedFloat64Array()

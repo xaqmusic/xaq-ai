@@ -230,6 +230,26 @@ inline std::array<float, 4> feet_y_gravity_cmd_fk(const BodyCalib& b, const std:
     return out;
 }
 
+// Each leg's LIFT GAIN at the commanded pose: metres of foot depth below the body (along gravity) per radian of hip2 and
+// per radian of knee, by finite difference on the same FK as feet_y_gravity_cmd_fk — [g_hip2, g_knee] x 4, sim leg
+// order.  The kinematics-aware press reads it (MotorEPMv2 press_kin; operator 2026-10-26): a leg folded under the body
+// has a negative knee gain, and pressing it the fixed way folds it further.  The sim computes the same numbers.
+inline std::array<float, 8> feet_lift_gain(const BodyCalib& b, const std::array<double, 12>& cmd,
+                                           const ogma::body::Vec3f& up, double eps = 0.01) {
+    std::array<float, 8> out{};
+    auto depth = [&](int i, double t1, double t2, double t3) {
+        const ogma::body::LegPose p = ogma::body::fk_leg(b.anchors[size_t(i)], t1, t2, t3, 0.0);
+        return -ogma::body::feet_y_gravity(b.rest_inv(p.lower.origin), up, b.l3);
+    };
+    for (int i = 0; i < 4; ++i) {
+        const double t1 = cmd[size_t(i * 3)], t2 = cmd[size_t(i * 3 + 1)], t3 = cmd[size_t(i * 3 + 2)];
+        const double d0 = depth(i, t1, t2, t3);
+        out[size_t(2 * i)]     = float((depth(i, t1, t2 + eps, t3) - d0) / eps);
+        out[size_t(2 * i + 1)] = float((depth(i, t1, t2, t3 + eps) - d0) / eps);
+    }
+    return out;
+}
+
 // ---- foot sensors ----------------------------------------------------------------------
 // The FSRs sit on HAT ADC A0-A3 = PHYSICAL FL, FR, RL, RR (foot_cal_sweep.py / foot_tap_test.py).
 // The sim's legs are mirrored, so in SIM order: fl <- A1, fr <- A0, rl <- A3, rr <- A2.
@@ -310,6 +330,7 @@ struct BrainTopics {
     std::array<float, 4>  foot_load{};
     std::array<float, 12> joint_torque{};   // zeros: hobby servos report no torque
     std::array<float, 4>  feet_y_gravity_cmd_imu{};
+    std::array<float, 8>  feet_jac{};          // feet_lift_gain at the commanded pose (published with --feet-jac)
     float distress = 0.0f;
     float upright  = 1.0f;
     bool  fsr_stale = false;                // fsr_ok was false: foot values are the last good ones
@@ -375,6 +396,7 @@ public:
         //    swing clearance read in the sim.
         t.feet_y_gravity_cmd_imu = cmd_fk_ ? feet_y_gravity_cmd_fk(body_, cmd, up)
                                            : feet_y_gravity_zero_pose(body_, up);
+        t.feet_jac = feet_lift_gain(body_, cmd, up);
         t.upright = up.y;
 
         // 6. Foot sensors.  A failed read holds the last good values and says so.
