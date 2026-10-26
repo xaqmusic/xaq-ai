@@ -448,6 +448,9 @@ class Dash:
             if "lift" in c.cfg.tunables:
                 lv = c.st.tuned.get("lift", c.tune_targets.get("lift", c.cfg.tunables["lift"][1]))
                 out += f"    swing lift {lv:.2f}"
+            if "rlift" in c.cfg.tunables:
+                rv = c.st.tuned.get("rlift", c.tune_targets.get("rlift", c.cfg.tunables["rlift"][1]))
+                out += f"    rear ×{rv:.1f}"
             if "slearn" in c.cfg.tunables:
                 sv = c.st.tuned.get("slearn", c.tune_targets.get("slearn", c.cfg.tunables["slearn"][1]))
                 out += f"    lift learner {dash_run.fmt_tunable(dash_run.TUNABLES['slearn'], sv)}"
@@ -537,6 +540,10 @@ class Dash:
                     self.msg_bad = "refused" in self.msg or "not in this config" in self.msg
                     if "lift" in self.ctrl.st.tuned:
                         self.tune_other["lift"] = self.ctrl.st.tuned["lift"]
+                    return True
+                if ch in (ord("n"), ord("m")):       # rear swing lift, as a multiple of the front
+                    self.msg = self.ctrl.nudge("rlift", -1 if ch == ord("n") else 1)
+                    self.msg_bad = "refused" in self.msg or "not in this config" in self.msg
                     return True
                 if ch in (ord("k"), ord("l")):
                     self.msg = self.ctrl.nudge("slearn", -1 if ch == ord("k") else 1)
@@ -899,7 +906,7 @@ class Dash:
         self._line(scr, h - 2, 36,
                    "— EPM amber = under 30% baked (still earning its vocabulary)", C(DIM))
         self._line(scr, h - 1, 1,
-                   f"SPACE stop   C config   [ ] speed   - = period   ; ' swing lift   , . belly target   S restart svcs   q quit"
+                   f"SPACE stop   C config   [ ] speed   - = period   ; ' swing lift   n m rear lift ×   , . belly target   S restart svcs   q quit"
                    f"   every {self.interval:.1f}s", C(DIM))
         scr.refresh()
 

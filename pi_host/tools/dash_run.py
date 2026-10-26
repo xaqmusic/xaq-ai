@@ -110,6 +110,8 @@ TUNABLES = {
     # lift, as a magnitude, with the knee half moved at the config's knee/femur ratio.  Read every tick.
     "lift": Tunable("lift", "swing lift", "MotorEPMv2", "leg_phase_lift_hip2", 0.05, 0.0, 0.9, "",
                     sign=-1.0, pair_key="leg_phase_lift_knee"),
+    # Rear swing lift as a multiple of the front (operator 2026-10-25: rear legs bind on bars).  1 = off.
+    "rlift": Tunable("rlift", "rear lift ×", "MotorEPMv2", "leg_phase_lift_rear_mult", 0.1, 0.5, 3.0, "", default=1.0),
     # The per-leg swing-lift learner's rate (plan 7.29): 0 = off, so the bench can A/B it within a run.
     "slearn": Tunable("slearn", "lift learner", "MotorEPMv2", "swing_learn_rate", 0.005, 0.0, 0.03, "",
                       requires="swing_learn_rising"),

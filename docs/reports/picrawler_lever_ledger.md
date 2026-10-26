@@ -9092,3 +9092,18 @@ sectors (whatever lies along their heading), so a failure point is "the first im
 the belly-strike count from gc_raw is not yet a validated metric and is not reported. Re-use context: the
 baseline for any per-terrain setting (swing lift on 38-50 mm edges first), and for an ultrasonic gate
 (O72): a gate should recover the sensor-off reach while keeping the walls.
+
+### 2026-10-25 — G3 ON THE TERRAIN ARENA (20 varied worlds per arm, 16 000 ticks, ultrasonic off): the gait-context vocabulary does NOT separate edge terrain from flat — `NULL` (n = 20, varied worlds) for this input set; and the rear legs bind at edges — the operator's observation, reproduced at 6 rad/s
+
+Arms: `…__robot_p1_ctx_ac` (26 channels, self-commissioned), `_ctx_pos` (+ femur/knee posture, 42), `_ctx_posonly`
+(16). Winner-vs-label NMI against a shifted-label chance: terrain type 0.27-0.28 vs 0.23-0.28; steps/bars vs flat
+0.23 vs 0.19-0.21; with an edge-proximity label (within 0.15 m of a step edge, or among the bars — a steps sector is
+mostly flat plateau top) 0.23-0.24 vs 0.19-0.21; ≥ 25 mm edges 0.18-0.20 vs 0.13-0.16. Posture adds nothing here;
+posture alone sits at chance. The corridor's 0.14 margin (ledger 2026-10-24) was partly its fixed zone order. Reading:
+two-stride summaries of contact, load, belly, tilt and posture do not carry "an edge is under me" at this scale;
+the design note's own input list names what is missing — early-swing contact and the progress deficit, i.e. the gait's
+prediction errors. **Rear binding** (capability logs, swing-phase contact = touching while sin(phase) > 0): at 6 rad/s,
+on 25 mm+ edges rear 57 % vs front 31 % (flat 34 / 26); at the robot's 4.22 rad/s both pairs rise alike (43 / 37 vs
+35 / 28). New handle `leg_phase_lift_rear_mult` (MotorEPMv2, hot, default 1 = per-tick identical, seed 3) and dash keys
+n/m. Re-use context: a context input built from the gait's own errors per leg pair (the situations G4 needs to tell
+apart are the ones where the errors differ); the camera's anticipatory channel; G4 with one global context first.

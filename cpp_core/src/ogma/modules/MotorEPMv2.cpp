@@ -1219,6 +1219,12 @@ ParamSchema MotorEPMv2::params_schema() const {
          "Phase lead (rad) of the leg-phase lift: lift = max(0, sin(phi + lead)). > 0 starts the lift in late stance, so a leg "
          "held at the Tegotae fixed point (cos phi = omega / (sigma N), late stance) unloads itself and is released, as a "
          "crank-driven foot is. 0 = byte-identical.", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"leg_phase_lift_rear_mult", ParamMutability::HotMutable,
+         "REAR SWING LIFT, as a multiple of the front (operator 2026-10-25: the front legs step over bars, the rear "
+         "legs bind; terrain arena, 6 rad/s: swing-phase contact on 25 mm+ edges rear 57 % vs front 31 %).  Scales "
+         "the phase-shaped lift on legs 2-3 only, read every tick (a handle for G4's front/rear operating point).  "
+         "1 = off, byte-identical.",
+         ParamValue{1.0}, std::nullopt, std::nullopt},
         {"leg_phase_lift_knee", ParamMutability::HotMutable,
          "Phase-shaped swing lift, shank half: y[knee] += gain * max(0, sin phi). Positive = fold (the swing_tuck sign). "
          "0 = off, byte-identical.",
@@ -1554,6 +1560,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_swing"]    = leg_phase_swing_;
     m["leg_phase_lift_hip2"] = leg_phase_lift_hip2_;
     m["leg_phase_lift_knee"] = leg_phase_lift_knee_;
+    m["leg_phase_lift_rear_mult"] = leg_phase_lift_rear_mult_;
     m["leg_phase_lift_lead"] = leg_phase_lift_lead_;
     m["leg_phase_late_press"] = leg_phase_late_press_;
     m["wshift_rate"] = wshift_rate_; m["wshift_leak"] = wshift_leak_; m["wshift_max"] = wshift_max_; m["wshift_hip2"] = wshift_hip2_;
@@ -1828,6 +1835,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "leg_phase_swing",     [&](auto const& v){ leg_phase_swing_     = get_double(v, "leg_phase_swing"); });
     apply_param(params, "leg_phase_lift_hip2", [&](auto const& v){ leg_phase_lift_hip2_ = get_double(v, "leg_phase_lift_hip2"); });
     apply_param(params, "leg_phase_lift_knee", [&](auto const& v){ leg_phase_lift_knee_ = get_double(v, "leg_phase_lift_knee"); });
+    apply_param(params, "leg_phase_lift_rear_mult", [&](auto const& v){ leg_phase_lift_rear_mult_ = get_double(v, "leg_phase_lift_rear_mult"); });
     apply_param(params, "leg_phase_lift_lead", [&](auto const& v){ leg_phase_lift_lead_ = get_double(v, "leg_phase_lift_lead"); });
     apply_param(params, "leg_phase_late_press", [&](auto const& v){ leg_phase_late_press_ = get_double(v, "leg_phase_late_press"); });
     apply_param(params, "wshift_rate", [&](auto const& v){ wshift_rate_ = get_double(v, "wshift_rate"); });
@@ -3491,6 +3499,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "leg_phase_swing")     leg_phase_swing_     = get_double(value, "leg_phase_swing");
     else if (key == "leg_phase_lift_hip2") leg_phase_lift_hip2_ = get_double(value, "leg_phase_lift_hip2");
     else if (key == "leg_phase_lift_knee") leg_phase_lift_knee_ = get_double(value, "leg_phase_lift_knee");
+    else if (key == "leg_phase_lift_rear_mult") leg_phase_lift_rear_mult_ = get_double(value, "leg_phase_lift_rear_mult");
     else if (key == "leg_phase_lift_lead") leg_phase_lift_lead_ = get_double(value, "leg_phase_lift_lead");
     else if (key == "leg_phase_late_press") leg_phase_late_press_ = get_double(value, "leg_phase_late_press");
     else if (key == "wshift_rate") wshift_rate_ = get_double(value, "wshift_rate");
@@ -6175,6 +6184,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 sm = std::clamp(sm, float(swing_learn_min_), float(swing_learn_max_));
                 lscale *= sm;
             }
+            if (leg >= 2 && leg_phase_lift_rear_mult_ != 1.0) lscale *= float(leg_phase_lift_rear_mult_);   // rear legs
             y[1]     += float(leg_phase_lift_hip2_) * lift * lscale;
             y[m - 1] += float(leg_phase_lift_knee_) * lift * lscale;
             ext_lift_acc_ += double(lift); ++ext_lift_n_;
