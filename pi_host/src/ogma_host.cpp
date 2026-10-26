@@ -680,6 +680,7 @@ int main(int argc, char** argv) {
         } imu_joiner{imu_run, imu_thr};
         // Brain-input accounting: frames in, ticks published, ticks withheld and why.
         long bi_frames = 0, bi_published = 0, bi_stale = 0, bi_no_imu = 0, bi_bad = 0, bi_fsr_stale = 0;
+        bool bi_feed_lost = false; long bi_feed_losses = 0;   // a stale benchd feed holds the brain (see the pause rule)
         long bi_uncommanded = 0;   // a servo with no pulse (0 us): its angle is unknown
         uint64_t bi_last_seq = 0, bi_seq_gaps = 0;
         long bi_last_frame_tick = -1;
@@ -962,10 +963,20 @@ int main(int argc, char** argv) {
                 // world.  So the graph does not tick at all until resume — the brain is held
                 // in time, never reset (SPEC §4.2.2).
                 const bool frame_fresh = bi_last_frame_tick >= 0 && ticks - bi_last_frame_tick <= kStateStaleTicks;
-                brain_paused = bi_stopped && frame_fresh;
-                if (brain_paused) ++bi_paused;
+                // ⚠ A STALE FEED PAUSES THE BRAIN TOO (2026-10-26).  Withholding the inputs was not enough: the graph
+                // kept ticking on its last cached values, so integrators, the gait's phase clock and the learned press
+                // ran on a frozen world, and when benchd came back it slewed the body to wherever they had drifted (robot
+                // run 2026-10-26: a 5.5 s benchd stall ended with the rear-right knee commanded fully folded and the
+                // foot under the body).  Once frames have been arriving, a stale one holds the brain in time, as STOP
+                // does — never reset — until the next fresh frame.
+                const bool feed_lost = bi_last_frame_tick >= 0 && !frame_fresh;
+                brain_paused = (bi_stopped && frame_fresh) || feed_lost;
+                if (feed_lost && !bi_feed_lost) { ++bi_feed_losses; std::printf("ogma_host: benchd state feed stale (%lld ticks): brain held\n", (long long)(ticks - bi_last_frame_tick)); std::fflush(stdout); }
+                if (!feed_lost && bi_feed_lost) { std::printf("ogma_host: benchd state feed back: brain resumes\n"); std::fflush(stdout); }
+                bi_feed_lost = feed_lost;
+                if (feed_lost) ++bi_stale;
+                else if (brain_paused) ++bi_paused;
                 else if (!imu_fresh) ++bi_no_imu;
-                else if (!frame_fresh) ++bi_stale;
                 else if (!ogma::hw::brain::all_servos_commanded(bi_in.us, builder_map)) ++bi_uncommanded;
                 else {
                     for (int k = 0; k < 3; ++k) {
@@ -1185,6 +1196,8 @@ int main(int argc, char** argv) {
                         bi_published, ticks, bi_no_imu, bi_stale, bi_uncommanded, bi_frames,
                         (unsigned long long)bi_seq_gaps, bi_bad, bi_fsr_stale, bi_tof_pub);
             std::printf("ogma_host: STOP — %ld ticks paused (graph held, not reset) while benchd was STOPPED\n", bi_paused);
+            std::printf("ogma_host: stale feed — %ld episode(s), %ld ticks the brain was held (not reset) with no fresh benchd frame\n",
+                        bi_feed_losses, bi_stale);
             std::printf("ogma_host: servo current — %ld sense.servo_current samples published (instrument, no consumer)\n", bi_current_pub);
         }
         if (cmd_pub) {

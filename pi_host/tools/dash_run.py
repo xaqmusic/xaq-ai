@@ -608,6 +608,11 @@ class RunController:
         # the 50 Hz state feed, on the same clock as the events, for the stall witnesses and
         # the sim's servo sounds.  Short single-joint probe taps did not sound like the brain.
         self.record = True
+        # AUDIO OFF (operator, 2026-10-26: "we do not need to be recording audio ... we will work on audio later"):
+        # a 48 kHz WAV is ~6 MB a minute of SD writes during the run, and SD write stalls were what froze benchd's
+        # servo loop that day.  The feed, brain_diag and the current capture still record.  True brings it back
+        # (and the three sync taps that align it).
+        self.record_audio = False
         self.rec_dir = LOG_DIR / f"dashrun_{stamp}"
         self._audio = None
         self._feed = None
@@ -825,11 +830,14 @@ class RunController:
             try:
                 self.rec_dir.mkdir(parents=True, exist_ok=True)
                 self._feed = self.io.start_feed(self.rec_dir / "feed.jsonl")
-                self._ev_rec("audio_start_request")
-                self._audio = self.io.start_audio(self.rec_dir / "audio.wav")
-                self._ev_rec("audio_started" if self._audio else "audio_FAILED")
-                self._ev(f"recording audio + 50 Hz feed -> {self.rec_dir}" if self._audio
-                         else "⚠ could not open the mic — recording the feed only")
+                if self.record_audio:
+                    self._ev_rec("audio_start_request")
+                    self._audio = self.io.start_audio(self.rec_dir / "audio.wav")
+                    self._ev_rec("audio_started" if self._audio else "audio_FAILED")
+                    self._ev(f"recording audio + 50 Hz feed -> {self.rec_dir}" if self._audio
+                             else "⚠ could not open the mic — recording the feed only")
+                else:
+                    self._ev(f"recording the 50 Hz feed -> {self.rec_dir} (audio off)")
                 # Fast current + pack voltage (~940 Hz, benchd ina.capture sag): the 140 ms
                 # telemetry average cannot see what browns the HAT out.
                 rc = self.io.bench.call("ina.capture", mode="sag", seconds=3600)
@@ -1056,7 +1064,7 @@ class RunController:
             self._ev_rec("ina_capture_stop", file=self._inacap)
         if self.record and self.rec_dir.exists():
             meta = {"config": self.cfg.file, "name": self.cfg.name, "pose": self.pose, "run_mode": self.run_mode,
-                    "audio": {"device": "plughw:CARD=Device,DEV=0", "rate": 48000, "seconds": round(secs, 1)},
+                    "audio": ({"device": "plughw:CARD=Device,DEV=0", "rate": 48000, "seconds": round(secs, 1)} if self.record_audio else None),
                     "feed_frames": frames, "hat_resets": self.st.hat_resets,
                     "ina_capture": self._inacap,
                     "brain_seconds": round(self.io.now() - self.st.started_at, 1) if self.st.started_at else 0.0,
