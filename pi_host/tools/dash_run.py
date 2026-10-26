@@ -127,6 +127,8 @@ def fmt_tunable(t: Tunable, v: Optional[float]) -> str:
         return f"{v:.2f}"
     if t.name == "slearn":
         return "off" if v <= 0 else f"{v:.3f}"
+    if t.name == "rlift":
+        return f"{v:.1f}"
     return f"{v * t.scale:.0f} {t.unit}"
 VBAT_WARN = 7.0                               # limp is 6.4 sustained; belly-up draws ~1.5 A
 
@@ -153,6 +155,13 @@ class ConfigEntry:
     lpg_period: Optional[float] = None
     # name -> (module id, configured value) for every TUNABLES row this config has.
     tunables: dict = field(default_factory=dict)
+
+
+def short_name(file: str) -> str:
+    """The config's short name: the last '__' segment of its file stem (robot_p1, robot_p1_swl, hip2p030 ...), the
+    name the ledger and the analysis use; the friendly metadata name rides beside it."""
+    stem = file[:-5] if file.endswith(".json") else file
+    return stem.split("__")[-1]
 
 
 def allowlist(launcher_gd: Path = LAUNCHER_GD) -> list[str]:

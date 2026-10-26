@@ -579,13 +579,14 @@ class Dash:
             k = top + i
             tag = "✓ ROBOT " if c.faithful else "  sim   "
             attr = (curses.A_REVERSE if k == self.sel else 0) | C(OK if c.faithful else WARN)
-            self._line(scr, 3 + i, 1, f"{tag} {c.name[:max(10, w - 12)]}", attr)
+            sn = dash_run.short_name(c.file)
+            self._line(scr, 3 + i, 1, f"{tag} {sn:<16} {c.name[:max(10, w - 30)]}", attr)
 
     def draw_confirm(self, scr, C) -> None:
         c = self.configs[self.sel]
         y = 0
         self._line(scr, y, 1, "RUN CONFIG — confirm", C(HEAD) | curses.A_BOLD); y += 2
-        self._line(scr, y, 3, c.name, C(OK if c.faithful else WARN) | curses.A_BOLD); y += 1
+        self._line(scr, y, 3, f"{dash_run.short_name(c.file)}  —  {c.name}", C(OK if c.faithful else WARN) | curses.A_BOLD); y += 1
         self._line(scr, y, 3, c.file, C(DIM)); y += 2
         if not c.faithful:
             self._line(scr, y, 3, "⚠ SIM INPUTS: tuned on inputs the robot cannot publish (achieved joint "
@@ -625,7 +626,7 @@ class Dash:
         h, w = scr.getmaxyx()
         if st.phase == "countdown":
             n = int(math.ceil(st.countdown_left))
-            self._line(scr, y, 1, f" RUN {self.ctrl.cfg.name[:60]} ", C(HEAD) | curses.A_BOLD); y += 2
+            self._line(scr, y, 1, f" RUN {dash_run.short_name(self.ctrl.cfg.file)}  {self.ctrl.cfg.name[:60]} ", C(HEAD) | curses.A_BOLD); y += 2
             self._line(scr, y, 3, f"  STARTING IN  {n:2d} s  — the robot will move to '{self.ctrl.pose}' "
                                   f"and the brain will take the servos  ",
                        C(BAD) | curses.A_BOLD | curses.A_REVERSE); y += 2
@@ -636,7 +637,7 @@ class Dash:
         belly = f"{st.belly_mm:.0f} mm" if st.belly_mm is not None else "—"
         tilt = f"{st.tilt_deg:.0f}°" if st.tilt_deg is not None else "—"
         vb = f"{st.vbat:.2f} V" if st.vbat is not None else "—"
-        self._line(scr, y, 1, f" RUN {st.phase.upper():8} {self.ctrl.cfg.name[:44]}  {el:4.0f} s   "
+        self._line(scr, y, 1, f" RUN {st.phase.upper():8} {dash_run.short_name(self.ctrl.cfg.file)}  {self.ctrl.cfg.name[:30]}  {el:4.0f} s   "
                               f"belly {belly}  tilt {tilt}  vbat {vb} ", C(col) | curses.A_BOLD | curses.A_REVERSE); y += 1
         self._line(scr, y, 3, st.detail, C(col)); y += 1
         if st.recovering:
