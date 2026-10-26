@@ -568,6 +568,7 @@ class RunState:
     slew_us: Optional[int] = None         # the brain's live servo slew (benchd), when known
     lpg_period: Optional[float] = None    # the live LoadPhaseGait period, when set or known
     tuned: dict = field(default_factory=dict)   # TUNABLES name -> live value
+    synced: Optional[bool] = None         # the end-of-run flush to the SD card: None = not yet, True = safe to power off
 
 
 class RunController:
@@ -760,6 +761,26 @@ class RunController:
         except OSError:
             pass                                  # a full disk must not stop a STOP
 
+    def _flush_to_disk(self) -> None:
+        """Push every written file out to the SD card before the run reports done.
+
+        ⚠ THE OPERATOR POWERS THE PI OFF AFTER EVERY RUN (to move it to the bench supply).  Linux keeps written data
+        in memory for up to ~30 s before it reaches the card, so a power-off right after a run loses it: 2026-10-26,
+        powered off ~4 s after the end, that run's meta.json was 0 bytes and its events file and host log were cut off.
+        os.sync() returns once the kernel has written everything — this run's files, benchd's and ogma_host's logs.
+        Only what is written AFTER it (benchd's idle telemetry) is at risk, and that is not the run."""
+        t0 = time.monotonic()
+        try:
+            os.sync()
+            self.st.synced = True
+            msg = f"✓ all files written to the SD card ({time.monotonic() - t0:.1f} s) — SAFE TO POWER OFF"
+        except Exception as e:                    # never let the flush break the end sequence
+            self.st.synced = False
+            msg = f"⚠ flush to the SD card failed ({e!r}) — wait 30 s before powering off"
+        detail = self.st.detail                   # the run panel shows the flush on its own line; keep the reason
+        self._ev(msg)
+        self.st.detail = detail
+
     def _run(self) -> None:
         try:
             if not self._countdown():
@@ -769,6 +790,7 @@ class RunController:
             moved = self._prepare()
             if moved is None:                     # aborted before anything moved
                 self.st.phase = "aborted"
+                self._flush_to_disk()             # the prepare may have started a recording
                 return
             if moved:
                 self._running()
@@ -1112,6 +1134,7 @@ class RunController:
         if self._svc_was_active:
             ok = self.io.systemctl("start", "ogma-host")
             self._ev("ogma-host service restarted" if ok else "⚠ could not restart ogma-host")
+        self._flush_to_disk()
         dur = self.io.now() - self.st.started_at if self.st.started_at else 0.0
         self.st.phase = "done"
         self._ev(f"done — brain drove {dur:.0f} s; log {self.st.log_path}")

@@ -418,21 +418,19 @@ def test_ending_during_an_outage_waits_for_the_hat_before_the_rescue_pose(tmp_pa
 
 
 def test_the_run_is_recorded_from_before_the_first_motion_until_after_the_rescue(tmp_path, monkeypatch):
+    # Audio is off by default (2026-10-26): the 50 Hz feed is the recording that must span the run.
     robot, ctrl = make(tmp_path, monkeypatch)
     ctrl.start()
     assert wait_phase(ctrl, {"running"})
     ctrl.end(); ctrl.join(10)
     c = robot.calls
-    assert c.index("audio_start") < c.index("pose.set")              # the pose move is on the recording
-    taps = [i for i, x in enumerate(c) if x == "servo.set"]
-    assert len(taps) == 6                                              # 3 taps, out and back
-    assert c.index("pose.set") < taps[0] and taps[-1] < c.index("mode.set=autonomous")   # in bench, before the brain
-    assert c.index("limp") < c.index("audio_stop")                     # the rescue is on the recording
-    assert c.index("audio_stop") < c.index("systemctl start ogma-host")   # the mic is free before the service takes it
+    assert "audio_start" not in c
+    assert c.index("feed_start") < c.index("pose.set")               # the pose move is on the recording
+    assert c.index("limp") < c.index("feed_stop")                     # the rescue is on the recording
     meta = json.loads((ctrl.rec_dir / "meta.json").read_text())
-    assert meta["audio"]["seconds"] == 30.0 and meta["feed_frames"] == 1500
-    kinds = [json.loads(l)["kind"] for l in open(ctrl.rec_dir / "events.jsonl")]
-    assert kinds.count("sync_tap") == 6 and "audio_started" in kinds and "audio_stop" in kinds
+    assert meta["audio"] is None and meta["feed_frames"] == 1500
+    assert ctrl.st.synced is True                                     # flushed to the card: safe to power off
+    assert any("SAFE TO POWER OFF" in t for _, t in ctrl.st.events)
 
 
 def test_a_fast_config_sets_the_slew_in_bench_mode_and_restores_it(tmp_path, monkeypatch):

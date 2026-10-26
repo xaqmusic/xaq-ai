@@ -645,6 +645,12 @@ class Dash:
                        C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
         if st.hat_warning:
             self._line(scr, y, 3, st.hat_warning, C(BAD) | curses.A_BOLD); y += 1
+        if st.phase == "ending" or (st.phase in ("done", "aborted") and st.synced is None):
+            self._line(scr, y, 3, " DO NOT POWER OFF — writing the run to the SD card ", C(BAD) | curses.A_BOLD | curses.A_REVERSE); y += 1
+        elif st.synced:
+            self._line(scr, y, 3, " ✓ SAFE TO POWER OFF — every file is on the SD card ", C(OK) | curses.A_BOLD | curses.A_REVERSE); y += 1
+        elif st.synced is False:
+            self._line(scr, y, 3, " ⚠ the flush failed — wait 30 s before powering off ", C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
         keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   [ ] speed   - = period   ; ' lift   k l learner   , . belly"
                 if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
