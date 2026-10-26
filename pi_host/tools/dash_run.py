@@ -276,6 +276,8 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
             flags.append("--vel-ego")
         if str(be.get("OGMA_PICRAWLER_FEET_JAC", "")) == "1":
             flags.append("--feet-jac")         # per-leg lift gains for the kinematics-aware press (2026-10-26)
+        if str(be.get("OGMA_PICRAWLER_FEET_XZ", "")) == "1":
+            flags.append("--feet-xz")          # toe positions for the support-gated lift-off (2026-10-26)
         if str(be.get("OGMA_PICRAWLER_CMD_FK_SOURCE", "")) == "1":
             flags.append("--cmd-fk")           # the commanded-FK corner sensor (gait audit 2026-10-13)
         out.append(ConfigEntry(file=f, path=p, name=str(md.get("name", f)),

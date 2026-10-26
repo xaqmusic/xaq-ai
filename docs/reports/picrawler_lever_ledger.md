@@ -9301,3 +9301,35 @@ own stance reference), but any CoG or load-magnitude estimate needs a per-foot c
 **Re-use context.** The error to give the gait is the one the dips show: a lift-off that drops the corner. The
 geometric support margin (commanded FK + contacts, both egocentric) predicts it. The open proposal: gate each leg's
 lift-off by its margin, with the threshold learned from the dips that follow, gain-0 guarded, sim first.
+
+### 2026-10-26 — SIM: SUPPORT-GATED LIFT-OFF (LoadPhaseGait `support_gate`) — belly dips per lift-off 29 → 18 % in the corridor, lower in all 6 paired seeds, tilt_sd 0.091 → 0.079, distance a tie — `WORKING` (signal, n = 6); on a mu 0.1 slip sheet 16 → 13 %, 3 of 4 seeds lower — `PARTIAL` (n = 4)
+
+**The lever** (from the robot run above: lift-offs with the CoG far outside the remaining feet are followed by dips).
+LoadPhaseGait holds a leg whose phase is about to enter swing while the CoG lies more than that leg's allowance
+θ_i outside the feet that stay down: the polygon of the other touching feet, or the line between two. The hold lasts
+at most `support_hold_max` ticks (25), so a trot whose support is a line cannot deadlock. θ_i is learned per leg:
+after each lift-off the belly is watched for 20 ticks, a drop of 12 mm or more is a dip, and θ_i += rate × (0.1 −
+dip). It settles where 10 % of that leg's lift-offs dip. Inputs: the new `reality.proprio.feet_xz` (each toe's [x, z]
+in the chassis frame from the COMMANDED pose: sim body `OGMA_PICRAWLER_FEET_XZ=1`, robot `ogma_host --feet-xz`, the
+same `toe_body` FK), the contact flags, and `belly_m`. The CoG is fixed at the chassis centre (`support_cog`). Gain-0:
+gate off is byte-identical (unit test). The control `_sg0` runs the gate with `support_hold_max` 0: it never holds but
+counts everything, and its run is byte-identical to `_lz` (2000-tick arena, body logs equal).
+
+**Corridor** (n = 6 × 9000, difficulty 0.3, paired seeds; dips counted over the last two thirds of each run):
+
+| arm | dips / lift-off | net_z | straight | tilt_sd | falls | belly | lift-offs |
+|---|---|---|---|---|---|---|---|
+| `_sg0` (watching) | 29.2 % (39, 22, 25, 33, 32, 25) | 6.92 ± 0.85 | 0.71 | 0.091 ± 0.010 | 0 | 61 mm | ~370 |
+| `_sg` (gate) | **18.1 %** (23, 13, 20, 21, 22, 10) | 6.96 ± 1.05 | 0.71 | **0.079 ± 0.004** | 1 (seed 5) | 64 mm | ~340 |
+
+Holds: ~170 per run, ~10 ticks each. Lift-offs released at the cap: 13–46 per run, against 181–244 lift-offs the control
+would have gated. Learned θ: 0.005–0.04 m, front legs looser than rear in most seeds. The 10 % target is not reached
+(18 %): the remaining dips are not about support (bumps, slips). One fall in six seeds against none, not yet read.
+
+**Slip sheet** (mu 0.1, r 2–9 m, spawn on it, n = 4 × 6000): dips 16.1 / 21.6 / 13.7 / 12.2 → 8.6 / 26.2 / 7.5 / 9.6 %,
+speed a tie, 0 resets both arms, tilt lower in 3 of 4. The sim does not sink on low friction (belly 63 mm both), so few
+of its dips there come from support.
+
+**Next.** Observe in the UI (launcher `…_sg`), read seed 5's fall, then the robot: ogma_host `--feet-xz` and the dash's
+FEET_XZ mapping are built and tested (host tests 96/96), not yet deployed. Re-use context, if the robot ties: the
+assumed CoG. With the FSRs calibrated per foot, the CoG can be measured at stand and set in `support_cog`.

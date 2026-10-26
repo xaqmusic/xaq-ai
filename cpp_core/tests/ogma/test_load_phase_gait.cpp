@@ -172,3 +172,76 @@ TEST(LoadPhaseGait, TheAdaptivePeriodSlowsWhenTheServosLagAndSpeedsUpWhenTheyKee
     drive(off, 0.5f, 500);
     EXPECT_DOUBLE_EQ(off.m.diag_snapshot()["period_eff"].get<double>(), 50.0) << "rate 0: the configured period";
 }
+
+// ---- support-gated lift-off ----
+namespace {
+// A square stance, toes at (+-0.1, +-0.1): FL (-x,+z), FR (+x,+z), RL (-x,-z), RR (+x,-z).
+const std::vector<float> kSquare = {-0.1f, 0.1f, 0.1f, 0.1f, -0.1f, -0.1f, 0.1f, -0.1f};
+struct SFix : Fix {
+    explicit SFix(ogma::ParamMap p) : Fix(with(std::move(p))) {}
+    static ogma::ParamMap with(ogma::ParamMap p) {
+        p["support_topic"] = std::string("reality.proprio.feet_xz"); p["belly_topic"] = std::string("reality.proprio.belly_m");
+        p["sigma_ratio"] = 0.0;                                    // the free clock: only the gate holds anything
+        return p;
+    }
+    void runs(uint64_t t, std::vector<float> contact, float belly = 0.06f, std::vector<float> toes = kSquare) {
+        bus.begin_tick(t);
+        bus.publish("reality.proprio.foot_contact", pv(contact));
+        bus.publish("reality.proprio.feet_xz", pv(toes));
+        bus.publish("reality.proprio.belly_m", pv({belly}));
+        m.tick(t); bus.end_tick();
+    }
+};
+}
+TEST(LoadPhaseGait, SupportGateOffIsByteIdentical) {
+    // The topics subscribed, the gate at 0: phases must equal a module that never saw them.
+    Fix plain({{"sigma_ratio", 0.0}, {"init_phase", std::vector<double>{1.9 * kPi, 1.2 * kPi, 0.5, 1.0}}});
+    SFix gated({{"support_gate", 0.0}, {"init_phase", std::vector<double>{1.9 * kPi, 1.2 * kPi, 0.5, 1.0}}});
+    for (uint64_t t = 0; t < 300; ++t) {
+        plain.run(t, {1, 1, 0, 1});
+        gated.runs(t, {1, 1, 0, 1});
+        for (int leg = 0; leg < 4; ++leg) ASSERT_EQ(plain.m.phase(leg), gated.m.phase(leg)) << "tick " << t;
+    }
+}
+TEST(LoadPhaseGait, ALegIsHeldWhileTheCogIsOutsideTheFeetLeftBehindThenReleasedAtTheCap) {
+    // FL about to lift with only FR down besides it: the support left is the front line z = 0.1, the CoG (0, 0) is 0.1 m
+    // behind it -- far past the 0.03 allowance.  Held for support_hold_max ticks, then it lifts anyway.
+    SFix f({{"support_gate", 1.0}, {"support_hold_max", int64_t{10}}, {"support_learn_rate", 0.0},
+            {"init_phase", std::vector<double>{2.0 * kPi - 0.02, 0.5 * kPi, 0.5 * kPi, 0.5 * kPi}}});
+    int held = 0;
+    for (uint64_t t = 0; t < 30; ++t) {
+        f.runs(t, {1, 1, 0, 0});
+        if (!f.m.swing(0)) ++held; else break;
+    }
+    EXPECT_GE(held, 10); EXPECT_LE(held, 12);
+    EXPECT_TRUE(f.m.swing(0)) << "released at the cap";
+}
+TEST(LoadPhaseGait, ALegLiftsAtOnceWhenTheFeetLeftBehindCarryTheCog) {
+    // FL lifts with FR, RL and RR down: the CoG (0, 0) sits on the RL-FR diagonal, 0 m from the triangle -- within the
+    // allowance, so no hold.
+    SFix f({{"support_gate", 1.0}, {"init_phase", std::vector<double>{2.0 * kPi - 0.02, 0.5 * kPi, 0.5 * kPi, 0.5 * kPi}}});
+    f.runs(0, {1, 1, 1, 1});
+    f.runs(1, {1, 1, 1, 1});
+    EXPECT_TRUE(f.m.swing(0));
+}
+TEST(LoadPhaseGait, DipsAfterLiftOffShrinkTheAllowanceAndCleanLiftOffsGrowIt) {
+    // Every FL lift-off is followed by a 20 mm belly drop: its allowance must fall toward the minimum.  With no drops
+    // it rises from the 0.03 start.
+    for (bool dips : {true, false}) {
+        SFix f({{"support_gate", 1.0}, {"support_learn_rate", 0.005}, {"support_dip_window", int64_t{10}},
+                {"init_phase", std::vector<double>{0.0, 0.5 * kPi, 0.5 * kPi, 0.5 * kPi}}});
+        int since = 1000; bool was = f.m.swing(0);
+        for (uint64_t t = 0; t < 4000; ++t) {
+            const bool now = f.m.swing(0);
+            since = (now && !was) ? 0 : since + 1;            // ticks since FL's last lift-off
+            was = now;
+            const float belly = (dips && since < 8) ? 0.04f : 0.06f;
+            f.runs(t, {1, 1, 1, 1}, belly);
+        }
+        const auto d = f.m.diag_snapshot();
+        const float th = d["sg_theta"][0].get<float>();
+        EXPECT_GT(d["sg_learned"].get<int64_t>(), 20);
+        if (dips) EXPECT_LT(th, 0.01f) << "dipping lift-offs shrink the allowance";
+        else      EXPECT_GT(th, 0.045f) << "clean lift-offs grow it (by rate x target per lift-off: slower than a dip shrinks it)";
+    }
+}

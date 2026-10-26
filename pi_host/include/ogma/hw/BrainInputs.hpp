@@ -331,6 +331,7 @@ struct BrainTopics {
     std::array<float, 12> joint_torque{};   // zeros: hobby servos report no torque
     std::array<float, 4>  feet_y_gravity_cmd_imu{};
     std::array<float, 8>  feet_jac{};          // feet_lift_gain at the commanded pose (published with --feet-jac)
+    std::array<float, 8>  feet_xz{};           // each toe's [x, z] in the chassis rest frame, commanded pose (--feet-xz)
     float distress = 0.0f;
     float upright  = 1.0f;
     bool  fsr_stale = false;                // fsr_ok was false: foot values are the last good ones
@@ -397,6 +398,12 @@ public:
         t.feet_y_gravity_cmd_imu = cmd_fk_ ? feet_y_gravity_cmd_fk(body_, cmd, up)
                                            : feet_y_gravity_zero_pose(body_, up);
         t.feet_jac = feet_lift_gain(body_, cmd, up);
+        // The toes' horizontal positions at the same commanded pose: the support polygon for LoadPhaseGait's lift-off
+        // gate (the sim's reality.proprio.feet_xz: rest_inv * (lower * toe_off_c)).
+        for (int i = 0; i < 4; ++i) {
+            const Vec3f toe_c = body_.toe_body(i, cmd[size_t(i * 3 + 0)], cmd[size_t(i * 3 + 1)], cmd[size_t(i * 3 + 2)]);
+            t.feet_xz[size_t(2 * i)] = toe_c.x; t.feet_xz[size_t(2 * i + 1)] = toe_c.z;
+        }
         t.upright = up.y;
 
         // 6. Foot sensors.  A failed read holds the last good values and says so.

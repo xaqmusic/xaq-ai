@@ -1689,6 +1689,10 @@ var ultrasonic_deadzone_m: float = 0.0
 # reality.proprio.feet_jac, the same numbers ogma_host --feet-jac publishes (BrainInputs feet_lift_gain).  Read by
 # MotorEPMv2's kinematics-aware press (press_kin).  Off = not published.
 var publish_feet_jac: bool = false
+# TOE POSITIONS (OGMA_PICRAWLER_FEET_XZ=1; 2026-10-26): each toe's horizontal position in the chassis rest frame at the
+# commanded (slew-limited) pose, [x, z] x 4 on reality.proprio.feet_xz — egocentric (the robot knows its commands and its
+# geometry).  Read by LoadPhaseGait's support-gated lift-off.  Off = not published.
+var publish_feet_xz: bool = false
 const _US_AZ_DEG: Array = [-7.5, -3.75, 0.0, 3.75, 7.5]   # the ~15 deg lobe, 5 x 3 rays
 const _US_EL_DEG: Array = [-5.0, 0.0, 5.0]
 var _us_range: float = 1.5
@@ -3323,6 +3327,9 @@ func _ready() -> void:
 	brain.register_source("FeetYGravityCmdImu", "reality.proprio.feet_y_gravity_cmd_imu",
 		"float32[4]: commanded-FK foot height on a GYRO-FUSED gravity estimate (complementary " +
 		"filter) — fully hardware-realizable, no exact attitude anywhere.", true)
+	if publish_feet_xz:
+		brain.register_source("FeetXz", "reality.proprio.feet_xz",
+			"float32[8]: per leg [x, z] (m) of the toe in the chassis rest frame at the commanded pose — the support polygon LoadPhaseGait's lift-off gate reads.", true)
 	if publish_feet_jac:
 		brain.register_source("FeetJac", "reality.proprio.feet_jac",
 			"float32[8]: per leg [d depth/d hip2, d depth/d knee] (m per rad) at the commanded pose along the fused gravity — the lift gains the kinematics-aware press reads (ogma_host --feet-jac publishes the same).", true)
@@ -3752,7 +3759,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
-			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_ROOM_SIZE",
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
 			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
@@ -3802,6 +3809,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_ULTRASONIC":        ultrasonic_model  = (v != "0" and v != "")
 			"OGMA_PICRAWLER_US_DEADZONE":       ultrasonic_deadzone_m = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_FEET_JAC":          publish_feet_jac  = (v != "0" and v != "")
+			"OGMA_PICRAWLER_FEET_XZ":           publish_feet_xz   = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ROOM_SIZE":         room_size         = clampf(v.to_float(), 1.0, 18.0)
 			"OGMA_PICRAWLER_CAMERA_ROBOT":      camera_robot      = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ODOM":              publish_odom      = (v != "0" and v != "")
@@ -7791,6 +7799,13 @@ func _step_one() -> void:
 				jac.append((dh - d0) / eps)
 				jac.append((dk - d0) / eps)
 			brain.publish_proprio(jac, "feet_jac")
+		if publish_feet_xz:
+			var xz := PackedFloat64Array()
+			for i in range(4):
+				var toe: Vector3 = rest_inv * (_fk_leg(i, _eff_target_hip1[i], _eff_target_hip2[i], _eff_target_knee[i])[2] * _toe_off_c[i])
+				xz.append(toe.x)
+				xz.append(toe.z)
+			brain.publish_proprio(xz, "feet_xz")
 		# (attitude-error diagnostics are set in _imu_substep, at the sensor's own rate)
 
 		# ---- STRIDE-ODOMETRY INSTRUMENT (2026-08-25, PART V stage A) -----------------
@@ -12778,6 +12793,18 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["lp_w"]     = snappedf(float(lp.get("omega_rel", 0.0)), 0.001)   # mean rate / free rate
 		line["lp_load"]  = snappedf(float(lp.get("load_mean", 0.0)), 0.001)
 		line["lp_td_n"]  = int(lp.get("touchdowns", 0))
+		if bool(lp.get("have_support", false)):                                # the support-gated lift-off (only when fed)
+			line["sg_lo"]   = int(lp.get("sg_liftoffs", 0))
+			line["sg_dips"] = int(lp.get("sg_dips", 0))
+			line["sg_lrn"]  = int(lp.get("sg_learned", 0))
+			line["sg_hold"] = int(lp.get("sg_holds", 0))
+			line["sg_ht"]   = int(lp.get("sg_hold_ticks", 0))
+			line["sg_rel"]  = int(lp.get("sg_released", 0))
+			line["sg_m"]    = snappedf(float(lp.get("sg_margin", 0.0)), 0.0001)
+			var th: Array = lp.get("sg_theta", [])
+			var th_s: Array = []
+			for v in th: th_s.append(snappedf(float(v), 0.0001))
+			line["sg_th"] = th_s
 		var _lps = lp.get("share", [])
 		if _lps is Array and _lps.size() == 4:
 			var _sa := PackedFloat64Array()

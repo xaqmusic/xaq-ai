@@ -143,6 +143,27 @@ TEST(BrainBodyCalib, LiftGainFemurDeepensTheFootAndAFoldedUnderKneeReversesIts) 
     EXPECT_LT(gt[4], g[4]) << "and the femur's own gain is smaller there";
 }
 
+TEST(BrainBodyCalib, ToesAtTheWalkingPoseFormASquareAroundTheChassisCentreAndHip1SwingsThemFore) {
+    // The support-gated lift-off's input (reality.proprio.feet_xz, 2026-10-26): at the walking pose the four toes sit
+    // at the corners of a ~0.2 m square around the chassis origin (robot run 231715 read FL (-0.105, +0.105) at stand),
+    // front feet at +z, left feet at -x.  A hip1 swing moves that toe along z and leaves the others where they were.
+    const BodyCalib b = real_body();
+    ASSERT_TRUE(b.ok) << b.why;
+    std::array<double, 12> walk{};
+    for (int i = 0; i < 4; ++i) { walk[size_t(i * 3 + 1)] = 0.25; walk[size_t(i * 3 + 2)] = -0.6; }
+    const double sx[4] = {-1, 1, -1, 1}, sz[4] = {1, 1, -1, -1};   // FL FR RL RR
+    std::array<Vec3f, 4> t0{};
+    for (int i = 0; i < 4; ++i) {
+        t0[size_t(i)] = b.toe_body(i, walk[size_t(i * 3)], walk[size_t(i * 3 + 1)], walk[size_t(i * 3 + 2)]);
+        EXPECT_GT(sx[i] * t0[size_t(i)].x, 0.05) << "leg " << i << " x side";
+        EXPECT_GT(sz[i] * t0[size_t(i)].z, 0.05) << "leg " << i << " z side";
+        EXPECT_LT(std::hypot(t0[size_t(i)].x, t0[size_t(i)].z), 0.25) << "leg " << i << " within reach";
+    }
+    std::array<double, 12> sw = walk; sw[0] = 0.3;                // FL hip1
+    const Vec3f t1 = b.toe_body(0, sw[0], sw[1], sw[2]);
+    EXPECT_GT(std::fabs(t1.z - t0[0].z), 0.01) << "hip1 swings the toe fore or aft";
+}
+
 TEST(BrainJoints, NormalisationMatchesTheSimAndIsJointMajor) {
     const BodyCalib b = real_body();
     ASSERT_TRUE(b.ok) << b.why;

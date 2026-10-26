@@ -68,6 +68,9 @@ private:
     void handle_contact(MessagePtr p);
     void handle_load(MessagePtr p);
     void handle_track(MessagePtr p);
+    void handle_support(MessagePtr p);
+    void handle_belly(MessagePtr p);
+    float support_margin(size_t lifting) const;
 
     std::string contact_topic_ = "reality.proprio.foot_contact";
     std::string load_topic_    = "";          // empty = shares from the contact flags
@@ -90,6 +93,27 @@ private:
     double track_ratio_ = 0.0, period_eff_ = 0.0;
     bool   have_track_ = false;
     double period_now() const { return (period_adapt_rate_ > 0.0 && period_eff_ > 0.0) ? period_eff_ : period_ticks_; }
+    // SUPPORT-GATED LIFT-OFF (2026-10-26; robot run 231715: 56 % of lift-offs made with the CoG more than 30 mm outside
+    // the remaining feet were followed by a belly dip, 14 % within 15 mm).  A leg about to cross into swing is HELD at
+    // the end of its stance while the CoG lies further outside the feet that stay down than its own allowance theta_i
+    // (metres; at most support_hold_max ticks, so a trot whose support is a line cannot deadlock).  theta_i is learned
+    // from what each lift-off does: the belly is watched for support_dip_window ticks; a drop of support_dip_m or more
+    // is a dip.  theta_i += rate * (target - dip): it settles where that leg's lift-offs dip at the target rate.
+    // The geometry is egocentric: toe positions from the commanded FK (support_topic, x/z per leg in the chassis frame)
+    // and the contact flags; the CoG is a fixed point in that frame (support_cog).  0 = off, byte-identical.
+    std::string support_topic_ = "", belly_topic_ = "";
+    double support_gate_ = 0.0;
+    double support_margin_init_ = 0.03, support_margin_min_ = 0.005, support_margin_max_ = 0.08;
+    double support_learn_rate_ = 0.002, support_dip_target_ = 0.1, support_dip_m_ = 0.012;
+    int    support_dip_window_ = 20, support_hold_max_ = 25;
+    std::vector<double> support_cog_ = {0.0, 0.0};
+    std::vector<float> toe_x_, toe_z_, theta_;
+    std::vector<int32_t> hold_n_, watch_left_;
+    std::vector<float> watch_ref_, watch_min_;
+    bool have_support_ = false, have_belly_ = false;
+    float belly_ = 0.0f;
+    int64_t sg_holds_ = 0, sg_hold_ticks_ = 0, sg_released_ = 0, sg_liftoffs_ = 0, sg_dips_ = 0, sg_learned_ = 0;
+    float sg_margin_ema_ = 0.0f;
     // 0 = shares (deployed); 1 = absolute load, Owaki's form (see the params schema).
     int    load_mode_     = 0;
     std::vector<float> load_ref_;
