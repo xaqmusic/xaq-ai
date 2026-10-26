@@ -9266,3 +9266,38 @@ Config `…robot_p1_presskin_lz_slipsim.json` (mu 0.1) is in the launcher; press
 **Re-use context.** A study of slip adaptation needs a percept of slip first (CLAUDE.md §1 step 2): the yaw the
 planted feet predict against the gyro, or the stride odometry against vision. A sim belly that sinks on low friction
 would need the robot's splay mechanism (servo compliance under a sprawled stance) in the servo model.
+
+### 2026-10-26 — ROBOT (presskin_lz, 262 s, carpet then vinyl): belly dips follow lift-offs made with the CoG outside the remaining support — 56 % of lift-offs beyond 30 mm outside are followed by a dip, 14 % within 15 mm; the front-right leg is the worst; and the SD card WAS the stall — the writer thread absorbed a 3.2 s write — `BASELINE` (n = 1 run)
+
+**Stalls.** First run on the new ogma_host. 8 stdout writes took over 80 ms (worst 3208 ms, pipe backlog peak 58 KB),
+and the tick loop saw none of them: 0 late wakes, 2 ticks dropped, 0 stale-feed holds (the previous two runs had 3
+holds each). The SD card blocking a write for seconds is confirmed as the cause of the brain's pauses.
+
+**The operator's reading:** dips come partly from slipping and partly from lifting and swinging with the CoG in the
+wrong place. Measured from the 50 Hz feed (`leg_jac_from_log` now prints each toe's position in the chassis frame
+and each foot's grams). Support comes from the FSR contacts (≥ 200 counts) and the commanded toe positions; the CoG
+is taken at the chassis centre. A dip is the belly ToF falling ≥ 12 mm below its trailing 1 s median: 210 onsets,
+48 per minute. At each of 1125 lift-offs, the signed distance from the CoG to the feet still down (the support
+polygon; for two feet, the line between them):
+
+| margin at lift-off | lift-offs | dip within 0.4 s |
+|---|---|---|
+| > 30 mm outside | 203 | 56 % |
+| 15–30 mm outside | 338 | 28 % |
+| 0–15 mm outside | 408 | 14 % |
+| inside | 176 | 18–25 % |
+
+Per leg: a dip follows FR lift-offs 35 % of the time, FL 24 %, RL 25 %, RR 21 %. Before FR's dipping lift-offs the
+CoG sits a median 62 mm toward FR from the centre of the remaining feet (51 mm before its clean ones). RR differs most
+(+41 mm vs −6 mm). Shifting the assumed CoG 10 mm in any direction changes the margins by a few mm and leaves the
+ordering intact. Caveats: the toes are the COMMANDED positions (a slipping or sagging foot is elsewhere), and the CoG
+is assumed, not measured. The inside bins still dip 18–25 %, and those are the slips.
+
+**The FSRs cannot locate the CoG yet.** Grams while planted, median: FL 46, FR 56, RL 680, RR 30. The four sum to
+705 g when all are down (body 598 g), and RR reads 0 at the stand pose. The counts → grams curve is the predicted
+one, and the feet differ by more than 10×. LoadPhaseGait is unaffected (`load_norm_tau` 500 divides each foot by its
+own stance reference), but any CoG or load-magnitude estimate needs a per-foot calibration first.
+
+**Re-use context.** The error to give the gait is the one the dips show: a lift-off that drops the corner. The
+geometric support margin (commanded FK + contacts, both egocentric) predicts it. The open proposal: gate each leg's
+lift-off by its margin, with the threshold learned from the dips that follow, gain-0 guarded, sim first.
