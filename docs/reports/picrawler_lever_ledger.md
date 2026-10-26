@@ -9107,3 +9107,19 @@ on 25 mm+ edges rear 57 % vs front 31 % (flat 34 / 26); at the robot's 4.22 rad/
 35 / 28). New handle `leg_phase_lift_rear_mult` (MotorEPMv2, hot, default 1 = per-tick identical, seed 3) and dash keys
 n/m. Re-use context: a context input built from the gait's own errors per leg pair (the situations G4 needs to tell
 apart are the ones where the errors differ); the camera's anticipatory channel; G4 with one global context first.
+
+### 2026-10-26 — ROBOT BENCH RUN of robot_p1 with the live rear-lift knob (416 s, autonomous): the stance-height learner pins at its 0.45 limit within ~2 min while the belly sinks 57 → 32 mm, so raising its target (60 → 70 mm) cannot act; swing contact stays 40-55 % on both pairs; four brownout HAT resets cluster late, at the higher lift and target — `BASELINE` (n = 1 run)
+
+Operator: the rear lift seemed to help but steps stayed unreliable; robot_p1 (hand-tuned) is the only LPG config that
+walks reliably, the learned variants (swl, press) cause falls. Measured (brain_diag phase joined to the 50 Hz FSR
+feed, swing = sin φ > 0, touching = FSR ≥ 200): swing-phase contact front 55 / rear 41 % at the start, 37-47 / 41-52 %
+later; belly (ToF median) 57 → 55 → 51 → 41 → 36 → 32 mm across the run; `tuck_learned` 0.34 at 20 s, 0.45 (its limit)
+from 13:40:34 to the end. Current mean 1.1-1.5 A, p95 2.1-3.2 A; the rail fell to 0 at each of the four disarms
+(13:39:38, 13:43:41, 13:44:27, 13:44:46); a tilt-guard stop (141°) at 13:44:17; v_ema turned negative after
+13:42:37. The rear-lift values are unknown: the dash rounded the multiplier to a whole number ("× 1 (was 1)" for every
+press) and the brain does not record it — the display is fixed (0.1 steps shown) and the value will be logged.
+Reading: on this robot a height learner asked for an unreachable target pins at its bound and becomes a constant
+maximum tuck; the belly still sinks (the servos give under load, ledger 2026-10-24 sag entry), so every swing starts
+low. A learner at its bound is the effort variable saying the target is out of reach
+([[regulated-quantities-hide-their-own-stress]]). Re-use context: a reachable belly target (~45-50 mm here), short
+runs before the sink, and the servo-rail hardware fix before any higher-demand setting.
