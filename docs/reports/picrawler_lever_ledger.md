@@ -9123,3 +9123,18 @@ maximum tuck; the belly still sinks (the servos give under load, ledger 2026-10-
 low. A learner at its bound is the effort variable saying the target is out of reach
 ([[regulated-quantities-hide-their-own-stress]]). Re-use context: a reachable belly target (~45-50 mm here), short
 runs before the sink, and the servo-rail hardware fix before any higher-demand setting.
+
+### 2026-10-26 — G4a (LiftDescent) NEVER STEPPED, and the swing-lift dose response says why: at the robot's 4.22 rad/s, more commanded lift does not lower swing contact in the sim and costs stability — G4a `NULL` (the selection never acted: 52 valid trials per run, 0 steps; 8 worlds per arm before an unrelated OOM); dose response `BASELINE` (n = 20 paired worlds)
+
+G4a on the terrain arena (robot_p1 + LiftDescent, ±δ dithers of 0.2-0.25 held 400 ticks): the fitted slopes never
+cleared 2 standard errors, so the operating point stayed at 1.00 / 1.00 in every run — a measurement of the dither, not
+of the descent. Fixed-setting dose response (robot_p1, terrain arena, 20 varied worlds, 24 000 ticks, ultrasonic off,
+paired by world): rear ×1.5 — nothing moves (reach +0.3 m, rear swing contact flat +1 pt); rear ×2.0 — rear swing
+contact on flat +4.8 pts (t 2.1), resets +0.7 (t 2.0), reach −1.1 m; all legs ×1.5 — rear flat contact +4.1 (t 2.1),
+resets +0.65 (t 2.2), reach −1.8 m (t −1.7), edge contact −7 to −8 pts on 8 worlds (noisy). Reading: the servos cannot
+complete a larger lift inside the stride at this speed (the robot's 2026-10-24 entry: the slew delivers ~70 % of the
+commanded hip2 range; "more lift command does not become clearance"), so a larger command adds sway, not clearance; the
+slope G4a looked for is small and partly adverse, and the terrain swing of the errors swamps it. The 2026-10-25 rear
+binding at 6 rad/s (rear 57 % vs front 31 % on edges) is a fast-servo phenomenon. Re-use context: G4a with a handle that
+DOES move the errors at this servo speed (stride period, or lift with a longer period that lets the slew finish), or
+per-situation trials (G4b) that remove the terrain variance; LiftDescent's machinery passed its unit tests and stays.
