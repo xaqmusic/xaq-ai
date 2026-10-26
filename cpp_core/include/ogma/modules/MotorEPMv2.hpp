@@ -534,6 +534,11 @@ private:
     double leg_phase_lift_hip2_ = 0.0;
     double leg_phase_lift_knee_ = 0.0;
     double leg_phase_lift_rear_mult_ = 1.0;   // rear legs' swing lift as a multiple of the front (1 = off)
+    // G4a handle (LiftDescent): [front, rear] multipliers on the phase-shaped lift, from lift_handle_topic.  Empty
+    // topic = no subscription; until a token arrives the lift is unscaled (byte-identical).
+    std::string lift_handle_topic_;
+    float lift_handle_front_ = 1.0f, lift_handle_rear_ = 1.0f;
+    bool  lift_handle_seen_ = false;
     double leg_phase_lift_lead_ = 0.0;   // rad; lift = max(0, sin(phi + lead)); 0 = byte-identical
     double leg_phase_late_press_ = 0.0;      // probe: fixed late-stance press; 0 = byte-identical
     double leg_phase_late_press_hip2_ = 1.0;

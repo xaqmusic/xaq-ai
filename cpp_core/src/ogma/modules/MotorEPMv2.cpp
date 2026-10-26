@@ -1219,6 +1219,10 @@ ParamSchema MotorEPMv2::params_schema() const {
          "Phase lead (rad) of the leg-phase lift: lift = max(0, sin(phi + lead)). > 0 starts the lift in late stance, so a leg "
          "held at the Tegotae fixed point (cos phi = omega / (sigma N), late stance) unloads itself and is released, as a "
          "crank-driven foot is. 0 = byte-identical.", ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"lift_handle_topic", ParamMutability::ConstructionOnly,
+         "G4a (LiftDescent): a ProprioToken [front, rear] of multipliers on the phase-shaped swing lift, legs 0-1 and "
+         "2-3.  Feedback (may lag a tick).  Empty = no subscription, byte-identical; until a token arrives the lift is unscaled.",
+         ParamValue{std::string("")}, std::nullopt, std::nullopt},
         {"leg_phase_lift_rear_mult", ParamMutability::HotMutable,
          "REAR SWING LIFT, as a multiple of the front (operator 2026-10-25: the front legs step over bars, the rear "
          "legs bind; terrain arena, 6 rad/s: swing-phase contact on 25 mm+ edges rear 57 % vs front 31 %).  Scales "
@@ -1561,6 +1565,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_lift_hip2"] = leg_phase_lift_hip2_;
     m["leg_phase_lift_knee"] = leg_phase_lift_knee_;
     m["leg_phase_lift_rear_mult"] = leg_phase_lift_rear_mult_;
+    m["lift_handle_topic"] = lift_handle_topic_;
     m["leg_phase_lift_lead"] = leg_phase_lift_lead_;
     m["leg_phase_late_press"] = leg_phase_late_press_;
     m["wshift_rate"] = wshift_rate_; m["wshift_leak"] = wshift_leak_; m["wshift_max"] = wshift_max_; m["wshift_hip2"] = wshift_hip2_;
@@ -1836,6 +1841,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "leg_phase_lift_hip2", [&](auto const& v){ leg_phase_lift_hip2_ = get_double(v, "leg_phase_lift_hip2"); });
     apply_param(params, "leg_phase_lift_knee", [&](auto const& v){ leg_phase_lift_knee_ = get_double(v, "leg_phase_lift_knee"); });
     apply_param(params, "leg_phase_lift_rear_mult", [&](auto const& v){ leg_phase_lift_rear_mult_ = get_double(v, "leg_phase_lift_rear_mult"); });
+    apply_param(params, "lift_handle_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) lift_handle_topic_ = *p; });
     apply_param(params, "leg_phase_lift_lead", [&](auto const& v){ leg_phase_lift_lead_ = get_double(v, "leg_phase_lift_lead"); });
     apply_param(params, "leg_phase_late_press", [&](auto const& v){ leg_phase_late_press_ = get_double(v, "leg_phase_late_press"); });
     apply_param(params, "wshift_rate", [&](auto const& v){ wshift_rate_ = get_double(v, "wshift_rate"); });
@@ -2180,6 +2186,17 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(
             objective_topics_[leg], SubscriptionKind::Feedback,
             [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective(leg, p); }));
+    }
+    // G4a lift handle (LiftDescent): Feedback, empty = no subscription → byte-identical.
+    if (!lift_handle_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            lift_handle_topic_, SubscriptionKind::Feedback,
+            [this](std::string_view /*topic*/, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+                if (!pt || pt->values.size() < 2) return;
+                lift_handle_front_ = pt->values[0]; lift_handle_rear_ = pt->values[1]; lift_handle_seen_ = true;
+            }));
     }
     // PLAN-objective socket (PART III lever b) — the planner's band-gated posture
     // prediction, same Feedback semantics.  Empty list = no subscription → byte-identical.
@@ -6185,6 +6202,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 lscale *= sm;
             }
             if (leg >= 2 && leg_phase_lift_rear_mult_ != 1.0) lscale *= float(leg_phase_lift_rear_mult_);   // rear legs
+            if (lift_handle_seen_) lscale *= (leg < 2 ? lift_handle_front_ : lift_handle_rear_);           // G4a handle
             y[1]     += float(leg_phase_lift_hip2_) * lift * lscale;
             y[m - 1] += float(leg_phase_lift_knee_) * lift * lscale;
             ext_lift_acc_ += double(lift); ++ext_lift_n_;

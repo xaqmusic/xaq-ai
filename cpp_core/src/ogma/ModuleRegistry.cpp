@@ -66,6 +66,7 @@
 #include "ogma/modules/BodyRhythmTracker.hpp"
 #include "ogma/modules/KeyframeAverager.hpp"
 #include "ogma/modules/Generator.hpp"
+#include "ogma/modules/LiftDescent.hpp"
 #include "ogma/modules/BeliefFilter.hpp"
 #include "ogma/modules/FeatureWindow.hpp"
 #include "ogma/modules/KeyframePeakDetector.hpp"
@@ -191,6 +192,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("KeyframeAverager",    [](){ return std::make_unique<KeyframeAverager>(); });
         // 2026-10-24 — the EPM's decoder (generator_and_belief_filter.md §3.1, stage G1): instrument.
         reg.register_type("Generator",           [](){ return std::make_unique<Generator>(); });
+        reg.register_type("LiftDescent",         [](){ return std::make_unique<LiftDescent>(); });
         // 2026-10-24 — predict-then-correct over an EPM's nodes (generator_and_belief_filter.md §3.2, G2): instrument.
         reg.register_type("BeliefFilter",        [](){ return std::make_unique<BeliefFilter>(); });
         // 2026-10-24 — several topics summarised over a window as one vector (G3 gait-context input).

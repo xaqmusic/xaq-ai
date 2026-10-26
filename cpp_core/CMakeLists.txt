@@ -246,6 +246,7 @@ add_library(ogma_core
     src/ogma/modules/SensorBundle.cpp
     src/ogma/modules/KeyframeAverager.cpp
     src/ogma/modules/Generator.cpp
+    src/ogma/modules/LiftDescent.cpp
     src/ogma/modules/BeliefFilter.cpp
     src/ogma/modules/FeatureWindow.cpp
     src/ogma/modules/KeyframePeakDetector.cpp
@@ -335,6 +336,8 @@ add_executable(test_load_phase_gait tests/ogma/test_load_phase_gait.cpp)
 target_link_libraries(test_load_phase_gait PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_generator tests/ogma/test_generator.cpp)
 target_link_libraries(test_generator PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_lift_descent tests/ogma/test_lift_descent.cpp)
+target_link_libraries(test_lift_descent PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_belief_filter tests/ogma/test_belief_filter.cpp)
 target_link_libraries(test_belief_filter PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_feature_window tests/ogma/test_feature_window.cpp)
@@ -610,6 +613,7 @@ gtest_discover_tests(test_prox_memory)
 gtest_discover_tests(test_bearing_to_intent)
 gtest_discover_tests(test_load_phase_gait)
 gtest_discover_tests(test_generator)
+gtest_discover_tests(test_lift_descent)
 gtest_discover_tests(test_belief_filter)
 gtest_discover_tests(test_feature_window)
 gtest_discover_tests(test_distress)
