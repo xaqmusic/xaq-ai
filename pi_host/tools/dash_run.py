@@ -105,7 +105,10 @@ TUNABLES = {
     "period": Tunable("period", "LPG period", "LoadPhaseGait", "period_ticks", PERIOD_STEP_TICKS,
                       PERIOD_MIN, PERIOD_MAX, "ticks", default=70.0),
     "height": Tunable("height", "belly target", "MotorEPMv2", "tuck_learn_target_m", 0.005, 0.030, 0.100, "mm",
-                      scale=1000.0, default=0.065, requires="tuck_learn_rate"),
+                      scale=1000.0, default=0.065, requires="tuck_learn_rate",
+                      # a config with the learned stance press moves its target with the height learner's (one belly
+                      # target, two learners); a config without press_target_m is not paired
+                      pair_key="press_target_m"),
     # Swing lift (operator, 2026-10-23: swinging toes brush the floor): the femur half of the phase-shaped swing
     # lift, as a magnitude, with the knee half moved at the config's knee/femur ratio.  Read every tick.
     "lift": Tunable("lift", "swing lift", "MotorEPMv2", "leg_phase_lift_hip2", 0.05, 0.0, 0.9, "",
@@ -222,10 +225,12 @@ def config_tunables(doc: dict) -> dict:
                 if v is None:
                     break
                 v = v * t.sign
-                if t.pair_key:                  # (module id, value, pair/value ratio); a zero lift has no knob
+                if t.pair_key and t.pair_key in params:   # (module id, value, pair/value ratio); a zero lift has no knob
                     if not v > 0:
                         break
                     out[t.name] = (str(mod.get("id", "")), v, float(params.get(t.pair_key, 0.0)) / v)
+                    break
+                if t.pair_key and t.name == "lift":       # the lift's knee half is part of the knob: no knee, no knob
                     break
             except (TypeError, ValueError):
                 break
@@ -670,7 +675,7 @@ class RunController:
         t = TUNABLES[name]
         entry = self.cfg.tunables[name]
         r = self.io.brain_call("set_param", id=entry[0], key=t.key, value=float(t.sign * value))
-        if t.pair_key and r and r.get("status") == "ok":
+        if t.pair_key and len(entry) > 2 and r and r.get("status") == "ok":
             r = self.io.brain_call("set_param", id=entry[0], key=t.pair_key, value=float(entry[2] * value))
         return r
 
