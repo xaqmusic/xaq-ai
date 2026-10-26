@@ -39,6 +39,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <memory>
 #include <chrono>
 #include <csignal>
@@ -308,7 +310,6 @@ struct State {
     double   ext5v          = 0.0;       // the Pi's OWN measure of the rail the HAT feeds
     int64_t  ext5v_ms       = 0;
     int64_t throttled_next_ms = 0;   // deadlines, so the rate is OURS and not the client's
-    int64_t ext5v_next_ms     = 0;
     int64_t adc_fast_next_ms  = 0;   // fast ADC deadline; the rate is ours, not the client's
     // Whole-robot bus current (BOM 3).  Instrument only -- nothing here consumes it.
     // null when the part is absent, and benchd then behaves exactly as it did before.
@@ -400,6 +401,33 @@ struct State {
     // The record's own lock (2026-10-26).  record() is called with S.m held from many places, and once WITHOUT it — the
     // telemetry thread's 10 Hz line — so the stream needs a lock of its own.  See the telemetry loop for why.
     std::mutex log_m;
+    // ⚠ NO THREAD WAITS ON THE SD CARD (2026-10-26, second half).  Taking the telemetry write out of S.m was not enough:
+    // record() is still called with S.m held from a dozen places, and while any thread sat in log.flush() on a stalled
+    // card the next record() under S.m waited for log_m — so the servo tick waited too.  record() now only queues the
+    // line; log_thread writes it.  A stalled card delays the record, never the servos.
+    std::condition_variable log_cv;
+    std::deque<std::string> log_q;
+    bool log_stop = false;
+    long log_dropped = 0;                               // lines refused because the queue was full (the card is gone)
+    static constexpr size_t LOG_Q_MAX = 50000;
+    std::atomic<int64_t> log_busy_since{-1};            // mono ms the writer entered write+flush; -1 = idle
+    // ⚠ THE VIDEOCORE MAILBOX IS POLLED OFF THE LOCK (2026-10-26).  frame() ran `vcgencmd get_throttled` (10 Hz) and
+    // `vcgencmd pmic_read_adc` (1 Hz) through popen with S.m held; a mailbox call has wedged before (2026-09-25, under a
+    // second sampler), and the robot runs now share the VideoCore with the camera.  vc_thread polls; frame() reads
+    // the latest value.  The rail guard's detection bound is unchanged: the same 100 ms poll, now on its own thread.
+    std::mutex vc_m;
+    std::string vc_throttled = "0x0";
+    double  vc_ext5v = 0.0;
+    int64_t vc_ext5v_ms = 0, ext5v_seen_ms = 0;
+    std::atomic<int64_t> vc_busy_since{-1};             // mono ms the poller entered popen; -1 = idle
+    std::atomic<int> vc_busy_what{0};                   // 1 get_throttled, 2 pmic_read_adc
+    long vc_calls = 0, vc_slow = 0; double vc_max_ms = 0.0;   // under vc_m
+    // THE STALL WITNESS.  When the servo tick runs more than STALL_MS late (at wake or at the lock) it records how late,
+    // where the time went, and what the VideoCore poller and the log writer were doing at that moment.  If neither was
+    // busy and the lock was free, the whole process was descheduled — a different fault, and the record says which.
+    static constexpr double STALL_MS = 80.0;
+    long stalls = 0, ticks_dropped = 0; double stall_max_ms = 0.0;
+    std::thread log_thr;                                // started in the constructor, drained and joined in the destructor
 
     State(const std::string& dev, const std::string& body_, const std::string& map_path_, const std::string& poses_path_, const std::string& log_path)
         : bus(dev), hat(bus), driver(hat, ServoDriverConfig{40, int(TICK_HZ / 2), TICK_HZ}),
@@ -408,14 +436,36 @@ struct State {
         if (!poses.is_object()) poses = json::object();
         for (int c = 0; c < ServoDriver::N; ++c) driver.set_limits(c, {OPER_MIN_US, OPER_MAX_US});
         map = {{"version", 1}, {"body", body}, {"servos", json::array()}};
+        log_thr = std::thread([this]{ log_writer(); });
+    }
+    ~State() {
+        { std::lock_guard<std::mutex> lk(log_m); log_stop = true; }   // the writer drains the queue, then exits
+        log_cv.notify_one();
+        if (log_thr.joinable()) log_thr.join();
     }
 
     void record(const char* kind, const json& j) {
-        json line = {{"t_mono_ms", mono_ms()}, {"kind", kind}, {"data", j}};
-        std::lock_guard<std::mutex> lk(log_m);
-        if (!log) return;
-        log << line.dump() << '\n';
-        log.flush();
+        std::string line = json{{"t_mono_ms", mono_ms()}, {"kind", kind}, {"data", j}}.dump();
+        { std::lock_guard<std::mutex> lk(log_m);
+          if (log_q.size() >= LOG_Q_MAX) { ++log_dropped; return; }
+          log_q.push_back(std::move(line)); }
+        log_cv.notify_one();
+    }
+    // The writer: drains the queue in batches, writing with no lock held.  Runs until log_stop and the queue is empty.
+    void log_writer() {
+        std::deque<std::string> batch;
+        for (;;) {
+            { std::unique_lock<std::mutex> lk(log_m);
+              log_cv.wait(lk, [&]{ return log_stop || !log_q.empty(); });
+              if (log_q.empty() && log_stop) return;
+              batch.swap(log_q); }
+            if (!log) { batch.clear(); continue; }
+            log_busy_since = mono_ms();
+            for (const auto& l : batch) log << l << '\n';
+            log.flush();
+            log_busy_since = -1;
+            batch.clear();
+        }
     }
 
     // ---- envelope bookkeeping (callers hold m) ----
@@ -963,39 +1013,16 @@ struct State {
         }
         if (now >= throttled_next_ms) {
             throttled_next_ms = now + THROTTLE_POLL_MS;
-            // EXT5V is the Pi's own reading of the 5 V input the HAT feeds — the rail that
-            // actually fails.  INSTRUMENT ONLY for now: published so its behaviour under
-            // load can be watched before any threshold is chosen from it, which is the
-            // same admission rule every other sensor here is under.
-            //
-            // ⚠ Its own, SLOWER deadline.  Nothing reacts to it, so there is no latency
-            // requirement — and it costs 2.9 ms against get_throttled's 1.5 ms.  (An
-            // earlier note here said this call "runs at ~8 Hz".  That was the sample
-            // spacing of the operator's logging script, not the cost of the call; the
-            // call is 2.9 ms and would run at ~340 Hz.  See bom §3.8.8.4.)
-            if (now >= ext5v_next_ms) {
-                ext5v_next_ms = now + g_ext5v_poll_ms;
-                if (FILE* f = popen("vcgencmd pmic_read_adc EXT5V_V 2>/dev/null", "r")) {
-                    char b[128] = {0};
-                    if (fgets(b, sizeof b, f)) {
-                        std::string t(b); auto eq = t.find('=');
-                        if (eq != std::string::npos) {
-                            try { ext5v = std::stod(t.substr(eq + 1)); ext5v_ms = mono_ms(); }
-                            catch (...) { /* a malformed line is not worth a tick */ }
-                        }
-                    }
-                    pclose(f);
-                }
-                // In fast mode the 10 Hz telemetry frame is too coarse to be the record,
-                // so each sample gets its own line.  Gated on the rate so normal running
-                // does not grow the log by 10x for a channel nothing acts on.
-                if (g_ext5v_poll_ms < 500)
-                    record("ext5v", {{"v", ext5v}, {"vbat", vbat}, {"i_a", ina_i}});
-            }
-            if (FILE* f = popen("vcgencmd get_throttled 2>/dev/null", "r")) {
-                char b[64] = {0}; if (fgets(b, sizeof b, f)) { std::string t(b); auto eq = t.find('='); if (eq != std::string::npos) { pi_throttled = t.substr(eq + 1); while (!pi_throttled.empty() && (pi_throttled.back() == '\n' || pi_throttled.back() == '\r')) pi_throttled.pop_back(); } }
-                pclose(f);
-            }
+            // The values come from vc_thread (see State::vc_m and vc_thread for the two polls and their rates): no
+            // mailbox call is made here, under the lock.
+            { std::lock_guard<std::mutex> vl(vc_m);
+              pi_throttled = vc_throttled;
+              if (vc_ext5v_ms != ext5v_seen_ms) {
+                  ext5v = vc_ext5v; ext5v_ms = vc_ext5v_ms; ext5v_seen_ms = vc_ext5v_ms;
+                  // In fast mode the 10 Hz telemetry frame is too coarse to be the record, so each sample gets its
+                  // own line.  Gated on the rate so normal running does not grow the log by 10x.
+                  if (g_ext5v_poll_ms < 500) record("ext5v", {{"v", ext5v}, {"vbat", vbat}, {"i_a", ina_i}});
+              } }
             // ---- the guard proper -------------------------------------------------
             unsigned thr = 0;
             try { thr = unsigned(std::stoul(pi_throttled, nullptr, 0)); } catch (...) { thr = 0; }
@@ -1064,6 +1091,7 @@ struct State {
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
                 {"overruns", overruns}, {"bus_errors", bus_errors},
+                {"stalls", stalls}, {"stall_max_ms", stall_max_ms}, {"ticks_dropped", ticks_dropped},
                 {"tick_split", {{"servo", sp_servo.out()}, {"adc4", sp_adc.out()}, {"tof", sp_tof.out()},
                                 {"lock_wait", sp_lock.out()}, {"feed_total", sp_feed.out()},
                                 {"wake_to_feed", sp_pre.out()}, {"tick_total", sp_total.out()}}},
@@ -1215,9 +1243,31 @@ void tick_thread(State& S) {
             } else if (n >= 0) cmd_unparsed = true;
         }
         std::lock_guard<std::mutex> lk(S.m);
+        double lock_us = 0.0;
         { timespec lk1; clock_gettime(CLOCK_MONOTONIC, &lk1);
-          S.sp_lock_w.add((lk1.tv_sec - now.tv_sec) * 1e6 + (lk1.tv_nsec - now.tv_nsec) / 1e3); }
+          lock_us = (lk1.tv_sec - now.tv_sec) * 1e6 + (lk1.tv_nsec - now.tv_nsec) / 1e3;
+          S.sp_lock_w.add(lock_us); }
         if (late_ns > period_ns) ++S.overruns;
+        // THE STALL WITNESS (see State::STALL_MS).  Late at wake = this thread was not run; late at the lock = a holder.
+        const double late_ms = late_ns / 1e6, lock_ms = lock_us / 1e3;
+        if (late_ms > State::STALL_MS || lock_ms > State::STALL_MS) {
+            const int64_t wn = mono_ms();
+            const int64_t vb = S.vc_busy_since.load(), lb = S.log_busy_since.load();
+            size_t q = 0; { std::lock_guard<std::mutex> ql(S.log_m); q = S.log_q.size(); }
+            ++S.stalls; S.stall_max_ms = std::max(S.stall_max_ms, late_ms + lock_ms);
+            S.record("stall", {{"late_ms", late_ms}, {"lock_ms", lock_ms},
+                               {"vc_busy_ms", vb >= 0 ? json(wn - vb) : json(nullptr)},
+                               {"vc_what", S.vc_busy_what.load() == 1 ? "get_throttled" : S.vc_busy_what.load() == 2 ? "pmic_read_adc" : ""},
+                               {"log_busy_ms", lb >= 0 ? json(wn - lb) : json(nullptr)}, {"log_q", q}});
+        }
+        // ⚠ MISSED TICKS ARE DROPPED, NOT REPLAYED (2026-10-26).  `next` advances one period per pass, so after a stall
+        // the deadline lies in the past and clock_nanosleep returns at once: the loop used to run every missed tick
+        // back to back, each one slewing the servos a full tick's step — a 1 s stall became ~50 slew steps in a burst,
+        // the servos racing to the brain's target.  More than two periods behind: re-anchor on now.
+        if (late_ns > 2 * period_ns) {
+            S.ticks_dropped += late_ns / period_ns;
+            next = now;
+        }
         const int64_t ms = mono_ms();
         try {
             S.service_pose_move();
@@ -1451,6 +1501,52 @@ void imu_thread(State& S) {
             else    { S.imu_ok = false; ++S.imu_errors; }
         }
         std::this_thread::sleep_until(next);
+    }
+}
+
+// The VideoCore poller (see State::vc_m).  get_throttled every THROTTLE_POLL_MS for the rail guard; EXT5V — the Pi's
+// own reading of the 5 V input the HAT feeds, INSTRUMENT ONLY — on its own, slower deadline (g_ext5v_poll_ms): nothing
+// reacts to it, and it costs 2.9 ms against get_throttled's 1.5 ms (bom §3.8.8.4).  A call over 50 ms is recorded.
+void vc_thread(State& S) {
+    auto poll = [&](const char* cmd, int what) -> std::string {
+        const int64_t t0 = mono_ms();
+        S.vc_busy_what = what; S.vc_busy_since = t0;
+        std::string out;
+        if (FILE* f = popen(cmd, "r")) {
+            char b[128] = {0};
+            if (fgets(b, sizeof b, f)) out = b;
+            pclose(f);
+        }
+        S.vc_busy_since = -1; S.vc_busy_what = 0;
+        const double ms = double(mono_ms() - t0);
+        bool slow = false;
+        { std::lock_guard<std::mutex> vl(S.vc_m);
+          ++S.vc_calls; S.vc_max_ms = std::max(S.vc_max_ms, ms);
+          if (ms > 50.0) { ++S.vc_slow; slow = true; } }
+        if (slow) S.record("vc_slow", {{"cmd", cmd}, {"ms", ms}});
+        return out;
+    };
+    int64_t ext5v_next_ms = 0;
+    while (g_run) {
+        const int64_t now = mono_ms();
+        if (now >= ext5v_next_ms) {
+            ext5v_next_ms = now + g_ext5v_poll_ms;
+            const std::string t = poll("vcgencmd pmic_read_adc EXT5V_V 2>/dev/null", 2);
+            const auto eq = t.find('=');
+            if (eq != std::string::npos) {
+                try { const double v = std::stod(t.substr(eq + 1));
+                      std::lock_guard<std::mutex> vl(S.vc_m); S.vc_ext5v = v; S.vc_ext5v_ms = mono_ms(); }
+                catch (...) { /* a malformed line is not worth a sample */ }
+            }
+        }
+        std::string t = poll("vcgencmd get_throttled 2>/dev/null", 1);
+        const auto eq = t.find('=');
+        if (eq != std::string::npos) {
+            t = t.substr(eq + 1);
+            while (!t.empty() && (t.back() == '\n' || t.back() == '\r')) t.pop_back();
+            std::lock_guard<std::mutex> vl(S.vc_m); S.vc_throttled = t;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(THROTTLE_POLL_MS));
     }
 }
 
@@ -2195,6 +2291,7 @@ int main(int argc, char** argv) {
     std::thread tl(telemetry_thread, std::ref(S), pub);
     std::thread ti(imu_thread, std::ref(S));
     std::thread tc(ina_capture_thread, std::ref(S));
+    std::thread tv(vc_thread, std::ref(S));
     while (g_run) {
         zmq_pollitem_t items[] = {{rep, 0, ZMQ_POLLIN, 0}, {ctl, 0, ZMQ_POLLIN, 0}};
         if (zmq_poll(items, ctl ? 2 : 1, 100) <= 0) continue;
@@ -2221,7 +2318,7 @@ int main(int argc, char** argv) {
             zmq_send(sock, out.data(), out.size(), 0);
         }
     }
-    tt.join(); tl.join(); ti.join(); tc.join();
+    tt.join(); tl.join(); ti.join(); tc.join(); tv.join();
     {
         std::lock_guard<std::mutex> lk(S.m);
         // Leave the ToF stopped rather than free-running after we are gone: the part
