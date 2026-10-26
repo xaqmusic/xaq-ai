@@ -1092,6 +1092,12 @@ ParamSchema MotorEPMv2::params_schema() const {
          "1 = the per-leg integrated offset is applied only while that leg is planted; in swing the leg lifts from the shared "
          "rest pose. 0 = applied in swing too (measured to cancel the swing lift on a leg with a large positive offset).",
          ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"level_int_zero_mean", ParamMutability::HotMutable,
+         "1 = the per-leg integrated offsets are held zero-mean across the legs (each update subtracts their mean): the "
+         "integrator tilts the body and never raises or lowers it, so it cannot cancel the learned stance press. Robot "
+         "2026-10-26: planted legs read themselves as the high corner in a trot and all four offsets ran to -0.30 against a "
+         "press at +0.30. 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
         {"stride_center_gain", ParamMutability::HotMutable,
          "STRIDE-CENTRE HOMEOSTAT, per leg: off -= gain * EMA(achieved hip1) per tick, |off| <= stride_center_max, applied to the "
          "hip command, so each hip's time-average returns to neutral. The load-held phase dwells at lift-off and leaves every "
@@ -1626,6 +1632,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["lift_relative_gain"]  = lift_relative_gain_;
     m["lift_relative_tau"]   = lift_relative_tau_;
     m["level_int_planted_only"] = level_int_planted_only_;
+    m["level_int_zero_mean"] = level_int_zero_mean_;
     m["torque_topic"]       = torque_topic_;
     m["contact_instrument_only"] = contact_instrument_only_;
     m["gait_align_diag"]    = gait_align_diag_;
@@ -1949,6 +1956,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "lift_relative_gain",  [&](auto const& v){ lift_relative_gain_  = get_double(v, "lift_relative_gain"); });
     apply_param(params, "lift_relative_tau",   [&](auto const& v){ lift_relative_tau_   = std::max(1.0, get_double(v, "lift_relative_tau")); });
     apply_param(params, "level_int_planted_only", [&](auto const& v){ level_int_planted_only_ = get_double(v, "level_int_planted_only"); });
+    apply_param(params, "level_int_zero_mean", [&](auto const& v){ level_int_zero_mean_ = get_double(v, "level_int_zero_mean"); });
     apply_param(params, "torque_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) torque_topic_ = *p; });
     apply_param(params, "contact_instrument_only", [&](auto const& v){ contact_instrument_only_ = get_double(v, "contact_instrument_only"); });
     apply_param(params, "gait_align_diag", [&](auto const& v){ gait_align_diag_ = get_double(v, "gait_align_diag"); });
@@ -3651,6 +3659,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "lift_relative_gain")  lift_relative_gain_  = get_double(value, "lift_relative_gain");
     else if (key == "lift_relative_tau")   lift_relative_tau_   = std::max(1.0, get_double(value, "lift_relative_tau"));
     else if (key == "level_int_planted_only") level_int_planted_only_ = get_double(value, "level_int_planted_only");
+    else if (key == "level_int_zero_mean") level_int_zero_mean_ = get_double(value, "level_int_zero_mean");
     else if (key == "support_select_gain") support_select_gain_ = get_double(value, "support_select_gain");
     else if (key == "panic_on") panic_on_ = get_double(value, "panic_on");
     else if (key == "panic_off") panic_off_ = get_double(value, "panic_off");
@@ -6305,6 +6314,12 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 corner_err_[size_t(leg)] = e;
                 level_off_[size_t(leg)] = std::clamp(level_off_[size_t(leg)] + float(level_int_gain_) * e,
                                                      -float(level_int_max_), float(level_int_max_));
+                if (level_int_zero_mean_ > 0.0) {   // the leveler owns attitude, not height (see the header note)
+                    float mu = 0.0f;
+                    for (float o : level_off_) mu += o;
+                    mu /= float(n_legs_);
+                    for (float& o : level_off_) o = std::clamp(o - mu, -float(level_int_max_), float(level_int_max_));
+                }
             }
             if (level_int_planted_only_ <= 0.0 || !in_swing_[leg]) {
                 y[1]     += level_off_[size_t(leg)];

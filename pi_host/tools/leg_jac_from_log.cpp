@@ -5,7 +5,8 @@
 // difference, its GAIN: depth change per radian of hip2 and per radian of knee.  The learned stance press adds the same
 // command to both (press_knee 1), so its lift is the sum; where that sum falls to zero or below, pressing harder folds
 // the leg under the body instead of raising the corner (operator 2026-10-26: the right rear leg tucking under).
-// Prints one JSON line per frame: per leg [depth m, d depth/d hip2, d depth/d knee, foot reach from the hip m], FSR
+// Prints one JSON line per frame: per leg [depth m, d depth/d hip2, d depth/d knee, shin-midpoint reach from the hip m,
+// hip2 rad, knee rad, femur tilt deg, shin tilt deg], FSR
 // planted flags, the belly ToF.  Level ground assumed (up = +y), as sag_from_log.
 //
 // Build: g++ -std=c++20 -O2 -I cpp_core/include -I pi_host/include -I <nlohmann include> pi_host/tools/leg_jac_from_log.cpp
@@ -51,7 +52,20 @@ int main(int argc, char** argv) {
             const auto p = ogma::body::fk_leg(body.anchors[size_t(i)], t1, t2, t3, 0.0);
             const auto hip = body.anchors[size_t(i)].hip1_world;
             const double reach = std::hypot(double(p.lower.origin.x - hip.x), double(p.lower.origin.z - hip.z));
-            legs.push_back({d0, g2, g3, reach, t2, t3});
+            // Segment tilts from the body vertical (level ground assumed): the femur hip2 -> knee and the shin
+            // knee -> shin midpoint, in degrees; 0 = the segment points straight down.  The depth model above treats
+            // the shin as vertical (feet_y_gravity subtracts l3/2), so a tilted shin is also its error.
+            const ogma::body::Basis3f rot1{ ogma::body::Quatf(ogma::body::Vec3f(0.0f, 1.0f, 0.0f), float(t1)) };
+            const ogma::body::Xform3f h1(rot1, body.anchors[size_t(i)].hip1_world - rot1 * body.anchors[size_t(i)].hip1_world);
+            const ogma::body::Vec3f hip2_now = h1 * body.anchors[size_t(i)].hip2_world;
+            const ogma::body::Basis3f rot2{ ogma::body::Quatf(rot1 * body.anchors[size_t(i)].hip2_axis, float(t2)) };
+            const ogma::body::Xform3f h2(rot2, hip2_now - rot2 * hip2_now);
+            const ogma::body::Vec3f knee_now = h2 * h1 * body.anchors[size_t(i)].knee_world;
+            auto tilt = [](ogma::body::Vec3f a, ogma::body::Vec3f b) {
+                const double dx = double(b.x - a.x), dy = double(b.y - a.y), dz = double(b.z - a.z);
+                return std::atan2(std::hypot(dx, dz), -dy) * 180.0 / M_PI;
+            };
+            legs.push_back({d0, g2, g3, reach, t2, t3, tilt(hip2_now, knee_now), tilt(knee_now, p.lower.origin)});
             planted.push_back(j["fsr"][size_t(ogma::hw::brain::kFsrChannelForSimLeg[size_t(i)])].get<int>() >= 200 ? 1 : 0);
         }
         std::cout << nlohmann::json{{"t", j.value("t", 0)}, {"legs", legs}, {"planted", planted},

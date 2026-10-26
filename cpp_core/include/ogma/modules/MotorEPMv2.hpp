@@ -714,6 +714,12 @@ private:
     // the offset applied in swing too, the right rear's +0.13 offset cancelled its swing lift
     // (femur excursion -0.08 -> -0.01) and the foot never cleared.  0 = applied always.
     double level_int_planted_only_ = 0.0;
+    // 1 = the integrated offsets are held ZERO-MEAN across the legs: the integrator can tilt the body, never raise or
+    // lower it.  Measured on the robot 2026-10-26 (five press runs): in a trot the swinging diagonal's corners sag, so
+    // every PLANTED leg reads itself as the high corner (mean corner error -0.035 rad while planted), and all four
+    // offsets ran to -0.30 while the learned stance press ran to +0.30 -- two integrators cancelling, the belly flat
+    // at ~50 mm whatever its target.  Height belongs to the press; attitude to this.  0 = off, byte-identical.
+    double level_int_zero_mean_ = 0.0;
     // THE COMMANDED-FK CORNER SENSOR (2026-10-13).  Under honest inputs the joints are the
     // servo model, so sag is invisible; the corner altitude IS observable from the commanded
     // forward kinematics rotated by the IMU (feet_topic = reality.proprio.feet_y_gravity_cmd_imu

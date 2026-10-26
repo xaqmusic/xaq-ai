@@ -9177,3 +9177,37 @@ a single speed intent can map onto the period at stroke ~1.0, from 90 (slow, eff
 buys no speed and costs falls. Caveats: sim servos do not sag, and faster gaits draw more current (the robot browned out
 at 4.5 rad/s, 2026-10-19). Re-use context: a speed meta-control (one intent → period at stroke 1.0), then G4a with the
 period as its handle (it moves the progress error, unlike swing lift); robot check of stroke 1.0 at period 50 first.
+
+### 2026-10-26 — ROBOT RUN of robot_p1_presskin (308 s, carpet onto vinyl): the kinematics-aware press and the per-leg corner integrator CANCEL each other — every planted leg reads itself as the high corner, the integrator runs all four legs to −0.30 while the press runs to +0.30, and the belly stays at ~50 mm whatever its target (60 → 80 mm); fix `level_int_zero_mean` built, sim tie — measurement `BASELINE` (n = 1 run, the pattern in 5 of 5 press runs); the fix `IN_FLIGHT`
+
+**What was seen.** The operator raised the belly target 60 → 65 → 70 → 75 → 80 mm late in the run to get the legs
+steeper on the slippery floor. The belly ToF did not move (median 44–51 mm in every 10 s bin from 140 s to the end).
+`press_a` climbed steadily from 0 to its 0.30 cap on all four legs (cap reached ~255 s). `press_def`, the height deficit,
+grew from 5 to 32 mm. Over the same time `level_off`, the per-leg rest-length integrator, fell to its −0.30 bound on
+all four legs, almost a mirror image of the press. Both add to hip2 and the knee with the same sign, so their sum
+stayed near zero. Measured femur tilt barely moved (FL 79° → 74°), and the shin stayed 25–40° from vertical in stance
+(10° at the stand pose).
+
+**Why.** The integrator's error is the corner projection of pitch and roll, integrated only while the leg is
+planted. In a trot the swinging diagonal's corners sag, so a planted leg is, on average, the HIGH corner: mean
+`corner_err` while planted was −0.069 / −0.038 / −0.029 / −0.005 rad (FL/FR/RL/RR, 76 / 67 / 55 / 48 % of samples
+negative). The error is zero-sum over all four legs but not over the planted pair, so the integrator gains a common
+mode: it shortens every leg, which is a height command, and height belongs to the press. The same pair of saturated
+integrators shows in all five press runs that day (press2 ×2, press3 ×2, presskin). In the sim the common mode is small
+(level_off mean ±0.05) because the sim's servos sag less under the swinging diagonal. The sim therefore never showed
+the fight.
+
+**The fix (one lever).** `level_int_zero_mean` 1 (MotorEPMv2, hot, default 0 = byte-identical) subtracts the
+offsets' mean after every update. The integrator can then tilt the body but never raise or lower it. Sim
+(robot_p1_presskin vs `_lz`, corridor, n = 4 × 9000): net_z 6.87 ± 1.16 vs 6.58 ± 0.78, straight 0.71 / 0.71, tilt_sd
+0.091 / 0.086, 0 falls in both — **a tie**. The lever landed: the level_off mean is 0.000 in every `_lz` seed and
+−0.05 to +0.03 without it. Config `…robot_p1_presskin_lz.json` is in the launcher.
+
+**Not settled by this run.** Where the carpet ends and the vinyl starts (no external odometry; `stride_v` is
+kinematic and cannot see slip). Whether a steeper stance helps on vinyl can only be tested once the height command
+actually reaches the legs, so this fix comes first. The leg tool `pi_host/tools/leg_jac_from_log.cpp` now prints the
+femur and shin tilt per leg.
+
+**Re-use context.** If `_lz` still cannot raise the belly, the next suspect is the press's own reach. A planted leg
+whose shin is 30–40° off vertical turns more of its push into splay on a low-friction floor. That would make stance
+reach the handle, solved by IK (the open proposal).

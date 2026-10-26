@@ -1073,8 +1073,10 @@ class RunController:
                 (self.rec_dir / "meta.json").write_text(json.dumps(meta, indent=1))
             except OSError:
                 pass
-            self._ev(f"recorded {secs:.0f} s of audio, {frames} feed frames -> {self.rec_dir}"
-                     + ("" if secs > 1 and frames > 0 else "  ⚠ A CHANNEL RECORDED NOTHING"))
+            audio_ok = secs > 1 or not self.record_audio      # audio off is not a channel that failed
+            self._ev((f"recorded {secs:.0f} s of audio, " if self.record_audio else "audio off, ")
+                     + f"{frames} feed frames -> {self.rec_dir}"
+                     + ("" if audio_ok and frames > 0 else "  ⚠ A CHANNEL RECORDED NOTHING"))
 
     def _cleanup(self) -> None:
         with self._cleanup_lock:
