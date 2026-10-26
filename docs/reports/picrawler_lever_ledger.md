@@ -9138,3 +9138,14 @@ slope G4a looked for is small and partly adverse, and the terrain swing of the e
 binding at 6 rad/s (rear 57 % vs front 31 % on edges) is a fast-servo phenomenon. Re-use context: G4a with a handle that
 DOES move the errors at this servo speed (stride period, or lift with a longer period that lets the slew finish), or
 per-situation trials (G4b) that remove the terrain variance; LiftDescent's machinery passed its unit tests and stays.
+
+### 2026-10-26 — G4b INPUT TEST: a context vocabulary built from the gait's own errors (GaitErrors: swing-phase contact per leg + stall) does not separate edge terrain from flat either — `NULL` (n = 20 varied worlds, terrain arena, robot_p1 at 4.22 rad/s)
+
+`…__robot_p1_ctx_err` (errors only, mean + sd, 10 channels) and `_ctx_errplus` (+ the 26 summary channels). Winner vs
+label NMI against a shifted-label chance: errors only — type 0.24 vs 0.21, edge-zone vs flat 0.20 vs 0.18, ≥ 25 mm
+0.17 vs 0.13; errors + summary — 0.29 vs 0.25, 0.24 vs 0.19, 0.19 vs 0.14. Margins of 0.03-0.05, as the summary-channel
+vocabulary (2026-10-25). Reading, with the dose response the same day: at this servo speed the gait's errors do not
+differ much between edges and flat (swing contact 35-45 % on both), so no vocabulary of them can tell the two apart —
+the walker is not terrain-sensitive at the two-stride scale. Re-use context: the faster servo (rear binding is loud at
+6 rad/s, 57 vs 31 %), event-scale features (the contact error AT an edge rather than over two strides), or the camera's
+look-ahead; on the robot the height/press and power problems come first.
