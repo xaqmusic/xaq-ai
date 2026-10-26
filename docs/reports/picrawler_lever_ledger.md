@@ -9164,3 +9164,16 @@ two cells down to the floor box (a seam between adjacent convex cells, not a thi
 bowl's edge (5 × 8000 ticks, press at 80 mm, to r 21.3 m): worst leg tip 13 mm below the surface, 0 resets. Capability
 and G3 numbers on the terrain arena before this date were measured on the heightmap ground. Re-use context: larger bowl
 cells (fewer seams) if the outer-bowl seam ever shows in a run.
+
+### 2026-10-26 — SPEED MAP at the robot's servo speed (robot_p1, 4.22 rad/s, flat arena, LPG period 30-90 × stroke gain 0.4-1.4, 4 seeds × 9000 ticks): with the stroke at 1.0, the period alone sweeps forward speed 4.9 → 7.0 cm/s without a fall; the deployed stroke 0.7 is under-stroked — `BASELINE` (signal, n = 4)
+
+Forward speed (net displacement / time, cm/s), stroke 0.7 / 1.0 / 1.4: period 90 — 3.9 / 4.9 / 5.4 (1 fall); 70 — 3.0 /
+5.1 / 5.5 (2 falls); 50 — 5.2 (deployed) / 5.9 / 5.3 (3 falls, tilt_sd 0.154); 40 — 5.4 / 6.0 / 5.8; 30 — 5.9 / 7.0 (tilt_sd
+0.128) / 6.9. Hip1 swing actually achieved (p95-p5): ~0.73-0.83 rad at stroke 0.7, 0.92-1.07 at 1.0; at stroke 1.4 it
+reaches 1.25-1.40 at long periods but only 1.03 at period 30 — there the slew limit binds. Distance per stride per radian
+of hip swing falls with the period (~8 cm/rad at period 90, ~6 at 50, ~4.4 at 30): short strides slip more, which is the
+"walking in place" the operator saw when the period shortened alone. Reading: speed is not the period alone but the pair;
+a single speed intent can map onto the period at stroke ~1.0, from 90 (slow, efficient) to 30 (fastest), and stroke 1.4
+buys no speed and costs falls. Caveats: sim servos do not sag, and faster gaits draw more current (the robot browned out
+at 4.5 rad/s, 2026-10-19). Re-use context: a speed meta-control (one intent → period at stroke 1.0), then G4a with the
+period as its handle (it moves the progress error, unlike swing lift); robot check of stroke 1.0 at period 50 first.
