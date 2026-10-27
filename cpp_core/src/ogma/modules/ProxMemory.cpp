@@ -54,6 +54,12 @@ ParamSchema ProxMemory::params_schema() const {
         {"too_close_m",   ParamMutability::HotMutable, "The live ping below this reads as contact: too_close = 1 - d / too_close_m.", ParamValue{0.15}},
         {"memory_ticks",  ParamMutability::HotMutable, "A stored point lives this many ticks (the body's own yaw wander is the sweep).", ParamValue{int64_t{150}}},
         {"behind_m",      ParamMutability::HotMutable, "A point this far behind the sensor is dropped.", ParamValue{0.10}},
+        {"support_n", ParamMutability::HotMutable,
+         "CORROBORATION: a bin's range is its support_n-th nearest stored point (1..8), so a lone false ping is never the "
+         "obstacle; a bin with fewer points reads nothing. 1 = the nearest point, byte-identical.", ParamValue{int64_t{1}}},
+        {"too_close_pings", ParamMutability::HotMutable,
+         "CORROBORATION: too_close reads only after this many consecutive valid pings below too_close_m (1..20). "
+         "1 = the live ping, byte-identical.", ParamValue{int64_t{1}}},
         {"ahead_half_deg", ParamMutability::HotMutable, "|azimuth| within this is the ahead slot (the duck's 5.625 deg).", ParamValue{5.625}},
         {"side_max_deg",   ParamMutability::HotMutable, "|azimuth| beyond this leaves the side slots (still in the view).", ParamValue{60.0}},
     };
@@ -66,6 +72,7 @@ ParamMap ProxMemory::current_params() const {
     m["range_m"] = ParamValue{range_m_}; m["view_range_m"] = ParamValue{view_range_m_};
     m["sensor_fwd_m"] = ParamValue{sensor_fwd_m_}; m["too_close_m"] = ParamValue{too_close_m_};
     m["memory_ticks"] = ParamValue{int64_t(memory_ticks_)}; m["behind_m"] = ParamValue{behind_m_};
+    m["support_n"] = ParamValue{int64_t(support_n_)}; m["too_close_pings"] = ParamValue{int64_t(too_close_pings_)};
     m["ahead_half_deg"] = ParamValue{ahead_half_deg_}; m["side_max_deg"] = ParamValue{side_max_deg_};
     return m;
 }
@@ -82,6 +89,8 @@ void ProxMemory::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "sensor_fwd_m", [&](auto const& v){ sensor_fwd_m_ = get_double(v, "sensor_fwd_m"); });
     apply_param(params, "too_close_m",  [&](auto const& v){ too_close_m_  = get_double(v, "too_close_m"); });
     apply_param(params, "memory_ticks", [&](auto const& v){ memory_ticks_ = int(get_double(v, "memory_ticks")); });
+    apply_param(params, "support_n",       [&](auto const& v){ on_param_change("support_n", v); });
+    apply_param(params, "too_close_pings", [&](auto const& v){ on_param_change("too_close_pings", v); });
     apply_param(params, "behind_m",     [&](auto const& v){ behind_m_     = get_double(v, "behind_m"); });
     apply_param(params, "ahead_half_deg", [&](auto const& v){ ahead_half_deg_ = get_double(v, "ahead_half_deg"); });
     apply_param(params, "side_max_deg",   [&](auto const& v){ side_max_deg_   = get_double(v, "side_max_deg"); });
@@ -98,6 +107,8 @@ void ProxMemory::on_param_change(std::string_view key, ParamValue const& value) 
     else if (k == "sensor_fwd_m")   sensor_fwd_m_   = get_double(value, k);
     else if (k == "too_close_m")    too_close_m_    = get_double(value, k);
     else if (k == "memory_ticks")   memory_ticks_   = int(get_double(value, k));
+    else if (k == "support_n")       support_n_       = std::clamp(int(get_double(value, k)), 1, 8);
+    else if (k == "too_close_pings") too_close_pings_ = std::clamp(int(get_double(value, k)), 1, 20);
     else if (k == "behind_m")       behind_m_       = get_double(value, k);
     else if (k == "ahead_half_deg") ahead_half_deg_ = get_double(value, k);
     else if (k == "side_max_deg")   side_max_deg_   = get_double(value, k);
@@ -133,13 +144,23 @@ void ProxMemory::tick(uint64_t tick_id) {
         const double along = sensor_fwd_m_ + last_d_;
         pts_.push_back(Pt{ox_ + along * c, oy_ + along * s, tick_id});
     }
+    if (new_ping_) close_streak_ = (last_valid_ && last_d_ < too_close_m_) ? close_streak_ + 1 : 0;
     new_ping_ = false;
     // 2. Age out.
     while (!pts_.empty() && tick_id - pts_.front().t > uint64_t(std::max(1, memory_ticks_))) pts_.pop_front();
     // 3. Re-express every point in the current body frame, relative to the beam's origin,
     //    bin by azimuth (az = atan2(body +X component, forward component)), nearest per bin.
-    float best[3] = {1e9f, 1e9f, 1e9f};
-    float view_best[8]; for (float& v : view_best) v = 1e9f;
+    // Each bin keeps its support_n smallest ranges, sorted; its range is the last of them (1e9 = too few points).
+    const int K = support_n_;
+    float best_k[3][8], view_k[8][8];
+    for (auto& b : best_k) for (float& v : b) v = 1e9f;
+    for (auto& b : view_k) for (float& v : b) v = 1e9f;
+    auto keep = [K](float* b, float r) {
+        if (r >= b[K - 1]) return;
+        int j = K - 1;
+        while (j > 0 && b[j - 1] > r) { b[j] = b[j - 1]; --j; }
+        b[j] = r;
+    };
     const double sx = ox_ + sensor_fwd_m_ * c, sy = oy_ + sensor_fwd_m_ * s;   // the beam's origin, odom frame
     for (auto it = pts_.begin(); it != pts_.end();) {
         const double dx = it->x - sx, dy = it->y - sy;
@@ -148,19 +169,22 @@ void ProxMemory::tick(uint64_t tick_id) {
         if (fwd < -behind_m_) { it = pts_.erase(it); continue; }
         const double r  = std::sqrt(fwd * fwd + lat * lat);
         const double az = std::atan2(lat, fwd) / kDeg;  // degrees, + = toward body +X
-        if (std::fabs(az) <= ahead_half_deg_)       best[1] = std::min(best[1], float(r));
-        else if (az > 0 && az <= side_max_deg_)     best[2] = std::min(best[2], float(r));
-        else if (az < 0 && -az <= side_max_deg_)    best[0] = std::min(best[0], float(r));
+        if (std::fabs(az) <= ahead_half_deg_)       keep(best_k[1], float(r));
+        else if (az > 0 && az <= side_max_deg_)     keep(best_k[2], float(r));
+        else if (az < 0 && -az <= side_max_deg_)    keep(best_k[0], float(r));
         if (std::fabs(az) < 60.0) {
             const int sec = std::clamp(int((az + 60.0) / 15.0), 0, 7);
-            view_best[sec] = std::min(view_best[sec], float(r));
+            keep(view_k[sec], float(r));
         }
         ++it;
     }
+    float best[3], view_best[8];
+    for (int i = 0; i < 3; ++i) best[i] = best_k[i][K - 1];
+    for (int k = 0; k < 8; ++k) view_best[k] = view_k[k][K - 1];
     for (int i = 0; i < 3; ++i)
         slots_[i] = best[i] < 1e8f ? float(std::clamp(1.0 - double(best[i]) / range_m_, 0.0, 1.0)) : 0.0f;
     // 4. too_close from the LIVE ping only: contact is now, not remembered.
-    slots_[3] = (last_valid_ && last_d_ < too_close_m_)
+    slots_[3] = (last_valid_ && last_d_ < too_close_m_ && close_streak_ >= too_close_pings_)
               ? float(std::clamp(1.0 - last_d_ / too_close_m_, 0.0, 1.0)) : 0.0f;
     for (int k = 0; k < 8; ++k)
         view_[k] = view_best[k] < 1e8f ? float(std::clamp(double(view_best[k]) / view_range_m_, 0.0, 1.0)) : 1.0f;

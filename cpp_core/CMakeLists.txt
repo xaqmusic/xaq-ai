@@ -715,5 +715,8 @@ target_link_libraries(epm_tof_study PRIVATE ogma_core pthread)
 # epm_replay — recorded input vectors through a real EPM, offline (conditioning studies, 2026-10-24)
 add_executable(epm_replay bench/epm_replay.cpp)
 target_link_libraries(epm_replay PRIVATE ogma_core pthread)
+# prox_replay — a robot run's range pings and odometry through the real ProxMemory, offline (corroboration settings, 2026-10-27)
+add_executable(prox_replay bench/prox_replay.cpp)
+target_link_libraries(prox_replay PRIVATE ogma_core pthread)
 
 endif() # OGMA_BUILD_TESTS

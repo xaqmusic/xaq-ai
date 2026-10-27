@@ -9388,3 +9388,20 @@ run log when the dash runs it. Built, not deployed.
 confound it can publish in-band (memory: confounds ride in the channel). Mark a reading no-echo, as the deadzone does,
 while a front toe is inside the beam's cone at a distance matching the reading. That replaces the fixed deadzone with
 the leg's own geometry; it needs the sensor's mount position and beam width.
+
+### 2026-10-27 — ProxMemory CORROBORATION (`support_n`, `too_close_pings`): a lone false ping is never the obstacle — built, unit-tested, sim: avoidance still acts on real walls — `IN_FLIGHT` (the robot's blips are the test; the sim's sensor has none)
+
+The operator's proposal: the range need not be fast, so let distances accumulate instead of reacting to blips.
+ProxMemory already accumulated (every ping a point in the odom frame for `memory_ticks` 150), but each bin took its
+NEAREST point. One false 0.077 m ping was therefore the ahead obstacle for the whole 3 s memory, and `too_close` fired
+on one live ping. `support_n` k: a bin's range is its k-th nearest point, and a bin with fewer than k reads nothing.
+A wall (~19 pings/s on the same spot) is believed within k pings. A toe moves with the body, so its blips scatter in
+the odom frame and do not stack. `too_close_pings` k: contact needs k consecutive valid close pings. Both 1 =
+byte-identical. Unit tests: a lone 0.077 m hit among 0.6 m wall pings dominates at k = 1 and is ignored at k = 3; a
+real obstacle is believed on its 3rd ping; a far ping resets the contact streak. Sim (`_sgkc` = `_sgk` + 3 / 2): arena,
+no obstacle reached, 3 seeds identical to `_sgk`. Room gym 3 × 3 m, 4 seeds: walls still read ahead under 0.25 m in
+every seed (1–8 % of samples vs 2–5 %), avoidance active 5–37 % vs 16–21 %, resets 3 vs 4. The sim's beam has no
+blips, so this shows the reflex still works, not that it is better. **Instrument:** `cpp_core/bench/prox_replay`
+replays a robot run log's pings and odometry through the real module under several settings. It counts ahead-near
+ticks while the 2 s ping median is beyond 0.40 m (false) and the first real near-wall tick (latency), so the robot's
+setting comes from its own data.

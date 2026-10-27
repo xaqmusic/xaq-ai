@@ -68,3 +68,39 @@ TEST(ProxMemory, TooCloseIsTheLivePingOnly) {
     f.run(1, 1.5f, false, 0, 0, 0);                  // the ping is gone: contact is not remembered
     auto q = f.prox(); EXPECT_FLOAT_EQ(q[3], 0.0f); EXPECT_GT(q[1], 0.9f) << "the point itself is remembered";
 }
+
+// ---- corroboration (support_n, too_close_pings) ----
+TEST(ProxMemory, ALoneFalseCloseHitIsIgnoredWhenThreePointsMustAgree) {
+    // A wall at ~0.6 m pinged repeatedly (slightly different values, as a real sensor reads), then ONE false 0.077 m
+    // hit (a toe in the beam), then the wall again.  With support_n 1 the false hit is the ahead obstacle for the whole
+    // memory; with support_n 3 the ahead slot keeps reading the wall.
+    for (int64_t k : {int64_t{1}, int64_t{3}}) {
+        Fix f({{"support_n", k}});
+        uint64_t t = 0;
+        for (int i = 0; i < 10; ++i) f.run(t++, 0.60f + 0.001f * float(i % 3), true, 0, 0, 0);
+        f.run(t++, 0.077f, true, 0, 0, 0);
+        for (int i = 0; i < 5; ++i) f.run(t++, 0.60f + 0.001f * float(i % 3), true, 0, 0, 0);
+        const float ahead = f.prox()[1];
+        if (k == 1) EXPECT_GT(ahead, 0.9f) << "nearest point: the false hit at 0.077 m dominates";
+        else        EXPECT_NEAR(ahead, 0.4f, 0.01f) << "3rd nearest: the wall at 0.6 m";
+    }
+}
+TEST(ProxMemory, ARealObstacleIsBelievedOnceEnoughPingsLandOnIt) {
+    Fix f({{"support_n", int64_t{3}}});
+    f.run(0, 0.30f, true, 0, 0, 0);
+    EXPECT_FLOAT_EQ(f.prox()[1], 0.0f) << "one ping: not yet believed";
+    f.run(1, 0.301f, true, 0, 0, 0);
+    EXPECT_FLOAT_EQ(f.prox()[1], 0.0f) << "two pings: not yet";
+    f.run(2, 0.302f, true, 0, 0, 0);
+    EXPECT_NEAR(f.prox()[1], 0.698f, 0.01f) << "three pings on the same spot: believed";
+}
+TEST(ProxMemory, TooCloseWaitsForConsecutiveClosePingsAndOneFarPingResetsIt) {
+    Fix f({{"too_close_pings", int64_t{2}}});
+    f.run(0, 0.08f, true, 0, 0, 0);
+    EXPECT_FLOAT_EQ(f.prox()[3], 0.0f) << "one close ping is not contact";
+    f.run(1, 0.081f, true, 0, 0, 0);
+    EXPECT_GT(f.prox()[3], 0.4f) << "two in a row are";
+    f.run(2, 0.60f, true, 0, 0, 0);
+    f.run(3, 0.08f, true, 0, 0, 0);
+    EXPECT_FLOAT_EQ(f.prox()[3], 0.0f) << "a far ping between resets the streak";
+}
