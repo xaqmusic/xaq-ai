@@ -9405,3 +9405,20 @@ blips, so this shows the reflex still works, not that it is better. **Instrument
 replays a robot run log's pings and odometry through the real module under several settings. It counts ahead-near
 ticks while the 2 s ping median is beyond 0.40 m (false) and the first real near-wall tick (latency), so the robot's
 setting comes from its own data.
+
+> **Replay of the first robot run with per-ping logging** (run 182543, first 274 s, 5491 pings, 84 % valid, through
+> `prox_replay`). Close pings come in runs: 6 single pings under 0.15 m and runs of 2, 3 and 4 (e.g. four at 0.09–0.11 m
+> between 0.93 m readings: a toe resting in the beam for ~0.2 s, its points stacked within ~1 cm). False = the module
+> says ahead < 0.25 m (or too_close) while the 2 s ping median is beyond 0.40 m:
+>
+> | support_n / too_close_pings | ahead-near ticks (false) | too_close ticks (false) | first real near-wall tick |
+> |---|---|---|---|
+> | 1 / 1 (deployed) | 815 (314) | 40 (34) | 10119 |
+> | 3 / 3 | 336 (73) | 8 (8) | +10 |
+> | 5 / 5 | 188 (21) | 0 | +13 |
+> | **6 / 6** | **140 (0)** | **0** | **+15 (0.3 s)** |
+> | 8 / 8 | 76 (0) | 0 | +18 |
+>
+> 6 / 6 removes every false trigger at 0.3 s of first-detection delay. It also shortens the time a real wall reads as
+> near ahead (501 → 140 ticks), because six points must fall in the ±5.6° ahead bin. `_sgkc` set to 6 / 6. Chosen
+> in-sample: the next run checks it.

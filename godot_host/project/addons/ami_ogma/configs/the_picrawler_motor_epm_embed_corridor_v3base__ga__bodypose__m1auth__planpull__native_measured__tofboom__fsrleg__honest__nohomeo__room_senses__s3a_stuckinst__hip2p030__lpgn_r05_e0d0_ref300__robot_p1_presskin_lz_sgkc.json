@@ -1,6 +1,6 @@
 {
  "metadata": {
-  "name": "EXP \u00b7 ROBOT \u00b7 _sgk + RANGE CORROBORATION (an obstacle needs 3 pings on the same spot, contact 2 in a row: a toe blip is ignored) \u00b7 presskin_lz + SUPPORT GATE + KINEMATIC ROUTE (the stance reach and the corner integrator push along each leg's lift direction, like the press; no knee fold on a leg folded under) \u00b7 (a leg waits at the end of stance until the CoG is near the feet that stay down; each leg learns its allowance from the belly dips its lift-offs cause)",
+  "name": "EXP \u00b7 ROBOT \u00b7 _sgk + RANGE CORROBORATION (an obstacle needs 6 pings on the same spot, contact 6 in a row: a toe blip is ignored) \u00b7 presskin_lz + SUPPORT GATE + KINEMATIC ROUTE (the stance reach and the corner integrator push along each leg's lift direction, like the press; no knee fold on a leg folded under) \u00b7 (a leg waits at the end of stance until the CoG is near the feet that stay down; each leg learns its allowance from the belly dips its lift-offs cause)",
   "description": "PROMOTED (operator, 2026-10-24, after bench tuning): the promoted sim stack (shaped-noise handover, self-collision keep-out, gravity-referenced panic push, corner integrator) on the robot, with the femur rest LEARNED toward a 60 mm belly (range 0.15-0.45, leak 0.002 to 0.3), swing lift 0.40 (femur; knee 0.267), 4.22 rad/s (slew 46), LPG period 50 (1.0 s/stride). Robot keeps its pause on inversion. Known: the body sags over a run (belly 63 -> ~36 mm with the femur at its 0.45 limit), and swinging toes still brush 33-69 % of swing time. All knobs live on picrawler-dash.",
   "env_target": "picrawler",
   "gym_mode": "room",
@@ -582,8 +582,8 @@
     "range_m": 0.5,
     "sensor_fwd_m": 0.049,
     "too_close_m": 0.15,
-    "support_n": 3,
-    "too_close_pings": 2,
+    "support_n": 6,
+    "too_close_pings": 6,
     "memory_ticks": 150
    }
   },
