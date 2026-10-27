@@ -270,6 +270,11 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
                 flags += ["--range-deadzone", dz]   # leg-occlusion deadzone (2026-10-25), as the sim reads it
         if str(be.get("OGMA_PICRAWLER_CAMERA_ROBOT", "")) == "1":
             flags.append("--camera")
+            # The camera preview for the Godot bench dashboard's POV panel (operator 2026-10-27): the senses-only
+            # service publishes it with --video on control port + 2 (7402); the run's ogma_host replaces that service
+            # on the same ports, so without --video the dashboard went dark while the brain drove.  One frame copy per
+            # camera frame, sent ZMQ_DONTWAIT and conflated: no wait in the tick.  Instrument only; the brain is unchanged.
+            flags.append("--video")
         if str(be.get("OGMA_PICRAWLER_ODOM", "")) == "1":
             flags += ["--odom", "--odom-scale", str(be.get("OGMA_PICRAWLER_ODOM_SCALE", "2.0"))]
         if str(be.get("OGMA_PICRAWLER_HONEST_VEL_EGO", "")) == "1":
