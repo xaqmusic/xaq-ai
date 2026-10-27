@@ -704,3 +704,18 @@ def test_the_lift_learner_knob_exists_only_with_the_rising_window_and_turns_off(
     assert "brain set_param motor_epm.swing_learn_rate=0.0" in robot.calls
     ctrl.end()
     ctrl.join(10)
+
+
+def test_a_mark_key_stamps_the_operators_label_on_the_recording(tmp_path, monkeypatch):
+    # 2026-10-27: the stride odometry cannot see a slipping body, so the operator labels the episodes.
+    robot, ctrl = make(tmp_path, monkeypatch)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"})
+    assert ctrl.mark("swim") == "marked swim"
+    assert ctrl.mark("good") == "marked good"
+    ctrl.end(); ctrl.join(10)
+    rows = [json.loads(l) for l in (ctrl.rec_dir / "events.jsonl").read_text().splitlines()]
+    marks = [r for r in rows if r["kind"] == "mark"]
+    assert [m["label"] for m in marks] == ["swim", "good"]
+    assert all("mono_ms" in m for m in marks)                        # on the feed's clock
+    assert any("mark: swim" in t for _, t in ctrl.st.events)

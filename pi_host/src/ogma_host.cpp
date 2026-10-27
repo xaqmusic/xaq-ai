@@ -1102,6 +1102,19 @@ int main(int argc, char** argv) {
                         if (a.dump_actions) {
                             const nlohmann::json row = {{"kind", "actions"}, {"tick", long(tid)}, {"u", act_u}, {"us", us}};
                             std::printf("%s\n", row.dump().c_str());
+                            // The raw IMU beside the command it rode with (2026-10-27, instrument only): the
+                            // stride odometry assumes a loaded foot holds the ground, so a slipping body is
+                            // invisible to it -- the sonar read it at a third of the odometry's speed.  The
+                            // accelerometer is the egocentric witness ("the stride says I accelerated, the
+                            // body did not").  Body frame (sim axes: +X left, +Y up, +Z forward); accel in g,
+                            // gyro in deg/s as Icm20948 stores them; `fresh` 0 = the thread had no new sample
+                            // this tick, so the values repeat the last one.  Nothing reads this on the bus.
+                            if (imu) {
+                                const nlohmann::json irow = {{"kind", "imu"}, {"tick", long(tid)}, {"fresh", imu_fresh ? 1 : 0},
+                                                             {"a_g", imu_last.accel_body}, {"g_dps", imu_last.gyro_body},
+                                                             {"up", imu_last.up_fused}, {"ok", imu_last.ok ? 1 : 0}};
+                                std::printf("%s\n", irow.dump().c_str());
+                            }
                         }
                     }
                 }

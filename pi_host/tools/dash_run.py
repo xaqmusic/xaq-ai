@@ -640,6 +640,15 @@ class RunController:
         self._abort.set()
         self._ev("E pressed: end requested")
 
+    def mark(self, label: str) -> str:
+        """The operator's eye on the recording (2026-10-27): one key stamps what the robot is doing
+        NOW into events.jsonl (kind "mark", on the feed's monotonic clock) and the events file.
+        The stride odometry cannot see a slipping body, so the labelled episodes are the truth
+        the logs are read against."""
+        self._ev_rec("mark", label=label)
+        self._ev(f"mark: {label}")
+        return f"marked {label}"
+
     # ---- live tuning (operator, 2026-10-23): servo speed and the LPG period during a run ----
     def nudge_speed(self, steps: int) -> str:
         """Servo speed +/- SPEED_STEP_RAD_S, as benchd's brain slew (slew.set: allowed in the brain
