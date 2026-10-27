@@ -1092,6 +1092,13 @@ ParamSchema MotorEPMv2::params_schema() const {
          "1 = the per-leg integrated offset is applied only while that leg is planted; in swing the leg lifts from the shared "
          "rest pose. 0 = applied in swing too (measured to cancel the swing lift on a leg with a large positive offset).",
          ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"kin_route", ParamMutability::HotMutable,
+         "KINEMATIC ROUTE for the other stance-length terms (needs press_kin and jac_topic): the stance reach and the corner "
+         "integrator's positive offset are applied along the leg's own lift direction (the press's feet_jac direction), "
+         "the integrator's negative offset through the femur only, and the reach stops growing while the leg's lift gain is "
+         "below press_kin_min. Robot 2026-10-27: a leg folded under (knee +0.58, knee gain negative) while the reach and "
+         "the integrator, both blind to the leg's geometry, kept adding knee fold. 0 = off, byte-identical.",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
         {"level_int_zero_mean", ParamMutability::HotMutable,
          "1 = the per-leg integrated offsets are held zero-mean across the legs (each update subtracts their mean): the "
          "integrator tilts the body and never raises or lowers it, so it cannot cancel the learned stance press. Robot "
@@ -1633,6 +1640,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["lift_relative_tau"]   = lift_relative_tau_;
     m["level_int_planted_only"] = level_int_planted_only_;
     m["level_int_zero_mean"] = level_int_zero_mean_;
+    m["kin_route"] = kin_route_;
     m["torque_topic"]       = torque_topic_;
     m["contact_instrument_only"] = contact_instrument_only_;
     m["gait_align_diag"]    = gait_align_diag_;
@@ -1957,6 +1965,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "lift_relative_tau",   [&](auto const& v){ lift_relative_tau_   = std::max(1.0, get_double(v, "lift_relative_tau")); });
     apply_param(params, "level_int_planted_only", [&](auto const& v){ level_int_planted_only_ = get_double(v, "level_int_planted_only"); });
     apply_param(params, "level_int_zero_mean", [&](auto const& v){ level_int_zero_mean_ = get_double(v, "level_int_zero_mean"); });
+    apply_param(params, "kin_route", [&](auto const& v){ kin_route_ = get_double(v, "kin_route"); });
     apply_param(params, "torque_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) torque_topic_ = *p; });
     apply_param(params, "contact_instrument_only", [&](auto const& v){ contact_instrument_only_ = get_double(v, "contact_instrument_only"); });
     apply_param(params, "gait_align_diag", [&](auto const& v){ gait_align_diag_ = get_double(v, "gait_align_diag"); });
@@ -3660,6 +3669,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "lift_relative_tau")   lift_relative_tau_   = std::max(1.0, get_double(value, "lift_relative_tau"));
     else if (key == "level_int_planted_only") level_int_planted_only_ = get_double(value, "level_int_planted_only");
     else if (key == "level_int_zero_mean") level_int_zero_mean_ = get_double(value, "level_int_zero_mean");
+    else if (key == "kin_route") kin_route_ = get_double(value, "kin_route");
     else if (key == "support_select_gain") support_select_gain_ = get_double(value, "support_select_gain");
     else if (key == "panic_on") panic_on_ = get_double(value, "panic_on");
     else if (key == "panic_off") panic_off_ = get_double(value, "panic_off");
@@ -6207,12 +6217,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             float& e = reach_e_[size_t(leg)];
             const float st_w = std::max(0.0f, -ext_sin_[size_t(leg)]);  // 0 at touchdown/liftoff, 1 mid-stance
             if (st_w > 0.0f) {
-                e += float(reach_rate_) * st_w * std::max(0.0f, float(reach_target_) - n)
+                // KINEMATIC ROUTE (kin_route; see the header): the reach lengthens the leg along its own lift
+                // direction, and does not grow while the leg cannot lift its corner (as the press's learning).
+                const bool kr = kin_route_ > 0.0 && press_kin_ > 0.0 && jac_seen_;
+                float d2 = 1.0f, d3 = 0.0f, cap = 1.0f;
+                if (kr) cap = press_lift_dir(leg, y[m - 1], d2, d3);
+                const bool grow = !kr || cap >= float(press_kin_min_);
+                e += (grow ? float(reach_rate_) * st_w * std::max(0.0f, float(reach_target_) - n) : 0.0f)
                    - float(reach_leak_) * std::max(float(reach_leak_min_), std::min(1.0f, n)) * e;   // floor: a body whose loads stay low still unwinds
                 e = std::clamp(e, 0.0f, float(reach_max_));
                 const float a = e * std::min(1.0f, 3.0f * st_w) * conf_eff_;   // ramps in over early stance
-                y[m - 1] += a;
-                y[1]     += a * float(reach_hip2_);
+                if (kr) { y[1] += a * d2; y[m - 1] += a * d3; }
+                else {
+                    y[m - 1] += a;
+                    y[1]     += a * float(reach_hip2_);
+                }
             }
         }
         // LEG-PHASE LIFT (leg_phase_lift_*): a swing lift shaped by the external phase,
@@ -6322,8 +6341,19 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 }
             }
             if (level_int_planted_only_ <= 0.0 || !in_swing_[leg]) {
-                y[1]     += level_off_[size_t(leg)];
-                y[m - 1] += level_off_[size_t(leg)];
+                const float off = level_off_[size_t(leg)];
+                if (kin_route_ > 0.0 && press_kin_ > 0.0 && jac_seen_) {   // KINEMATIC ROUTE (see the header)
+                    float d2, d3;
+                    press_lift_dir(leg, y[m - 1], d2, d3);
+                    // Raising the corner goes along the leg's lift direction (2x: the old form put the offset on both
+                    // joints, a vector of length sqrt 2 x off; keep the same reach, |a| = sqrt(2) |off|); lowering it
+                    // relaxes the femur only, as the press does.
+                    if (off > 0.0f) { const float a = 1.41421356f * off; y[1] += a * d2; y[m - 1] += a * d3; }
+                    else            { y[1] += off; }
+                } else {
+                    y[1]     += off;
+                    y[m - 1] += off;
+                }
             }
         }
         // LEARNED STANCE PRESS (press_learn_rate; Tegotae plan 7.31).  Operator, 2026-10-24: the push from the planted

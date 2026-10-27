@@ -9333,3 +9333,35 @@ of its dips there come from support.
 **Next.** Observe in the UI (launcher `…_sg`), read seed 5's fall, then the robot: ogma_host `--feet-xz` and the dash's
 FEET_XZ mapping are built and tested (host tests 96/96), not yet deployed. Re-use context, if the robot ties: the
 assumed CoG. With the FSRs calibrated per foot, the CoG can be measured at stand and set in `support_cog`.
+
+### 2026-10-27 — ROBOT (presskin_lz_sg, 170 s): one rear leg (sim index RL) folded under again — knee command pinned at +0.58 rad (the self-collision cap) from 90 s, knee lift gain negative, toe pulled in from (−106, −106) to (−47, −49) mm, and the leg's three commands chattering between saturated poses every few ticks; two stance-length terms are blind to the leg's geometry — `KINEMATIC ROUTE` (`kin_route`) built; sim: distance 6.96 → 7.34, falls 1 → 2 of 6, dips 18 → 21 % — `IN_FLIGHT` (the sim does not tuck, so it cannot test the fix)
+
+**What the logs show.** From ~50 s the RL leg's commands (u, leg-major indices 6–8) run the full −1..+1 range, flipping
+every 2–10 ticks between (hip1 −1, hip2 +1, knee +0.68) and (hip1 +1, hip2 −1, knee −1). The other legs stay inside
+±0.5. +0.68 is the last entry of `selfcol_knee_max` (hip2 at +1): the knee asks for more fold and is capped. Benchd's
+output knee for that leg sits at +0.58 rad from 90 s on, and the leg's oscillation amplitude (`amp_leg`) is ~0 from 70
+s. Its corner integrator reached +0.29 at 99–108 s, then fell back to +0.05 while the knee stayed pinned. Most of the
+command comes from the homeokinesis branch (`hk_share` 0.7–0.9), and that leg has the highest forward-model error
+(`tle_leg` 0.2–0.3).
+
+**Two kinematics-blind terms.** The stance reach (`reach_rate` 0.01, `reach_max` 0.6): while a stance foot's load is
+under half its own running reference, knee += e and hip2 += 0.5e. The corner integrator: hip2 and knee += off. On a leg
+folded under, more knee fold RAISES the foot, so the foot feels less load, the corner reads low, and both terms add
+more. This leg's FSR reads in the over-range part of the predicted curve (680 g median planted), so an ordinary stance
+can read as light against its inflated reference. **Not confirmed:** `reach_e` was not recorded (the dash's diag
+filter dropped `reach_`; now kept, with `hk_` and `kin_`). The chatter itself is the HK branch saturating, which this
+fix does not touch.
+
+**The lever.** `kin_route` 1 (needs `press_kin` and `jac_topic`): the reach and the integrator's positive offset go
+along the leg's own lift direction, the direction the kinematics-aware press uses (on a folded-under leg it UNFOLDS the
+knee). The integrator's negative offset goes through the femur only, and the reach stops growing while the lift gain is
+below `press_kin_min`. 0 = byte-identical (`_lz` body log equal on the new build).
+
+**Sim, corridor n = 6 × 9000, `_sg` → `_sgk`:** net_z 6.96 ± 1.05 → 7.34 ± 0.35, straight 0.71 → 0.74, tilt_sd 0.079 →
+0.092, falls 1 → 2, dips per lift-off 18.1 → 21.0 %. Leg-samples with knee > 0.3 rad were 0–2 % in both arms: the sim
+does not reproduce the tuck. **All three falls in the gate configs are flips at tick 300–360**, just after warm-up,
+with knees jumping to ~+1.2 rad on three legs first. The watching control (`_sg0`) and `_lz` never flipped. That points
+at the gate's start, to be read before the gate is trusted.
+
+**Also fixed:** AsyncStdout wrote its stdout_slow note at a chunk edge and split one JSON line in run 020712. Notes now
+go in only at a line break (stress test: a slow FIFO reader, 20 001 lines, 1 note, 0 corrupt).

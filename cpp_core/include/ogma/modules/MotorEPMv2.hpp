@@ -720,6 +720,12 @@ private:
     // offsets ran to -0.30 while the learned stance press ran to +0.30 -- two integrators cancelling, the belly flat
     // at ~50 mm whatever its target.  Height belongs to the press; attitude to this.  0 = off, byte-identical.
     double level_int_zero_mean_ = 0.0;
+    // KINEMATIC ROUTE (2026-10-27).  The kinematics-aware press (press_kin) pushes along each leg's lift direction; two
+    // other terms that lengthen a stance leg did not: the stance reach (knee += e, hip2 += e * reach_hip2) and the corner
+    // integrator (hip2 and knee += off).  On a leg folded under the body more knee fold RAISES the foot, the foot feels
+    // less load / the corner sits lower, and both terms add more — the robot's rear leg tucked under with its knee pinned
+    // at the self-collision cap.  1 = both go through press_lift_dir, as the press does.  0 = off, byte-identical.
+    double kin_route_ = 0.0;
     // THE COMMANDED-FK CORNER SENSOR (2026-10-13).  Under honest inputs the joints are the
     // servo model, so sag is invisible; the corner altitude IS observable from the commanded
     // forward kinematics rotated by the IMU (feet_topic = reality.proprio.feet_y_gravity_cmd_imu

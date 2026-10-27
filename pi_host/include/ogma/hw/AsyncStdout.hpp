@@ -13,6 +13,7 @@
 // A terminal is left alone (no file behind it).  Only stdout: stderr stays direct and rare.
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -63,23 +64,38 @@ private:
             int queued = 0;
             if (::ioctl(rd_, FIONREAD, &queued) == 0 && queued > backlog_.load()) backlog_ = queued;
             const ssize_t n = ::read(rd_, buf, sizeof buf);
-            if (n <= 0) return;
+            if (n <= 0) { flush_note(); return; }
             const auto t0 = std::chrono::steady_clock::now();
-            for (ssize_t off = 0; off < n;) {
-                const ssize_t w = ::write(real_, buf + off, size_t(n - off));
-                if (w <= 0) break;
-                off += w;
+            // A pending note goes in at the first line break of this chunk, never inside a line (a note written at a
+            // chunk edge split a JSON line in two, robot run 2026-10-27).
+            ssize_t off = 0;
+            if (!note_.empty()) {
+                const void* nl = std::memchr(buf, '\n', size_t(n));
+                if (nl) {
+                    const ssize_t k = static_cast<const char*>(nl) - buf + 1;
+                    write_all(buf, k); off = k;
+                    flush_note();
+                }
             }
+            write_all(buf + off, n - off);
             const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             if (ms > max_ms_.load()) max_ms_ = ms;
             if (ms > SLOW_MS) {
                 ++slow_;
-                const std::string note = "{\"kind\":\"stdout_slow\",\"ms\":" + std::to_string(ms) +
-                                         ",\"bytes\":" + std::to_string(n) + "}\n";
-                (void)!::write(real_, note.data(), note.size());
+                note_ += "{\"kind\":\"stdout_slow\",\"ms\":" + std::to_string(ms) + ",\"bytes\":" + std::to_string(n) + "}\n";
+                if (buf[n - 1] == '\n') flush_note();     // this chunk ended on a line break: safe now
             }
         }
     }
+    void write_all(const char* p, ssize_t len) {
+        for (ssize_t off = 0; off < len;) {
+            const ssize_t w = ::write(real_, p + off, size_t(len - off));
+            if (w <= 0) break;
+            off += w;
+        }
+    }
+    void flush_note() { if (!note_.empty()) { write_all(note_.data(), ssize_t(note_.size())); note_.clear(); } }
+    std::string note_;
     int rd_ = -1, real_ = -1;
     std::thread thr_;
     std::atomic<long> slow_{0}, backlog_{0};
