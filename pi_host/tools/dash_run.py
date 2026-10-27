@@ -787,6 +787,10 @@ class RunController:
         detail = self.st.detail                   # the run panel shows the flush on its own line; keep the reason
         self._ev(msg)
         self.st.detail = detail
+        try:
+            os.sync()   # the message line itself (2026-10-27: written after the first sync, it was the one line lost)
+        except Exception:
+            pass
 
     def _run(self) -> None:
         try:

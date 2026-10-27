@@ -7866,6 +7866,15 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
         j["clip_duty_j"] = duty;
         j["clip_duty"]   = duty_mean;
         j["hk_share"]    = pre_sum > 1e-9 ? hk_sum / pre_sum : 0.0;
+        {   // per-leg controller size (see the full diag); brain_diag reads THIS snapshot
+            std::vector<double> cn(n_legs_, 0.0), hn(n_legs_, 0.0);
+            for (int i = 0; i < n_legs_ && i < int(legs_.size()); ++i) {
+                if (!legs_[size_t(i)].initialized) continue;
+                cn[size_t(i)] = legs_[size_t(i)].C.size() ? double(legs_[size_t(i)].C.norm()) : 0.0;
+                hn[size_t(i)] = legs_[size_t(i)].h.size() ? double(legs_[size_t(i)].h.norm()) : 0.0;
+            }
+            j["hk_cnorm"] = cn; j["hk_hnorm"] = hn;
+        }
     }
     j["gait_coherence"]    = gait_coherence();  // Kuramoto phase-lock ∈[0,1]; rises as legs lock to the gait
     j["coupling_eff"]      = coupling_eff_;      // Gate 2: live (faded) coupling strength

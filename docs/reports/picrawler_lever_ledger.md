@@ -9444,3 +9444,32 @@ cannot separate the arms. This agrees with 2026-08's NULL ("all controller learn
 **Instrument.** MotorEPMv2 diag `hk_cnorm` / `hk_hnorm` (per-leg |C|, |h|; the dash keeps `hk_`) to see on the robot
 whether a leg's controller grows before it saturates. **Next:** the robot with `_sgk_hk0`, one change from the last run.
 The range corroboration (6 / 6, `_sgkc`) is evaluated offline on any run's logged pings, so it can wait.
+
+### 2026-10-27 — ROBOT (presskin_lz_sgk_hk0, 336 s, one operator pause): HK controller learning OFF — no leg saturated (0 % of ticks on every leg, 5–7 % on all four only during one avoid turn), every leg pushes in stance, `hk_share` 0.13–0.15 flat — `WORKING` (n = 1 run; operator: HK off is the right choice for the real robot now); the remaining problem is PACE — path speed steady, net progress not
+
+**Saturation.** Per 2000-tick window, % of ticks with any joint of a leg at |u| ≥ 0.99: 0 % on all legs except ticks
+8000–10000 (5 / 7 / 6 / 6 %, all four legs together, while the avoid reflex turned at 166–189 s). The `_sgk` run
+before it reached 82 % on FR. hip1 ranges stay ±0.2–0.4 on every leg. `clip_duty` ≤ 0.004, `hk_share` 0.13–0.15
+for the whole run (0.41 → 0.69 with learning on).
+
+**Propulsion.** Stance toe fore-aft speed, summed over the legs, −5 to −10 cm/s (propulsive) in every 30 s window
+(the `_sgk` run reversed after 260 s). RR and RL push hardest (−2 to −5.5 each), FL −1 to −2.7. FR is weakest
+(−1.2 to +1.0; +8.5 in the last window).
+
+**Pace — the open problem.** Dead-reckoned path per 30 s is fairly steady (144–227 cm, 362 in the last window), but
+net forward progress along the heading swings from −25 to +182 cm, because the heading wanders (summed |Δyaw|
+60–306° per 30 s). The per-sample stride velocity is oscillation-dominated (sd ~11 cm/s around a mean of −2 to +3
+cm/s): a blind metric for pace. Coordination is loose: touchdown-phase PLV 0.15–0.35, inter-leg PLV 0.25–0.45. The
+support gate holds ~65 % of lift-offs (70–107 holds of 114–155 lift-offs per minute), and 26–51 % of lift-offs are
+followed by a belly dip. The LPG period stays at 50 and the level-gated stroke at 0.4–0.65.
+
+**Range corroboration out of sample** (this run's 6636 pings, `prox_replay`): 6 / 6 cut false near-ahead ticks 198
+→ 56 (not 0) and false too_close 6 → 0. But the first near-ahead on a real approach moved from tick 8552 to 9225
+(13 s), possibly a missed approach. The ping-median "truth" is crude. `_sgkc` stays OFF the robot: a better
+criterion (the camera, or the toes' geometry) is needed before choosing a setting.
+
+**Housekeeping.** The 210–248 s pause was the operator (SPACE: a foot about to stick). The events files of the last
+two runs end in zero bytes: the dash wrote its "SAFE TO POWER OFF" line after the flush, so that one line was lost at
+power-off (fixed: a second sync after the message; not deployed). The per-leg `hk_cnorm` / `hk_hnorm` went into the
+full diag, not the snapshot brain_diag records (fixed; not deployed). After a boot the Pi answers on 10.0.0.114 before
+`picrawler.local` resolves.
