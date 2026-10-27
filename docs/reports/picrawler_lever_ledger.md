@@ -9422,3 +9422,25 @@ setting comes from its own data.
 > 6 / 6 removes every false trigger at 0.3 s of first-detection delay. It also shortens the time a real wall reads as
 > near ahead (501 → 140 ticks), because six points must fall in the ±5.6° ahead bin. `_sgkc` set to 6 / 6. Chosen
 > in-sample: the next run checks it.
+
+### 2026-10-27 — ROBOT (presskin_lz_sgk, 386 s): the robot ended up moving BACKWARD because one leg went into saturated chatter — FR's hip1 clipped in 6 → 43 → 72 → 82 % of ticks from 120 s, its hip2 in 91 %, its stance stroke reversed (toe +5–6 cm/s forward while planted from 260 s); the HK controller's learning is the driver — sim 24 000 ticks: learning on, one leg slides to 17 % clip and stays; off, 0 % — `HK learning off` (`_sgk_hk0`) `IN_FLIGHT`
+
+**Robot.** Dead-reckoned progress per 20 s is positive to ~300 s (up to 96 cm), then negative (−43, −13, −42 cm). The
+toes' commanded fore-aft speed while planted (negative = propulsive), summed over the legs, is −4 to −11 cm/s to 240 s
+and ~0 to +5 after. FR alone reverses (stance +5 to +6.4 cm/s, swing −10 to −15), while FL and RL shrink to ~0 (their
+hip1 commands within ±0.1 late in the run) and RR keeps pushing. FR is not folded under (knee −0.6, lift gains
+positive) and its phase agrees with its contact as often as the other legs do. Its commands are the previous run's
+RL failure: hip1 saturated in 6 % of ticks (80 s), then 43 % (120 s), 72, 78, 82 %; hip2 20 → 91 %. Over the run,
+`clip_duty` rose 0.010 → 0.104 and `hk_share` 0.41 → 0.69. The avoid reflex was off for most of it. `kin_route` held:
+no leg folded under (the reach stayed ≤ 0.27), but it does not touch this.
+
+**Sim, the slowest-integrator horizon** (24 000 ticks, 4 seeds, corridor 0.3, ultrasonic off; memory: windups
+appeared after 12 000 ticks). `_sgk`: seed 3's FL hip1 clip per 3000-tick window goes 1 → 10 → 17 % from ~9000 ticks
+and stays (hk_share 0.45, clip_duty 0.045 over the second half); seed 2's RR 2–4 %; 3 resets. `_sgk_hk0` (`ctrl_lr` 0,
+`bias_lr` 0: the HK controller frozen at its start, output still present, hk_share ~0.10): every leg ≤ 1 % in every
+window, clip_duty 0.000, 0 resets. net_z ties (9.3–10.0 vs 8.3–10.1), but the corridor caps it near 10 m, so distance
+cannot separate the arms. This agrees with 2026-08's NULL ("all controller learning off costs nothing").
+
+**Instrument.** MotorEPMv2 diag `hk_cnorm` / `hk_hnorm` (per-leg |C|, |h|; the dash keeps `hk_`) to see on the robot
+whether a leg's controller grows before it saturates. **Next:** the robot with `_sgk_hk0`, one change from the last run.
+The range corroboration (6 / 6, `_sgkc`) is evaluated offline on any run's logged pings, so it can wait.

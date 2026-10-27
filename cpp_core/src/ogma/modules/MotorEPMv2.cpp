@@ -7738,6 +7738,16 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
         mod["pre_mag_j"]   = pmag;  mod["pre_max_j"] = pmax;
         mod["hk_mag_j"]    = hkm;   mod["hk_share"]  = pre_sum > 1e-9 ? hk_sum / pre_sum : 0.0;
     }
+    {   // Per-leg controller size (2026-10-27, instrument only): on the robot one leg at a time went into saturated
+        // chatter after minutes; |C| (Frobenius) and |h| say whether that leg's own controller grew first.
+        std::vector<double> cn(n_legs_, 0.0), hn(n_legs_, 0.0);
+        for (int i = 0; i < n_legs_ && i < int(legs_.size()); ++i) {
+            if (!legs_[size_t(i)].initialized) continue;
+            cn[size_t(i)] = legs_[size_t(i)].C.size() ? double(legs_[size_t(i)].C.norm()) : 0.0;
+            hn[size_t(i)] = legs_[size_t(i)].h.size() ? double(legs_[size_t(i)].h.norm()) : 0.0;
+        }
+        mod["hk_cnorm"] = cn; mod["hk_hnorm"] = hn;
+    }
     // (F2) ECHO CHANNEL.  The per-joint state is [pos, last_action, delta], so state
     // index 3j+1 IS the command just issued — a channel the self-model can predict
     // exactly and the controller can drive perfectly, i.e. one on which the
