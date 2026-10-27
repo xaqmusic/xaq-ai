@@ -9365,3 +9365,26 @@ at the gate's start, to be read before the gate is trusted.
 
 **Also fixed:** AsyncStdout wrote its stdout_slow note at a chunk edge and split one JSON line in run 020712. Notes now
 go in only at a line break (stress test: a slow FIFO reader, 20 001 lines, 1 note, 0 corrupt).
+
+### 2026-10-27 — ROBOT (presskin_lz_sgk, 286 s, walking toward a wall): the ultrasonic's false close readings — 16 single-sample drops below the slow approach in the 5 Hz record, 7 with a front toe in front of the sensor (44 % against an 10.9 % base rate) — `BASELINE` (n = 1 run); per-ping range logging added
+
+**What was seen.** The operator watched the camera and the range together: the slow descent of the range (1.4 → ~0.5 m
+over the run) is the walk toward the wall; short spikes inside it are errors. The only range record in the run is
+prox_memory's `last_d`, sampled at ~5 Hz by brain_diag (the sensor pings at 18.7/s; 65 % of samples valid). A spike is a
+valid reading more than 0.15 m below its 2 s running median, under 0.5 m: 16 of them. Three read 0.077 m (218, 219,
+255 s), just outside the 0.075 m deadzone. Others read 0.11–0.17 m, and a cluster at 234–239 s reads 0.35–0.49 m against
+a 0.6–0.97 m trend.
+
+**Self-occlusion.** The front toes' commanded positions (`leg_jac_from_log`): in the 0.15 s before 7 of the 16 spikes,
+a front toe was within 20 mm of the centreline and more than 90 mm ahead of the chassis centre (in front of the
+sensor), mostly FR at |x| 5–19 mm. That happens in 10.9 % of all frames (binomial p ≈ 0.002 for 7 of 16). The
+0.075 m deadzone was set for both legs occluding (operator, 2026-10-25); one foot swinging across the beam reads
+further out. The 234–239 s cluster does not fit occlusion (toes clear of the centreline).
+
+**Instrument.** ogma_host now logs every new ping (`{"kind":"range",...}`, raw metres, validity, deadzoned) into the
+run log when the dash runs it. Built, not deployed.
+
+**Proposed** (not built): the body knows where its toes are (`feet_xz`, commanded FK), so a foot in the beam is a
+confound it can publish in-band (memory: confounds ride in the channel). Mark a reading no-echo, as the deadzone does,
+while a front toe is inside the beam's cone at a distance matching the reading. That replaces the fixed deadzone with
+the leg's own geometry; it needs the sensor's mount position and beam width.

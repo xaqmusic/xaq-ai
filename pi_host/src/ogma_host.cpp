@@ -802,6 +802,15 @@ int main(int argc, char** argv) {
                     f->values[0] = dz ? float(rangefinder.config().max_range_m) : float(r.distance_m);
                     f->values[1] = (r.valid && !dz) ? 1.0f : 0.0f;
                     bus->publish("sense.range", f);
+                    // Every new ping into the run log (with --dump-actions, the dash's runs): the raw reading before
+                    // the deadzone and what the brain got.  The 5 Hz brain_diag sample missed most of the false
+                    // close readings the operator saw on the dashboard (2026-10-27).
+                    static uint64_t last_range_seq = 0;
+                    if (a.dump_actions && r.seq != last_range_seq) {
+                        last_range_seq = r.seq;
+                        std::printf("{\"kind\":\"range\",\"tick\":%ld,\"seq\":%llu,\"m\":%.4f,\"valid\":%d,\"dz\":%d}\n",
+                                    ticks, (unsigned long long)r.seq, r.distance_m, r.valid ? 1 : 0, dz ? 1 : 0);
+                    }
                 }
             }
             if (tof) {
