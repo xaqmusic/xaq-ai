@@ -9520,3 +9520,29 @@ the reference moves toward yaw + bearing with a time constant (2 s) instead of j
 degrees and a wall episode moves it fully; the bearing published during the episode is unchanged. Gain-0: `_cs` and
 `_cs` with `ref_attack_s` 0 explicit are byte-identical over 3000 ticks in the room with the sonar on (deterministic, 0
 differing lines). Unit tests: a one-tick blip moves the reference 1 %, 400 ticks move it 97 %; 0 = the jump.
+
+### 2026-10-28 — THE `_cs` CIRCLE'S CAUSE, FOUND BY REPLAY: the stride odometry's 2–3× over-read DRAGS FAR SONAR POINTS INTO THE BODY through the proximity memory (run 223518: 14 pings under 0.5 m, all at 0.48–0.50 m, none with a toe in the beam, yet 1343 avoid-active ticks on one side); FOUR FORMS OF LEVER A — `ref_attack_s` `REGRESSION` (sim room, dose-response 0.5 / 1.7 / 2.0 falls at 0.5 / 1 / 2 s), `ref_value_min` `PARTIAL`, `odom_translation` 0 `PARTIAL`, `pinged_range_floor` `PARTIAL` (the narrowest; shipped as `_cs_pf`, robot run pending)
+
+**Replay** (`prox_replay`, now with gyro-integrated yaw between the 1 Hz odom samples, the translation scale and the
+floor as arms, and avoid-activity counters: a tick is ACTIVE when any slot ≥ 0.10, STRONG at ≥ 0.30):
+
+| run | deployed memory: active / strong | pinged-range floor | rotation only | 6/6 corroboration + floor |
+|---|---|---|---|---|
+| 223518 `_cs`, the circle | 1343 / 100 (one side 1301) | **0 / 0** | 0 / 0 | 0 / 0 |
+| 163757 `_cs` | 4138 / 1181; false near-ahead 134; too_close 3 real | 1377 / 104; 14; 3 | 1659 / 273; 12; 3 | 294 / 0; 0; 0 |
+| 215940 `_sgk_hk0`, real walls | 3775 / 2324; false near-ahead 166; first real approach tick 3442 | 2155 / 1482; 82; 3672 (+4.6 s) | 2155 / 1490; 118; 3672 | 1746 / 966; 10; 3697 |
+
+The translation scale's dose on run 223518: 1343 → 287 → 72 → 25 → 0 active ticks at 1 / 0.5 / 0.4 / 0.3 / 0. The over-read
+measured by sonar is 2–3×, so 0.4 is the calibrated correction; the floor needs no constant and matched it.
+**Sim room (honest odometry, real walls), n = 6 × 12 000, difficulty 0.3**, falls per run / net_disp / PLV: `_cs` 0.00 / 1.27 /
+0.25; `_cs_ra` (2 s) 2.00 / 1.16 / 0.26, `_ra1` 1.67, `_ra05` 0.50; `_cs_rv` (0.3) 0.83 / 0.99 / 0.29; `_cs_ot0` 1.17 / 1.44 / 0.26;
+`_cs_pf` 0.50 / 1.02 / 0.26. Every fall came after 130–450 ticks of wall contact with the body pivoting against the wall.
+The lag form's mechanism: a lagging reference pulls the body BACK toward the wall it just turned from. The others reduce the
+avoid loop's reach in a world where its evidence is honest, so the body meets walls more often (active 12 → 14–22 %). The
+sim lacks the defect these levers correct, so the room is a cost measurement, not the gate; the gate is the robot run and,
+in the sim, the slip sheet (feet slip → the stride over-reads there too; not yet run). Gain-0: `_cs` byte-identical across
+four builds and against each lever's explicit 0 (3000-tick room runs, 0 differing lines). Unit tests: each form.
+**On the robot, read:** net yaw per 30 s, avoid active %, the circle, wall approaches (a real wall is seen ~4 s later),
+and the `_cs` stepping numbers. **Re-use context** for the refuted lag: a world without obstacles that need a decisive
+turn-away. The deeper fix remains the progress sense itself (the accelerometer against the stride), after which the
+memory can carry the full odometry again.
