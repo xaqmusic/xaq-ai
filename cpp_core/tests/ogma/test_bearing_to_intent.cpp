@@ -84,3 +84,39 @@ TEST(BearingToIntent, AnOverrideWinsWhileItsValueIsPositiveAndItsSpeedGoesOutUnc
     f.m.tick(3); f.bus.end_tick();
     auto k = f.goal(); EXPECT_NEAR(std::atan2(k.first, k.second), 0.0, 1e-4) << "released and the loop active: the loop owns the bearing";
 }
+
+TEST(BearingToIntent, LeverA_TheReferenceIsEarnedByPersistenceNotSeizedByABlip) {
+    // hz 50, attack 2 s: one active tick moves the reference 1/100 of the way; 400 ticks move it ~98 %.
+    Fix f({{"ref_attack_s", 2.0}, {"hz", 50.0}});
+    f.run(0, 0.0);                                        // silent: reference = the start heading (0)
+    f.run(1, 0.0, {0.7071f, 0.7071f, 0.8f});              // a one-tick blip, 45 deg toward +X
+    auto g = f.goal(); EXPECT_NEAR(std::atan2(g.first, g.second), M_PI / 4.0, 1e-4) << "the reflex still steers at full strength";
+    EXPECT_NEAR(f.m.ref_yaw(), (M_PI / 4.0) * 0.01, 1e-6) << "but the held heading moved one percent of the way";
+    f.run(2, 0.0, {0.0f, 0.0f, 0.0f});                    // silent again: the hold aims at the barely-moved reference
+    auto h = f.goal(); EXPECT_LT(std::fabs(std::atan2(h.first, h.second)), 0.01);
+    for (uint64_t t = 3; t < 403; ++t) f.run(t, 0.0, {0.7071f, 0.7071f, 0.8f});   // a persistent wall: 8 s
+    EXPECT_GT(f.m.ref_yaw(), (M_PI / 4.0) * 0.97) << "a persistent loop earns the reference fully";
+}
+TEST(BearingToIntent, LeverA_AtZeroTheReferenceJumpsAsBefore) {
+    Fix f({{"ref_attack_s", 0.0}});
+    f.run(0, 0.0); f.run(1, 0.0, {0.7071f, 0.7071f, 0.8f});
+    EXPECT_NEAR(f.m.ref_yaw(), M_PI / 4.0, 1e-6);
+}
+
+TEST(BearingToIntent, LeverA2_WeakEvidenceSteersButDoesNotRewriteTheHeldHeading) {
+    Fix f({{"ref_value_min", 0.3}});
+    f.run(0, 0.0);                                        // reference = 0
+    f.run(1, 0.0, {0.7071f, 0.7071f, 0.15f});             // a blip: 45 deg toward +X, value 0.15
+    EXPECT_TRUE(f.m.active());
+    auto g = f.goal(); EXPECT_NEAR(std::atan2(g.first, g.second), M_PI / 4.0, 1e-4) << "the reflex still steers";
+    EXPECT_NEAR(f.m.ref_yaw(), 0.0, 1e-9) << "the held heading is untouched";
+    f.run(2, 0.3, {0.0f, 0.0f, 0.0f});                    // silent; the body wiggled 0.3 rad -> the hold aims back
+    auto h = f.goal(); EXPECT_NEAR(std::atan2(h.first, h.second), -0.3, 1e-4);
+    f.run(3, 0.3, {0.7071f, 0.7071f, 0.7f});              // a wall: value 0.7 -> rewrites
+    EXPECT_NEAR(f.m.ref_yaw(), 0.3 + M_PI / 4.0, 1e-6);
+}
+TEST(BearingToIntent, LeverA2_AtZeroAnyValueRewrites) {
+    Fix f({{"ref_value_min", 0.0}});
+    f.run(0, 0.0); f.run(1, 0.0, {0.7071f, 0.7071f, 0.06f});
+    EXPECT_NEAR(f.m.ref_yaw(), M_PI / 4.0, 1e-6);
+}

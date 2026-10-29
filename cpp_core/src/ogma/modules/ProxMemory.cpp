@@ -50,6 +50,8 @@ ParamSchema ProxMemory::params_schema() const {
         {"view_topic",  ParamMutability::ConstructionOnly, "Output: [8] nearest range per 15 deg sector across +/-60 deg over view_range_m, 1 = nothing. Sector 0 = the -X side.", ParamValue{std::string("reality.proprio.prox_view")}},
         {"range_m",       ParamMutability::HotMutable, "Proximity = 1 - r / range_m.", ParamValue{1.0}},
         {"view_range_m",  ParamMutability::HotMutable, "View = r / view_range_m.", ParamValue{1.5}},
+        {"pinged_range_floor", ParamMutability::HotMutable, "A remembered point may come NEARER only by being re-pinged, never by dead reckoning (2026-10-28): its range for the slots is max(the carried range, the range its ping measured). Receding, dropping behind and the azimuth sweep keep the full odometry. On the robot the stride odometry over-reads 2-3x on slip and dragged far walls into the body (run 223518); with honest odometry a wall the beam keeps seeing is unchanged. 0 = off, byte-identical; 1 = on.", ParamValue{0.0}},
+        {"odom_translation", ParamMutability::HotMutable, "How much of the odometry's TRANSLATION carries the stored points (2026-10-28). The robot's stride odometry over-reads 2-3x on slip, so a far wall is dragged into the body by phantom progress (run 223518: pings at 0.48-0.50 m, proximity 0.72, a right-hand circle through the memory). 1 = the full odometry, byte-identical; 0 = rotation only (a point keeps its measured range until re-pinged, its azimuth follows the gyro's yaw); between = a scale on the translation.", ParamValue{1.0}},
         {"sensor_fwd_m",  ParamMutability::HotMutable, "The beam's origin ahead of the odom origin (the chassis front face, m).", ParamValue{0.049}},
         {"too_close_m",   ParamMutability::HotMutable, "The live ping below this reads as contact: too_close = 1 - d / too_close_m.", ParamValue{0.15}},
         {"memory_ticks",  ParamMutability::HotMutable, "A stored point lives this many ticks (the body's own yaw wander is the sweep).", ParamValue{int64_t{150}}},
@@ -71,6 +73,7 @@ ParamMap ProxMemory::current_params() const {
     m["prox_topic"] = ParamValue{prox_topic_};   m["view_topic"] = ParamValue{view_topic_};
     m["range_m"] = ParamValue{range_m_}; m["view_range_m"] = ParamValue{view_range_m_};
     m["sensor_fwd_m"] = ParamValue{sensor_fwd_m_}; m["too_close_m"] = ParamValue{too_close_m_};
+    m["odom_translation"] = ParamValue{odom_translation_}; m["pinged_range_floor"] = ParamValue{pinged_range_floor_};
     m["memory_ticks"] = ParamValue{int64_t(memory_ticks_)}; m["behind_m"] = ParamValue{behind_m_};
     m["support_n"] = ParamValue{int64_t(support_n_)}; m["too_close_pings"] = ParamValue{int64_t(too_close_pings_)};
     m["ahead_half_deg"] = ParamValue{ahead_half_deg_}; m["side_max_deg"] = ParamValue{side_max_deg_};
@@ -87,6 +90,8 @@ void ProxMemory::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "range_m",      [&](auto const& v){ range_m_      = get_double(v, "range_m"); });
     apply_param(params, "view_range_m", [&](auto const& v){ view_range_m_ = get_double(v, "view_range_m"); });
     apply_param(params, "sensor_fwd_m", [&](auto const& v){ sensor_fwd_m_ = get_double(v, "sensor_fwd_m"); });
+    apply_param(params, "odom_translation", [&](auto const& v){ odom_translation_ = get_double(v, "odom_translation"); });
+    apply_param(params, "pinged_range_floor", [&](auto const& v){ pinged_range_floor_ = get_double(v, "pinged_range_floor"); });
     apply_param(params, "too_close_m",  [&](auto const& v){ too_close_m_  = get_double(v, "too_close_m"); });
     apply_param(params, "memory_ticks", [&](auto const& v){ memory_ticks_ = int(get_double(v, "memory_ticks")); });
     apply_param(params, "support_n",       [&](auto const& v){ on_param_change("support_n", v); });
@@ -105,6 +110,8 @@ void ProxMemory::on_param_change(std::string_view key, ParamValue const& value) 
     if      (k == "range_m")        range_m_        = get_double(value, k);
     else if (k == "view_range_m")   view_range_m_   = get_double(value, k);
     else if (k == "sensor_fwd_m")   sensor_fwd_m_   = get_double(value, k);
+    else if (k == "odom_translation") odom_translation_ = get_double(value, k);
+    else if (k == "pinged_range_floor") pinged_range_floor_ = get_double(value, k);
     else if (k == "too_close_m")    too_close_m_    = get_double(value, k);
     else if (k == "memory_ticks")   memory_ticks_   = int(get_double(value, k));
     else if (k == "support_n")       support_n_       = std::clamp(int(get_double(value, k)), 1, 8);
@@ -139,10 +146,14 @@ void ProxMemory::tick(uint64_t tick_id) {
     last_tick_ = tick_id;
     // Odom-frame conventions (DeadReckon): heading h = (cos yaw, sin yaw); body +X = (-sin yaw, cos yaw).
     const double c = std::cos(oyaw_), s = std::sin(oyaw_);
+    // odom_translation 1 = the literal ox_/oy_ (byte-identical); 0 = the points live in a frame that
+    // turns with the body but never travels (rotation only); between = a scale on the translation.
+    const double px = (odom_translation_ == 1.0) ? ox_ : ox_ * odom_translation_;
+    const double py = (odom_translation_ == 1.0) ? oy_ : oy_ * odom_translation_;
     // 1. A new valid ping becomes a point at the beam's origin + d along the heading.
     if (new_ping_ && last_valid_ && have_odom_) {
         const double along = sensor_fwd_m_ + last_d_;
-        pts_.push_back(Pt{ox_ + along * c, oy_ + along * s, tick_id});
+        pts_.push_back(Pt{px + along * c, py + along * s, tick_id, last_d_});
     }
     if (new_ping_) close_streak_ = (last_valid_ && last_d_ < too_close_m_) ? close_streak_ + 1 : 0;
     new_ping_ = false;
@@ -161,13 +172,14 @@ void ProxMemory::tick(uint64_t tick_id) {
         while (j > 0 && b[j - 1] > r) { b[j] = b[j - 1]; --j; }
         b[j] = r;
     };
-    const double sx = ox_ + sensor_fwd_m_ * c, sy = oy_ + sensor_fwd_m_ * s;   // the beam's origin, odom frame
+    const double sx = px + sensor_fwd_m_ * c, sy = py + sensor_fwd_m_ * s;   // the beam's origin, odom frame
     for (auto it = pts_.begin(); it != pts_.end();) {
         const double dx = it->x - sx, dy = it->y - sy;
         const double fwd = dx * c + dy * s;             // along the heading
         const double lat = -dx * s + dy * c;            // along body +X
         if (fwd < -behind_m_) { it = pts_.erase(it); continue; }
-        const double r  = std::sqrt(fwd * fwd + lat * lat);
+        double r  = std::sqrt(fwd * fwd + lat * lat);
+        if (pinged_range_floor_ > 0.0 && r < it->d) r = it->d;   // nearer only by a new ping
         const double az = std::atan2(lat, fwd) / kDeg;  // degrees, + = toward body +X
         if (std::fabs(az) <= ahead_half_deg_)       keep(best_k[1], float(r));
         else if (az > 0 && az <= side_max_deg_)     keep(best_k[2], float(r));
@@ -216,7 +228,8 @@ void ProxMemory::restore_state(nlohmann::json const& s) {
 }
 nlohmann::json ProxMemory::diag_snapshot() const {
     return nlohmann::json{{"minus_x", slots_[0]}, {"ahead", slots_[1]}, {"plus_x", slots_[2]}, {"too_close", slots_[3]},
-                          {"points", int(pts_.size())}, {"pings", pings_}, {"last_d", last_d_}, {"last_valid", last_valid_}};
+                          {"points", int(pts_.size())}, {"pings", pings_}, {"last_d", last_d_}, {"last_valid", last_valid_},
+                          {"odom_translation", odom_translation_}, {"pinged_range_floor", pinged_range_floor_}};
 }
 
 } // namespace ogma

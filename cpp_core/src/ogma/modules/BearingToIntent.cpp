@@ -60,6 +60,8 @@ ParamSchema BearingToIntent::params_schema() const {
         {"speed_min",      ParamMutability::HotMutable, "Floor on s while the goal is ahead (|e| < 90 deg).", ParamValue{0.0}},
         {"reverse_behind", ParamMutability::HotMutable, "cos e < 0: true = back up at the gated magnitude (the duck backs while it turns); false = hold speed_min.", ParamValue{false}},
         {"ref_tau_s",      ParamMutability::HotMutable, "> 0: while the loop is silent the reference leaks toward the current heading with this time constant (s). 0 = a hard hold.", ParamValue{0.0}},
+        {"ref_value_min",  ParamMutability::HotMutable, "LEVER A, second form (2026-10-28): a loop steers at any value above floor, but REWRITES the held heading reference only while its value (the bearing token's third element, the loop's need: a proximity in [0, 1], 1 = touching) is at least this. The robot's false sonar blips carried 0.10-0.35, real walls 0.63-0.75; a blip then costs a wiggle back to the old heading instead of a new heading. The time-constant form (ref_attack_s) was refuted in the sim room: a lagging reference pulls the body back into the wall it just left. 0 = any value rewrites, byte-identical.", ParamValue{0.0}},
+        {"ref_attack_s",   ParamMutability::HotMutable, "LEVER A (2026-10-28): > 0 = while the loop is active the reference MOVES toward yaw + bearing with this time constant (s) instead of jumping to it, so a loop earns authority over the held heading by persistence (a 0.2 s sonar blip moves it a few degrees; a 20 s wall episode moves it fully). The bearing published during the episode is unchanged. 0 = the jump, byte-identical.", ParamValue{0.0}},
         {"hz",             ParamMutability::ConstructionOnly, "Tick rate, for ref_tau_s.", ParamValue{50.0}},
     };
 }
@@ -71,7 +73,7 @@ ParamMap BearingToIntent::current_params() const {
     m["override_topic"] = ParamValue{override_topic_};
     m["floor"] = ParamValue{floor_}; m["speed_max"] = ParamValue{speed_max_}; m["speed_pow"] = ParamValue{speed_pow_};
     m["speed_min"] = ParamValue{speed_min_}; m["reverse_behind"] = ParamValue{reverse_behind_};
-    m["ref_tau_s"] = ParamValue{ref_tau_s_}; m["hz"] = ParamValue{hz_};
+    m["ref_tau_s"] = ParamValue{ref_tau_s_}; m["ref_attack_s"] = ParamValue{ref_attack_s_}; m["ref_value_min"] = ParamValue{ref_value_min_}; m["hz"] = ParamValue{hz_};
     return m;
 }
 
@@ -89,6 +91,8 @@ void BearingToIntent::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "speed_min",  [&](auto const& v){ speed_min_ = get_double(v, "speed_min"); });
     apply_param(params, "reverse_behind", [&](auto const& v){ if (auto b = std::get_if<bool>(&v)) reverse_behind_ = *b; });
     apply_param(params, "ref_tau_s",  [&](auto const& v){ ref_tau_s_ = get_double(v, "ref_tau_s"); });
+    apply_param(params, "ref_attack_s", [&](auto const& v){ ref_attack_s_ = get_double(v, "ref_attack_s"); });
+    apply_param(params, "ref_value_min", [&](auto const& v){ ref_value_min_ = get_double(v, "ref_value_min"); });
     apply_param(params, "hz",         [&](auto const& v){ hz_        = get_double(v, "hz"); });
     sub_ids_.push_back(bus_->subscribe(bearing_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ handle_bearing(p); }));
@@ -115,6 +119,8 @@ void BearingToIntent::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "speed_pow")  speed_pow_ = get_double(value, k);
     else if (k == "speed_min")  speed_min_ = get_double(value, k);
     else if (k == "ref_tau_s")  ref_tau_s_ = get_double(value, k);
+    else if (k == "ref_attack_s") ref_attack_s_ = get_double(value, k);
+    else if (k == "ref_value_min") ref_value_min_ = get_double(value, k);
     else if (k == "reverse_behind") { if (auto b = std::get_if<bool>(&value)) reverse_behind_ = *b; }
     else throw std::invalid_argument("BearingToIntent: param '" + k + "' is construction-only / unknown");
 }
@@ -160,7 +166,12 @@ void BearingToIntent::tick(uint64_t tick_id) {
     if (have_bearing_ && mag >= floor_) {
         active_ = true;
         e = std::atan2(cx_, cy_);
-        ref_yaw_ = yaw_ + e;                       // the loop sets the reference
+        if (ref_value_min_ > 0.0 && val_ < ref_value_min_) {
+            // lever A (second form): weak evidence steers but does not rewrite the held heading
+        } else if (ref_attack_s_ > 0.0)            // lever A (first form, refuted in the sim room; kept off)
+            ref_yaw_ += wrap_pi(yaw_ + e - ref_yaw_) * std::min(1.0, 1.0 / (ref_attack_s_ * hz_));
+        else
+            ref_yaw_ = yaw_ + e;                   // the loop sets the reference
     } else {
         active_ = false;
         if (ref_tau_s_ > 0.0) ref_yaw_ += (yaw_ - ref_yaw_) * std::min(1.0, 1.0 / (ref_tau_s_ * hz_));
@@ -198,6 +209,7 @@ void BearingToIntent::restore_state(nlohmann::json const& s) {
 nlohmann::json BearingToIntent::diag_snapshot() const {
     return nlohmann::json{{"active", active_}, {"err", err_}, {"vx", vx_}, {"vy", vy_}, {"speed", speed_},
                           {"ref_yaw", ref_yaw_}, {"yaw", yaw_}, {"value", val_}, {"msgs", msgs_},
+                          {"ref_attack_s", ref_attack_s_}, {"ref_value_min", ref_value_min_},
                           {"override", override_on_}, {"override_msgs", override_msgs_}};
 }
 

@@ -104,3 +104,36 @@ TEST(ProxMemory, TooCloseWaitsForConsecutiveClosePingsAndOneFarPingResetsIt) {
     f.run(3, 0.08f, true, 0, 0, 0);
     EXPECT_FLOAT_EQ(f.prox()[3], 0.0f) << "a far ping between resets the streak";
 }
+
+TEST(ProxMemory, RotationOnlyKeepsAPointsMeasuredRangeUntilRePingedButStillSweepsItWithYaw) {
+    // odom_translation 0: odometry "advancing" does not drag the point in (the robot's stride odometry
+    // over-reads on slip); a yaw turn still moves it to the side.
+    Fix f({{"range_m", 1.0}, {"odom_translation", 0.0}, {"memory_ticks", int64_t(1000)}});
+    f.run(1, 0.5f, true, 0.0, 0.0, 0.0);                 // a point 0.5 m ahead (+ the sensor offset)
+    const float v0 = f.prox()[1];
+    f.run(2, 0.5f, false, 0.4, 0.0, 0.0);                // odometry says the body advanced 0.4 m; no new ping
+    EXPECT_NEAR(f.prox()[1], v0, 1e-5f) << "the point keeps its measured range";
+    f.run(3, 0.5f, false, 0.4, 0.0, M_PI / 4.0);         // a 45 deg yaw turn (90 would put it past the 60 deg side slot)
+    EXPECT_NEAR(f.prox()[1], 0.0f, 1e-5f) << "it leaves the ahead slot";
+    EXPECT_GT(f.prox()[0] + f.prox()[2], 0.0f) << "and is now at the body's side";
+}
+TEST(ProxMemory, OdomTranslationOneIsTheFullOdometry) {
+    Fix a({{"range_m", 1.0}}), b({{"range_m", 1.0}, {"odom_translation", 1.0}});
+    for (auto* f : {&a, &b}) { f->run(1, 0.5f, true, 0.0, 0.0, 0.0); f->run(2, 0.5f, false, 0.3, 0.0, 0.0); }
+    EXPECT_FLOAT_EQ(a.prox()[1], b.prox()[1]);
+    EXPECT_GT(a.prox()[1], 0.5f) << "with the full odometry the point came 0.3 m nearer";
+}
+
+TEST(ProxMemory, PingedRangeFloorLetsAPointComeNearerOnlyByANewPingWhileRecedingKeepsTheOdometry) {
+    Fix f({{"range_m", 1.0}, {"pinged_range_floor", 1.0}, {"memory_ticks", int64_t(1000)}});
+    f.run(1, 0.5f, true, 0.0, 0.0, 0.0);                 // pinged at 0.5 m
+    const float v0 = f.prox()[1];
+    f.run(2, 0.5f, false, 0.4, 0.0, 0.0);                // odometry advances 0.4 m, no new ping
+    EXPECT_NEAR(f.prox()[1], v0, 1e-5f) << "dead reckoning cannot bring it nearer than its ping";
+    f.run(3, 0.2f, true, 0.4, 0.0, 0.0);                 // a new ping at 0.2 m
+    EXPECT_GT(f.prox()[1], v0 + 0.2f) << "a nearer ping is believed";
+    Fix g({{"range_m", 1.0}, {"pinged_range_floor", 1.0}, {"memory_ticks", int64_t(1000)}});
+    g.run(1, 0.5f, true, 0.0, 0.0, 0.0);
+    g.run(2, 0.5f, false, -0.3, 0.0, 0.0);               // the body backs away 0.3 m
+    EXPECT_LT(g.prox()[1], v0 - 0.2f) << "receding follows the odometry";
+}

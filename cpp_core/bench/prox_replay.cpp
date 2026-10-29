@@ -12,6 +12,7 @@
 // Usage: prox_replay <run.log> [support_n too_close_pings]...   (default: 1 1  2 2  3 2  3 3  5 3)
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <deque>
 #include <fstream>
 #include <iostream>
@@ -36,9 +37,16 @@ int main(int argc, char** argv) {
     if (argc < 2) { std::cerr << "usage: prox_replay <run.log> [support_n too_close_pings]...\n"; return 2; }
     std::vector<Ping> pings;
     std::map<long, std::array<double, 3>> odom;
+    std::map<long, double> gyro;               // per-tick yaw rate (deg/s, body up) from the imu rows, when logged
     std::ifstream f(argv[1]);
     std::string line;
     while (std::getline(f, line)) {
+        if (line.rfind("{\"a_g\"", 0) == 0) {
+            nlohmann::json j;
+            try { j = nlohmann::json::parse(line); } catch (...) { continue; }
+            if (j.value("kind", "") == "imu" && j.contains("g_dps")) gyro[j["tick"].get<long>()] = j["g_dps"][1].get<double>();
+            continue;
+        }
         if (line.rfind("{\"kind\":\"range\"", 0) == 0 || line.rfind("{\"distress\"", 0) == 0) {
             nlohmann::json j;
             try { j = nlohmann::json::parse(line); } catch (...) { continue; }
@@ -61,16 +69,32 @@ int main(int argc, char** argv) {
         return {lo->second[0] + a * (hi->second[0] - lo->second[0]), lo->second[1] + a * (hi->second[1] - lo->second[1]),
                 lo->second[2] + a * dyaw};
     };
-    std::vector<std::pair<int, int>> arms;
-    for (int i = 2; i + 1 < argc; i += 2) arms.push_back({std::atoi(argv[i]), std::atoi(argv[i + 1])});
-    if (arms.empty()) arms = {{1, 1}, {2, 2}, {3, 2}, {3, 3}, {5, 3}};
+    // Arms: support_n too_close_pings [odom_translation]  (the third is optional, default 1 = the full odometry).
+    // Arms: support_n too_close_pings [odom_translation] [f]   ("f" = pinged_range_floor on).
+    struct Arm { int k, tc; double tr; int pf; };
+    std::vector<Arm> arms;
+    for (int i = 2; i + 1 < argc; ) {
+        Arm a{std::atoi(argv[i]), std::atoi(argv[i + 1]), 1.0, 0}; i += 2;
+        if (i < argc && std::strchr(argv[i], '.')) { a.tr = std::atof(argv[i]); ++i; }
+        if (i < argc && std::strcmp(argv[i], "f") == 0) { a.pf = 1; ++i; }
+        arms.push_back(a);
+    }
+    if (arms.empty()) arms = {{1, 1, 1.0, 0}, {2, 2, 1.0, 0}, {3, 2, 1.0, 0}, {3, 3, 1.0, 0}, {5, 3, 1.0, 0}};
     const long t0 = pings.front().tick, t1 = pings.back().tick;
-    std::printf("%zu pings over ticks %ld..%ld (%.0f s); %zu odom samples\n", pings.size(), t0, t1, (t1 - t0) / 50.0, odom.size());
-    std::printf("support too_close | ahead<0.25m ticks: all / FALSE (trend > 0.40 m) | too_close ticks: all / FALSE | first ahead<0.25m on a real approach (tick)\n");
-    for (auto [k, tc] : arms) {
+    // Yaw at 50 Hz: the 1 Hz odom yaw is too coarse for a body turning 5 deg/s, so when the per-tick imu rows
+    // are present the yaw between odom samples is the gyro integrated from the last sample (the same gyro the
+    // host integrates); the translation stays interpolated.
+    const bool have_gyro = !gyro.empty();
+    std::printf("%zu pings over ticks %ld..%ld (%.0f s); %zu odom samples; yaw %s\n", pings.size(), t0, t1, (t1 - t0) / 50.0, odom.size(),
+                have_gyro ? "gyro-integrated between odom samples" : "interpolated (no imu rows)");
+    std::printf("support too_close transl floor | ahead<0.25m ticks: all / FALSE (trend > 0.40 m) | too_close: all / FALSE | first real ahead<0.25m | ACTIVE ticks (max slot >= 0.10) | STRONG (>= 0.30) | side L / R\n");
+    for (auto [k, tc, tr, pf] : arms) {
         ogma::InProcessBus bus; ogma::ProxMemory m;
         m.set_id("prox");
-        m.on_setup(&bus, {{"support_n", int64_t(k)}, {"too_close_pings", int64_t(tc)}, {"range_m", 0.5}, {"too_close_m", 0.15}});
+        m.on_setup(&bus, {{"support_n", int64_t(k)}, {"too_close_pings", int64_t(tc)}, {"range_m", 0.5}, {"too_close_m", 0.15},
+                          {"odom_translation", tr}, {"pinged_range_floor", double(pf)}});
+        long active = 0, strong = 0, sideL = 0, sideR = 0;
+        double yaw_g = 0.0; long last_anchor = -1;
         size_t pi = 0;
         std::deque<float> recent;          // valid ping metres over the last 100 ticks
         std::deque<long>  recent_t;
@@ -86,7 +110,14 @@ int main(int argc, char** argv) {
             std::vector<float> s(recent.begin(), recent.end());
             float trend = 9.0f;
             if (!s.empty()) { std::nth_element(s.begin(), s.begin() + s.size() / 2, s.end()); trend = s[s.size() / 2]; }
-            const auto o = odom_at(t);
+            auto o = odom_at(t);
+            if (have_gyro) {
+                auto oa = odom.find(t);
+                if (oa != odom.end()) { yaw_g = oa->second[2]; last_anchor = t; }
+                else if (last_anchor >= 0) { auto g = gyro.find(t); if (g != gyro.end()) yaw_g += g->second * (M_PI / 180.0) / 50.0; }
+                else yaw_g = o[2];
+                o[2] = yaw_g;
+            }
             bus.begin_tick(uint64_t(t));
             bus.publish("reality.proprio.odom", pv({float(o[0]), float(o[1]), float(o[2])}));
             bus.publish("sense.range", pv({held_m, held_v ? 1.0f : 0.0f}));
@@ -95,9 +126,12 @@ int main(int argc, char** argv) {
             const bool ahead_near = m.slot(1) > 0.5f;           // nearer than 0.25 m with range_m 0.5
             if (ahead_near) { ++ahead_all; if (trend > 0.40f) ++ahead_false; else if (first_real < 0) first_real = t; }
             if (m.slot(3) > 0.0f) { ++tc_all; if (trend > 0.40f) ++tc_false; }
+            const float mx = std::max(m.slot(0), std::max(m.slot(1), m.slot(2)));
+            if (mx >= 0.10f) { ++active; if (m.slot(0) > m.slot(2)) ++sideL; else if (m.slot(2) > m.slot(0)) ++sideR; }
+            if (mx >= 0.30f) ++strong;
         }
-        std::printf("   %d       %d      | %6ld / %6ld                            | %5ld / %5ld          | %ld\n",
-                    k, tc, ahead_all, ahead_false, tc_all, tc_false, first_real);
+        std::printf("   %d       %d     %4.2f   %d   | %6ld / %6ld                            | %5ld / %5ld     | %6ld            | %6ld                      | %6ld           | %5ld / %5ld\n",
+                    k, tc, tr, pf, ahead_all, ahead_false, tc_all, tc_false, first_real, active, strong, sideL, sideR);
     }
     return 0;
 }

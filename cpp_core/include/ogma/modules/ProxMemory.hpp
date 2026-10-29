@@ -68,6 +68,22 @@ private:
     double range_m_      = 1.0;     // proximity = 1 − r / range_m
     double view_range_m_ = 1.5;     // view = r / view_range_m, 1 = nothing
     double sensor_fwd_m_ = 0.049;   // the beam's origin ahead of the odom origin (the chassis front face)
+    // 2026-10-28.  How much of the odometry's TRANSLATION carries the stored points.  The robot's
+    // stride odometry over-reads 2-3x on its floor (the sonar closes at a third of what the stride
+    // says), so a wall pinged at 0.49 m is dragged into the body by phantom progress: in run 223518
+    // (_cs) the 14 pings under 0.5 m all read 0.48-0.50 m, none with a toe in the beam, yet the
+    // avoid loop reached a proximity of 0.72 and the body circled right through the memory (a right
+    // turn rotates every remembered point to the left).  The yaw is the gyro's and is sound; the
+    // translation is the suspect channel.  1 = the full odometry (byte-identical); 0 = ROTATION ONLY:
+    // a point keeps its measured range until re-pinged and only its azimuth follows the body's yaw
+    // (at 2 cm/s over a 3 s memory the true translation is 6 cm); between = a scale on the translation.
+    double odom_translation_ = 1.0;
+    // 2026-10-28, the narrower form.  A point may come NEARER only by being re-pinged, never by dead
+    // reckoning: its range for the slots is max(carried range, the range its ping measured).  Receding,
+    // dropping behind and the azimuth sweep keep the full odometry, so with honest odometry (the sim)
+    // nothing changes for a wall the beam keeps seeing; on the robot the phantom approach of a far
+    // wall is capped at what the beam actually said.  0 = off, byte-identical; 1 = on.
+    double pinged_range_floor_ = 0.0;
     double too_close_m_  = 0.15;    // the live ping below this reads as contact (too_close → 1 at 0)
     int    memory_ticks_ = 150;     // a point lives this long (3 s at 50 Hz)
     double behind_m_     = 0.10;    // a point this far behind the sensor is dropped
@@ -77,7 +93,7 @@ private:
     int    too_close_pings_ = 1;    // consecutive close pings before too_close reads (1 = the live ping)
     int    close_streak_    = 0;
 
-    struct Pt { double x, y; uint64_t t; };
+    struct Pt { double x, y; uint64_t t; double d; };   // d: the range the ping measured (m), for pinged_range_floor
     std::deque<Pt> pts_;
     double ox_ = 0.0, oy_ = 0.0, oyaw_ = 0.0;   // latest odom
     bool   have_odom_ = false;

@@ -24,8 +24,18 @@ suffix is one lever on the one before it:
 | `_sg` | LoadPhaseGait `support_gate`: a leg waits at the end of stance until the CoG is within a learned allowance of the feet that stay down (toe positions `feet_xz` from the commanded FK) | sim dips 29 → 18 % of lift-offs | `WORKING` sim / robot unclear (holds ~65 % of lift-offs) |
 | `k` | MotorEPMv2 `kin_route`: the stance reach and the integrator also push along the lift direction | a rear leg folded under, knee pinned at the keep-out cap | `WORKING` (no fold since) |
 | `_hk0` | `ctrl_lr` 0, `bias_lr` 0: the HK controller frozen at its start (its output remains, ~14 % of the command) | one leg at a time slid into saturated chatter after minutes (FR 82 %, stroke reversed, body moved backward) | `WORKING`; operator: HK off is right for the robot now |
+| `_cs` | LoadPhaseGait `load_topic` empty: the Tegotae rule's load share from the contact flags (1/n touching), not the FSR force through the shared curve | the legs never locked (diagonal phase lock ~0.3 vs the sim's 0.88; per-leg rates 30–45 % apart); with contact shares 0.51 and 0.89, touchdown CV 0.38, the support gate's dips at target, no "swim" marks | `WORKING` (2 runs, 2026-10-28) — **the operator's best stepping so far**; circles right (below) |
+| `_cs_ra` | **lever A**, BearingToIntent `ref_attack_s` 2 s: the heading reference is earned by a loop's persistence, not seized by a one-ping sonar blip | `_cs` circled right at 4–6°/s: the avoid loop's short activations set the reference to the right and the hold finished each turn; the left-side push was the hold's own steer differential | `IN_FLIGHT` (sim A/B 2026-10-28; robot run pending) |
 
 On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (the gate watching only).
+
+## Read before the next session (2026-10-28)
+
+- **Leg names in brain_diag are the sim's order and the sim is mirrored:** sim `fl` = physical FR (ADC A1), `fr` = FL (A0), `rl` = RR (A3), `rr` = RL (A2).
+- **The stride odometry over-reads 2–3× on this floor** (sonar closing rate vs the stride estimate); the brain's progress sense cannot see slip. `progress_commit_gain` is fed by it (`_pc0` = off, `NULL` on coordination, n = 1).
+- **A severed FSR wire (physical FR) broke the gait** on two runs of the 28th morning; check the four channels' duty in the feed before trusting a run.
+- **The operator's mark key** (`g` / `w` on the dash) and the per-tick IMU rows in the host log exist since 2026-10-27.
+- **Next:** one robot run of `_cs_ra` (lever A); then video the carpet → vinyl transition on the fixed stack; then `_pc0` on top; in the sim, the robot-measured disturbance layer and the contact belief for the gait's shares (`generator_and_belief_filter.md` G2).
 
 ## What the last run says about pace (run 185039, 336 s)
 

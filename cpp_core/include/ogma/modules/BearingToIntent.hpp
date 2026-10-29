@@ -71,6 +71,27 @@ private:
     double speed_min_  = 0.0;    // floor while the goal is ahead (|e| < 90 deg)
     bool   reverse_behind_ = false;   // cos e < 0: back up (true) or hold speed_min (false)
     double ref_tau_s_  = 0.0;    // > 0: the reference leaks toward the current heading
+    // 2026-10-28, lever A (the heading reference walks).  On the robot every short activation
+    // of the avoid loop -- most of them one or two false sonar pings -- rewrote the reference
+    // to "yaw + away-bearing", and the hold then turned the body 20-60 deg toward it once the
+    // loop fell silent (runs 185039 .. 223518: 130-500 deg of reference motion per run from
+    // episodes under 2.4 s; the _cs right-hand circle was this feedback closing through the
+    // proximity memory).  > 0: while the loop is active the reference MOVES toward yaw + e with
+    // this time constant (s) instead of jumping, so authority over the heading is earned by
+    // persistence: a 0.2 s blip moves it a few degrees, a 20 s wall episode moves it fully.
+    // The bearing published DURING the episode is unchanged (the reflex steers at full
+    // strength); only what the hold keeps afterward changes.  0 = the jump, byte-identical.
+    double ref_attack_s_ = 0.0;
+    // Lever A, second form (2026-10-28, after the sim room refuted the time constant: with a
+    // lagging reference the hold pulls the body BACK toward the wall it just turned from, and
+    // it tips pivoting against it -- 2.0 falls per 12 000 ticks against 0; every fall after
+    // 130-450 ticks of wall contact with the hold's goal 70-85 deg behind).  Duration cannot
+    // tell a one-ping blip from a short wall glance; the loop's own EVIDENCE can: the robot's
+    // blips carried a proximity value of 0.10-0.35, the real walls 0.63-0.75.  > 0: a loop
+    // steers at any value above `floor` (the reflex is untouched), but it REWRITES the held
+    // reference only while its value is at least this -- weak evidence costs a wiggle back to
+    // the old heading, strong evidence sets a new one.  0 = any value rewrites, byte-identical.
+    double ref_value_min_ = 0.0;
     double hz_         = 50.0;
 
     double cx_ = 0.0, cy_ = 0.0, val_ = 0.0; bool have_bearing_ = false;

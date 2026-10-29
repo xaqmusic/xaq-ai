@@ -9473,3 +9473,50 @@ two runs end in zero bytes: the dash wrote its "SAFE TO POWER OFF" line after th
 power-off (fixed: a second sync after the message; not deployed). The per-leg `hk_cnorm` / `hk_hnorm` went into the
 full diag, not the snapshot brain_diag records (fixed; not deployed). After a boot the Pi answers on 10.0.0.114 before
 `picrawler.local` resolves.
+
+### 2026-10-27 — ROBOT INSTRUMENTS for the stride question: the operator's mark key (`g` good / `w` swim into events.jsonl on the feed's clock) and the raw IMU per tick in the host log; FIRST READINGS: the stride odometry over-reads 2–3× (sonar), the heading hold works but its REFERENCE walks on one-ping avoid episodes, and the support gate's allowance winds to its floor — `BASELINE` (n = 4 runs of the 27th)
+
+**The heading reference.** With the avoid loop silent the hold keeps the heading within 2° over 30 s (run 185039, first
+window). The wander is the reference: every activation of the avoid loop sets it to "yaw + away-bearing", and when the
+loop falls silent 0.2–2 s later the hold turns the body to it. Per run, the episodes under 2.4 s moved the reference
+134 / 338 / 354 / 318° (runs 020712, 164309, 182531, 185039); about half of such single pings are a front toe in the beam
+(entry of 2026-10-27, the range false readings). Lever A built the next day (`ref_attack_s`, below).
+**The odometry.** Where a surface was ahead and the heading steady, the stride odometry read 3–7 cm/s while the sonar
+closed at 1.2–2.4 cm/s: the stance feet slip and the brain's progress sense cannot see it (it assumes a loaded foot
+holds). "Path speed steady" in the resume note of the 27th was this blind metric. The commit boost (`progress_commit_gain`
+1.0, +30 % thrust after 3.6 s above 3 cm/s) sat above its threshold about half of every run on phantom progress.
+**The support gate.** In all four runs the learned allowance fell 27 → 5 mm (the floor) while dips per lift-off stayed
+0.30–0.38 against a 0.10 target, holds rose to 0.66–0.77 of lift-offs at 12–13 ticks each. The regulated quantity did not
+respond; the gate was not controlling the robot's dips (resolved by the contact shares, 2026-10-28 below).
+**Marks (runs 215328, 215940; 60 marks).** Nothing the brain records separates "swim" from "good": inter-leg PLV, phase
+rate, phase–contact agreement, holds, belly, feet planted, current, contact flicker, IMU variance, sonar closing — all
+overlap within noise. The diagonal-pair phase resultant is ~0.4 at all times (the sim's 0.88), and the per-leg touchdown
+rates differ by 30–45 % (physical FL 0.77–0.79/s vs RR 0.52–0.55/s): the gait beats between legs with different periods,
+and "a few good steps" are the beat's in-phase moments. Sim, room, 6000 ticks, n = 1 each: support gate off lowers the
+diagonal resultant 0.88 → 0.58; contact-only shares raise it to 0.95 (PLV 0.68 → 0.76).
+
+### 2026-10-28 — ROBOT: CONTACT-ONLY LOAD SHARES (`_cs`, LoadPhaseGait `load_topic` empty) — diagonal phase lock 0.28–0.40 → 0.51 and 0.89 (sim 0.88), touchdown-interval CV 0.49–0.61 → 0.38, the support gate's dips at target (0.14) with the allowance stable at 25–29 mm, saturation ≤ 0.4 %, 2.0 cm/s toward a wall by sonar (base 0.6–1.4), 95 "good" marks and no "swim" — `WORKING` (n = 2 runs: 163757, 223518); and the PROGRESS→COMMIT thrust off (`_pc0`) — `NULL` on coordination (n = 1, run 164225; the odometry over-read fell to 1.2× from 2–3×, kept for the slip question)
+
+Why contact beats force here: the force shares pass through one shared FSR curve on four feet whose curves differ (one
+reads 4× the others and sits beyond the curve's last point 65–74 % of the time; weight conservation across support
+patterns: RR planted → 820–890 g, RR lifted → 140–190 g against a 598 g body). The contact flag is the channel the FSR
+work validated (one miss in 128 taps). Shares take the values {0, 1/4, 1/3, 1/2} and still coordinate better, as in the
+sim. Per-leg rates still differ (0.61–0.85/s) but now as a pair structure. Leg names in brain_diag are the SIM's order,
+which is mirrored: sim `fr` = physical FL (ADC A0). Both morning runs of the 28th (113159 `_pc0`, 113459 `robot_p1`) had
+the physical FR FSR (A1) severed: 0–4 counts for the whole run. They are one-foot-blind lesion references, not A/Bs
+(the gait was visibly broken; the operator repaired the wire and repeated both). `robot_p1` repeated (222733, 342 s):
+PLV 0.52 but diagonal lock 0.33, swing feet touching 0.32 of samples (the highest of any run), one front foot cycling
+at a third of the other's rate, a tilt-guard stop at 65 s after the body pitched ~43°, 1.4 cm/s toward the wall.
+Re-use context for the force shares: per-foot calibrated curves (weight conservation on the logs is the method), or a
+contact belief (the generator-and-belief-filter note, G2) in place of the raw flag.
+
+### 2026-10-28 — ROBOT `_cs` CIRCLES RIGHT at 4–6°/s (both runs): the heading REFERENCE, not the legs — the avoid loop read an obstacle on one side in 84–94 % of its active ticks and steered away, the hold finished each turn while silent (−2.4 to −3.8°/s idle, error −0.1 to −0.24 rad), and the left-side stance push 40–55 % larger than the right IS the hold's steer differential (`_sgk_hk0` and `robot_p1` push evenly with the same hold) — mechanism `BASELINE`; LEVER A built: BearingToIntent `ref_attack_s` (`_cs_ra`)
+
+The loop that sustains it is geometric: proximity memory keeps points in the odometry frame, a right turn rotates every
+remembered point to the body's left, "obstacle left" commands right again. Whether the first point was a wall or a toe
+blip the video will say; the sonar's valid-ping rate in run 223518 was the lowest recorded (48 %). Why `_cs` and not the
+base: the better-coordinated gait turns decisively when told to, so the feedback closes. Lever A: while a loop is active
+the reference moves toward yaw + bearing with a time constant (2 s) instead of jumping, so a one-ping blip moves it a few
+degrees and a wall episode moves it fully; the bearing published during the episode is unchanged. Gain-0: `_cs` and
+`_cs` with `ref_attack_s` 0 explicit are byte-identical over 3000 ticks in the room with the sonar on (deterministic, 0
+differing lines). Unit tests: a one-tick blip moves the reference 1 %, 400 ticks move it 97 %; 0 = the jump.
