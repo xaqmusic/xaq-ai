@@ -9546,3 +9546,30 @@ four builds and against each lever's explicit 0 (3000-tick room runs, 0 differin
 and the `_cs` stepping numbers. **Re-use context** for the refuted lag: a world without obstacles that need a decisive
 turn-away. The deeper fix remains the progress sense itself (the accelerometer against the stride), after which the
 memory can carry the full odometry again.
+
+### 2026-10-29 — ROBOT, five runs on several surfaces: THE CIRCLE IS GONE ON FLAT GROUND with either form of lever A (`_cs_rv` +0.1°/s, `_cs_pf` −0.8°/s with the hold alone at −0.2°/s and the avoid loop active 11 %, against −4.4 / −5.9°/s for `_cs`) — `WORKING` (signal, n = 1 each); the stepping holds (diagonal lock 0.65–0.71, interval CV 0.40–0.42, saturation ≤ 1.2 %); and the LATE-RUN SWIMMING is a within-run drift that every long run shows: over 3–4 minutes the diagonal lock falls 0.8 → 0.4–0.5, swing feet drag more (0.13 → 0.21), the belly's dips deepen (ToF p10 54 → 33 mm) while its median holds (61–64 mm), the support gate's dips rise 0.2 → 0.3–0.5 and its allowance winds to the floor by minute 2, current +20 % — `BASELINE` (n = 2 long flat runs, swim marks in minute 3 of both)
+
+| run | config | surface | gyro yaw mean | yaw while avoid active / idle | avoid active | diagonal lock | interval CV | sonar toward a wall |
+|---|---|---|---|---|---|---|---|---|
+| 184322 | `robot_p1` | flat | — | — | 25 % | 0.60 | 0.53 | −1.2 cm/s (n = 7) |
+| 184650 | `_cs_rv` | flat | **+0.13°/s** | +0.1 / +0.1°/s; sides L 175 / R 160 | 33 % | 0.71 | 0.40 | 1.6 (n = 10) |
+| 185143 | `_cs_pf` | flat | **−0.77°/s** | −5.8 / −0.2°/s | **11 %** | 0.65 | 0.42 | 1.7 (n = 20) |
+| 185624 | `_cs_pf` | rough (investigation) | −0.93°/s | — | 36 % | 0.83 | 0.49 | tilt-guard flip at 110 s; pack 6.49 V min; FL FSR median 271 counts (was 1500–1800) |
+| 185926 | `_cs_pf` | rough (investigation) | −4.14°/s | −9.2 / −1.0°/s; sides L 47 / R 202 | 34 % | 0.58 | 0.60 | three HAT resets in the first 30 s (rail 1.93 V, 3.5 A); belly on the ground (ToF p10 12 mm) |
+
+The rough-surface runs are not A/Bs: bumps give the sonar real close returns and the body spent time on its belly after
+brownouts; a right circle returned there with the loop active a third of the time. The FL foot sensor's median fell to
+271 counts in run 185624 (1007 in 185926, 1500–1800 on flat): the toe on a bump edge, or the wire again — check before
+the next session. `robot_p1` repeated: diagonal lock 0.60 this time (0.33 and 0.70 before), feet dragging 0.19, four
+legs saturating 1.8–2.7 %, the sonar reading the body moving AWAY from the wall ahead.
+**The drift, per minute (run 185143 / 184650):** diagonal lock 0.70 / 0.81 → 0.40 / 0.51; PLV 0.45 / 0.48 → 0.38 / 0.36;
+swing-foot touching 0.18 / 0.17 → 0.21 / 0.15; belly ToF p10 32–54 / 48 → 33 / 40 mm with the median flat at 61–64;
+support-gate dips 0.32 / 0.21 → 0.51 / 0.31 and the allowance 7–26 / 17–30 → 5 mm (the floor) by minute 2–3; current
+0.98–1.15 → 1.18 / 1.11 A; pack 7.43 / 7.47 → 7.31 / 7.37 V. The servo-sag instrument (`sag_from_log`: commanded stance
+height − belly ToF) reads a constant 38–41 mm median sag through every minute: the body does not sink, its DIPS deepen.
+The learners move with it: the press relaxes toward 0 on some legs (−0.075 → −0.028), one leg's stance reach winds
+(0.65 → 2.63), and the gate holds longer (10.9 → 14.4 ticks per lift-off). The 2-minute `_cs` run (223518) ended before
+any of this began. Candidates, untested: servo heating (torque loss shows first in the transient, not the hold), the
+gate's own feedback (more dips → smaller allowance → longer holds → a more disrupted rhythm), a learner winding. The
+discriminating test is a cooling pause: walk 3 min, servos off 3 min, walk 3 min, same floor; if the third stretch
+starts clean the body is thermal; if it resumes degraded the learners carry it (compare with learning rates at 0).
