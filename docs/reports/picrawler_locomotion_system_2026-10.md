@@ -361,3 +361,27 @@ For the reader who will build on this. Names are the repository's.
 | the configurations | `godot_host/project/addons/ami_ogma/configs/…hip2p030__lpg*.json` (sim) and `…s3a_stuckinst__hip2p030__lpg*.json` (robot stack); the launcher shows short names, the long form is each file's description |
 | the instruments | `scripts_tools/arenaavg.py`, `seedavg.py`, `roomavg.py` (harnesses); `stepnoise.py`, `thrash.py` (reversals); the per-leg physics contact `con` and the modules' state in the body log and the dash's brain diag |
 | the record | the ledger's 2026-10-12 and 2026-10-13 entries; the audit of 2026-10-12 |
+
+## Addendum, 2026-10-31 — from stepping to walking on the robot
+
+The design above stands. Four levers, each one measured against the configuration before it on the robot, took the
+gait from the 2026-10-13 winner to a steady diagonal pattern that holds for six minutes and turns away from obstacles
+placed in its path. Each was a sensor fact rather than a tuning; the ledger's entries from 2026-10-26 to 2026-10-31
+carry the evidence, and the Claude Docs page "PiCrawler locomotion system" carries the readable account.
+
+| Lever (config suffix) | What the robot did | What it was | Verdict |
+|---|---|---|---|
+| learned-controller learning off (`_hk0`) | one leg at a time slid into saturated chatter after minutes; the body walked backward | the per-leg controller winding up on a servo that reports nothing | `WORKING`, 1 run; sim 24 000 ticks reproduces it |
+| contact-only load shares (`_cs`) | the legs never locked (diagonal lock ~0.3 vs the sim's 0.88), cycling 30–45 % apart | force shares through one FSR curve shared by four sensors whose curves differ 4× | `WORKING`, 2 runs; sim PLV 0.68 → 0.76 |
+| pinged-range floor on the proximity memory (`_pf`) | a right-hand circle at 4–6°/s | the stride odometry over-reads 2–3× on slip and dragged far sonar points into the body (replay: 1343 → 0 avoid ticks) | `WORKING`, 1 run |
+| support-gate allowance fixed at 30 mm (`_sl0`) | swimming late in every run over 3 min | the gate's learner collapsed its allowance at obstacle contact into an absorbing state | `WORKING`, 1 run of 376 s with placed obstacles; sim corridor ties |
+
+The gait as the instruments read it: diagonal phase lock 0.28–0.40 (2026-10-27) → 0.86, 0.94 in the last minute;
+touchdown-interval CV 0.49–0.61 → 0.38; saturation per leg 0.3–3 % → ≤ 0.6 %; about 3 cm/s toward a wall by sonar.
+Two cautions for a reader of the logs: brain_diag's leg names are the simulation's, and the simulation is mirrored
+(its front-left is the physical front-right); and every odometry-derived speed over-reads on slip by 2–3×.
+
+Not yet shown: the six-minute result at power (one run), a progress sense that survives slip, whether the late decay
+has a thermal component as well as the learned one, and a simulation that carries the robot's disturbances. The
+operator's reading: the robot is near the end of what it can do without a heavier redesign (servos without feedback,
+one sonar beam, a pack that sags to 6.5 V in six minutes).
