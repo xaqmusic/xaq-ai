@@ -9598,3 +9598,25 @@ on an obstacle does, and the learner keeps the lesson.
 test and is on the Pi; `_cs_pf_sm20` (`support_margin_min` 0.02) the safety-net form, sim only. If `_sl0` removes the late
 degradation, the principled form follows: the dip-learning suspended while the avoid loop is active or the tilt is out of
 band (a dip during a pivot is not the lift-off's fault), and a target set from the gait's own quiet dip rate.
+
+### 2026-10-31 — ROBOT `_cs_pf_sl0` (the support gate's allowance FIXED at 30 mm), 376 s with obstacle contact (pillows placed in the path, video DSCF0004): NO LATE DEGRADATION — diagonal lock 0.86 over the run and 0.89–0.95 in minutes 1–6, interval CV 0.38, swing feet touching 0.15, 9.3 hold ticks per lift-off, dips 0.18, saturation ≤ 0.6 %; ten avoid turns ≥ 2 s with the lock 0.91 before, 0.89 in the 30 s after, 0.87 at 30–60 s; one dip at 240 s recovered within 20 s — `WORKING` (robot, n = 1 long run; sim corridor n = 6 ties or improves); the absorbing state was the learner
+
+| | `_cs_pf` 170338 (192 s) | `_cs_pf` 171049 (499 s) | **`_cs_pf_sl0` 185909 (376 s)** |
+|---|---|---|---|
+| diagonal lock, whole run / last minute | 0.72 / 0.72 | 0.63 / 0.67 | **0.86 / 0.94** |
+| PLV | 0.49 | 0.45 | 0.52 |
+| touchdown-interval CV | 0.47 | 0.42 | **0.38** |
+| allowance at the end | 5–19 mm | 5–7 mm | 30 mm (fixed) |
+| hold ticks per lift-off | 10.0 | 11.8 | 9.3 |
+| belly ToF p10, last minute | 31 mm | 52 mm | 56 mm |
+| avoid turns ≥ 2 s | 3 | 12 | 10 |
+
+The pack sagged 7.77 → 7.22 V (min 6.51) over the run with no HAT reset. The second run of the session (190619, 62 s)
+is void: pack 6.35 V min, rail 2.25 V, 3.5 A, a HAT reset at 35 s, a rougher surface. Heading: −9.6°/s while the
+avoid loop spoke (turning away from the placed obstacles, 225 of 301 active ticks on one side), −0.7°/s while silent.
+**Verdict and re-use context.** The support gate's learned allowance is `REGRESSION` on the robot with contact shares:
+its 10 % dip target sits below the clean dip rate (14–20 % robot, 0.29 sim corridor), so it drifts down in good walking
+and collapses at obstacle contact into a state it cannot leave. A fixed 30 mm allowance is the robot's base. The
+learner's re-use context: a target set from the gait's own quiet dip rate, learning suspended while the avoid loop is
+active or the tilt is out of band (a dip during a pivot is not the lift-off's fault), and a floor above the holding
+regime (`_cs_pf_sm20`, built, untested on the robot).
