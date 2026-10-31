@@ -9620,3 +9620,24 @@ and collapses at obstacle contact into a state it cannot leave. A fixed 30 mm al
 learner's re-use context: a target set from the gait's own quiet dip rate, learning suspended while the avoid loop is
 active or the tilt is out of band (a dip during a pivot is not the lift-off's fault), and a floor above the holding
 regime (`_cs_pf_sm20`, built, untested on the robot).
+
+### 2026-10-31 — INSTRUMENTS AND HANDLES, not levers: the PACE meta-control (one slider for a faster or slower gait until a pace error learns it) in the sim tuning panel and on the dash (`o`/`p`); a `stroke` tunable; the launcher allowlist pruned to promoted configs and baselines; and `_cs_pf_sl0_sim60`, the robot base with ideal servos — corridor n = 6: net_z 8.03 ± 2.73 (five seeds at 8.2–10.0, one fall), straight 0.61, PLV 0.62, 425 steps, gate dips 0.30 at 2.9 hold ticks per lift-off
+
+**Pace.** `pace` ∈ [0, 1] maps to the LPG period over the span the 2026-10-26 speed map swept (90 → 30 ticks; 4.9 →
+7.0 cm/s at stroke 1.0 in the sim) and scales the stroke with it from the config's own point:
+`stroke = stroke_cfg · (1 + 0.5 · (p − p_cfg))`, clamped to [0.4, 1.2], where `p_cfg` is the pace of the config's own
+period — so at its own pace a config is reproduced exactly and the slider changes nothing until moved. Servo speed
+stays its own control (a hardware and brownout matter: the robot browned out at 4.5 rad/s, 2026-10-19). The mapping is
+`dash_run.pace_targets` and the sim panel's `_on_pace`; the dash keys are `o` (slower) and `p` (faster), queued before
+the brain takes over and live after. The operator's intent (2026-10-31): "until it is adapted/learned this meta
+control should adjust LPG phase and the other sliders so a faster or slower gait can be tried in real time" — this is
+the handle the pace error of the resume note's direction 1 would drive. Not a behaviour change; byte-identical until
+touched.
+**Allowlist.** Baselines `ref_servo6`, the original robot stack (`hip2p030`), the first LPG robot config
+(`lpgn_r05_e0d0_ref300`), `robot_p1`; the robot base `_cs_pf_sl0`; sim-ideal `sim_s60_p30`, `exp_reach_…_ko`
+(promoted 2026-10-23) and the new `_cs_pf_sl0_sim60`. Sixteen intermediate robot levers left the list; their configs
+and verdicts stay.
+**`_cs_pf_sl0_sim60`** is to `_cs_pf_sl0` what `sim_s60_p30` is to `robot_p1`: MAX_SERVO_SPEED 4.22 → 6.0, period 50 →
+30, no sonar deadzone. Against `_cs_pf_sl0` at 4.22 rad/s in the same corridor (net_z 6.98, straight 0.68, 0 falls): more
+distance, one fall in six, the gate's dip rate the same 0.3 (contact shares) at fewer hold ticks. The sim twin for gating
+levers on the new base.
