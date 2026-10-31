@@ -76,6 +76,30 @@ BRAIN_PORT = 7400                             # ogma_host's inspector control po
 SPEED_STEP_RAD_S = 0.25                       # the live servo-speed keys' step
 PERIOD_STEP_TICKS = 5                         # the live LPG-period keys' step
 PERIOD_MIN, PERIOD_MAX = 20, 120
+
+# ---- PACE, a meta-control (operator, 2026-10-31): one slider for "a faster or slower gait", until a pace error
+# learns it.  pace p in [0, 1] moves the LPG period over the span the 2026-10-26 speed map swept (90 -> 30 ticks:
+# 4.9 -> 7.0 cm/s at stroke 1.0 in the sim) and moves the stroke with it, as a fraction of the config's own stroke,
+# so the config's point is exactly reproduced at its own pace.  Servo speed stays its own control (a hardware and
+# brownout matter).  The same mapping lives in the sim's tuning panel (motor_epm_panel.gd).
+PACE_PERIOD_SLOW, PACE_PERIOD_FAST = 90.0, 30.0
+PACE_STROKE_SLOPE = 0.5                             # stroke = stroke_cfg * (1 + slope * (p - p_cfg))
+PACE_STROKE_MIN, PACE_STROKE_MAX = 0.4, 1.2
+PACE_STEP = 0.1
+
+
+def pace_from_period(period: float) -> float:
+    """The pace at which the period mapping gives this period, clamped to [0, 1]."""
+    p = (PACE_PERIOD_SLOW - float(period)) / (PACE_PERIOD_SLOW - PACE_PERIOD_FAST)
+    return min(1.0, max(0.0, p))
+
+
+def pace_targets(p: float, period_cfg: float, stroke_cfg: float) -> tuple[float, float]:
+    """(period_ticks, stroke_gain) for pace p, given the config's own period and stroke."""
+    p = min(1.0, max(0.0, p))
+    period = round(PACE_PERIOD_SLOW - (PACE_PERIOD_SLOW - PACE_PERIOD_FAST) * p)
+    stroke = stroke_cfg * (1.0 + PACE_STROKE_SLOPE * (p - pace_from_period(period_cfg)))
+    return float(min(PERIOD_MAX, max(PERIOD_MIN, period))), float(min(PACE_STROKE_MAX, max(PACE_STROKE_MIN, stroke)))
 LIVE_SLEW_MIN, LIVE_SLEW_MAX = 20, 60               # benchd's slew.set band (kLiveSlewMin/Max)
 
 
@@ -104,6 +128,9 @@ class Tunable:
 TUNABLES = {
     "period": Tunable("period", "LPG period", "LoadPhaseGait", "period_ticks", PERIOD_STEP_TICKS,
                       PERIOD_MIN, PERIOD_MAX, "ticks", default=70.0),
+    # The hip stroke's amplitude (the forward push), also the second handle of the pace meta-control.
+    "stroke": Tunable("stroke", "stroke", "MotorEPMv2", "stroke_gain", 0.05, PACE_STROKE_MIN, PACE_STROKE_MAX, "",
+                      default=0.7),
     "height": Tunable("height", "belly target", "MotorEPMv2", "tuck_learn_target_m", 0.005, 0.030, 0.100, "mm",
                       scale=1000.0, default=0.065, requires="tuck_learn_rate",
                       # a config with the learned stance press moves its target with the height learner's (one belly
@@ -132,6 +159,8 @@ def fmt_tunable(t: Tunable, v: Optional[float]) -> str:
         return "off" if v <= 0 else f"{v:.3f}"
     if t.name == "rlift":
         return f"{v:.1f}"
+    if t.name == "stroke":
+        return f"{v:.2f}"
     return f"{v * t.scale:.0f} {t.unit}"
 VBAT_WARN = 7.0                               # limp is 6.4 sustained; belly-up draws ~1.5 A
 
@@ -692,6 +721,40 @@ class RunController:
             return msg
         self.st.lpg_period = want
         msg = f"LPG period {want:.0f} ticks = {want / TICK_HZ:.2f} s per stride (was {cur:.0f})"
+        self._ev(msg)
+        return msg
+
+    def nudge_pace(self, steps: int) -> str:
+        """PACE -/+ PACE_STEP: one meta-control that moves the LPG period (90 -> 30 ticks over pace 0 -> 1) and the
+        stroke with it (pace_targets), so a faster or slower gait can be tried live before a pace error learns it."""
+        if not self.cfg.lpg_id or self.cfg.lpg_period is None:
+            return "pace: this config has no LoadPhaseGait"
+        if "stroke" not in self.cfg.tunables:
+            return "pace: this config has no stroke_gain"
+        cur_period = self.st.lpg_period if self.st.lpg_period is not None else self.period_target
+        if cur_period is None:
+            cur_period = self.cfg.lpg_period
+        p = round((pace_from_period(cur_period) + steps * PACE_STEP) / PACE_STEP) * PACE_STEP
+        p = min(1.0, max(0.0, p))
+        period, stroke = pace_targets(p, self.cfg.lpg_period, self.cfg.tunables["stroke"][1])
+        if not self._tune_applied:
+            self.period_target = period
+            self.st.lpg_period = period
+            self.tune_targets["stroke"] = stroke
+            self.st.tuned["stroke"] = stroke
+            msg = f"pace {p:.1f}: period {period:.0f} ticks, stroke {stroke:.2f} for this run (sent when the brain takes over)"
+            self._ev(msg)
+            return msg
+        r = self.io.brain_call("set_param", id=self.cfg.lpg_id, key="period_ticks", value=period)
+        if r and r.get("status") == "ok":
+            self.st.lpg_period = period
+            r = self._send_tunable("stroke", stroke)
+        if not r or r.get("status") != "ok":
+            msg = f"pace {p:.1f} refused: {(r or {}).get('message', 'no reply from ogma_host')}"
+            self._ev(msg)
+            return msg
+        self.st.tuned["stroke"] = stroke
+        msg = f"pace {p:.1f}: period {period:.0f} ticks = {period / TICK_HZ:.2f} s/stride, stroke {stroke:.2f}"
         self._ev(msg)
         return msg
 

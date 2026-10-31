@@ -25,6 +25,8 @@ const _MODULE_ID: String = "motor_epm"
 # the LoadPhaseGait stack, for walking-speed and posture experiments.  A key the loaded config does not have
 # shows "—" and does nothing.  The old list is in git history (motor_epm_panel.gd before this change).
 const _SLIDERS: Array = [
+	{"section": "PACE  (meta: period + stroke together)"},
+	{"meta": "pace", "key": "pace", "label": "pace (0 slow .. 1 fast)", "min": 0.0, "max": 1.0, "step": 0.05},
 	{"section": "GAIT  (LoadPhaseGait)"},
 	{"id": "load_phase", "key": "period_ticks", "label": "LPG period (ticks / stride)", "min": 20.0, "max": 120.0, "step": 1.0},
 	{"id": "load_phase", "key": "sigma_ratio",  "label": "LPG load hold (sigma ratio)",  "min": 0.0,  "max": 4.0,   "step": 0.1},
@@ -56,6 +58,17 @@ const _SLIDERS: Array = [
 ]
 
 var _body: Node = null
+# PACE meta-control (operator, 2026-10-31): one slider that moves the LPG period over the span the 2026-10-26 speed
+# map swept (90 -> 30 ticks over pace 0 -> 1) and the stroke with it, as a fraction of the config's own stroke, so
+# the config's point is exactly reproduced at its own pace.  Until a pace error learns this, it is how a faster or
+# slower gait is tried live.  The same mapping is the dash's o/p keys (pi_host/tools/dash_run.py, pace_targets).
+const _PACE_PERIOD_SLOW: float = 90.0
+const _PACE_PERIOD_FAST: float = 30.0
+const _PACE_STROKE_SLOPE: float = 0.5
+const _PACE_STROKE_MIN: float = 0.4
+const _PACE_STROKE_MAX: float = 1.2
+var _pace_period_cfg: float = -1.0    # the config's period and stroke, captured at the first sync
+var _pace_stroke_cfg: float = -1.0
 var _content_vb: VBoxContainer = null
 var _status: Label = null
 var _minimise_btn: Button = null
@@ -160,6 +173,8 @@ func _build_slider_row(parent: VBoxContainer, spec: Dictionary) -> void:
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var key := str(spec["key"])
 	var where := "body" if bool(spec.get("body", false)) else str(spec.get("id", _MODULE_ID))
+	if spec.has("meta"):
+		where = "meta"
 	slider.value_changed.connect(func(v: float) -> void: _on_slider(where, key, v))
 	row.add_child(slider)
 
@@ -219,6 +234,12 @@ func _sync_from_module() -> bool:
 			var bv = _body.get(str(spec["key"]))
 			if bv != null:
 				cur["body/" + str(spec["key"])] = bv
+	# The pace slider starts at the pace of the config's own period; it needs both handles present.
+	if cur.has("load_phase/period_ticks") and cur.has(_MODULE_ID + "/stroke_gain") \
+			and cur["load_phase/period_ticks"] != null and cur[_MODULE_ID + "/stroke_gain"] != null:
+		_pace_period_cfg = float(cur["load_phase/period_ticks"])
+		_pace_stroke_cfg = float(cur[_MODULE_ID + "/stroke_gain"])
+		cur["meta/pace"] = _pace_from_period(_pace_period_cfg)
 	var missing := 0
 	for k in _value_labels.keys():
 		var lbl: Label = _value_labels[k]
@@ -246,9 +267,36 @@ func _sync_from_module() -> bool:
 		print("SimTuningPanel selftest: load_phase.period_ticks -> %s, body MAX_SERVO_SPEED -> %s" % [str(got), str(_body.get("MAX_SERVO_SPEED"))])
 	return true
 
+func _pace_from_period(period: float) -> float:
+	return clampf((_PACE_PERIOD_SLOW - period) / (_PACE_PERIOD_SLOW - _PACE_PERIOD_FAST), 0.0, 1.0)
+
+func _on_pace(p: float) -> void:
+	# One meta-control, two handles: the LPG period and the stroke (see the constants above).
+	if _pace_period_cfg < 0.0 or _pace_stroke_cfg < 0.0:
+		if _status != null:
+			_status.text = "pace: this config has no LPG period or stroke_gain"
+		return
+	p = clampf(p, 0.0, 1.0)
+	var period := roundf(_PACE_PERIOD_SLOW - (_PACE_PERIOD_SLOW - _PACE_PERIOD_FAST) * p)
+	var stroke := clampf(_pace_stroke_cfg * (1.0 + _PACE_STROKE_SLOPE * (p - _pace_from_period(_pace_period_cfg))),
+		_PACE_STROKE_MIN, _PACE_STROKE_MAX)
+	_on_slider("load_phase", "period_ticks", period)
+	_on_slider(_MODULE_ID, "stroke_gain", stroke)
+	for lk in ["load_phase/period_ticks", _MODULE_ID + "/stroke_gain"]:
+		if _value_labels.has(lk):
+			var sld: HSlider = _value_labels[lk].get_meta("slider")
+			sld.set_value_no_signal(period if lk.ends_with("period_ticks") else stroke)
+	if _value_labels.has("meta/pace"):
+		_value_labels["meta/pace"].text = "%.2f" % p
+	if _status != null:
+		_status.text = "pace %.2f -> period %.0f ticks (%.2f s/stride), stroke %.2f" % [p, period, period / 50.0, stroke]
+
 func _on_slider(where: String, key: String, v: float) -> void:
 	var ok := false
 	var err := ""
+	if where == "meta":
+		_on_pace(v)
+		return
 	if where == "body":
 		if _body != null and is_instance_valid(_body):
 			_body.set(key, v)

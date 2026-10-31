@@ -555,6 +555,12 @@ class Dash:
                     if "height" in self.ctrl.st.tuned:
                         self.tune_other["height"] = self.ctrl.st.tuned["height"]
                     return True
+                if ch in (ord("o"), ord("p")):       # PACE meta-control: o slower, p faster (LPG period + stroke together)
+                    self.msg = self.ctrl.nudge_pace(-1 if ch == ord("o") else 1)
+                    self.msg_bad = "refused" in self.msg or "no " in self.msg
+                    if self.ctrl.st.lpg_period is not None:
+                        self.tune_period = self.ctrl.st.lpg_period
+                    return True
                 if ch in (ord("g"), ord("w")):       # the operator's eye: g = good steps, w = swimming (out of phase)
                     self.msg, self.msg_bad = self.ctrl.mark("good" if ch == ord("g") else "swim"), False
                     return True
@@ -654,7 +660,7 @@ class Dash:
             self._line(scr, y, 3, " ✓ SAFE TO POWER OFF — every file is on the SD card ", C(OK) | curses.A_BOLD | curses.A_REVERSE); y += 1
         elif st.synced is False:
             self._line(scr, y, 3, " ⚠ the flush failed — wait 30 s before powering off ", C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
-        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   g/w mark good/swim   [ ] speed   - = period   ; ' lift   k l learner   , . belly"
+        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   g/w mark good/swim   o p PACE   [ ] speed   - = period   ; ' lift   k l learner   , . belly"
                 if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
         self._line(scr, y, 3, keys, C(DIM)); y += 1

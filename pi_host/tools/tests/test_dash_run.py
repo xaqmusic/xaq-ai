@@ -719,3 +719,26 @@ def test_a_mark_key_stamps_the_operators_label_on_the_recording(tmp_path, monkey
     assert [m["label"] for m in marks] == ["swim", "good"]
     assert all("mono_ms" in m for m in marks)                        # on the feed's clock
     assert any("mark: swim" in t for _, t in ctrl.st.events)
+
+
+def test_pace_moves_the_period_and_the_stroke_together_and_reproduces_the_configs_point(tmp_path, monkeypatch):
+    # The meta-control (operator, 2026-10-31): pace 0 -> 1 sweeps the LPG period 90 -> 30 and scales the stroke
+    # with it; at the config's own pace the config's values come back exactly.
+    assert dash_run.pace_targets(dash_run.pace_from_period(50.0), 50.0, 0.7) == (50.0, 0.7)
+    period, stroke = dash_run.pace_targets(1.0, 50.0, 0.7)
+    assert period == 30.0 and stroke > 0.7
+    period, stroke = dash_run.pace_targets(0.0, 50.0, 0.7)
+    assert period == 90.0 and stroke < 0.7
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    robot = FakeRobot(tmp_path)
+    c = tl_cfg()
+    assert "stroke" in c.tunables
+    ctrl = dash_run.RunController(robot, c, "stand", countdown_s=0.3, ready_extra_s=0.0)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    msg = ctrl.nudge_pace(+1)
+    assert "pace" in msg and "refused" not in msg
+    sent = [x for x in robot.calls if x.startswith("brain set_param")]
+    assert any(".period_ticks=" in x for x in sent) and any(".stroke_gain=" in x for x in sent)
+    assert ctrl.st.lpg_period is not None and "stroke" in ctrl.st.tuned
+    ctrl.end(); ctrl.join(10)
