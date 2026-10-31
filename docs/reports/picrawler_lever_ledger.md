@@ -9573,3 +9573,28 @@ any of this began. Candidates, untested: servo heating (torque loss shows first 
 gate's own feedback (more dips → smaller allowance → longer holds → a more disrupted rhythm), a learner winding. The
 discriminating test is a cooling pause: walk 3 min, servos off 3 min, walk 3 min, same floor; if the third stretch
 starts clean the body is thermal; if it resumes degraded the learners carry it (compare with learning rates at 0).
+
+### 2026-10-31 — ROBOT, two `_cs_pf` runs with a 3-minute HAT-off pause between (192 s, 499 s) and video: THE LATE-RUN DEGRADATION IS AN ABSORBING STATE OF THE SUPPORT GATE'S LEARNER, ENTERED AT OBSTACLE CONTACT — the allowance collapses to its 5 mm floor within 20–40 s of a wall pivot and never recovers (at the floor the gate holds legs 12–17 ticks per lift-off, the rhythm breaks, the dips stay high, nothing raises it); across six runs' quiet windows the allowance predicts the diagonal lock (+0.76; 15–31 mm → 0.85, under 7 mm → 0.53) — `BASELINE`; the SIM CORRIDOR with contact shares shows THE SAME COLLAPSE (allowance 6 mm, dips 0.29 against the 0.10 target); allowance FIXED at 30 mm (`_cs_pf_sl0`): corridor net_z 6.56 → 6.98, straight 0.63 → 0.68, hold ticks 5.6 → 3.5, falls 0 both — `WORKING` (sim signal, n = 6), on the Pi, robot run pending
+
+**Run 171049 (after the pause), per 20 s:** diagonal lock 0.74–0.96 for 200 s with the allowance at 17–33 mm, through
+avoid turns at 40 s (19 % active) and 80 s (40 % active, +78° yaw) that cost nothing. At 200–245 s a wall: the loop active
+100 %, heading error −1.2 rad, sonar 0.25–0.30 m, the body rearing to the tilt guard at 223 s (belly ToF 332–689 mm, roll
+−0.84). The allowance fell leg by leg (30 → 15/24/19/7 → 5 mm by 300–340 s) and the lock stayed 0.36–0.58 for the
+remaining four minutes, with 12–17 hold ticks per lift-off, dips 0.27–0.45, belly ToF p10 28–40 mm (50–58 before),
+current 1.1–1.3 A (1.0 before). **Run 170338:** the same at 120 s (the video: a door frame), allowance 20–31 → 5/26/5/14
+→ 5 mm, lock 0.95 → 0.38, partial recovery to 0.7 with the low tail of the belly staying at 31–41 mm.
+**Not thermal, or not only:** the second run began clean after the pause, but every run restarts the learners too; the
+allowance explains the data without heat. The servo-sag median is constant (38–41 mm) in every minute of every run; the
+current rises after the collapse, with the broken rhythm, not before it.
+**Why the learner collapses:** its target (10 % of lift-offs dipping) is below the clean rate with contact shares (14–20 %
+on the robot, 0.29 in the sim corridor), so it drifts down in good walking and crashes when a pivot charges a burst of
+dips to the lift-offs. A learner that cannot reach its target winds to its bound (the memory's "regulated quantities
+hide their own stress"); here the bound is also a trap.
+**Video (`/home/xaqmusic/Videos/picrawler`, ~27 s of dash in frame before the brain runs):** carpet for the first minute,
+then hardwood; the first run's degradation at a door frame, the second's at the kitchen toe-kick with the body rearing on
+it, then a door, dumbbells and a drum stand during the degraded stretch. Turning per se does not degrade the gait; pushing
+on an obstacle does, and the learner keeps the lesson.
+**Levers (one at a time):** `_cs_pf_sl0` (`support_learn_rate` 0, the allowance fixed at its 30 mm start) is the mechanism
+test and is on the Pi; `_cs_pf_sm20` (`support_margin_min` 0.02) the safety-net form, sim only. If `_sl0` removes the late
+degradation, the principled form follows: the dip-learning suspended while the avoid loop is active or the tilt is out of
+band (a dip during a pivot is not the lift-off's fault), and a target set from the gait's own quiet dip rate.
