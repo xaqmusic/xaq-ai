@@ -1426,10 +1426,17 @@ void tick_thread(State& S) {
                 }
                 clock_gettime(CLOCK_MONOTONIC, &r1);
                 S.sp_adc_w.add((r1.tv_sec - r0.tv_sec) * 1e6 + (r1.tv_nsec - r0.tv_nsec) / 1e3);
-                if (want_fast)
-                    S.record("adc_fast", {{"a", a},
+                if (want_fast) {
+                    // The twelve servos' CURRENT pulses ride with each fast sample (2026-11-01): a touch
+                    // onset is read from these rows, and the pose at that onset was otherwise only in the
+                    // 10 Hz telemetry frame before it -- at the 300-1900 us/s a tapping servo moves, that
+                    // frame is 5-30 mm of toe height (palpation session 1).  `us` stays the read's cost.
+                    std::vector<int> pulse; pulse.reserve(12);
+                    for (int c = 0; c < 12; ++c) pulse.push_back(S.driver.current_us(c));
+                    S.record("adc_fast", {{"a", a}, {"pulse", pulse},
                                           {"us", (r1.tv_sec - r0.tv_sec) * 1000000L
                                                  + (r1.tv_nsec - r0.tv_nsec) / 1000L}});
+                }
             } catch (const std::exception& e) {
                 fsr_ok = false;
                 S.note_bus_error();

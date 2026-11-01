@@ -104,6 +104,10 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   LEARN per row, no ARM step (a slider or a fader is the servo's command, after pickup), the map in
   `godot_host/project/local/midi_map.json` (`midi_map.example.json` committed). `pi_host/PROTOCOL.md` §"MIDI".
 
+- **Palpation session 1 (2026-11-01, ledger):** the toe's FSR registers every floor tap; the FK floor height repeats to
+  2.5 mm when the tap is slow; the pose record was the limit (10 Hz telemetry) — fixed: `adc_fast` now carries the twelve
+  pulses (rebuild benchd on the Pi before session 2). Reader: `python3 pi_host/tools/touch_session.py <benchd_*.jsonl>`.
+  Session 2: slow taps, `M` marks, a box; then learn each leg's floor offset from the touches.
 - **Before climbing: the belly ToF's pitch compensation** ([register O73](open_items_register.md)). The brain reads the
   uncompensated clearance; a pitched chassis reads as a changed height to the stance press and the learned stance
   height. The compensated channel exists in benchd at gain 0; switch and A/B it on slopes before any climb work.

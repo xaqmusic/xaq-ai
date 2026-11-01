@@ -9690,3 +9690,31 @@ single headless run did not apply the config's `body_env` — the brain's cloud 
 the env was exported as `seedavg.py` does; the recipe now says so. Docs: `pi_host/PROTOCOL.md` §"MIDI", the robot resume's
 tools. Next: the bench toe test (wall, box, pillow) to decide which of FSR / bus current / IMU sees a wall touch.
 
+### 2026-11-01 — PALPATION STAGE 0, FIRST BENCH SESSION (`touch_ready`, belly down, a flat floor only; FL then FR, hip1 swept −71°..+66°, two knee settings per leg): THE TOE'S FSR REGISTERS EVERY TAP — 23 front-foot taps, 23 onsets, the first sample over the threshold 206–1482 counts, plateaus 470–2200 (light touches, ~30–60 g); the commanded-FK floor height repeats to 2.5 mm sd across a 132° hip1 sweep when the tap is slow and 4–9 mm otherwise, and THE LIMIT IS THE POSE RECORD, not the sensor — `BASELINE` (n = 1 session; reader `pi_host/tools/touch_session.py`; record `~/xaq_runs/robot_20261101_touch1/benchd_20261101_162531.jsonl`)
+
+*Operator's protocol: from `touch_ready`, the knee set so the femur is 90° to the tibia, hip2 rotated down to tap, hip1
+adjusted, repeat; then a more acute knee; then the right leg. Rear-foot events ignored (the rock of the tap loads them).*
+
+| group | n | knee | hip1 sweep | FK floor height along gravity at onset (mm) |
+|---|---|---|---|---|
+| FL, femur ⟂ tibia | 7 | 6° | −71..+61° | −36.5 ± 2.5 (range −40..−32); slope on hip1 −0.02 mm/° |
+| FL, knee more bent | 4 | 59° | −71..+61° | −30.0 ± 4.3 |
+| FR, femur ⟂ tibia | 7 | 5° | −57..+66° | −20.5 ± 8.7 (range −34..−8) |
+| FR, knee more bent | 6 | 43° | −71..+65° | −23.0 ± 4.7 |
+
+**What holds.** Every driven tap produced an onset and the first sample over 200 counts was usually already far above it, so
+a 20 ms sample suffices and the threshold is not marginal. Across a 132° hip1 sweep the FK's floor is flat (no slope on
+hip1), so the hip1 model and the sweep geometry are right. The best group repeats to 2.5 mm sd, an eighth of the voxel.
+**What does not.** The same floor reads 6.5 mm higher at the bent knee on FL (2.5 mm lower on FR), and FL reads ~15 mm
+lower than FR for one floor with the body level (IMU lean ~1°): a per-leg, per-configuration bias in the commanded
+kinematics (servo-map origins, or compliance that grows with the lever arm). **The floor is the reference that can
+calibrate it** — palpation's first use is to touch the known floor and learn each leg's offset. **The spread's main
+cause is the record, not the sensor:** the pose at onset came from the 10 Hz telemetry frame before it, and the hip2
+servo moved at 300–1900 µs/s during taps, so that frame is 5–30 mm of toe height (the frame after onset brackets it;
+the dashboard's own command log is worse, because `servo.set` slews at 40 µs/tick and a fast fader leads the pulse by
+hundreds of µs). The FR spread (8.7 mm) is faster taps, not a worse leg. **Fixes, built:** the daemon's fast ADC record
+now carries the twelve current pulses (`adc_fast.pulse`; needs a benchd rebuild on the Pi) and the reader prefers them;
+for the session itself, tap slower (≤100 µs/s is < 2 mm) and send `M` marks. The screen capture (12:23 recording,
+3:20 and 4:20) shows the twin's voxels in an arc around each front leg at the floor plane with the same scatter in
+height. Re-use context: session 2 with the pulses in the record and a box, then the per-leg floor calibration as the
+touch cloud's first learned quantity.
