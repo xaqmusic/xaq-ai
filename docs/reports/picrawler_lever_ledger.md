@@ -9718,3 +9718,35 @@ for the session itself, tap slower (≤100 µs/s is < 2 mm) and send `M` marks. 
 3:20 and 4:20) shows the twin's voxels in an arc around each front leg at the floor plane with the same scatter in
 height. Re-use context: session 2 with the pulses in the record and a box, then the per-leg floor calibration as the
 touch cloud's first learned quantity.
+
+### 2026-11-01 — THE SCRIPTED PROBE (`pi_host/tools/palpate.py`), FLOOR PASS: 20 stations, 20 contacts; the FK floor height now repeats to 0.3–1.6 mm sd across a 120° hip1 sweep (by hand it was 2.5–8.7), the pose at every onset is in the record (benchd's `adc_fast.pulse`, the operator restarted the daemon on the new build), and the systematic offsets stand out clean: FL reads 14–17 mm LOWER than FR for one floor, the knee setting moves a leg 3–4 mm, hip1 sweeps it 3 mm — the per-leg calibration the floor can teach — `BASELINE` (instrument; n = 1 pass, 1 rep per station)
+
+*Operator: "would it be more accurate if you commanded the servos or we scripted a sequence?" — yes, and this is it:
+from `touch_ready`, per leg and knee setting, five hip1 stations; hip2 lowered 6 µs per 60 ms (~100 µs/s) until the
+foot's counts cross 200 in two frames, then 60 µs further while recording counts against depth, hold, retract; a
+`mark` before every tap; the direction "down" from the planar FK's lowest-toe pulse (the local slope lies at the top of
+the arc). Record `~/xaq_runs/robot_20261101_touch1/benchd_20261101_180730.jsonl`, read by `touch_session.py` (marks →
+segments, planted-foot co-events dropped).*
+
+| leg, knee | n | contact hip2 (µs) | toe height along gravity at onset (mm) | plateau (counts) | compliance (counts/µs of extra descent) | current step (A) |
+|---|---|---|---|---|---|---|
+| FL, A (femur ⟂ tibia) | 5 | 1060 ± 9 | −33.6 ± 1.5 | 1254 ± 174 | 7.6 ± 3.8 | 0.3 |
+| FL, B (more bent) | 5 | 771 ± 6 | −29.8 ± 0.6 | 1855 ± 72 | 16.1 ± 6.1 | 0.1 |
+| FR, A | 5 | 1042 ± 10 | −17.1 ± 1.6 | 1490 ± 181 | 9.9 ± 7.5 | 0.3 |
+| FR, B | 5 | 754 ± 2 | −19.9 ± 0.3 | 2049 ± 202 | 16.2 ± 1.7 | 0.1 |
+
+**Reading.** Every station touched, and the pose is now known at the onset (the fast rows' pulses agree with the
+telemetry frame before, because the descent is slow). Within a leg and knee setting the floor repeats to a millimetre or
+two across the whole sweep, so the instrument is good to a tenth of the voxel. What remains is BIAS, and it is now
+measured rather than suspected: **FL lower than FR by 14–17 mm** for one flat floor with the body level (the dominant
+term: a servo-map origin or a mechanical offset on one front leg), the **knee setting** shifting FL by +3.8 mm and FR by
+−2.8 mm (compliance that depends on the lever arm, the sag study's shape), and a **slope along hip1** of ~3 mm over
+120° with opposite signs on the two legs (a roll of the body or a hip1 origin). These three are exactly the terms a
+per-leg floor calibration learns from touches of a known surface — palpation's first learned quantity, before any
+object is probed. **The floor's compliance reference** is 8–16 counts per µs (A vs B differ by the lever arm); a pillow
+is expected well below it, a box at or above. **The touch_ready pose is not "front legs up"** as the sensors see it: FR
+read ~2400 counts (≈ 300 g) while FL was probed, so one front toe rests on the floor; the support-plane reference must
+exclude it or the operator's pose should lift it. **Harness notes:** a stale terminal watcher made a working run look
+stalled at tap 6 and it was interrupted; `--start-at` resumes a pass. Re-use context: the box pass at the middle
+stations (`--stations -30,0,30 --cond box5`), the pillow, then the horizontal probe for faces (not built: the script
+descends only).

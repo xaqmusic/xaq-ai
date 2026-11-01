@@ -107,7 +107,10 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
 - **Palpation session 1 (2026-11-01, ledger):** the toe's FSR registers every floor tap; the FK floor height repeats to
   2.5 mm when the tap is slow; the pose record was the limit (10 Hz telemetry) — fixed: `adc_fast` now carries the twelve
   pulses (rebuild benchd on the Pi before session 2). Reader: `python3 pi_host/tools/touch_session.py <benchd_*.jsonl>`.
-  Session 2: slow taps, `M` marks, a box; then learn each leg's floor offset from the touches.
+  **The scripted probe** (`pi_host/tools/palpate.py --cond <label>`, run with the venv) replaces hand taps: 20/20 floor
+  contacts, 0.3–1.6 mm repeatability; the biases are measured (FL 14–17 mm lower than FR; knee 3–4 mm; hip1 3 mm/120°).
+  Next: the box pass at the middle stations, the pillow, the horizontal probe for faces (unbuilt), and the per-leg
+  floor calibration as the touch cloud's first learned quantity. `touch_ready` leaves the FR toe on the floor (~300 g).
 - **Before climbing: the belly ToF's pitch compensation** ([register O73](open_items_register.md)). The brain reads the
   uncompensated clearance; a pitched chassis reads as a changed height to the stance press and the learned stance
   height. The compensated channel exists in benchd at gain 0; switch and A/B it on slopes before any climb work.

@@ -134,6 +134,7 @@ def main():
     ap.add_argument("log"); ap.add_argument("--segments", default=""); ap.add_argument("--body", default="measured")
     ap.add_argument("--thresh", type=int, default=200); ap.add_argument("--off", type=int, default=150)
     ap.add_argument("--hold-s", type=float, default=1.5); ap.add_argument("--min-gap-s", type=float, default=0.3)
+    ap.add_argument("--all-feet", action="store_true", help="keep events on feet a palpate mark did not name (the planted feet's co-events)")
     a = ap.parse_args()
     adc, tele, sets, marks, smap = load(a.log)
     if not adc: sys.exit("no adc_fast rows: was `adc.rate ms=20` on?")
@@ -150,10 +151,15 @@ def main():
               f"above {a.thresh}: {100*frac:4.0f} % of the session")
     # segments
     segs = []
+    def short(text):
+        # palpate's marks: "palpate tap 7 cond=floor leg=FL knee=B hip1=-30 rep=1" -> "floor FL B -30"
+        kv = dict(part.split("=", 1) for part in text.split() if "=" in part)
+        if "leg" in kv: return " ".join(x for x in (kv.get("cond", ""), kv["leg"], kv.get("knee", ""), kv.get("hip1", "")) if x)
+        return text
     if marks:
         for i, (t, text) in enumerate(marks):
             t_end = marks[i + 1][0] if i + 1 < len(marks) else adc[-1][0] + 1
-            segs.append((t, t_end, text))
+            segs.append((t, t_end, short(text)))
     elif a.segments:
         for part in a.segments.split(","):
             rng, _, label = part.partition(":"); s0, _, s1 = rng.partition("-")
@@ -204,14 +210,17 @@ def main():
             i_pre = i_a(fr_pre); i_hold = max((i_a(frame_before(tele, t)) for t in range(int(t_on), int(min(t_off, t_on + a.hold_s * 1000)) + 1, 100)), default=float("nan"))
             up_pre, up_hold = up_of(fr_pre), up_of(frame_before(tele, min(t_off, t_on + 700)))
             lean = math.degrees(math.acos(max(-1.0, min(1.0, sum(x * y for x, y in zip(up_pre, up_hold))))))
-            rows.append(dict(ch=ch, phys=phys, seg=seg_of(t_on), t=(t_on - t0) / 1000, t_off=t_off, dur=(t_off - t_on) / 1000,
+            seg = seg_of(t_on)
+            if not a.all_feet and seg.split() and len(seg.split()) >= 2 and seg.split()[1] in PHYS and seg.split()[1] != phys:
+                continue          # a palpate mark names the driven foot: the planted feet's co-events are the body's rock, not touches
+            rows.append(dict(ch=ch, phys=phys, seg=seg, t=(t_on - t0) / 1000, t_off=t_off, dur=(t_off - t_on) / 1000,
                              onset=adc[i_on][1][ch], plateau=max(hold) if hold else adc[i_on][1][ch], moving=moving_lbl,
                              h_mm=h_mm, toe_y_mm=toe_y_mm, plane_mm=plane_mm, i_pre=i_pre, i_hold=i_hold, lean=lean, pose=pose_src))
     rows.sort(key=lambda r: r["t"])
     print(f"\n{len(rows)} touch events (onset >= {a.thresh} counts for 60 ms, release < {a.off}):")
-    print(f"{'t(s)':>7} {'foot':4} {'segment':12} {'onset':>5} {'plat':>5} {'hold s':>6} {'h vs plane mm':>13} {'toe y mm':>8} {'I pre->hold A':>14} {'lean deg':>8} {'pose':4}  moving")
+    print(f"{'t(s)':>7} {'foot':4} {"segment":16} {'onset':>5} {'plat':>5} {'hold s':>6} {'h vs plane mm':>13} {'toe y mm':>8} {'I pre->hold A':>14} {'lean deg':>8} {'pose':4}  moving")
     for r in rows:
-        print(f"{r['t']:7.1f} {r['phys']:4} {r['seg'][:12]:12} {r['onset']:5d} {r['plateau']:5d} {r['dur']:6.2f} "
+        print(f"{r['t']:7.1f} {r['phys']:4} {r["seg"][:16]:16} {r['onset']:5d} {r['plateau']:5d} {r['dur']:6.2f} "
               f"{r['h_mm']:13.1f} {r['toe_y_mm']:8.1f} {r['i_pre']:6.2f}->{r['i_hold']:5.2f} {r['lean']:8.2f} {r['pose']:4}  {r['moving']}")
     # per segment / foot summary
     print("\nper segment and foot (n, onset counts mean±sd, plateau mean, h vs plane mm mean±sd, current step A mean):")
@@ -224,6 +233,16 @@ def main():
     for (seg, ph), rs in sorted(groups.items(), key=lambda kv: min(r["t"] for r in kv[1])):
         print(f"  {seg[:14]:14} {ph:3} n={len(rs):2d}  onset {msd([r['onset'] for r in rs])}  plateau {statistics.mean([r['plateau'] for r in rs]):6.0f}  "
               f"h {msd([r['h_mm'] for r in rs])} mm  I step {msd([r['i_hold'] - r['i_pre'] for r in rs])} A")
+    # palpate passes: the same by (condition, leg, knee) across the hip1 stations -- the comparison across conditions
+    passes = {}
+    for r in rows:
+        w = r["seg"].split()
+        if len(w) >= 3 and w[1] in PHYS: passes.setdefault((w[0], w[1], w[2]), []).append(r)
+    if passes:
+        print("\nper condition, leg and knee setting across the hip1 stations (toe y = body-frame height at onset, from the fast rows' pulses):")
+        for (cond, ph, kn), rs in sorted(passes.items(), key=lambda kv: min(r["t"] for r in kv[1])):
+            print(f"  {cond:8} {ph} knee {kn}: n={len(rs):2d}  onset {msd([r['onset'] for r in rs])}  plateau {statistics.mean([r['plateau'] for r in rs]):6.0f}  "
+                  f"toe y {msd([r['toe_y_mm'] for r in rs])} mm  h vs plane {msd([r['h_mm'] for r in rs])} mm  I step {msd([r['i_hold'] - r['i_pre'] for r in rs])} A")
 
 
 if __name__ == "__main__":
