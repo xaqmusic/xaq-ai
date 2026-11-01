@@ -217,6 +217,72 @@ limits, in µs instead of rad. Conversion the dashboard uses to render the *comm
 `angle_rad = sign · (us − origin_us) / 636.6` (500–2500 µs ≙ ±π/2), labelled **"commanded —
 not measured"** because hobby servos report nothing back.
 
+## The dashboard's MIDI controller and the clouds of touches (2026-11-01)
+
+Two bench instruments for the palpation work (the design conversation of 2026-11-01: palpation first, then the
+stop-and-look, then places). Both live in the dashboard and change nothing on the robot's side of the protocol.
+
+**MIDI → servos** (`godot_host/project/scripts/midi_servo_map.gd`). A controller's faders and knobs on the twelve
+servo channels, P0..P11, the dashboard's rows. The map is its own local file, not a brain config:
+`godot_host/project/local/midi_map.json` (git-ignored, written by LEARN) over `godot_host/project/midi_map.example.json`
+(the AKAI MIDI Mix defaults: the eight faders → P0..P7, the third knob row of strips 1–4 → P8..P11, SOLO → STOP). Each
+binding is `{"ch": n, "invert": bool}`; a bare integer reads as not inverted. The per-row LIMP buttons are gone (this HAT
+cannot limp a servo; the top bar's RESCUE POSE remains the deliberate act).
+
+- **LEARN**: a row's `LEARN` button, then touch the fader or knob that should drive it; the binding shows beside
+  the button (`learn…` while waiting) and the map file is rewritten at once. `learn STOP button` binds a controller
+  button to STOP (STOP only, never resume: a panic button).
+- **The servo map loads on connect** (operator, 2026-11-01), so the rows are named and their limits set before a
+  slider or a fader moves; LOAD MAP remains for a re-read.
+- **No ARM step** (operator, 2026-11-01): a slider IS the servo's command, dragged by the mouse or driven by a MIDI
+  control — the HAT holds a servo's last pulse anyway. A slider's value is sent when connected, in `bench` mode, not
+  stopped, on a `measured` body; the daemon refuses the rest regardless (SPEC §1.1), so a controller can never fight
+  a brain run. On the first fresh telemetry after a connect (and after a rescue) every slider takes its servo's
+  current pulse, so the first drag starts from where the servo is, not from 1500 µs.
+- **inv** (per row): flips that servo's control for a joint that runs the other way from the knob (hip1 here); it is
+  stored with the binding in the map, survives a re-LEARN of that servo, and the control re-picks up in its new sense.
+- **Pickup**: a MIDI control takes hold of its servo only once it has crossed, or come within 4 % of, the servo's
+  current pulse (telemetry's `current_us`), so a controller whose faders sit anywhere never yanks twelve servos.
+- **Rate**: the daemon admits `CAL_STREAM_MAX` = 30 `servo.set`/s in all, so the dashboard's sends go through a token
+  bucket (24/s, burst 4): one dragged slider sends as before; twelve moving faders share the budget in turn.
+
+**The scene** (2026-11-01). The arena the body script builds is hidden on the bench; the only geometry is two
+translucent grids (`bench_grids.gd`, lines every 2 cm, heavier every 10 cm): **blue, translucent** at the chassis bottom, yaw-levelled
+with the twin, and a **translucent brown plane** where the belly ToF says the real floor is — the chassis plane dropped by the clearance
+(`tof.m`, raw − mount offset), with a yellow ring where the boom's beam lands (70 mm aft) and the beam drawn to it. The plane
+hides when the ToF is not reading rather than freezing at a stale height.
+
+**The twin leans as the robot leans** (2026-11-01). The daemon's fused up vector, low-pass filtered (τ 0.15 s; the
+10 Hz telemetry would otherwise step the body every frame), rotates the whole FK-written twin about its chassis origin
+(`calib_tilt` on the body; identity changes nothing in the sim). The servo angles the twin is posed from are filtered
+the same way (τ 0.12 s). The voxels draw in the LEVEL frame at the chassis origin, so the body tilts around them and
+they stay where they were measured; the blue belly grid rides the chassis, the brown floor plane stays level through
+the point where the boom's beam meets the floor, and the body casts its shadow on it.
+
+**MARK** (the field and button in the MIDI row, or `[M]`): sends the daemon's `mark` verb with the label, a running count
+and the twin's touch count, so a bench session's conditions label themselves in `benchd_*.jsonl`.
+
+**The clouds of touches** (`godot_host/project/scripts/touch_cloud.gd`, `cpp_core` `TouchMemory`). Every rising
+foot-contact edge is one claim about where a surface is: the toe's commanded-FK position at that moment, carrying the
+kinematic error the sag study measured (~32 mm standing). A voxel is believable in proportion to the agreement it
+collects (hits, feet, time), so each keeps a hit count, the feet that touched it, the load and its age. The dashboard
+draws two clouds in the twin's chassis frame and `[X]` hides them:
+
+- **purple — the twin's**: at each FSR onset (≥ 200 counts), the twin's own FK toe (lower-leg node × construction toe
+  offset), measured as the module measures it: height along the daemon's fused up vector (`imu.up_fused`), not the
+  chassis axis, and relative to the support plane of the feet already planted — so a tap that rocks or lifts the
+  chassis does not move the voxel (operator, 2026-11-01: a box's voxel had landed below the box). The first telemetry
+  frame is a baseline, not four touches (a standing robot has four loaded feet); only
+  changes after it count. `clear touches` or `[C]` empties it (the brain's cloud is the module's own state and stays). No robot-side change; it exists whenever the dashboard does.
+- **lavender — the brain's**: `TouchMemory`'s diag, read from ogma_host's control port (`list_modules` once, then
+  `module_diag` at ~3 Hz on the same worker thread as `host_sensors`), present when the running config carries the
+  module (`_cs_pf_sl0` does). Its heights are relative to its support plane; the diag's `plane_y` places them.
+
+The two are the same idea through two FKs on one body: where they disagree is the servo sag made visible. The manual
+toe test is: the robot in front of a wall or a box, move one leg (slider or fader) until the toe touches, read the voxel.
+In the sim the same purple cloud is always drawn (body-locked, carried by the body's own odometry, so the footprints
+slide as it drifts), with the brain's in lavender; `touch_vox` / `touch_n` / `touch_brain` are in the body's JSONL.
+
 ## Local record (SPEC §3)
 
 `pi_host/log/benchd_<YYYYMMDD_HHMMSS>.jsonl` on the Pi: every verb (with reply) and every

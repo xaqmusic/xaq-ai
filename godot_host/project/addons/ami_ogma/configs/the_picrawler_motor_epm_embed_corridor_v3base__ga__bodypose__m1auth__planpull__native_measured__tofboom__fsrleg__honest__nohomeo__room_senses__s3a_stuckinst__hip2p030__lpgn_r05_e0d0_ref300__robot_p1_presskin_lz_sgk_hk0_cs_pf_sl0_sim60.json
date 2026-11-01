@@ -29,7 +29,7 @@
    "height_homeostat",
    "panic"
   ],
-  "note": "2026-10-31. Same relation to _cs_pf_sl0 as sim_s60_p30 has to robot_p1: MAX_SERVO_SPEED 4.22 -> 6.0, period_ticks 50 -> 30, no US_DEADZONE.",
+  "note": "2026-10-31. Same relation to _cs_pf_sl0 as sim_s60_p30 has to robot_p1: MAX_SERVO_SPEED 4.22 -> 6.0, period_ticks 50 -> 30, no US_DEADZONE. | 2026-11-01: + TouchMemory (touch_memory), an INSTRUMENT: the cloud of touches from the toes' commanded FK at each contact onset, carried by the odometry; publishes nothing, so the gait is byte-identical (checked seed 1 x 1500, corridor).",
   "body": "measured_fsr",
   "gym_difficulty": 0.3,
   "body_env": {
@@ -633,6 +633,20 @@
     "odom_topic": "reality.proprio.odom",
     "yaw_rate_max": 0.15,
     "yaw_window_ticks": 150
+   }
+  },
+  {
+   "id": "touch_memory",
+   "type": "TouchMemory",
+   "params": {
+    "contact_topic": "reality.proprio.foot_contact",
+    "feet_xz_topic": "reality.proprio.feet_xz",
+    "feet_y_topic": "reality.proprio.feet_y_gravity_cmd_imu",
+    "odom_topic": "reality.proprio.odom",
+    "load_topic": "reality.proprio.foot_load",
+    "voxel_m": 0.02,
+    "max_voxels": 4000,
+    "diag_max": 400
    }
   }
  ],

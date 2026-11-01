@@ -226,6 +226,7 @@ add_library(ogma_core
     src/ogma/modules/LoopCompetence.cpp
     src/ogma/modules/TofAvoidLoop.cpp
     src/ogma/modules/ProxMemory.cpp
+    src/ogma/modules/TouchMemory.cpp
     src/ogma/modules/BearingToIntent.cpp
     src/ogma/modules/StuckSense.cpp
     src/ogma/modules/LoadPhaseGait.cpp
@@ -331,6 +332,8 @@ add_executable(test_dead_reckon tests/body/test_dead_reckon.cpp)
 target_link_libraries(test_dead_reckon PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_prox_memory tests/ogma/test_prox_memory.cpp)
 target_link_libraries(test_prox_memory PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_touch_memory tests/ogma/test_touch_memory.cpp)
+target_link_libraries(test_touch_memory PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_bearing_to_intent tests/ogma/test_bearing_to_intent.cpp)
 target_link_libraries(test_bearing_to_intent PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_load_phase_gait tests/ogma/test_load_phase_gait.cpp)
@@ -611,6 +614,7 @@ gtest_discover_tests(test_ogma_headers)
 gtest_discover_tests(test_rng_parity)
 gtest_discover_tests(test_dead_reckon)
 gtest_discover_tests(test_prox_memory)
+gtest_discover_tests(test_touch_memory)
 gtest_discover_tests(test_bearing_to_intent)
 gtest_discover_tests(test_load_phase_gait)
 gtest_discover_tests(test_generator)

@@ -96,6 +96,18 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   (`{"kind":"range"}`).
 - **Long sims:** run past the slowest integrator. The one-leg saturation only appears after ~9000 ticks; use 24 000.
 
+- **The cloud of touches and the MIDI controller (2026-11-01, palpation stage 0).** `TouchMemory` (in `_cs_pf_sl0` and
+  its sim twin; an instrument, gait byte-identical) stores every contact onset's commanded-FK toe position in the odom
+  frame and lists them in its diag; the sim draws them body-locked (purple = the body's own, lavender = the brain's,
+  `[X]` hides). The Godot bench dashboard draws the TWIN's FK toe at each FSR onset (purple) beside the brain's cloud
+  from ogma_host (lavender), so the two FKs can disagree visibly, and takes the AKAI MIDI Mix on the twelve servos:
+  LEARN per row, no ARM step (a slider or a fader is the servo's command, after pickup), the map in
+  `godot_host/project/local/midi_map.json` (`midi_map.example.json` committed). `pi_host/PROTOCOL.md` §"MIDI".
+
+- **Before climbing: the belly ToF's pitch compensation** ([register O73](open_items_register.md)). The brain reads the
+  uncompensated clearance; a pitched chassis reads as a changed height to the stance press and the learned stance
+  height. The compensated channel exists in benchd at gain 0; switch and A/B it on slopes before any climb work.
+
 ## Procedures
 
 - **Deploy:** `ssh picrawler 'cd ~/xaq-ai && git fetch -q origin && git merge --ff-only -q origin/picrawler-dev'`,

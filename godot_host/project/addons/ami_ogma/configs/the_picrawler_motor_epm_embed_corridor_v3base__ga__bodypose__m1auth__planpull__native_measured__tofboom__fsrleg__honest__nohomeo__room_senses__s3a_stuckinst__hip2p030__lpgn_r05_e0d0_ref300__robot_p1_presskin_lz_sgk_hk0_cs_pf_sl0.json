@@ -29,7 +29,7 @@
    "height_homeostat",
    "panic"
   ],
-  "note": "2026-10-31. One lever on _cs_pf. Across six runs' quiet windows the allowance predicts the diagonal lock (+0.76): 15-31 mm -> 0.85, under 7 mm -> 0.53. The learner's target (10 % of lift-offs dipping) is below the robot's clean rate (14-20 %), so it drifts down even in good walking and crashes at a pivot. Fixed allowance = the mechanism test; if the late degradation goes, the next form gates the learning on quiet walking (no avoid activity, tilt in band) rather than fixing the value.",
+  "note": "2026-10-31. One lever on _cs_pf. Across six runs' quiet windows the allowance predicts the diagonal lock (+0.76): 15-31 mm -> 0.85, under 7 mm -> 0.53. The learner's target (10 % of lift-offs dipping) is below the robot's clean rate (14-20 %), so it drifts down even in good walking and crashes at a pivot. Fixed allowance = the mechanism test; if the late degradation goes, the next form gates the learning on quiet walking (no avoid activity, tilt in band) rather than fixing the value. | 2026-11-01: + TouchMemory (touch_memory), an INSTRUMENT: the cloud of touches from the toes' commanded FK at each contact onset, carried by the odometry; publishes nothing, so the gait is byte-identical (checked seed 1 x 1500, corridor).",
   "body": "measured_fsr",
   "gym_difficulty": 0.3,
   "body_env": {
@@ -634,6 +634,20 @@
     "odom_topic": "reality.proprio.odom",
     "yaw_rate_max": 0.15,
     "yaw_window_ticks": 150
+   }
+  },
+  {
+   "id": "touch_memory",
+   "type": "TouchMemory",
+   "params": {
+    "contact_topic": "reality.proprio.foot_contact",
+    "feet_xz_topic": "reality.proprio.feet_xz",
+    "feet_y_topic": "reality.proprio.feet_y_gravity_cmd_imu",
+    "odom_topic": "reality.proprio.odom",
+    "load_topic": "reality.proprio.foot_load",
+    "voxel_m": 0.02,
+    "max_voxels": 4000,
+    "diag_max": 400
    }
   }
  ],

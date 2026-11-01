@@ -27,9 +27,9 @@ directional_shadow_max_distance = 5.0
 [node name="Camera3D" type="Camera3D" parent="."]
 script = ExtResource("2")
 target_path = NodePath("../Picrawler")
-initial_distance = 0.7
+initial_distance = 0.8
 initial_yaw_deg = 25.0
-initial_pitch_deg = 20.0
+initial_pitch_deg = 38.0
 floor_lock = true
 floor_y = 0.0
 current = true

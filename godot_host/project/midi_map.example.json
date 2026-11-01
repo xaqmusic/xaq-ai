@@ -1,0 +1,11 @@
+{
+  "_comment": "MIDI -> servo map for the bench dashboard and the sim servo panel (scripts/midi_servo_map.gd). Defaults for the AKAI MIDI Mix: the eight faders -> P0..P7, the third knob row of strips 1-4 -> P8..P11, the SOLO button -> STOP. cc: controller number -> servo channel P0..P11 as a bare number, or {\"ch\": n, \"invert\": true} to flip a control for a joint that runs the other way (the dash's rows; their min/max us come from LOAD MAP). LEARN in the dash writes res://local/midi_map.json, which wins over this file.",
+  "device": "MIDI Mix",
+  "cc": {
+    "19": 0, "23": 1, "27": 2, "31": 3, "49": 4, "53": 5, "57": 6, "61": 7,
+    "18": 8, "22": 9, "26": 10, "30": 11
+  },
+  "notes": {
+    "27": "stop"
+  }
+}

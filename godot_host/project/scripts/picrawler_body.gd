@@ -1735,6 +1735,24 @@ var _cam_mean: float = 0.0                      # INSTRUMENT: mean luma of the l
 @export var publish_odom: bool = false          # OGMA_PICRAWLER_ODOM=1
 @export var odom_scale_m: float = 2.0           # OGMA_PICRAWLER_ODOM_SCALE: place_in's x/y normaliser (room half + margin)
 var _odom = null                                # DeadReckonNode
+# THE CLOUD OF TOUCHES (2026-11-01, scripts/touch_cloud.gd).  Every rising foot-contact edge
+# stores the toe's commanded-FK position, carried by the body's own odometry and drawn
+# body-locked in PURPLE (the lower legs' contact colour), always, so the odometry's drift is
+# seen as the footprints sliding.  When the config carries a TouchMemory module, its voxels
+# are drawn too, in LAVENDER: two implementations of one idea on one body, so they can
+# disagree visibly.  [X] hides both.  An instrument: nothing in the brain reads this.
+const TouchCloudScript = preload("res://scripts/touch_cloud.gd")
+const TOUCH_LOCAL_COLOR := Color(0.62, 0.25, 0.95)     # = FOOT_SHOW_PURPLE
+const TOUCH_BRAIN_COLOR := Color(0.80, 0.62, 1.00)
+const TOUCH_DRAW_EVERY: int = 5
+var _touch_cloud = null                         # touch_cloud.gd
+var _touch_view_local = null                    # TouchCloud.View
+var _touch_view_brain = null
+var _touch_show: bool = true
+var _touch_tick: int = 0
+var _touch_feet_xz: PackedFloat64Array = PackedFloat64Array()
+var _touch_feet_y: PackedFloat64Array = PackedFloat64Array()
+var _touch_brain_n: int = -1                    # -1 = no TouchMemory module seen in the metrics
 var _odom_need_anchor: bool = true
 var _odom_yaw0: float = 0.0
 var _odom_origin_world: Vector3 = Vector3.ZERO
@@ -2760,6 +2778,10 @@ var _pending_chassis_freeze: int = 0
 # u values are in brain-command space [-1, +1] which the PD maps to
 # the joint's target_range.
 var _calibrate_mode: bool = false
+# CALIBRATION TILT (2026-11-01, the bench): a rotation about the suspended chassis origin applied
+# to the whole FK-written body — the dashboard sets it from the robot's fused up vector so the
+# twin leans as the robot leans.  Identity (the default) changes nothing: the write is the same.
+var calib_tilt: Basis = Basis.IDENTITY
 # Phase 7.x — when both _calibrate_mode AND _cpg_drive_calibrate are
 # true, the C-mode FK chain reads servo targets from the brain's
 # action channels (action.<joint> = Premotor + CPG blended) every
@@ -6540,6 +6562,14 @@ func _input(event: InputEvent) -> void:
 		if _ray_overlay_on:
 			_update_ray_overlay()   # immediate refresh, don't wait for the loom tick
 		print("PicrawlerBody: [V] ray_overlay = %s" % _ray_overlay_on)
+	elif key == KEY_X:
+		# 2026-11-01 — hide / show the cloud of touches (both the body's own and the brain's).
+		_touch_show = not _touch_show
+		if _touch_view_local != null: _touch_view_local.set_visible(_touch_show)
+		if _touch_view_brain != null: _touch_view_brain.set_visible(_touch_show)
+		print("PicrawlerBody: [X] touch_cloud = %s (local %d voxels, %d touches%s)" % [_touch_show,
+			_touch_cloud.count() if _touch_cloud != null else 0, _touch_cloud.touches if _touch_cloud != null else 0,
+			(", brain %d" % _touch_brain_n) if _touch_brain_n >= 0 else ""])
 	elif key == KEY_M:
 		# 2026-07-26 — toggle JUST the MOTOR-EPM slider panel.  It is a full-rect Control
 		# that sits over the top-right corner even when collapsed, which covered the IMU
@@ -7784,6 +7814,14 @@ func _step_one() -> void:
 			imu_arr.append(_stridemath.feet_y_gravity(foot_b, _up_est_body, L3))
 		brain.publish_proprio(acc_arr, "feet_y_gravity_cmd_acc")
 		brain.publish_proprio(imu_arr, "feet_y_gravity_cmd_imu")
+		# The touch cloud's inputs, at the same commanded pose: the toe heights above and the toes'
+		# [x, z] in the rest frame (what the brain's TouchMemory reads from feet_xz / feet_y_gravity_cmd_imu).
+		_touch_feet_y = imu_arr
+		_touch_feet_xz.resize(8)
+		for i in range(4):
+			var tb: Vector3 = rest_inv * (_fk_leg(i, _cmd_angle(i, 0), _cmd_angle(i, 1), _cmd_angle(i, 2))[2] * _toe_off_c[i])
+			_touch_feet_xz[2 * i] = tb.x
+			_touch_feet_xz[2 * i + 1] = tb.z
 		if publish_feet_jac:
 			# Lift gains at the slew-limited commanded pose (what the robot's driver knows), by finite difference on
 			# the shared FK — BrainInputs feet_lift_gain's numbers.
@@ -7933,6 +7971,7 @@ func _step_one() -> void:
 		foot_contact_arr.append(1.0 if not _lowers[i].get_colliding_bodies().is_empty() else 0.0)
 	brain.publish_proprio(foot_contact_arr, "foot_contact")
 	_last_foot_contact = foot_contact_arr
+	_touch_cloud_step(foot_contact_arr)
 	# Cache the TRUE swing fraction (legs touching nothing) for the diag line.  This is
 	# the ground truth for "is the foot on the ground".  It is NOT interchangeable with
 	# the two proxies that have been used as if it were: `feet_y < stance_y_threshold` is
@@ -9070,6 +9109,11 @@ func _step_one() -> void:
 			var s3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
 						  + servo_origins[servo_idx(i, 2)]
 			var fk: Array = _fk_leg(i, s1, s2, s3)
+			if calib_tilt != Basis.IDENTITY:
+				var pivot: Vector3 = _chassis_rest_xform.origin + Vector3(0.0, _suspend_lift_y, 0.0)
+				var tilt := Transform3D(calib_tilt, pivot - calib_tilt * pivot)     # rotate about the chassis origin
+				if i == 0: _chassis.global_transform = tilt * Transform3D(Basis.IDENTITY, pivot)
+				fk = [tilt * fk[0], tilt * fk[1], tilt * fk[2]]
 			_coxas[i].global_transform  = fk[0]
 			_uppers[i].global_transform = fk[1]
 			_lowers[i].global_transform = fk[2]
@@ -12752,6 +12796,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# The instrument-only EPMs over the new senses (the room preset): node counts and TLE,
 	# so a headless run can show each channel is being coarse-grained.  Absent when absent.
 	# S3's loop modules, when present: the proximity slots, the avoid loop, the intent bridge.
+	# The cloud of touches (2026-11-01): the body's own count and, when a TouchMemory module runs,
+	# the brain's.  Instruments; nothing in the brain reads them.
+	if _touch_cloud != null:
+		line["touch_vox"] = _touch_cloud.count()
+		line["touch_n"] = _touch_cloud.touches
+		if _touch_brain_n >= 0: line["touch_brain"] = _touch_brain_n
 	if metrics.has("prox_memory"):
 		var pm: Dictionary = metrics["prox_memory"]
 		line["prox_mx"] = snappedf(float(pm.get("minus_x", 0.0)), 0.001)
@@ -13963,3 +14013,47 @@ func publish_trainer_event(kind: String, intensity: float) -> void:
 		_trainer_bad_count  += 1
 	else:
 		push_warning("publish_trainer_event: unknown kind %s" % kind)
+
+
+# =============================================================================================
+# THE CLOUD OF TOUCHES — see the var block (2026-11-01) and scripts/touch_cloud.gd.
+# =============================================================================================
+func _touch_odom() -> Array:
+	if _odom == null: return []
+	return [_odom.x(), _odom.y(), _odom.yaw()]
+
+
+func _touch_cloud_step(contact: PackedFloat64Array) -> void:
+	# On the BENCH the body is the dashboard's twin: its legs rest on the hidden arena floor, so its
+	# physics contacts are not touches, and the dashboard draws the robot's FSR touches itself.
+	if foot_display_external:
+		if _touch_view_local != null: _touch_view_local.set_visible(false)
+		if _touch_view_brain != null: _touch_view_brain.set_visible(false)
+		return
+	if _touch_cloud == null:
+		_touch_cloud = TouchCloudScript.new()
+	_touch_tick += 1
+	if _touch_feet_xz.size() >= 8 and _touch_feet_y.size() >= 4:
+		_touch_cloud.step(_touch_tick, Array(contact), Array(_touch_feet_xz), Array(_touch_feet_y), _touch_odom())
+	if not _touch_show or _chassis == null or (_touch_tick % TOUCH_DRAW_EVERY) != 0:
+		return
+	if _touch_view_local == null:
+		_touch_view_local = TouchCloudScript.View.new(self, TOUCH_LOCAL_COLOR, _touch_cloud.voxel_m, "TouchCloudLocal")
+		_touch_view_brain = TouchCloudScript.View.new(self, TOUCH_BRAIN_COLOR, _touch_cloud.voxel_m * 0.8, "TouchCloudBrain")
+	var base: Transform3D = TouchCloudScript.level_frame(_chassis.global_transform)
+	_touch_view_local.show(_touch_cloud.body_voxels(_touch_odom(), 600), base, _touch_cloud.plane_y)
+	# The brain's own cloud, when a TouchMemory module is in the config: its diag lists the
+	# voxels already re-expressed in the body frame, nearest first, with its plane height.
+	if (_touch_tick % (TOUCH_DRAW_EVERY * 2)) == 0 and brain != null and brain.has_method("get_module_metrics"):
+		var metrics: Dictionary = brain.get_module_metrics()
+		var found := false
+		for mid in metrics.keys():
+			var d = metrics[mid]
+			if d is Dictionary and (d as Dictionary).has("voxels") and (d as Dictionary).has("plane_y"):
+				var rows: Array = (d as Dictionary)["voxels"]
+				_touch_view_brain.show(rows, base, float((d as Dictionary)["plane_y"]))
+				_touch_brain_n = int((d as Dictionary).get("count", rows.size()))
+				found = true
+				break
+		if not found and _touch_brain_n >= 0:
+			_touch_view_brain.show([], base, 0.0); _touch_brain_n = -1

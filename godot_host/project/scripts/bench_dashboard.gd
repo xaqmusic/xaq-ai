@@ -129,6 +129,55 @@ var _range_run := false
 var _range_host := ""
 var _range_reply: Dictionary = {}
 var _range_reply_ms := -1
+# THE BRAIN'S CLOUD OF TOUCHES (2026-11-01): ogma_host's module_diag of a TouchMemory module, read on
+# the same worker thread (its id found once per connection by list_modules).  Drawn LAVENDER beside
+# the TWIN's own cloud (PURPLE: the twin's FK toe at each FSR onset), so the two FKs can disagree
+# visibly — that disagreement is the servo sag made visible.  [X] hides both.
+var _touch_diag: Dictionary = {}
+var _touch_diag_ms := -1
+var _touch_id := ""              # worker-thread only
+var _touch_probed := false       # worker-thread only
+const TouchCloudScript = preload("res://scripts/touch_cloud.gd")
+# THE BENCH'S TWO FLOORS (2026-11-01, scripts/bench_grids.gd): the arena the body script builds is
+# hidden here; in its place an amber grid at the chassis bottom and a cyan grid where the belly ToF
+# says the real floor is (its clearance, with the boom's beam and footprint), so voxels read in space.
+const BenchGridsScript = preload("res://scripts/bench_grids.gd")
+var _grids = null
+const MidiServoMapScript = preload("res://scripts/midi_servo_map.gd")
+var _touch_local = null          # touch_cloud.gd
+var _touch_view_local = null     # TouchCloud.View
+var _touch_view_brain = null
+var _touch_show := true
+var _touch_twin_tick := 0
+var _touch_frame := 0
+var _touch_lbl: Label = null
+var _fsr_prev: Array = [false, false, false, false]
+const TOUCH_LOCAL_COLOR := Color(0.62, 0.25, 0.95)
+const TOUCH_BRAIN_COLOR := Color(0.80, 0.62, 1.00)
+# MIDI (2026-11-01, scripts/midi_servo_map.gd): a controller's faders and knobs on the twelve
+# servos.  A mapped control moves its row's slider, and a slider moves its servo (operator,
+# 2026-11-01: no per-servo ARM any more — the HAT holds a servo's last pulse anyway), after PICKUP
+# (the control has crossed the servo's current position).  The daemon admits 30 servo.set/s in
+# all, so sends go through a token bucket.  On the first fresh telemetry after a connect the
+# sliders are set to the servos' current pulses, so the first drag starts from where the servo is.
+var _midi = null                 # midi_servo_map.gd
+var _sliders_synced := false
+var _fsr_primed := false         # the twin's touch cloud ignores the first frame: a standing robot is not four touches
+var _slider_refused_ms := -1
+var _mark_edit: LineEdit = null     # MARK: a labelled fence post in the daemon's record (benchd `mark`)
+# THE TWIN LEANS AS THE ROBOT LEANS (operator, 2026-11-01): the daemon's fused up vector, low-pass
+# filtered (10 Hz telemetry would otherwise step the body every frame), becomes the body's
+# calib_tilt; the servo angles the twin is posed from are filtered the same way.  The voxels are
+# drawn in the LEVEL frame at the chassis origin, so the body tilts around them and they stay put.
+const POSE_TAU_S := 0.12
+const TILT_TAU_S := 0.15
+var _twin_angles: Array = []        # the filtered joint angles the twin is posed from
+var _twin_up := Vector3.UP          # the filtered body-frame up vector
+var _midi_lbl: Label = null
+var _midi_last := ""
+var _send_tokens := 0.0
+const SEND_MAX_PER_S := 24.0
+const SEND_BURST := 4.0
 var _range_pushed_ms := -1
 # Bottom-right POWER panel, fed from the ROBOT (INA219, A4, rail) — the same lines as
 # picrawler-dash's power rows.  In this scene the body's own panel would show the SIM's power
@@ -147,6 +196,7 @@ func _ready() -> void:
 	# body's own sign/origin arrays are neutralised.
 	call_deferred("_enter_calibrate_mode")
 	_refresh_all_rows()
+	_midi_setup()
 
 
 func _enter_calibrate_mode() -> void:
@@ -169,6 +219,11 @@ func _enter_calibrate_mode() -> void:
 	_body.set("_pw_panel", null)
 	_body.set("_pw_lbl", [])
 	_body.set("foot_display_external", true)     # the lower legs show the ROBOT's FSRs
+	# No arena on the bench: WorldRoot (floor, rings, obstacles) stays in the tree for the physics
+	# the twin was built against, invisible.  The two grids (bench_grids.gd) are the only geometry.
+	var wr: Variant = _body.get("_world_root")
+	if wr is Node3D: (wr as Node3D).visible = false
+	_grids = BenchGridsScript.new(self)
 	_body.set("_calibrate_mode", true)
 	_body.set("_calibrate_step", 0)
 	_body.set("_pending_chassis_freeze", 1)
@@ -264,10 +319,28 @@ func _build_ui() -> void:
 	_pose_name = LineEdit.new(); _pose_name.placeholder_text = "name (e.g. storage)"; _pose_name.custom_minimum_size.x = 160; prow.add_child(_pose_name)
 	var psb := Button.new(); psb.text = "SAVE POSE"; psb.pressed.connect(_on_pose_save); prow.add_child(psb)
 	_pose_list = OptionButton.new(); _pose_list.custom_minimum_size.x = 160; prow.add_child(_pose_list)
-	var prb := Button.new(); prb.text = "RECALL (arms 12)"; prb.pressed.connect(_on_pose_recall); prow.add_child(prb)
+	var prb := Button.new(); prb.text = "RECALL"; prb.pressed.connect(_on_pose_recall); prow.add_child(prb)
 	prb.add_theme_color_override("font_color", Color(1, 0.8, 0.3))
 	var pdb := Button.new(); pdb.text = "delete"; pdb.pressed.connect(_on_pose_delete); prow.add_child(pdb)
 	var prf := Button.new(); prf.text = "⟳"; prf.pressed.connect(_refresh_poses); prow.add_child(prf)
+	# --- MIDI: the controller on the twelve servos (scripts/midi_servo_map.gd) and the touch clouds.
+	var mrow := HBoxContainer.new(); topv.add_child(mrow)
+	mrow.add_child(_lbl("MIDI"))
+	var mre := Button.new(); mre.text = "reload map"; mre.pressed.connect(_midi_reload); mrow.add_child(mre)
+	var mls := Button.new(); mls.text = "learn STOP button"; mls.tooltip_text = "Click, then press the controller button that should STOP the robot"
+	mls.pressed.connect(func(): if _midi != null: _midi.learn_action = "stop"; _midi_last = "press the controller button for STOP"); mrow.add_child(mls)
+	_midi_lbl = _lbl("", 12); mrow.add_child(_midi_lbl)
+	mrow.add_child(_lbl("      "))
+	_touch_lbl = _lbl("", 12); _touch_lbl.add_theme_color_override("font_color", Color(0.85, 0.7, 1.0)); mrow.add_child(_touch_lbl)
+	var tcb := Button.new(); tcb.text = "clear touches"; tcb.focus_mode = Control.FOCUS_NONE
+	tcb.text = "clear touches [C]"
+	tcb.pressed.connect(_clear_touches); mrow.add_child(tcb)
+	mrow.add_child(_lbl("      MARK"))
+	_mark_edit = LineEdit.new(); _mark_edit.placeholder_text = "label, e.g. wall shin 30deg"; _mark_edit.custom_minimum_size.x = 220
+	_mark_edit.text_submitted.connect(func(_t): _send_mark()); mrow.add_child(_mark_edit)
+	var mkb := Button.new(); mkb.text = "MARK [M]"; mkb.focus_mode = Control.FOCUS_NONE
+	mkb.tooltip_text = "benchd `mark`: writes the label into the Pi's record (benchd_*.jsonl) so a session's touches label themselves"
+	mkb.pressed.connect(_send_mark); mrow.add_child(mkb)
 	_stop_lbl = _lbl("", 15); banner.add_child(_stop_lbl)
 	_mode_lbl = _lbl("MODE: —", 15); banner.add_child(_mode_lbl)
 	banner.add_child(_lbl("      "))
@@ -451,7 +524,7 @@ func _build_row(ch: int) -> Control:
 	var box := VBoxContainer.new()
 	var r1 := HBoxContainer.new(); box.add_child(r1)
 	var r2 := HBoxContainer.new(); box.add_child(r2)
-	var d: Dictionary = {"ch": ch, "armed": false}
+	var d: Dictionary = {"ch": ch}
 	r1.add_child(_lbl("P%-2d" % ch, 14))
 	var phys := OptionButton.new()
 	for o in PHYS_OPTIONS: phys.add_item(o)
@@ -460,10 +533,14 @@ func _build_row(ch: int) -> Control:
 	for o in JOINT_OPTIONS: joint.add_item(o)
 	joint.item_selected.connect(func(_i): _refresh_row(ch)); r1.add_child(joint); d["joint"] = joint
 	var sim := _lbl("sim ? → ?", 12); sim.custom_minimum_size.x = 230; r1.add_child(sim); d["sim"] = sim
-	var arm := Button.new(); arm.text = "ARM"; arm.pressed.connect(func(): _on_arm(ch)); r1.add_child(arm); d["arm"] = arm
-	var limp := Button.new(); limp.text = "LIMP"; limp.pressed.connect(_on_limp); r1.add_child(limp)
 	var widen := Button.new(); widen.text = "WIDEN"; widen.pressed.connect(func(): _on_widen(ch)); r1.add_child(widen); d["widen"] = widen
 	var rec := Button.new(); rec.text = "record map"; rec.pressed.connect(func(): _on_record(ch)); r1.add_child(rec)
+	var mb := Button.new(); mb.text = "LEARN"; mb.tooltip_text = "Click, then move the fader or knob that should drive this servo; the map is saved at once"
+	mb.pressed.connect(func(): _on_midi_learn(ch)); r1.add_child(mb)
+	var ml := _lbl("", 11); ml.custom_minimum_size.x = 60; r1.add_child(ml); d["midi"] = ml
+	var inv := Button.new(); inv.text = "inv"; inv.toggle_mode = true; inv.focus_mode = Control.FOCUS_NONE
+	inv.tooltip_text = "Invert this servo's MIDI control (a joint that runs the other way from the knob, e.g. hip1); saved in the map"
+	inv.toggled.connect(func(on): _on_midi_invert(ch, on)); r1.add_child(inv); d["inv"] = inv
 
 	var slider := HSlider.new(); slider.min_value = 500; slider.max_value = 2500; slider.step = 5; slider.value = 1500
 	slider.custom_minimum_size.x = 220; slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -634,7 +711,8 @@ func _range_stop() -> void:
 	if _range_thread != null and _range_thread.is_started():
 		_range_thread.wait_to_finish()
 	_range_thread = null
-	_range_mutex.lock(); _range_reply = {}; _range_reply_ms = -1; _range_mutex.unlock()
+	_range_mutex.lock(); _range_reply = {}; _range_reply_ms = -1; _touch_diag = {}; _touch_diag_ms = -1; _range_mutex.unlock()
+	_touch_id = ""; _touch_probed = false
 
 
 # The worker: its own socket, used only on this thread.  ogma_host's ControlServer speaks
@@ -642,47 +720,72 @@ func _range_stop() -> void:
 # host_sensors reads the raw sensor values and changes nothing (SPEC §1.1 holds).  Any
 # failure drops the socket and the next poll reconnects, so an ogma_host restart heals.
 func _range_worker() -> void:
-	var tcp: StreamPeerTCP = null
-	var buf := ""
+	var st := {"tcp": null, "buf": ""}
+	var n := 0
 	while _range_run:
-		var rep: Dictionary = {}
-		if tcp == null:
-			tcp = StreamPeerTCP.new()
-			buf = ""
-			if tcp.connect_to_host(_range_host_ip(), HOST_CTRL_PORT) != OK:
-				tcp = null
-				rep = {"error": "connect failed"}
-		if tcp != null:
-			var t0 := Time.get_ticks_msec()
-			while tcp.get_status() == StreamPeerTCP.STATUS_CONNECTING and Time.get_ticks_msec() - t0 < 1500:
-				tcp.poll(); OS.delay_msec(5)
-			if tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
-				tcp = null
-				rep = {"error": "no connection to :%d" % HOST_CTRL_PORT}
-			else:
-				tcp.put_data(('{"verb":"host_sensors"}\n').to_utf8_buffer())
-				t0 = Time.get_ticks_msec()
-				while buf.find("\n") < 0 and Time.get_ticks_msec() - t0 < 1000:
-					tcp.poll()
-					var n := tcp.get_available_bytes()
-					if n > 0:
-						var got: Array = tcp.get_partial_data(n)
-						if int(got[0]) == OK: buf += (got[1] as PackedByteArray).get_string_from_utf8()
-					else:
-						OS.delay_msec(2)
-				var nl := buf.find("\n")
-				if nl < 0:
-					tcp.disconnect_from_host(); tcp = null
-					rep = {"error": "timeout"}
-				else:
-					var line := buf.substr(0, nl)
-					buf = buf.substr(nl + 1)
-					var parsed: Variant = JSON.parse_string(line)
-					rep = parsed if parsed is Dictionary else {"error": "bad reply"}
-		_range_mutex.lock(); _range_reply = rep; _range_reply_ms = Time.get_ticks_msec(); _range_mutex.unlock()
+		var rep: Dictionary = _host_roundtrip(st, '{"verb":"host_sensors"}')
+		# The brain's cloud of touches, when ogma_host runs a config that carries a TouchMemory module:
+		# its id is found once per connection (list_modules), then its diag is read every third poll
+		# (~3 Hz; a few hundred voxels is ~20 KB).  module_diag reads and changes nothing (SPEC §1.1).
+		var touch: Dictionary = {}
+		var touch_fresh := false
+		if not rep.has("error"):
+			if _touch_id == "" and not _touch_probed:
+				var lm: Dictionary = _host_roundtrip(st, '{"verb":"list_modules"}')
+				if not lm.has("error"):
+					_touch_probed = true
+					for mm in lm.get("modules", []):
+						if mm is Dictionary and str(mm.get("type", "")) == "TouchMemory": _touch_id = str(mm.get("id", ""))
+			if _touch_id != "" and (n % 3) == 0:
+				var md: Dictionary = _host_roundtrip(st, JSON.stringify({"verb": "module_diag", "id": _touch_id}))
+				if not md.has("error") and md.get("diag") is Dictionary:
+					touch = md["diag"]; touch_fresh = true
+		else:
+			_touch_probed = false; _touch_id = ""
+		n += 1
+		_range_mutex.lock()
+		_range_reply = rep; _range_reply_ms = Time.get_ticks_msec()
+		if touch_fresh: _touch_diag = touch; _touch_diag_ms = Time.get_ticks_msec()
+		_range_mutex.unlock()
 		OS.delay_msec(RANGE_POLL_MS)
-	if tcp != null:
-		tcp.disconnect_from_host()
+	if st["tcp"] != null:
+		(st["tcp"] as StreamPeerTCP).disconnect_from_host()
+
+
+# One request/reply on the worker's socket (plain TCP, one JSON object per line).  `st` carries the
+# socket and the unread tail between calls; any failure drops the socket and the next call reconnects.
+func _host_roundtrip(st: Dictionary, line: String) -> Dictionary:
+	var tcp: StreamPeerTCP = st["tcp"]
+	if tcp == null:
+		tcp = StreamPeerTCP.new(); st["buf"] = ""
+		if tcp.connect_to_host(_range_host_ip(), HOST_CTRL_PORT) != OK:
+			st["tcp"] = null
+			return {"error": "connect failed"}
+		var t0 := Time.get_ticks_msec()
+		while tcp.get_status() == StreamPeerTCP.STATUS_CONNECTING and Time.get_ticks_msec() - t0 < 1500:
+			tcp.poll(); OS.delay_msec(5)
+		if tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+			st["tcp"] = null
+			return {"error": "no connection to :%d" % HOST_CTRL_PORT}
+		st["tcp"] = tcp
+	tcp.put_data((line + "\n").to_utf8_buffer())
+	var t1 := Time.get_ticks_msec()
+	var buf: String = st["buf"]
+	while buf.find("\n") < 0 and Time.get_ticks_msec() - t1 < 1000:
+		tcp.poll()
+		var nb := tcp.get_available_bytes()
+		if nb > 0:
+			var got: Array = tcp.get_partial_data(nb)
+			if int(got[0]) == OK: buf += (got[1] as PackedByteArray).get_string_from_utf8()
+		else:
+			OS.delay_msec(2)
+	var nl := buf.find("\n")
+	if nl < 0:
+		tcp.disconnect_from_host(); st["tcp"] = null; st["buf"] = ""
+		return {"error": "timeout"}
+	var reply := buf.substr(0, nl); st["buf"] = buf.substr(nl + 1)
+	var parsed: Variant = JSON.parse_string(reply)
+	return parsed if parsed is Dictionary else {"error": "bad reply"}
 
 
 # StreamPeerTCP wants an address; resolve the host name once per connection attempt.
@@ -897,6 +1000,7 @@ func _on_connect() -> void:
 		_set_status("connect failed: %s" % str(_client.call("last_error")))
 	if _connected:
 		_refresh_poses()
+		_on_load_map()        # the servo map on connect (operator, 2026-11-01): the rows named, limits and origins set
 		_range_start(_host_edit.text)
 
 func _on_disconnect() -> void:
@@ -907,7 +1011,7 @@ func _on_disconnect() -> void:
 	_range_stop()
 	_connected = false
 	_tele = {}; _tele_ms = -1
-	for d in _rows: d["armed"] = false
+	_sliders_synced = false; _fsr_primed = false
 	if mode == "bench":
 		_set_status("disconnected — bench deadman on the Pi sends the rescue pose within ~1 s")
 	else:
@@ -920,10 +1024,26 @@ func _on_disconnect() -> void:
 # the robot even while a text field or slider has focus.  The cost is that the pose-name
 # field cannot take a space, which is the right trade for a safety key.
 func _input(event: InputEvent) -> void:
+	if event is InputEventMIDI:
+		if _midi != null:
+			var msg: String = _midi.handle(event as InputEventMIDI)
+			if msg != "": _midi_last = msg
+		return
 	if event is InputEventKey and event.pressed and not event.echo \
 			and (event as InputEventKey).keycode == KEY_SPACE:
 		get_viewport().set_input_as_handled()
 		_toggle_stop()
+	elif event is InputEventKey and event.pressed and not event.echo \
+			and (event as InputEventKey).keycode == KEY_X and not _text_focused():
+		_touch_show = not _touch_show
+		if _touch_view_local != null: _touch_view_local.set_visible(_touch_show)
+		if _touch_view_brain != null: _touch_view_brain.set_visible(_touch_show)
+	elif event is InputEventKey and event.pressed and not event.echo \
+			and (event as InputEventKey).keycode == KEY_C and not _text_focused():
+		_clear_touches()
+	elif event is InputEventKey and event.pressed and not event.echo \
+			and (event as InputEventKey).keycode == KEY_M and not _text_focused():
+		_send_mark()
 
 # Is the robot KNOWN to be stopped right now?  Only fresh evidence counts: a stop/resume
 # reply in the last second, or telemetry under a second old.  Unknown is treated as
@@ -951,7 +1071,6 @@ func _toggle_stop() -> void:
 		if resuming:
 			_set_status("RESUMED (%s mode)" % str(rep.get("mode", "?")))
 		else:
-			for d in _rows: d["armed"] = false
 			_set_status("STOPPED — every servo frozen where it is. SPACE to resume.")
 	elif not resuming:
 		_set_status("⚠ STOP FAILED: %s — cut power if the robot is at risk" % str(rep.get("error", "no reply")))
@@ -959,25 +1078,26 @@ func _toggle_stop() -> void:
 func _on_limp() -> void:
 	var rep := _call({"verb": "limp"})
 	if bool(rep.get("ok", false)):
-		for d in _rows: d["armed"] = false
-		_pending.clear()
+		_pending.clear(); _sliders_synced = false      # the sliders re-sync to the rescue pose when it lands
 		_set_status("rescue pose '%s' commanded (this HAT cannot limp a servo)" % str(rep.get("rescue_pose", "NONE SAVED")))
 
-func _on_arm(ch: int) -> void:
-	if _refuse_if_not_measured("ARM P%d" % ch): return
-	var d: Dictionary = _rows[ch]
-	var us := int(d["slider"].value)
-	var rep := _call({"verb": "servo.set", "ch": ch, "us": us})
-	if bool(rep.get("ok", false)):
-		for r in _rows: r["armed"] = false
-		d["armed"] = true
-		_set_status("P%d armed at %d µs (clamped %s)" % [ch, us, str(rep.get("clamped_us", us))])
-
+# A slider IS the servo's command (2026-11-01, no ARM step): dragged by the mouse or driven by a
+# MIDI control, its value goes to the daemon through the token-bucket flush, when connected, in
+# bench mode, not stopped, on a measured body.  The daemon refuses the rest anyway (SPEC §1.1);
+# the checks here only keep the status line quiet.
 func _on_slider(ch: int, v: float) -> void:
 	var d: Dictionary = _rows[ch]
 	d["us"].text = "%d µs" % int(v)
-	if d["armed"] and _connected:
-		_pending[ch] = int(v)          # throttled flush in _process, final value always sent
+	if not _connected: return
+	var why := ""
+	if str(_tele.get("mode", "bench")) != "bench": why = "the daemon is in '%s' mode: the brain holds the servos" % str(_tele.get("mode", "?"))
+	elif _known_stopped(): why = "STOPPED: SPACE to resume before moving a servo"
+	elif not _body_is_measured(): why = "daemon body is '%s', servo commands need 'measured' (SPEC §5.2)" % str(_tele.get("body", "?"))
+	if why != "":
+		var now := Time.get_ticks_msec()
+		if now - _slider_refused_ms > 1500: _slider_refused_ms = now; _set_status("P%d not sent: %s" % [ch, why])
+		return
+	_pending[ch] = int(v)          # throttled flush in _process, final value always sent
 
 func _on_widen(ch: int) -> void:
 	if _refuse_if_not_measured("WIDEN P%d" % ch): return
@@ -1008,7 +1128,8 @@ func _on_save_map() -> void:
 
 func _on_load_map() -> void:
 	var rep := _call({"verb": "cal.load"})
-	if not bool(rep.get("ok", false)): return
+	if not bool(rep.get("ok", false)):
+		_set_status("servo map: %s" % str(rep.get("error", "cal.load failed"))); return
 	var m: Variant = rep.get("map", {})
 	var servos: Array = m.get("servos", []) if m is Dictionary else []
 	for s in servos:
@@ -1064,12 +1185,15 @@ func _process(delta: float) -> void:
 		if _ping_acc >= PING_S:
 			_ping_acc = 0.0
 			_call({"verb": "ping"})
-		_send_acc += delta
-		if _send_acc >= SEND_THROTTLE_S and not _pending.is_empty():
-			_send_acc = 0.0
-			for ch in _pending.keys():
-				_call({"verb": "servo.set", "ch": ch, "us": _pending[ch]})
-			_pending.clear()
+		# The daemon admits CAL_STREAM_MAX = 30 servo.set per second in all (benchd's RateGuard), so the
+		# flush is a token bucket at SEND_MAX_PER_S: one dragged slider sends as before (its latest value,
+		# ~20 Hz); twelve MIDI faders share the budget in turn instead of being refused.
+		_send_tokens = minf(SEND_BURST, _send_tokens + SEND_MAX_PER_S * delta)
+		while _send_tokens >= 1.0 and not _pending.is_empty():
+			var ch0 = _pending.keys()[0]
+			var us0: int = int(_pending[ch0]); _pending.erase(ch0)
+			_send_tokens -= 1.0
+			_call({"verb": "servo.set", "ch": ch0, "us": us0})
 		var t: Dictionary = _client.call("poll_telemetry")
 		if not t.is_empty():
 			_tele = t
@@ -1078,6 +1202,10 @@ func _process(delta: float) -> void:
 				_imu_src.call("set_frame", t)
 	_update_labels()
 	_drive_body()
+	_touch_views_update()
+	_grids_update()
+	_midi_refresh()
+	_screenshot_hook()
 
 
 func _on_imu_toggle() -> void:
@@ -1259,13 +1387,17 @@ func _update_labels() -> void:
 
 	# rows: reflect the daemon's view of each channel
 	var servos: Array = _tele.get("servos", [])
-	var armed_ch := int(_tele.get("armed_ch", -1))
+	# First fresh frame after a connect (or a rescue): every slider takes the servo's current pulse,
+	# so a drag or a fader starts from where the servo is rather than from 1500.
+	if _tele_fresh() and not _sliders_synced and servos.size() >= 12:
+		for ch in range(12):
+			if servos[ch] is Dictionary and servos[ch].has("current_us"):
+				_rows[ch]["slider"].set_value_no_signal(float(servos[ch]["current_us"]))
+				_rows[ch]["us"].text = "%d µs" % int(servos[ch]["current_us"])
+		_sliders_synced = true
+		if _midi != null: _midi.release_pickup_all()
 	for ch in range(12):
 		var d: Dictionary = _rows[ch]
-		if _tele_fresh():
-			d["armed"] = (armed_ch == ch)
-		d["arm"].text = "ARMED" if d["armed"] else "ARM"
-		d["arm"].add_theme_color_override("font_color", Color(0.3, 1, 0.3) if d["armed"] else Color(1, 1, 1))
 		d["widen"].text = "WIDENED" if cal_ch == ch else "WIDEN"
 		if ch < servos.size() and servos[ch] is Dictionary:
 			var s: Dictionary = servos[ch]
@@ -1281,8 +1413,8 @@ func _set_check(item: String, ok: bool, detail: String) -> void:
 
 
 func _drive_body() -> void:
-	# COMMANDED pose: the daemon's current pulse for the armed channel (what the
-	# hardware is being told, after slew), the slider for the rest.  Only rows with a
+	# COMMANDED pose: the daemon's current pulse for every channel when telemetry is fresh
+	# (what the hardware is being told, after slew), the slider otherwise.  Only rows with a
 	# known physical leg reach the model.
 	if _body == null: return
 	# The lower legs show the robot's foot sensors: leg colour unloaded, purple at contact
@@ -1292,19 +1424,25 @@ func _drive_body() -> void:
 		for i in range(4):
 			var counts := float(adc[FSR_CH_FOR_SIM[i]]) if adc.size() >= 4 else 0.0
 			_body.call("set_foot_force_display", i, counts >= FSR_CONTACT_COUNTS, _fsr_grams(counts) / BODY_MASS_G)
+	_touch_twin_step(adc)
 	var targets: Variant = _body.get("servo_targets")
 	if not (targets is Array) or targets.size() < 12: return
 	var servos: Array = _tele.get("servos", [])
+	var dt := get_process_delta_time()
+	var a_pose := 1.0 - exp(-dt / POSE_TAU_S)
+	if _twin_angles.size() != 12: _twin_angles = []; for _k in range(12): _twin_angles.append(0.0)
 	for ch in range(12):
 		var d: Dictionary = _rows[ch]
 		var phys := _row_phys(d)
 		if phys == "?": continue
 		var us: float = d["slider"].value
-		if d["armed"] and _tele_fresh() and ch < servos.size() and servos[ch] is Dictionary:
+		if _tele_fresh() and ch < servos.size() and servos[ch] is Dictionary:
 			us = float(servos[ch].get("current_us", us))
 		var angle: float = _row_sign(d) * (us - _row_origin(d)) / US_PER_RAD
 		var k: int = SIM_INDEX[MIRROR[phys]] * 3 + _row_joint_idx(d)
-		targets[k] = angle
+		_twin_angles[k] = lerpf(float(_twin_angles[k]), angle, a_pose)
+		targets[k] = _twin_angles[k]
+	_drive_tilt(dt)
 
 # Enter in a min/max field applies that row's OPERATING limits at once (servo.limits);
 # "record map" still writes them into the map.  Values are 500..2500 with min < max, and
@@ -1360,9 +1498,8 @@ func _on_pose_recall() -> void:
 		_rows[ch]["us"].text = "%d µs" % int(us[ch])
 	var set_rep: Dictionary = _call({"verb": "pose.set", "us": us})
 	if set_rep.get("ok", false):
-		for d in _rows: d["armed"] = true
 		_pending.clear()
-		_set_status("pose '%s' recalled — all 12 armed (slewing)" % name)
+		_set_status("pose '%s' recalled — all 12 servos slewing to it" % name)
 	else:
 		_set_status("pose.set: " + str(set_rep.get("error", "?")))
 
@@ -1393,3 +1530,253 @@ func _apply_min(panel: PanelContainer, content: Control, btn: Button, minimised:
 	else:
 		panel.anchor_bottom = 1.0
 		panel.offset_bottom = -30
+
+
+# ======================================================================================
+# MIDI — a controller's faders and knobs on the servos (scripts/midi_servo_map.gd, 2026-11-01)
+# ======================================================================================
+func _midi_setup() -> void:
+	_midi = MidiServoMapScript.new()
+	_midi.load_map()
+	_midi.open_inputs()
+	_midi.current_cb = _midi_current
+	_midi.control.connect(_on_midi_control)
+	_midi.action.connect(_on_midi_action)
+	_midi.learned.connect(func(_k, _n, _t): _refresh_midi_bindings())
+	_refresh_midi_bindings()
+	print("BenchDashboard: MIDI — %s" % _midi.describe())
+
+
+func _midi_reload() -> void:
+	if _midi == null: return
+	var p: String = _midi.load_map()
+	_midi.open_inputs()
+	_midi_last = ("map reloaded: %s" % p) if p != "" else "no map file (res://local/midi_map.json or res://midi_map.example.json)"
+	_refresh_midi_bindings()
+
+
+func _refresh_midi_bindings() -> void:
+	if _midi == null: return
+	for ch in range(_rows.size()):
+		var d: Dictionary = _rows[ch]
+		if d.has("midi"): (d["midi"] as Label).text = "learn…" if _midi.learn_ch == ch else _midi.binding_for(ch)
+		if d.has("inv"): (d["inv"] as Button).set_pressed_no_signal(_midi.invert_for(ch))
+
+
+func _on_midi_invert(ch: int, on: bool) -> void:
+	if _midi == null: return
+	if not _midi.set_invert(ch, on):
+		_midi_last = "P%d has no MIDI control bound yet — LEARN first" % ch
+		(_rows[ch]["inv"] as Button).set_pressed_no_signal(false)
+		return
+	_midi_last = "P%d MIDI control %s" % [ch, "inverted" if on else "normal"]
+	_refresh_midi_bindings()
+
+
+func _on_midi_learn(ch: int) -> void:
+	if _midi == null: return
+	_midi.learn_ch = ch
+	_midi.learn_action = ""
+	_refresh_midi_bindings()
+	_midi_last = "LEARN P%d: touch the fader or knob that should drive it" % ch
+
+
+# The servo's CURRENT normalised position, for pickup: the daemon's pulse when telemetry is fresh,
+# the slider otherwise, on this row's own min/max.
+func _midi_current(ch: int) -> float:
+	if ch < 0 or ch >= _rows.size(): return -1.0
+	var d: Dictionary = _rows[ch]
+	var lo := float(d["min"].text.to_int()); var hi := float(d["max"].text.to_int())
+	if hi <= lo: return -1.0
+	var us: float = d["slider"].value
+	if _tele_fresh():
+		var servos: Array = _tele.get("servos", [])
+		if ch < servos.size() and servos[ch] is Dictionary: us = float(servos[ch].get("current_us", us))
+	return clampf((us - lo) / (hi - lo), 0.0, 1.0)
+
+
+func _on_midi_control(ch: int, t: float) -> void:
+	if ch < 0 or ch >= _rows.size(): return
+	var d: Dictionary = _rows[ch]
+	var lo := float(d["min"].text.to_int()); var hi := float(d["max"].text.to_int())
+	if hi <= lo: lo = 500.0; hi = 2500.0
+	var us := int(round(lerpf(lo, hi, t) / 5.0) * 5)
+	d["slider"].value = us                      # value_changed -> _on_slider -> the servo, as a mouse drag would
+	_midi_last = "P%d <- %d µs" % [ch, us]
+
+
+func _on_midi_action(name: String) -> void:
+	match name:
+		"stop":
+			# STOP only, never resume: a controller button is a panic button.
+			if _connected and not _known_stopped(): _toggle_stop()
+			_midi_last = "controller STOP"
+		_:
+			_midi_last = "unknown MIDI action '%s'" % name
+
+
+func _midi_refresh() -> void:
+	if _midi_lbl == null or _midi == null: return
+	_midi_lbl.text = _midi.describe() + ((" · " + _midi_last) if _midi_last != "" else "")
+	if _touch_lbl != null: _touch_lbl.text = _touch_label_text()
+
+
+func _text_focused() -> bool:
+	var f := get_viewport().gui_get_focus_owner()
+	return f is LineEdit or f is TextEdit
+
+
+# ======================================================================================
+# The clouds of touches (scripts/touch_cloud.gd, 2026-11-01)
+# ======================================================================================
+# TWIN: the robot's FSR onsets on the twin's FK toes, measured the way the brain's TouchMemory
+# measures them (operator, 2026-11-01: a tap that rocked the chassis a few degrees put a box's
+# voxel below the box).  Two references make a touch a place rather than a chassis coordinate:
+#   1. GRAVITY — the toe's height and its horizontal position are taken along and across the
+#      daemon's fused up vector (`imu.up_fused`, body frame), not the twin's chassis axes, so a
+#      chassis that pitches under the tap does not pitch the voxel with it;
+#   2. THE SUPPORT PLANE — height is relative to the running median height of the feet that
+#      were already planted (TouchCloud.step, the same rule as the module), so a body that lifts
+#      on its rear feet carries its reference up with it.
+# The twin itself hangs level, so its chassis frame is the levelled frame the voxels draw in,
+# at plane_y + h: a floor touch sits at the planted feet, a box top at the box's height above them.
+func _touch_twin_step(adc: Array) -> void:
+	if _body == null: return
+	if _touch_local == null: _touch_local = TouchCloudScript.new()
+	var lowers: Variant = _body.get("_lowers"); var toe_off: Variant = _body.get("_toe_off_c"); var chassis: Variant = _body.get("_chassis")
+	if not (lowers is Array) or not (toe_off is Array) or chassis == null: return
+	if (lowers as Array).size() < 4 or (toe_off as Array).size() < 4: return
+	if adc.size() < 4:
+		_fsr_primed = false; return               # stale or no telemetry: the next fresh frame re-primes
+	var inv: Transform3D = (chassis as Node3D).global_transform.affine_inverse()
+	# The body's up, from the daemon's fused estimate; the twin's own up when the IMU block is absent.
+	var up := Vector3.UP
+	var imu_v: Variant = _tele.get("imu")
+	if imu_v is Dictionary and bool((imu_v as Dictionary).get("ok", false)):
+		var uf = (imu_v as Dictionary).get("up_fused")
+		if uf is Array and (uf as Array).size() >= 3:
+			var u := Vector3(float(uf[0]), float(uf[1]), float(uf[2]))
+			if u.length() > 0.5: up = u.normalized()
+	var fwd_l: Vector3 = (Vector3(0, 0, 1) - up * up.z).normalized()     # body forward, levelled
+	var left_l: Vector3 = up.cross(fwd_l).normalized()                     # body +X, levelled
+	var contact: Array = []; var xz: Array = []; var ys: Array = []
+	for i in range(4):
+		contact.append(1.0 if float(adc[FSR_CH_FOR_SIM[i]]) >= FSR_CONTACT_COUNTS else 0.0)
+		var tl: Vector3 = inv * ((lowers[i] as Node3D).global_transform * (toe_off[i] as Vector3))
+		xz.append(tl.dot(left_l)); xz.append(tl.dot(fwd_l))               # [x = body +X, z = forward], levelled
+		ys.append(tl.dot(up))                                             # height along gravity, body origin 0
+	_touch_twin_tick += 1
+	if not _fsr_primed:
+		_touch_local.prime(contact); _fsr_primed = true; return
+	_touch_local.step(_touch_twin_tick, contact, xz, ys, [])
+
+
+func _touch_views_update() -> void:
+	_touch_frame += 1
+	if _body == null or not _touch_show or (_touch_frame % 6) != 0: return
+	var chassis: Variant = _body.get("_chassis")
+	if chassis == null: return
+	if _touch_view_local == null:
+		_touch_view_local = TouchCloudScript.View.new(self, TOUCH_LOCAL_COLOR, 0.02, "TouchCloudTwin")
+		_touch_view_brain = TouchCloudScript.View.new(self, TOUCH_BRAIN_COLOR, 0.016, "TouchCloudBrain")
+	var base: Transform3D = TouchCloudScript.level_frame((chassis as Node3D).global_transform)   # level: the body tilts around the voxels
+	if _touch_local != null: _touch_view_local.show(_touch_local.body_voxels([], 600), base, _touch_local.plane_y)
+	_range_mutex.lock(); var td: Dictionary = _touch_diag; _range_mutex.unlock()
+	if td.has("voxels") and td["voxels"] is Array:
+		_touch_view_brain.show(td["voxels"], base, float(td.get("plane_y", 0.0)))
+
+
+func _touch_label_text() -> String:
+	var twin_n: int = _touch_local.count() if _touch_local != null else 0
+	var twin_t: int = _touch_local.touches if _touch_local != null else 0
+	_range_mutex.lock(); var td: Dictionary = _touch_diag; var td_ms := _touch_diag_ms; _range_mutex.unlock()
+	var brain := "brain: no TouchMemory in the running config"
+	if td.has("count"):
+		var age := (Time.get_ticks_msec() - td_ms) if td_ms >= 0 else 0
+		brain = "brain %d voxels / %d touches (lavender%s)" % [int(td.get("count", 0)), int(td.get("touches", 0)), "" if age < 2000 else ", stale"]
+	return "touches: twin %d voxels / %d onsets (purple) · %s   [X] %s  [C] clear" % [twin_n, twin_t, brain, "hide" if _touch_show else "show"]
+
+
+# [C] / the button: the TWIN's voxels go; the brain's cloud is the module's own state and stays
+# (it is cleared by the brain run ending, or by the module's snapshot being discarded).
+func _clear_touches() -> void:
+	if _touch_local != null: _touch_local.clear()
+	if _touch_view_local != null: _touch_view_local.show([], Transform3D(), 0.0)
+	_midi_last = "touch voxels cleared (the twin's; the brain's cloud is its own state)"
+
+
+# ======================================================================================
+# The two floors (scripts/bench_grids.gd): the chassis bottom and the ToF's real floor
+# ======================================================================================
+func _grids_update() -> void:
+	if _grids == null or _body == null: return
+	var chassis: Variant = _body.get("_chassis")
+	if chassis == null: return
+	var bottom_dy := float(_body.get("_chassis_bottom_local"))
+	var boom_z := float(_body.get("tof_boom_z"))
+	var clearance := NAN
+	# OGMA_BENCH_FAKE_TOF_M=<m>: a development hook with no robot — draws the ToF floor at that
+	# clearance when there is no telemetry, so the scene can be checked from a screenshot run.
+	var fake := OS.get_environment("OGMA_BENCH_FAKE_TOF_M")
+	if fake != "" and not _tele_fresh(): clearance = float(fake)
+	if _tele_fresh():
+		var tof_v: Variant = _tele.get("tof")
+		if tof_v is Dictionary and bool((tof_v as Dictionary).get("ok", false)) and bool((tof_v as Dictionary).get("valid", false)):
+			clearance = float((tof_v as Dictionary).get("m", NAN))     # raw − mount offset: the belly's clearance
+	_grids.update((chassis as Node3D).global_transform, bottom_dy, clearance, boom_z)
+
+
+# OGMA_BENCH_SCREENSHOT=<path.png>: save one frame of the window ~2 s after start and quit (a
+# development hook: the scene can be checked from a shell without a person at the window).
+var _shot_frames := 0
+func _screenshot_hook() -> void:
+	var path := OS.get_environment("OGMA_BENCH_SCREENSHOT")
+	if path == "" or _shot_frames < 0: return
+	_shot_frames += 1
+	if _shot_frames < 120: return
+	var img := get_viewport().get_texture().get_image()
+	if img != null:
+		img.save_png(path); print("BenchDashboard: screenshot -> ", path)
+	_shot_frames = -1
+	get_tree().quit()
+
+
+# MARK: the label in the field goes into the daemon's own record as a `mark` row (PROTOCOL.md),
+# with the twin's touch count beside it so the record and the screen can be lined up afterwards.
+var _mark_n := 0
+func _send_mark() -> void:
+	if not _connected: _set_status("MARK: not connected"); return
+	var label := _mark_edit.text.strip_edges() if _mark_edit != null else ""
+	_mark_n += 1
+	var text := "%s #%d (twin touches %d)" % [label if label != "" else "mark", _mark_n,
+		_touch_local.touches if _touch_local != null else 0]
+	var rep: Dictionary = _call({"verb": "mark", "text": text})
+	_set_status(("MARK written: " + text) if bool(rep.get("ok", false)) else ("MARK failed: " + str(rep.get("error", "?"))))
+
+
+# The twin's lean: the body's up vector (gravity in body coordinates) from the daemon's fused
+# estimate, filtered, turned into the rotation that takes it to the world's up with no yaw, and
+# handed to the body as calib_tilt.  Without an IMU block the twin stands level.
+func _drive_tilt(dt: float) -> void:
+	var up_meas := Vector3.UP
+	var have := false
+	var imu_v: Variant = _tele.get("imu")
+	if _tele_fresh() and imu_v is Dictionary and bool((imu_v as Dictionary).get("ok", false)):
+		var uf = (imu_v as Dictionary).get("up_fused")
+		if uf is Array and (uf as Array).size() >= 3:
+			var u := Vector3(float(uf[0]), float(uf[1]), float(uf[2]))
+			if u.length() > 0.5: up_meas = u.normalized(); have = true
+	# OGMA_BENCH_FAKE_UP="x,y,z": a development hook with no robot (a body-frame up vector).
+	var fake := OS.get_environment("OGMA_BENCH_FAKE_UP")
+	if not have and fake != "":
+		var parts := fake.split(",")
+		if parts.size() == 3:
+			var u2 := Vector3(float(parts[0]), float(parts[1]), float(parts[2]))
+			if u2.length() > 0.5: up_meas = u2.normalized()
+	var a := 1.0 - exp(-dt / TILT_TAU_S)
+	_twin_up = (_twin_up + (up_meas - _twin_up) * a).normalized()
+	var axis: Vector3 = _twin_up.cross(Vector3.UP)
+	var basis := Basis.IDENTITY
+	if axis.length() > 1e-6:
+		basis = Basis(axis.normalized(), acos(clampf(_twin_up.dot(Vector3.UP), -1.0, 1.0)))
+	_body.set("calib_tilt", basis)

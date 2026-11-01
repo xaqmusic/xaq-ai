@@ -866,14 +866,22 @@ Dictionary OgmaBrain::get_module_metrics() const {
         // as-is, so the body's JSONL can carry prox slots, the avoid bearing and the intent
         // without a per-type block each (the keys are the modules' own diag names).
         else if (type == "ProxMemory" || type == "TofAvoidLoop" || type == "BearingToIntent" ||
-                 type == "StuckSense" || type == "StuckEscape" || type == "LoadPhaseGait") {
+                 type == "StuckSense" || type == "StuckEscape" || type == "LoadPhaseGait" ||
+                 type == "TouchMemory") {
             const nlohmann::json dj = m->diag_snapshot();   // a named object: items() of a temporary dangles
             for (auto const& [k, v] : dj.items()) {
                 if (v.is_boolean())     d[String(k.c_str())] = v.get<bool>();
                 else if (v.is_number()) d[String(k.c_str())] = v.get<double>();
-                else if (v.is_array()) {                      // a per-leg vector (LoadPhaseGait's phases)
+                else if (v.is_array()) {                      // a per-leg vector (LoadPhaseGait's phases) ...
                     Array arr;
-                    for (auto const& e : v) if (e.is_number()) arr.push_back(e.get<double>());
+                    for (auto const& e : v) {
+                        if (e.is_number()) arr.push_back(e.get<double>());
+                        else if (e.is_array()) {              // ... or rows (TouchMemory's voxels, 2026-11-01)
+                            Array row;
+                            for (auto const& x : e) if (x.is_number()) row.push_back(x.get<double>());
+                            arr.push_back(row);
+                        }
+                    }
                     d[String(k.c_str())] = arr;
                 }
             }

@@ -240,6 +240,8 @@ OGMA_PICRAWLER_CONFIG=res://addons/ami_ogma/configs/<config.json> \
 OGMA_RESET_MODE=continuous OGMA_PICRAWLER_MAX_STEPS=<N> OGMA_PICRAWLER_GYM_DIFFICULTY=0.3 \
 godot4 --headless --fixed-fps 60 --quit-after 4000000 \
        --path . res://scenes/the_picrawler.tscn      # run from godot_host/project
+#   ⚠ ALSO export the config's metadata.body_env first (OGMA_PICRAWLER_FEET_XZ, _ODOM, _MAX_SERVO_SPEED …):
+#   only the launcher and seedavg.py apply it; a bare run silently drops those senses (2026-11-01).
 ```
 
 - ~52 ticks/s. Run concurrent seeds on distinct `OGMA_INSPECTOR_PORT`s.
@@ -252,7 +254,9 @@ godot4 --headless --fixed-fps 60 --quit-after 4000000 \
   `cell_perturbation_d.py --vary-world --lesion vision|stick|scent_noise|heading_drift`.
 - Body diagnostics are JSON-per-line on stdout (`fwd_v`, `gc_raw`/`gc_norm`/`cy_norm`,
   `h_ema`/`h_max`/`h_bias`, chassis `y`, `knee[]`, `feet_y[]`, `auto_reset_count`).
-- **UI:** `[P]` toggles the per-metre path trail; `[1]`/`[2]`/`[5]`/`[6]` live-swap arena/corridor/room/terrain; the
+- **UI:** `[P]` toggles the per-metre path trail; `[X]` hides the cloud of touches (purple: the body's own FK
+  footprints, body-locked, so the odometry's drift is seen; lavender: the brain's `TouchMemory` when the config
+  carries it); `[1]`/`[2]`/`[5]`/`[6]` live-swap arena/corridor/room/terrain; the
   MOTOR-EPM panel has live sliders for every lever. The live viewer is
   [`tools/xaq_inspector`](tools/xaq_inspector/README.md). **Operator/UI-driven diagnosis is
   first-class** — not a fallback.

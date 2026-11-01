@@ -9641,3 +9641,52 @@ and verdicts stay.
 30, no sonar deadzone. Against `_cs_pf_sl0` at 4.22 rad/s in the same corridor (net_z 6.98, straight 0.68, 0 falls): more
 distance, one fall in six, the gate's dip rate the same 0.3 (contact shares) at fewer hold ticks. The sim twin for gating
 levers on the new base.
+
+### 2026-11-01 — RUN 185909 RE-READ AGAINST ITS VIDEO (DSCF0004, brain time = video − 17 s): THE DARK PILLOW WAS ACOUSTICALLY BLACK — no echo at any range until the transducers were 5 cm from it, then the only six deadzone pings of the run (4.6–6.9 cm) published as no-echo; the yellow pillow echoed at 0.35–0.6 m and was avoided; no climb signature anywhere — `BASELINE` (n = 1 run, the measurement behind the palpation plan)
+
+The operator's "5:20 stuck on the corner of a dark pillow" is brain second 303–312. Yellow pillow (video 5:03–5:12, brain
+286–295): valid pings 0.35–0.60 m, the avoid loop active, the body turned. Dark pillow (5:19–5:22, brain 302–305): stall
+channel 0.7–0.9 with the avoid loop silent and the range reading a steady 1.0–1.1 m — the far wall, closing at walking
+speed — while the pillow sat directly ahead; the odometry credited +9 cm during the stall. Then (5:26–5:29, brain 309–312)
+the run's only deadzone pings, six of them at 0.046–0.069 m, each published as no-echo (`OGMA_PICRAWLER_US_DEADZONE` 0.075),
+stall 1.0, and 85–100 % no-echo pings for the next 20 s beside the pillow. The stride and range channels of the stuck
+sense disagreed through the window (the stride said stalled, the range deficit 0). Tilt stayed within ±0.06 rad components:
+nothing was climbed. **Reading:** soft dark fabric returns nothing to the HC-SR04 at any distance, and the deadzone turns
+the one real near return into silence; the camera is the only sensor that saw the pillow. The design conversation this
+fed is in the robot resume (palpation first, then a stop-and-look, then view-based places); the multizone ToF is ordered.
+Re-use context: the ultrasonic stays a far-field prior for HARD things; nothing soft can be sensed by it.
+
+### 2026-11-01 — PALPATION STAGE 0, INSTRUMENTS (not levers): `TouchMemory`, the cloud of touches from the toes' commanded FK carried by the odometry, in `_cs_pf_sl0` and `_cs_pf_sl0_sim60`; drawn body-locked in the sim (purple = the body's own, lavender = the brain's, `[X]`) and in the bench dashboard beside the TWIN's FK cloud; the AKAI MIDI Mix on the twelve servos (LEARN per row, no ARM, pickup, a 24/s send budget) — gain-0: corridor seed 1 × 1500, body JSON byte-identical with the module in the config — `BASELINE`
+
+*Operator: "use FK to build a cloud of touches … multiple sensors increase confidence … a voxel cloud visualization
+locked to the robot's origin so we can see the drift … in the godot dash command the servos until a toe touches a wall
+and see the voxel … draw both [the twin's and the brain's]; we need to see the disagreement … a MIDI controller for the
+servos, the map in its own file."*
+
+**TouchMemory** (`cpp_core`, 9 unit tests). Inputs: `foot_contact`, `feet_xz` (toe [x = body +X, z = forward] at the
+commanded pose), `feet_y_gravity_cmd_imu`, `odom`, optional `foot_load`. A touch is a contact flag's rising edge; its
+height is relative to the SUPPORT PLANE (running median of the toes already planted, never the landing foot), so a floor
+touch is h ≈ 0 at any stance height and a box reads h > 0. Stored in the odom frame on a 2 cm grid; each voxel keeps hits,
+foot mask, load and age — evidential, because one touch carries the ~32 mm kinematic error (2026-10-24) and a voxel is as
+believable as the agreement it collects (two feet landing on one spot share a voxel: tested). Publishes nothing; diag lists
+the nearest 400 voxels re-expressed in the body frame with `plane_y` and the inputs' health flags. `odom_translation` is
+ProxMemory's knob. **Gain-0:** the sim twin with and without the module, corridor, seed 1 × 1500, body_env applied: 25 of 25
+JSONL rows identical outside the new `touch_*` fields; at tick 1500 the body's own cloud 203 voxels / 261 touches, the
+brain's 225 (its toe positions come from the slew-limited targets, the body's from `_cmd_angle`: the first visible
+disagreement, as asked). **Drawing:** sim `touch_cloud.gd` (the GDScript twin of the module, always on, purple, body-locked
+in a yaw-levelled frame so heights stay along gravity, and the brain's in lavender from `get_module_metrics`, whose generic
+passthrough now carries nested rows); bench dashboard: the twin's FK toe at each FSR onset (purple; heights along the daemon's fused up vector and relative to
+the support plane, after the operator's first box tap rocked the chassis and put the voxel below the box) and the brain's diag via
+`module_diag` on the existing host worker (lavender). `[X]` hides both in both. The bench scene's arena is hidden; its only geometry is two grids, a translucent blue grid at the chassis
+bottom and a translucent brown plane where the belly ToF reads the floor (with the boom's beam), so voxels read in space. **MIDI** (`midi_servo_map.gd`): LEARN per
+row (the next control touched is bound and the map rewritten), NO ARM STEP (operator, same day: a slider, dragged or MIDI-driven, is
+the servo's command — the HAT holds the last pulse anyway; sent only connected, in bench mode, not stopped, body measured;
+the sliders take the servos' current pulses on the first telemetry after a connect), pickup before a control takes hold, a token bucket
+under the daemon's 30/s guard, the map in `godot_host/project/local/midi_map.json` (ignored) over `midi_map.example.json`
+(MIDI Mix defaults); the sim's calibration panel reads the same file. **Checked on the bench the same day (operator):** new twin voxels appear when a foot is touched; the four spurious voxels the
+operator saw at launch were the BODY SCRIPT's own cloud, fed by the twin's legs resting on the (now hidden) arena floor
+— off on the bench — and the first telemetry frame's four standing feet, now a baseline rather than touches. **Harness note:** the CLAUDE.md
+single headless run did not apply the config's `body_env` — the brain's cloud read empty (no `feet_xz`, no `odom`) until
+the env was exported as `seedavg.py` does; the recipe now says so. Docs: `pi_host/PROTOCOL.md` §"MIDI", the robot resume's
+tools. Next: the bench toe test (wall, box, pillow) to decide which of FSR / bus current / IMU sees a wall touch.
+

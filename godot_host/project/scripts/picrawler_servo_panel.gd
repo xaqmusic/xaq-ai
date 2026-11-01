@@ -36,11 +36,38 @@ var _info_label: Label
 # panel mirrors the live values into the sliders so the operator
 # can see the gait waveform applied to the suspended body.
 var _cpg_chk: CheckBox = null
+# MIDI (2026-11-01, scripts/midi_servo_map.gd): the same map file the bench dashboard learns,
+# read here with the servo channel P0..P11 taken as this panel's row (leg*3 + joint).  Only
+# while this panel is shown (calibration / motor-test), and never on the bench twin, whose
+# dashboard owns the controller.
+const MidiServoMapScript = preload("res://scripts/midi_servo_map.gd")
+var _midi = null   # midi_servo_map.gd
 
 func _ready() -> void:
     visible = false
     mouse_filter = Control.MOUSE_FILTER_STOP
     _build_ui()
+    _midi = MidiServoMapScript.new()
+    _midi.load_map()
+    _midi.current_cb = _midi_current
+    _midi.control.connect(_on_midi_control)
+    visibility_changed.connect(func(): if visible and _midi != null: _midi.open_inputs())   # lazily, when first shown
+
+func _input(event: InputEvent) -> void:
+    if not (event is InputEventMIDI) or _midi == null or not visible or _body == null: return
+    if bool(_body.get("foot_display_external")): return      # the bench twin: the dashboard drives
+    var msg: String = _midi.handle(event as InputEventMIDI)
+    if msg != "": print("ServoPanel: " + msg)
+
+func _midi_current(ch: int) -> float:
+    if ch < 0 or ch >= _rows.size() or _rows[ch] == null: return -1.0
+    var sl: HSlider = _rows[ch]["slider"]
+    return (sl.value - sl.min_value) / (sl.max_value - sl.min_value)
+
+func _on_midi_control(ch: int, t: float) -> void:
+    if not visible or ch < 0 or ch >= _rows.size() or _rows[ch] == null: return
+    var sl: HSlider = _rows[ch]["slider"]
+    sl.value = lerpf(sl.min_value, sl.max_value, t)     # value_changed -> _on_slider_changed, as a mouse drag would
 
 func _process(_delta: float) -> void:
     _refresh_spring_header()
