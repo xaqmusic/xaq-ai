@@ -62,6 +62,7 @@ public:
 private:
     struct Sample { float cur; float belly; float lean; std::array<float, 8> xz; std::array<float, 4> y; };
     struct Window { bool open = false; uint64_t t_on = 0; int ticks = 0; float h = 0, fwd = 0, lat = 0, i_pre = 0, i0 = 0, belly0 = 0, lean0 = 0, range = -1, vert = 0;
+                    float fwd_rel = 0, lat_rel = 0;    // the toe's position relative to this leg's running mean of touch positions
                     float load_peak = 0, i_max = 0, belly_max = 0, lean_max = 0; };
     void handle(std::string const& which, MessagePtr p);
     void publish(int leg, Window const& w, uint64_t tick_id);
@@ -80,6 +81,11 @@ private:
     double plane_tau_ticks_ = 50.0;
     double belly_plane_m_ = -0.029;   // the belly plane below the body origin: the ToF's floor reference
     double leg_y_offset_[4] = {0, 0, 0, 0};
+    // Conditioning (§0 rule 2): a touch's position is published relative to the leg's own running mean of touch
+    // positions, so the vocabulary is about what was touched rather than which leg touched it.  Default off.
+    bool   position_relative_ = false;
+    double position_tau_touches_ = 20.0;
+    int    recent_max_ = 32;                 // the diag's ring of recent events: [tick, leg, f0..f9]
 
     // latest inputs
     std::array<float, 4> contact_{}, prev_contact_{}, feet_y_{}, load_{};
@@ -90,6 +96,8 @@ private:
     std::deque<Sample> pre_;
     std::array<Window, 4> win_{};
     std::array<float, kDim> last_{}; int last_leg_ = -1; int64_t events_ = 0; uint64_t last_tick_ = 0;
+    std::array<std::array<double, 2>, 4> pos_mean_{}; std::array<int, 4> pos_n_{};
+    std::deque<std::array<float, kDim + 2>> recent_;
     Bus* bus_ = nullptr; std::vector<uint64_t> sub_ids_;
 };
 

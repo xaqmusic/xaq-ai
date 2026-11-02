@@ -128,8 +128,12 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   foot (up to 43 mm below the toe tip); the new channel `reality.proprio.toe_y` (ogma_host `--toe-y`, the floor
   calibration applied in the host; the sim under `OGMA_PICRAWLER_TOE_Y`) is what both touch modules read now, and the
   TouchMemory offsets are gone. **The Pi's ogma_host must be rebuilt** before the next robot run of `_cs_pf_sl0`
-  (the config now asks for `--toe-y` and the three new modules). Next: a live session with the sonar through ogma_host,
-  compare the brain's cloud to the twin's at the toe height, see whether the six nodes reappear; then the consumer. The
+  (the config now asks for `--toe-y` and the three new modules). **The terrain plan in the sim (2026-11-02 pm, ledger's last three entries):** step 1 done (position centring
+  promoted, NMI 0.35 → 0.44); step 2 running (`_sim60_terrain`, `enc_events` in the body log, `stall_events.py` in the
+  session scratch reads stall-vs-free; the 9000-tick battery met no stall below 38 mm, the 24 000-tick varied-world
+  battery is the one that counts); step 3 built (LiftDescent per encounter situation, G4b; configs `_sim60_terrain_g4a`
+  control and `_sim60_terrain_g4b` lever, all three in the launcher). The robot's next session: the sonar through
+  ogma_host, the brain's cloud against the twin's at the toe height, whether the six nodes reappear. The
   front hip2 origin shifts (+49 µs P4, −62 µs P10) are a servo-map lever for a gait A/B, not applied. `touch_ready` leaves the FR toe on the floor (~300 g).
 - **Before climbing: the belly ToF's pitch compensation** ([register O73](open_items_register.md)). The brain reads the
   uncompensated clearance; a pitched chassis reads as a changed height to the stance press and the learned stance

@@ -658,7 +658,8 @@
     "load_topic": "reality.proprio.foot_load",
     "pre_ticks": 15,
     "post_ticks": 25,
-    "belly_plane_m": -0.029
+    "belly_plane_m": -0.029,
+    "position_relative": true
    }
   },
   {

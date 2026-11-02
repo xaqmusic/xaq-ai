@@ -55,6 +55,22 @@ int main(int argc, char** argv) {
     auto& reg = ModuleRegistry::instance();
     InProcessBus bus;
     ParamMap enc_p = {{"feet_y_topic", ParamValue{std::string("reality.proprio.toe_y")}}};
+    // optional overrides anywhere after the calibration: enc.<param>=<value> / epm.<param>=<value> (number, true/false,
+    // or a comma list of numbers); the remaining arguments are the records
+    std::vector<std::string> records; std::vector<std::pair<std::string, std::string>> epm_over;
+    auto parse_value = [](std::string const& v) -> ParamValue {
+        if (v == "true") return ParamValue{true}; if (v == "false") return ParamValue{false};
+        if (v.find(',') != std::string::npos) { std::vector<double> xs; size_t p = 0; while (p <= v.size()) { size_t q = v.find(',', p); if (q == std::string::npos) q = v.size(); xs.push_back(std::atof(v.substr(p, q - p).c_str())); p = q + 1; } return ParamValue{xs}; }
+        if (v.find_first_not_of("-0123456789") == std::string::npos) return ParamValue{int64_t(std::atoll(v.c_str()))};
+        return ParamValue{std::atof(v.c_str())};
+    };
+    for (int ai = 4; ai < argc; ++ai) {
+        const std::string a = argv[ai]; const size_t eq = a.find('=');
+        if (eq != std::string::npos && (a.rfind("enc.", 0) == 0 || a.rfind("epm.", 0) == 0)) {
+            const std::string key = a.substr(4, eq - 4), val = a.substr(eq + 1);
+            if (a[1] == 'n') enc_p[key] = parse_value(val); else epm_over.emplace_back(key, val);
+        } else records.push_back(a);
+    }
     ParamMap epm_p = {
         {"modality_group", ParamValue{std::string("touch")}}, {"modality_name", ParamValue{std::string("encounter")}},
         {"encoder_kind", ParamValue{std::string("rbf")}}, {"input_topic", ParamValue{std::string("sense.touch_encounter")}},
@@ -63,6 +79,7 @@ int main(int argc, char** argv) {
         {"stale_prune_enabled", ParamValue{false}},      // an event-rate EPM: minutes pass between touches, and the prune counts ticks
         {"dim_min", ParamValue{std::vector<double>{-0.03, -0.10, -0.25, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0}}},
         {"dim_max", ParamValue{std::vector<double>{ 0.09,  0.25,  0.25, 0.6, 0.8, 0.8, 0.03, 0.4, 1.5, 1.0}}}};
+    for (auto const& [k, v] : epm_over) epm_p[k] = parse_value(v);
     ParamMap bel_p = {{"reality_topic", ParamValue{std::string("reality.touch.encounter")}}, {"obs_topic", ParamValue{std::string("sense.touch_encounter")}},
                       {"min_count", ParamValue{int64_t{2}}}};
     auto enc = reg.create("EncounterFeatures"); enc->set_id("encounter"); enc->on_setup(&bus, enc_p);
@@ -71,12 +88,13 @@ int main(int argc, char** argv) {
 
     const double us_per_rad = 545.2;
     uint64_t tick = 0; long events = 0;
-    for (int ai = 4; ai < argc; ++ai) {
+    for (size_t ri = 0; ri < records.size(); ++ri) {
+        const char* rec = records[ri].c_str();
         // pass 1: telemetry and marks in time order; pass 2: the fast rows drive the ticks
         struct Tele { long t; ogma::body::Vec3f up; double i_a; double tof; bool tof_ok; };
         std::vector<Tele> tele; std::vector<std::pair<long, json>> marks;
         {
-            std::ifstream f(argv[ai]); std::string line;
+            std::ifstream f(rec); std::string line;
             while (std::getline(f, line)) {
                 if (line.find("\"kind\":\"telemetry\"") != std::string::npos) {
                     json j; try { j = json::parse(line); } catch (...) { continue; }
@@ -100,7 +118,7 @@ int main(int argc, char** argv) {
             }
         }
         size_t ti = 0, mi = 0; json cur_mark = json::object(); long seen_events = enc->diag_snapshot().value("events", 0L);
-        std::ifstream f(argv[ai]); std::string line;
+        std::ifstream f(rec); std::string line;
         while (std::getline(f, line)) {
             if (line.find("\"kind\":\"adc_fast\"") == std::string::npos) continue;
             json j; try { j = json::parse(line); } catch (...) { continue; }
@@ -132,7 +150,7 @@ int main(int argc, char** argv) {
             auto e = std::dynamic_pointer_cast<const ProprioToken>(bus.last_value("sense.touch_encounter"));
             if (now_events != seen_events && e) {
                 seen_events = now_events;
-                json out; out["t_mono_ms"] = t; out["file"] = argv[ai];
+                json out; out["t_mono_ms"] = t; out["file"] = rec;
                 auto dg = enc->diag_snapshot(); out["leg"] = kPhysOfSim[dg.value("last_leg", 0)];
                 json feats = json::array(); for (int k = 0; k < e->values.size(); ++k) feats.push_back(e->values[k]);
                 out["features"] = feats;

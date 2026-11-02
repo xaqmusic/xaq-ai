@@ -43,7 +43,10 @@ def run_one(cfg, seed, max_steps, difficulty, extra):
     tag = ""
     if extra:
         tag = "_" + hashlib.sha1("|".join(sorted(extra)).encode()).hexdigest()[:6]
-    out = f"{SP}/sa_{os.path.splitext(cfg)[0]}{tag}_s{seed}.log"
+    stem = os.path.splitext(cfg)[0]
+    if len(stem) > 150:   # the long lever-chain names overflow the 255-byte filename limit (2026-11-02): keep the tail, hash the whole
+        stem = stem[-120:] + "_" + hashlib.sha1(stem.encode()).hexdigest()[:6]
+    out = f"{SP}/sa_{stem}{tag}_s{seed}.log"
     env = dict(os.environ, OGMA_PICRAWLER_GYM="corridor", OGMA_SEED=str(seed),
                OGMA_INSPECTOR_PORT=str(7400+seed),
                OGMA_PICRAWLER_GYM_DIFFICULTY=str(difficulty),

@@ -1758,6 +1758,7 @@ var _touch_tick: int = 0
 var _touch_feet_xz: PackedFloat64Array = PackedFloat64Array()
 var _touch_feet_y: PackedFloat64Array = PackedFloat64Array()
 var _touch_brain_n: int = -1                    # -1 = no TouchMemory module seen in the metrics
+var _enc_last_tick: float = -1.0   # the last encounter event row written to the JSONL (enc_events)
 var _odom_need_anchor: bool = true
 var _odom_yaw0: float = 0.0
 var _odom_origin_world: Vector3 = Vector3.ZERO
@@ -12817,6 +12818,18 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["touch_vox"] = _touch_cloud.count()
 		line["touch_n"] = _touch_cloud.touches
 		if _touch_brain_n >= 0: line["touch_brain"] = _touch_brain_n
+	# The encounter chain (2026-11-02): the module's event count and every event since the last row, as the module's
+	# own rows [tick, leg, h_floor, fwd, lat, load_peak, i_pre, i_post, belly_rise, lean_rise, range, vert_frac].
+	if metrics.has("encounter"):
+		var em: Dictionary = metrics["encounter"]
+		line["enc_n"] = int(em.get("events", 0))
+		var fresh: Array = []
+		for row in em.get("recent", []):
+			if row is Array and (row as Array).size() >= 2 and float((row as Array)[0]) > _enc_last_tick:
+				fresh.append(row)
+		if fresh.size() > 0:
+			line["enc_events"] = fresh
+			_enc_last_tick = float((fresh[fresh.size() - 1] as Array)[0])
 	if metrics.has("prox_memory"):
 		var pm: Dictionary = metrics["prox_memory"]
 		line["prox_mx"] = snappedf(float(pm.get("minus_x", 0.0)), 0.001)

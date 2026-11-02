@@ -63,3 +63,28 @@ TEST(EncounterFeatures, NoInputsNoEventsNoCrash) {
     Fix f; f.bus.begin_tick(0); f.m.tick(0); f.bus.end_tick();
     EXPECT_EQ(f.m.events(), 0); EXPECT_EQ(f.published, 0);
 }
+
+TEST(EncounterFeatures, PositionRelativeIsTheDeviationFromTheLegsOwnTouchMean_AndOffIsTheRawPosition) {
+    // leg 3 touches twice: at its usual spot, then 4 cm further forward.  Raw: both positions as given.  Relative:
+    // the first reads 0 (it defines the mean), the second reads its deviation from the mean so far.
+    auto run_two = [](bool rel) {
+        Fix f({{"post_ticks", ogma::ParamValue{int64_t{3}}}, {"pre_ticks", ogma::ParamValue{int64_t{3}}}, {"position_relative", ogma::ParamValue{rel}}});
+        uint64_t t = 0; std::vector<float> out1, out2;
+        std::vector<float> xz = kXZ;
+        for (int k = 0; k < 5; ++k, ++t) f.run(t, {1, 1, 1, 0}, xz, {-0.09f, -0.09f, -0.09f, -0.05f}, 0.1f, 0.0f, 1.0f);
+        for (int k = 0; k < 4; ++k, ++t) f.run(t, {1, 1, 1, 1}, xz, {-0.09f, -0.09f, -0.09f, -0.09f}, 0.1f, 0.0f, 1.0f);
+        out1 = f.last;
+        for (int k = 0; k < 5; ++k, ++t) f.run(t, {1, 1, 1, 0}, xz, {-0.09f, -0.09f, -0.09f, -0.05f}, 0.1f, 0.0f, 1.0f);
+        xz[7] += 0.04f;   // leg 3's forward position
+        for (int k = 0; k < 4; ++k, ++t) f.run(t, {1, 1, 1, 1}, xz, {-0.09f, -0.09f, -0.09f, -0.09f}, 0.1f, 0.0f, 1.0f);
+        out2 = f.last;
+        EXPECT_EQ(f.published, 2);
+        return std::make_pair(out1, out2);
+    };
+    auto raw = run_two(false);
+    EXPECT_NEAR(raw.first[1], -0.1, 1e-6); EXPECT_NEAR(raw.second[1], -0.06, 1e-6);
+    auto rel = run_two(true);
+    EXPECT_NEAR(rel.first[1], 0.0, 1e-6); EXPECT_NEAR(rel.first[2], 0.0, 1e-6);
+    EXPECT_NEAR(rel.second[1], 0.04, 1e-6) << "4 cm further forward than this leg's mean";
+    EXPECT_NEAR(rel.second[2], 0.0, 1e-6);
+}

@@ -9968,3 +9968,65 @@ Files: `cpp_core/{include,src}/ogma/modules/EncounterFeatures.*`, `cpp_core/test
 `cpp_core/bench/encounter_replay.cpp`, `pi_host/include/ogma/hw/BrainInputs.hpp` (`ToeCalib`, `BrainTopics::toe_y`),
 `pi_host/src/ogma_host.cpp` (`--toe-y`, `--toe-calib`), `pi_host/tools/dash_run.py`, `picrawler_body.gd`
 (`OGMA_PICRAWLER_TOE_Y`), both `_cs_pf_sl0` configs; replay output `~/xaq_runs/robot_20261101_touch1/encounters.jsonl`.
+
+### 2026-11-02 — THE ENCOUNTER EPM'S CONDITIONING: publishing each touch's position RELATIVE to the leg's own running mean of touch positions (`EncounterFeatures position_relative`, an EMA over 20 touches per leg) lifts the condition separation from NMI 0.35 to 0.44 and the floor-vs-box separation from 0.07 to 0.22 on the same 162 touches; narrowing the dimension ranges HURTS (0.36), and a lower insertion error adds nodes without separation (0.44 at 8 nodes) — `WORKING` (offline replay, n = 1 battery of 3 records; promoted into the three encounter configs)
+
+The lever is §0 rule 2 in its plainest form. Forward and lateral toe position in the body frame differ between
+legs by ±0.1 m, a third of the dimension's range, so the first vocabulary was partly a vocabulary of *which leg*
+touched. Relative to the leg's own mean touch position the same numbers say *how far from its usual spot the toe
+met something*, which is the object's property, not the leg's. The arms, on the week's three records through
+`encounter_replay` (base = the first entry's parameters, the toe-tip channel):
+
+| arm | NMI winner vs condition (chance, p95) | floor vs box | floor vs box TOP (h > 45 mm) | nodes (baked) | node purity |
+|---|---|---|---|---|---|
+| base | 0.346 (0.048, 0.071) | 0.073 | 0.068 | 6 (6) | 0.62 |
+| position relative | **0.444** (0.047, 0.074) | **0.224** | **0.239** | 6 (5) | 0.66 |
+| position relative + insertion error 0.08 | 0.438 (0.063, 0.086) | 0.220 | 0.248 | 8 (7) | 0.66 |
+| position relative + insertion 0.08 + narrowed ranges (h −0.02..0.10, position ±0.10) | 0.363 (0.079, 0.108) | 0.154 | 0.177 | 11 (9) | 0.65 |
+| position relative + narrowed ranges | 0.359 (0.058, 0.088) | 0.159 | 0.166 | 8 (7) | 0.64 |
+| base + insertion error 0.08 | 0.314 (0.085, 0.115) | 0.102 | 0.105 | 12 (12) | 0.64 |
+
+**Reading.** One conditioning change, no new constant, carries the gain; the two tuning knobs do not. Narrowing
+the ranges makes every other dimension louder in the RBF distance and fragments the floor (11 nodes), which is
+what "a small signal on a large spread collapses at the gate" looks like from the other side: the gate is a
+distance in the *scaled* space, so the scaling is the lever, and the scaling that worked is the one that removes a
+nuisance variable rather than one that magnifies the signal. The box tops are now separable from the floor at
+0.24, still the weakest pair; the box's height is a third of the height dimension's range and its current step is
+a tenth of the current dimension's, and both dimensions were sized for the robot's reach rather than for this
+pair. The next conditioning is not a range but a reference: height over the floor from the ToF reads the robot's
+flat floor at 0 ± 10 mm, and on the sim's walking body the same reference wanders ±30 mm with the chassis pitch
+(the boom-mounted ToF, register O73) — the planted feet's plane is the steadier floor while walking, the ToF the
+truer one while sitting. **Promoted:** `position_relative: true` in `_cs_pf_sl0`, `_sim60` and the new
+`_sim60_terrain`; default off in the module, so every other config is byte-identical. Re-use context: the
+insertion error and the ranges stay as they are until a live session shows the vocabulary too coarse or too fine
+for what the consumer needs; a per-foot FSR scale (the right sole reads lower) is the remaining nuisance variable.
+
+### 2026-11-02 — THE TERRAIN PLAN, STEPS 2 AND 3 IN THE SIM: the encounter chain logged on the terrain arena (`_sim60_terrain`, the body's JSONL carries `enc_events`), and the vocabulary's first consumer built — `LiftDescent` PER SITUATION (G4b: `situation_topic` = the encounter EPM's node, held by a 60-tick occupancy; each node its own swing-lift operating point and slope; a trial counts for the node that held 60 % of it) — `IN_FLIGHT` (the first instrument battery, n = 4 × 9000 ticks, met no stall: the walker crosses 12, 18 and 25 mm bands without one; the 24 000-tick varied-world battery that reaches the 38 and 50 mm bands is running)
+
+**Step 2, first battery (n = 4, 9000 ticks, fixed world, ToF floor reference, position centring off).** 3166 touches,
+6–9 m of travel per seed, zero resets, the body's 2 s net-displacement deficit never above 0.5: no stall at 25 mm and
+below, which matches the 2026-10-25 capability map (both walkers stall at 38–50 mm edges). Two instrument facts
+came out of it before any stall was seen. (1) The height-over-floor feature on the WALKING body does not carry the
+band: the flat centre reads h p50 +12 mm, p90 +25 mm, and ring 3 (25 mm steps) reads the same (+12 / +28). The
+floor reference was the belly ToF (`belly_plane_m − clearance`), which on a walking body wanders with the chassis
+pitch (the boom-mounted ToF: register O73) by the same ±15 mm the bands differ by. The terrain instrument now takes
+the planted feet's plane (`belly_plane_m: 0`), which is exact in the sim and is TouchMemory's rule; the robot config
+keeps the ToF for seated palpation, where the body is still. (2) The vertical-fraction feature is in its expected
+walking band (p50 0.17, p90 0.35) and the lean rise is body-wide (p90 0.25–0.30 rad): both are per-footfall
+features in a gait, not per-encounter ones, and will need the stall gate (a touch that happens while the progress
+deficit is high) before they say anything about an obstacle.
+
+**Step 3, the build.** `LiftDescent` gains `situation_topic` (+ `situation_tau_ticks`, `situation_min_occ`,
+`situation_min_frac`, `situation_max`): a `RealityToken` stream whose `winner_id` names the situation; an
+occupancy EMA (τ 60 ticks) turns a per-footfall vocabulary into a context that lasts a stride or more and the body
+switches to a situation's operating point once its occupancy leads at 0.5; each situation keeps its own u, RLS
+slope, residual variance, trial count and annealed dither; the outcome normalisation stays global; a trial is
+attributed to the situation that held most of its measured ticks and discarded under 0.6; a new situation starts
+from the point the body was at; key −1 is the global point and the only one with no topic, so G4a is byte-identical
+(its four tests unchanged; a fifth drives two alternating situations with optima at 1.0 and 2.4 and finds both). In
+the sim (`_sim60_terrain_g4b`, 2200 ticks) the module holds two encounter nodes with four attributed trials and the
+handle dithering, read from its `LIFT_DIAG` line. **Three configs in the launcher:** `_sim60_terrain` (fixed lift,
+the instrument), `_sim60_terrain_g4a` (one operating point: the control that separates "descent at all" from "per
+situation" at 6 rad/s, where the 2026-10-26 null was at 4.22), `_sim60_terrain_g4b` (the lever). **Gate** (the G4
+decision): A/B against the fixed settings on the terrain arena, n ≥ 20 varied worlds, the full battery, and the (d)
+test; nothing is claimed until the long battery says the stall regime is reached and the vocabulary separates it.

@@ -86,3 +86,29 @@ TEST(LiftDescent, AResetDiscardsTheTrial) {
     EXPECT_EQ(w.ld.trials_discarded(), 1);
     EXPECT_EQ(w.ld.trials_valid(), 0);
 }
+
+TEST(LiftDescent, PerSituationPointsFollowTheirOwnOptima_AndNoTopicIsOnePoint) {
+    // G4b: the world alternates between two situations every 3000 ticks, announced by a RealityToken winner (0 / 1).
+    // Situation 0 wants a low front lift (1.0), situation 1 a high one (2.4).  Each point must move toward its own.
+    auto p = fast(); p["situation_topic"] = std::string("reality.touch.encounter"); p["situation_tau_ticks"] = 30.0;
+    World w(p); int sit = 0;
+    w.p_front = [&](double u){ const double opt = sit == 0 ? 1.0 : 2.4; return std::clamp(0.05 + 0.5 * (u - opt) * (u - opt), 0.0, 1.0); };
+    w.p_rear  = [](double u){ return std::clamp(0.05 + 0.5 * (u - 1.5) * (u - 1.5), 0.0, 1.0); };
+    for (uint64_t t = 1; t <= 150000; ++t) {
+        sit = int((t / 3000) % 2);
+        auto rt = std::make_shared<ogma::RealityToken>(); rt->producer_id = "epm"; rt->winner_id = sit;
+        w.bus.publish("reality.touch.encounter", rt);
+        w.step(t);
+    }
+    ASSERT_EQ(w.ld.n_situations(), 2);
+    EXPECT_LT(w.ld.u_of(0, 0), w.ld.u_of(1, 0) - 0.4) << "situation 0 low, situation 1 high";
+    EXPECT_NEAR(w.ld.u_of(0, 0), 1.0, 0.4);
+    EXPECT_NEAR(w.ld.u_of(1, 0), 2.4, 0.5);
+    // without a situation topic the module keeps one point and the token stream is ignored
+    World g(fast()); g.p_front = w.p_front; g.p_rear = w.p_rear;
+    for (uint64_t t = 1; t <= 2000; ++t) {
+        auto rt = std::make_shared<ogma::RealityToken>(); rt->producer_id = "epm"; rt->winner_id = int(t % 2);
+        g.bus.publish("reality.touch.encounter", rt); g.step(t);
+    }
+    EXPECT_EQ(g.ld.n_situations(), 0); EXPECT_EQ(g.ld.situation(), -1);
+}
