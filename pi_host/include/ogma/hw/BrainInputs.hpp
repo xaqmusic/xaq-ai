@@ -22,6 +22,7 @@
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -187,6 +188,37 @@ struct BodyCalib {
     }
 };
 
+// The per-leg floor calibration of the toe tip (pi_host/tools/toe_floor_calib.py, pi_host/calib/toe_height_calib.json):
+// y_true = y_fk + a + b*knee + c*hip1, fitted on palpate floor passes against the belly-on-floor anchor.  Physical legs
+// in the file; SIM order here (sim fl = physical FR).  Absent = zeros = the raw toe.
+struct ToeCalib {
+    std::array<double, 4> a{}, b{}, c{};   // metres, metres/rad of knee, metres/rad of hip1, sim leg order
+    bool   loaded = false;
+    std::string why;
+    double apply(int sim_leg, double hip1, double knee) const {
+        return a[size_t(sim_leg)] + b[size_t(sim_leg)] * knee + c[size_t(sim_leg)] * hip1;
+    }
+    static ToeCalib from_json(const nlohmann::json& j) {
+        ToeCalib t;
+        static const std::map<std::string, int> sim_of = {{"FR", 0}, {"FL", 1}, {"RR", 2}, {"RL", 3}};
+        try {
+            for (auto const& [ph, e] : j.at("legs").items()) {
+                auto it = sim_of.find(ph); if (it == sim_of.end()) continue;
+                t.a[size_t(it->second)] = e.value("a_mm", 0.0) / 1000.0;
+                t.b[size_t(it->second)] = e.value("b_mm_per_rad_knee", 0.0) / 1000.0;
+                t.c[size_t(it->second)] = e.value("c_mm_per_rad_hip1", 0.0) / 1000.0;
+            }
+            t.loaded = true;
+        } catch (const std::exception& e) { t.why = e.what(); }
+        return t;
+    }
+    static ToeCalib load(const std::string& path) {
+        std::ifstream f(path);
+        if (!f) { ToeCalib t; t.why = "cannot read " + path; return t; }
+        try { return from_json(nlohmann::json::parse(f)); } catch (const std::exception& e) { ToeCalib t; t.why = e.what(); return t; }
+    }
+};
+
 // The sim's `joints` normalisation (picrawler_body.gd, the honest_joints branch), from
 // angles indexed leg*3 + joint to the topic's joint-major order.  Clamped to ±1, as the
 // sim clamps.  Note the knee saturates above KNEE_REST + 1 rad, exactly as in the sim.
@@ -332,6 +364,11 @@ struct BrainTopics {
     std::array<float, 4>  feet_y_gravity_cmd_imu{};
     std::array<float, 8>  feet_jac{};          // feet_lift_gain at the commanded pose (published with --feet-jac)
     std::array<float, 8>  feet_xz{};           // each toe's [x, z] in the chassis rest frame, commanded pose (--feet-xz)
+    // The TOE TIP's height along the fused up vector, body origin 0, commanded pose, with the per-leg floor calibration
+    // applied (--toe-y).  This is NOT feet_y_gravity_cmd_imu: that channel is the sim-parity "foot" (the shank's centre
+    // minus half a shank, StrideOdometry::feet_y_gravity), which sits below the real toe by a pose-dependent amount of up
+    // to l3/2 (43 mm) -- right for the gait's planted-leg rule, wrong for a touch's height.  Touch consumers read this one.
+    std::array<float, 4>  toe_y{};
     float distress = 0.0f;
     float upright  = 1.0f;
     bool  fsr_stale = false;                // fsr_ok was false: foot values are the last good ones
@@ -403,6 +440,8 @@ public:
         for (int i = 0; i < 4; ++i) {
             const Vec3f toe_c = body_.toe_body(i, cmd[size_t(i * 3 + 0)], cmd[size_t(i * 3 + 1)], cmd[size_t(i * 3 + 2)]);
             t.feet_xz[size_t(2 * i)] = toe_c.x; t.feet_xz[size_t(2 * i + 1)] = toe_c.z;
+            // The toe tip along gravity, calibrated (BrainTopics::toe_y) -- the frame the floor calibration was fitted in.
+            t.toe_y[size_t(i)] = float(double(toe_c.dot(up)) + toe_calib_.apply(i, cmd[size_t(i * 3 + 0)], cmd[size_t(i * 3 + 2)]));
         }
         t.upright = up.y;
 
@@ -449,6 +488,8 @@ public:
     // place_in's x/y normaliser (the room's half-size plus a margin; the sim's odom_scale_m).
     void set_cmd_fk(bool on) { cmd_fk_ = on; }
     bool cmd_fk() const { return cmd_fk_; }
+    void set_toe_calib(const ToeCalib& c) { toe_calib_ = c; }
+    const ToeCalib& toe_calib() const { return toe_calib_; }
         void set_odom_scale(double s) { odom_scale_ = s > 0.1 ? s : 0.1; }
     // Re-anchor the odom frame at the current pose (the sim does this on a hard reset).
     void reset_odom() { odom_.reset(); yaw_anchor_ = yaw_unwrapped_; }
@@ -467,6 +508,7 @@ private:
     FsrModel     fsr_;
     double       us_per_rad_;
     bool         cmd_fk_ = false;
+    ToeCalib     toe_calib_;          // zeros unless the host loads one (--toe-y)
     ogma::body::ServoForwardModel   lag_;
     ogma::body::StrideV             sv_;
     ogma::body::DistressAccumulator dist_;

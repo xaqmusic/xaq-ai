@@ -1693,6 +1693,11 @@ var publish_feet_jac: bool = false
 # commanded (slew-limited) pose, [x, z] x 4 on reality.proprio.feet_xz — egocentric (the robot knows its commands and its
 # geometry).  Read by LoadPhaseGait's support-gated lift-off.  Off = not published.
 var publish_feet_xz: bool = false
+# The toe TIP's height along the fused gravity, body origin 0, commanded pose, [4] on reality.proprio.toe_y -- the touch
+# modules' height (TouchMemory, EncounterFeatures).  Distinct from feet_y_gravity_cmd_imu, the sim-parity "foot" (shank
+# centre minus half a shank) the gait reads, which sits below the toe by up to L3/2 depending on the pose.  ogma_host
+# --toe-y publishes the same, with the robot's per-leg floor calibration applied; the sim needs none.
+var publish_toe_y: bool = false
 const _US_AZ_DEG: Array = [-7.5, -3.75, 0.0, 3.75, 7.5]   # the ~15 deg lobe, 5 x 3 rays
 const _US_EL_DEG: Array = [-5.0, 0.0, 5.0]
 var _us_range: float = 1.5
@@ -3352,6 +3357,9 @@ func _ready() -> void:
 	if publish_feet_xz:
 		brain.register_source("FeetXz", "reality.proprio.feet_xz",
 			"float32[8]: per leg [x, z] (m) of the toe in the chassis rest frame at the commanded pose — the support polygon LoadPhaseGait's lift-off gate reads.", true)
+	if publish_toe_y:
+		brain.register_source("ToeY", "reality.proprio.toe_y",
+			"float32[4]: per leg height (m) of the toe TIP along the fused gravity, body origin 0, commanded pose — the touch modules' height (ogma_host --toe-y publishes the same, calibrated).", true)
 	if publish_feet_jac:
 		brain.register_source("FeetJac", "reality.proprio.feet_jac",
 			"float32[8]: per leg [d depth/d hip2, d depth/d knee] (m per rad) at the commanded pose along the fused gravity — the lift gains the kinematics-aware press reads (ogma_host --feet-jac publishes the same).", true)
@@ -3781,7 +3789,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
-			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_ROOM_SIZE",
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
 			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
@@ -3832,6 +3840,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_US_DEADZONE":       ultrasonic_deadzone_m = maxf(0.0, v.to_float())
 			"OGMA_PICRAWLER_FEET_JAC":          publish_feet_jac  = (v != "0" and v != "")
 			"OGMA_PICRAWLER_FEET_XZ":           publish_feet_xz   = (v != "0" and v != "")
+			"OGMA_PICRAWLER_TOE_Y":             publish_toe_y     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ROOM_SIZE":         room_size         = clampf(v.to_float(), 1.0, 18.0)
 			"OGMA_PICRAWLER_CAMERA_ROBOT":      camera_robot      = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ODOM":              publish_odom      = (v != "0" and v != "")
@@ -7816,12 +7825,18 @@ func _step_one() -> void:
 		brain.publish_proprio(imu_arr, "feet_y_gravity_cmd_imu")
 		# The touch cloud's inputs, at the same commanded pose: the toe heights above and the toes'
 		# [x, z] in the rest frame (what the brain's TouchMemory reads from feet_xz / feet_y_gravity_cmd_imu).
-		_touch_feet_y = imu_arr
 		_touch_feet_xz.resize(8)
+		var toe_arr := PackedFloat64Array()
 		for i in range(4):
 			var tb: Vector3 = rest_inv * (_fk_leg(i, _cmd_angle(i, 0), _cmd_angle(i, 1), _cmd_angle(i, 2))[2] * _toe_off_c[i])
 			_touch_feet_xz[2 * i] = tb.x
 			_touch_feet_xz[2 * i + 1] = tb.z
+			toe_arr.append(tb.dot(_up_est_body))
+		if publish_toe_y:
+			brain.publish_proprio(toe_arr, "toe_y")
+		# The twin's cloud reads the same height the brain's TouchMemory does: the toe tip when toe_y is published,
+		# else the parity foot.
+		_touch_feet_y = toe_arr if publish_toe_y else imu_arr
 		if publish_feet_jac:
 			# Lift gains at the slew-limited commanded pose (what the robot's driver knows), by finite difference on
 			# the shared FK — BrainInputs feet_lift_gain's numbers.

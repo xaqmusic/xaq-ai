@@ -314,6 +314,8 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
             flags.append("--feet-xz")          # toe positions for the support-gated lift-off (2026-10-26)
         if str(be.get("OGMA_PICRAWLER_CMD_FK_SOURCE", "")) == "1":
             flags.append("--cmd-fk")           # the commanded-FK corner sensor (gait audit 2026-10-13)
+        if str(be.get("OGMA_PICRAWLER_TOE_Y", "")) == "1":
+            flags.append("--toe-y")            # the calibrated toe tip's height for the touch modules (2026-11-02)
         out.append(ConfigEntry(file=f, path=p, name=str(md.get("name", f)),
                                faithful=str(be.get("OGMA_PICRAWLER_HONEST_JOINTS", "")) == "1",
                                phase=str(md.get("phase_tag", "")), speed_rad_s=spd,

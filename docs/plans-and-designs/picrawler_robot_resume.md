@@ -112,14 +112,24 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   Box pass (2026-11-02): the 60 mm box reads 57.5 ± 4.6 mm above each leg's own floor; a face push shows as current
   (0.6–0.8 A) before the sole; knee B needs `--lift`. **The per-leg floor calibration is done** (`toe_floor_calib.py`
   → `pi_host/calib/toe_height_calib.json`, from `toes_up` with all four legs): one floor at −29 ± 1 mm on every leg,
-  the box 61.7 ± 2.6 mm; applied in the reader, the bench twin and `_cs_pf_sl0`'s TouchMemory offsets (the Pi's
-  ogma_host must be rebuilt for the new params). Pillow pass: 10/10 contacts at 62 ± 7 mm (box 62 ± 3), no current step; compliance over 120 µs separates on FL only —
+  the box 61.7 ± 2.6 mm; applied in the reader, the bench twin and, since the encounter EPM, in ogma_host's `toe_y`
+  channel (the TouchMemory offsets it was first written into were in the wrong frame — below). Pillow pass: 10/10 contacts at 62 ± 7 mm (box 62 ± 3), no current step; compliance over 120 µs separates on FL only —
   `PARTIAL` as a sole measurement; the deep press (400 µs ≈ 70 mm) settled it: compliance is in the BODY's response —
   current per commanded mm 0.045 A (box) vs 0.004 (pillow), lift 0.65 vs 0.15 mm/mm — `WORKING`; the sole is blind to it;
   `palpate.py` now has a lean guard (12°). **The horizontal probe** (`palpate_face.py --cond wall`): the sole FINDS a
   wall face on a forward advance (4/4 probes at 150–154 mm reach, 4–15 mm before the sonar's wall); it floor-touches
-  at the start for its own height and reads the sonar for its travel. Next: the encounter EPM over (height, spread,
-  current step, current and lift per mm, sole-vs-current on approach); the
+  at the start for its own height and reads the sonar for its travel. **The encounter EPM** (ledger 2026-11-02, last
+  entry): `EncounterFeatures` (ten features per contact: height over the floor, position, sole load, the current's
+  rise before and after, belly and lean rise, sonar, vertical fraction) → `EPM` (touch/encounter) → `BeliefFilter`,
+  in `_cs_pf_sl0` and `_sim60`, consumed by nothing yet; replayed offline over the week's records
+  (`cpp_core/bench/encounter_replay servo_map body_calib toe_height_calib benchd.jsonl...`): six nodes, condition
+  separation NMI 0.35 vs 0.05 chance; the pillows on one node, the wall on one, the box tops NOT split from the floor
+  (the conditioning lever next). **A frame defect fixed with it:** the brain's touch height had been the gait's parity
+  foot (up to 43 mm below the toe tip); the new channel `reality.proprio.toe_y` (ogma_host `--toe-y`, the floor
+  calibration applied in the host; the sim under `OGMA_PICRAWLER_TOE_Y`) is what both touch modules read now, and the
+  TouchMemory offsets are gone. **The Pi's ogma_host must be rebuilt** before the next robot run of `_cs_pf_sl0`
+  (the config now asks for `--toe-y` and the three new modules). Next: a live session with the sonar through ogma_host,
+  compare the brain's cloud to the twin's at the toe height, see whether the six nodes reappear; then the consumer. The
   front hip2 origin shifts (+49 µs P4, −62 µs P10) are a servo-map lever for a gait A/B, not applied. `touch_ready` leaves the FR toe on the floor (~300 g).
 - **Before climbing: the belly ToF's pitch compensation** ([register O73](open_items_register.md)). The brain reads the
   uncompensated clearance; a pitched chassis reads as a changed height to the stance press and the learned stance

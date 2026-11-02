@@ -23,6 +23,7 @@
 #include "ogma/modules/TofAvoidLoop.hpp"
 #include "ogma/modules/ProxMemory.hpp"
 #include "ogma/modules/TouchMemory.hpp"
+#include "ogma/modules/EncounterFeatures.hpp"
 #include "ogma/modules/BearingToIntent.hpp"
 #include "ogma/modules/StuckSense.hpp"
 #include "ogma/modules/LoadPhaseGait.hpp"
@@ -157,6 +158,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("TofAvoidLoop",          [](){ return std::make_unique<TofAvoidLoop>(); });         // duck §17.6: avoidance as a loop with a bearing
         reg.register_type("ProxMemory",            [](){ return std::make_unique<ProxMemory>(); });           // picrawler S3: the duck's proximity slots from a single beam + odom
         reg.register_type("TouchMemory",           [](){ return std::make_unique<TouchMemory>(); });          // picrawler palpation (2026-11-01): the cloud of touches from the toes' FK, an instrument
+        reg.register_type("EncounterFeatures",     [](){ return std::make_unique<EncounterFeatures>(); });    // palpation stage 1 (2026-11-02): one vector per touch, the encounter vocabulary\'s input
         reg.register_type("BearingToIntent",       [](){ return std::make_unique<BearingToIntent>(); });      // picrawler S3: a loop's bearing -> goal bearing + speed, holding a reference when silent
         reg.register_type("StuckSense",            [](){ return std::make_unique<StuckSense>(); });           // picrawler S3 lever 2: the range beam as re-afference against the stride's efference
         reg.register_type("LoadPhaseGait",         [](){ return std::make_unique<LoadPhaseGait>(); });        // picrawler gait audit 2026-10-12: a per-leg phase the leg's own load holds (Tegotae)

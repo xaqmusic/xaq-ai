@@ -135,6 +135,10 @@ struct Args {
     // it from body_env OGMA_PICRAWLER_FEET_JAC, as the sim reads it.  Off = not published.
     bool   feet_jac = false;
     bool   feet_xz  = false;   // toe positions on reality.proprio.feet_xz, for LoadPhaseGait's support-gated lift-off
+    // The toe tip's height along gravity, calibrated per leg, on reality.proprio.toe_y (BrainTopics::toe_y) -- what the
+    // touch modules read (TouchMemory, EncounterFeatures).  The dash passes it from body_env OGMA_PICRAWLER_TOE_Y.
+    bool        toe_y     = false;
+    std::string toe_calib = "pi_host/calib/toe_height_calib.json";
 };
 
 void usage() {
@@ -149,6 +153,8 @@ void usage() {
         "  --dump-actions prints the brain's raw action targets every tick (u and target us, before benchd's slew)\n"
         "  --feet-jac publishes each leg's lift gain [d depth/d hip2, d depth/d knee] x 4 on reality.proprio.feet_jac\n"
         "  --feet-xz publishes each toe's [x, z] (m, chassis frame, commanded pose) x 4 on reality.proprio.feet_xz\n"
+        "  --toe-y [--toe-calib pi_host/calib/toe_height_calib.json] publishes each toe TIP's height along gravity (m, body origin,\n"
+        "    commanded pose, the per-leg floor calibration applied) x 4 on reality.proprio.toe_y -- the touch modules' height\n"
         "  --range-deadzone M publishes a valid range closer than M metres as no-echo (leg occlusion); 0 = off\n"
         "  --cmd-fk publishes feet_y_gravity_cmd_imu from the COMMANDED pose (the sim's CMD_FK_SOURCE=1) instead of the zero pose\n"
         "    from stride_v; both need --brain-inputs and are what the sim's OGMA_PICRAWLER_ODOM / _HONEST_VEL_EGO publish\n"
@@ -204,6 +210,8 @@ int main(int argc, char** argv) {
         else if (v == "--range-deadzone" && i + 1 < argc) a.range_deadzone_m = std::atof(argv[++i]);
         else if (v == "--feet-jac")                    a.feet_jac = true;
         else if (v == "--feet-xz")                     a.feet_xz = true;
+        else if (v == "--toe-y")                       a.toe_y = true;
+        else if (v == "--toe-calib" && i + 1 < argc)   a.toe_calib = argv[++i];
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
@@ -541,6 +549,16 @@ int main(int argc, char** argv) {
             builder->set_odom_scale(a.odom_scale);
             builder->set_cmd_fk(a.cmd_fk);
             if (a.cmd_fk) std::printf("ogma_host: feet_y_gravity_cmd_imu from the COMMANDED pose (--cmd-fk)\n");
+            if (a.toe_y) {
+                const auto tc = ogma::hw::brain::ToeCalib::load(a.toe_calib);
+                if (tc.loaded) {
+                    builder->set_toe_calib(tc);
+                    std::printf("ogma_host: toe_y ON, floor calibration %s (a mm, sim order fl fr rl rr: %.1f %.1f %.1f %.1f)\n",
+                                a.toe_calib.c_str(), tc.a[0] * 1e3, tc.a[1] * 1e3, tc.a[2] * 1e3, tc.a[3] * 1e3);
+                } else {
+                    std::printf("ogma_host: toe_y ON, UNCALIBRATED (%s: %s)\n", a.toe_calib.c_str(), tc.why.c_str());
+                }
+            }
             if (a.range_deadzone_m > 0.0) std::printf("ogma_host: range deadzone %.3f m (closer valid readings published as no-echo)\n", a.range_deadzone_m);
             if (a.odom || a.vel_ego)
                 std::printf("ogma_host: S1 senses — odom %s (place_in scale %.1f m), vel_ego %s\n",
@@ -1047,6 +1065,7 @@ int main(int argc, char** argv) {
                     pub("feet_y_gravity_cmd_imu", t.feet_y_gravity_cmd_imu.data(), t.feet_y_gravity_cmd_imu.size());
                     if (a.feet_jac) pub("feet_jac", t.feet_jac.data(), t.feet_jac.size());
                     if (a.feet_xz)  pub("feet_xz", t.feet_xz.data(), t.feet_xz.size());
+                    if (a.toe_y)    pub("toe_y", t.toe_y.data(), t.toe_y.size());
                     pub("distress", &t.distress, 1);
                     if (a.odom) {
                         pub("ego_heading", &t.ego_heading, 1);
@@ -1066,7 +1085,7 @@ int main(int argc, char** argv) {
                             {"gyro", v(t.gyro.data(), 3)}, {"stride_v", v(t.stride_v.data(), 2)},
                             {"foot_contact", v(t.foot_contact.data(), 4)},
                             {"foot_load", v(t.foot_load.data(), 4)},
-                            {"feet_y", v(t.feet_y_gravity_cmd_imu.data(), 4)},
+                            {"feet_y", v(t.feet_y_gravity_cmd_imu.data(), 4)}, {"toe_y", v(t.toe_y.data(), 4)},
                             {"distress", t.distress}, {"upright", t.upright}, {"servo_i", bi_servo_i},
                             {"odom", v(t.odom.data(), 3)}, {"vel_ego", v(t.vel_ego.data(), 2)},
                             {"fsr_raw", bi_in.fsr}, {"us", bi_in.us}};

@@ -9890,3 +9890,81 @@ way:** the station sign, the start height, the IK's seeds and limit check, a 100
 500 µs limit lifting the toe at 100 mm). Re-use context: a second pass with heights to 80 mm to see the sole's
 angle dependence; the box face (the sole may not reach a 60 mm face at 40 mm up); the encounter EPM now has both
 rules' signatures.
+
+### 2026-11-02 — THE ENCOUNTER EPM (`EncounterFeatures` → `EPM` → `BeliefFilter`, replayed over the week's three bench records by `cpp_core/bench/encounter_replay`): 339 touches, 162 on the probed leg across five conditions; the EPM's winners carry the condition at NMI 0.35 against a shuffled-label chance of 0.05 (p95 0.07) with six baked nodes — the pillows gather on one node (43 of 49), the floor on two (62 of 74), the wall on one with the deep presses — AND A FRAME DEFECT FOUND ON THE WAY: the brain's touch height was never the toe (the gait's parity foot sits up to 43 mm below it), fixed by a new channel `reality.proprio.toe_y` carrying the calibrated toe tip — `WORKING` as an instrument (offline; n = 1 replay of 3 records; nothing consumes the belief yet)
+
+**The defect first, because it changes every number above it.** `TouchMemory` and the first version of
+`EncounterFeatures` read `reality.proprio.feet_y_gravity_cmd_imu` for a toe's height. That channel is the sim's
+parity foot (`StrideOdometry::feet_y_gravity`: the shank's centre along gravity minus half a shank), right for the
+planted-leg rule it was built for and wrong for a touch: it sits below the real toe tip by `l3/2 · (1 − sin τ)` of
+the shank's tilt, 0.7 mm at the zero pose and up to 43 mm with the shank horizontal — the palpation knee. The
+week's floor calibration was fitted on the true toe (`touch_session.py`'s `toe_body`), and its constants were then
+written into TouchMemory's offsets, a correction in one frame applied in another. On the replay the box top read
+26 mm above the floor through the parity channel and 61 mm in the reader. The fix is a channel, not a constant:
+`ogma_host --toe-y` publishes each toe tip's height along the fused up vector, body origin 0, with
+`toe_height_calib.json` applied in the host (`BrainInputs::ToeCalib`: the constant, the knee term and the hip1
+term, physical → sim order); the sim publishes the same under `OGMA_PICRAWLER_TOE_Y=1` with no calibration; both
+touch modules take `feet_y_topic: reality.proprio.toe_y` in `_cs_pf_sl0` and `_sim60`, and the TouchMemory
+offsets are removed. Through the new channel the replay reads the floor at 0 ± 10 mm (74 touches, all four legs,
+both poses), the box at 53 (the median over top contacts and face drags; the clean tops 60–66), the pillows at
+66 and 69 and the wall's four stops between 2 and 84 mm up. The gait reads nothing from either channel's touch
+consumers; the sim pair on `_sim60` (seed 7, 1500 ticks) is the gain-0 record below.
+
+**The features** (`sense.touch_encounter`, ProprioToken[10], one per contact rising edge, after a 25-tick window):
+height over the floor (the belly plane −29 mm minus the ToF clearance when the ToF reads, else the planted feet's
+plane), the toe's forward and lateral position, the sole's peak load, the bus current's rise before and after the
+onset (the vertical probe's "current first" rule), the belly's rise and the lean's rise over the window (the deep
+press's compliance signature), the sonar's range (−1 when it has none; constant −1 in every record here, the bench
+never ran the sonar through ogma_host while palpating), and the fraction of the toe's pre-onset travel that was
+vertical (the horizontal probe's "sole first" rule). Each is read from the channels the robot already publishes
+plus the toe tip above; the module holds no thresholds beyond the contact edge it already shares with TouchMemory.
+
+| condition | n | height (m) | fwd | load peak | ΔI pre | ΔI post | belly rise | lean rise | vertical fraction |
+|---|---|---|---|---|---|---|---|---|---|
+| floor (both poses, 4 legs) | 74 | 0.000 | 0.03 | 0.15 | 0.02 | 0.07 | 0.002 | 0.010 | 0.72 |
+| box 60 mm (tops + face drags) | 25 | 0.040 | 0.10 | 0.04 | 0.09 | 0.14 | 0.003 | 0.026 | 0.65 |
+| pillow, 120 µs | 17 | 0.067 | 0.11 | 0.03 | 0.03 | 0.02 | 0.001 | 0.018 | 0.54 |
+| pillow, 400 µs | 32 | 0.068 | 0.11 | 0.03 | 0.02 | 0.03 | 0.001 | 0.017 | 0.56 |
+| wall (horizontal probe) | 14 | 0.032 | 0.11 | 0.04 | 0.01 | 0.07 | 0.002 | 0.004 | 0.52 |
+
+The table says what the week's passes said, now in one vector: the box is the only condition that raises the
+current before the sole fires (0.09 A) and the most after it; the pillows carry the box's height with a fifth of
+its current; the floor is low, loaded and vertical; the wall is approached nearly level with no current. The
+sonar column is empty, so the one feature that would separate "something ahead" from "nothing ahead" before any
+touch is untested — the first thing a live run adds.
+
+**The EPM** (RBF encoder over the ten features scaled by `dim_min/max`, 32 nodes, baking 3, insertion error
+0.12, the tick-based stale prune OFF because minutes pass between touches): six nodes, all baked, after 339
+events. Winner against condition on the probed leg, NMI 0.346; 300 label shuffles give 0.048 ± (p95 0.071).
+Per node: node 0 is the floor and the box tops (47 floor, 18 box), node 1 the floor (15 of 18), node 2 the soft
+things (43 of 49 pillow presses, with 6 box face-drags and 6 floor taps), node 3 the floor only, node 4 the wall
+with three deep presses (7 of 10). The BeliefFilter over those nodes ran at entropy 0.22 nats mean. **What
+separates and what does not:** soft vs hard is in the vocabulary (node 2 vs node 0), the floor vs an object is in
+it (nodes 1, 3 vs 0, 2), the wall is its own node on the horizontal approach; the box's tops are NOT split from
+the floor — both are "hard, low current until pressed" and the box's 4 cm of height is a third of the height
+dimension's range, inside one RBF node at this insertion error. That is the §0 rule 2 case (a small signal on a
+larger spread collapses at the gate) and the next conditioning lever: the floor's height is the belly ToF's own
+reading and could be centred out, or the height dimension narrowed to the reachable 0–0.09 m.
+
+**What this is and is not.** An instrument that turns the week's hand-read signatures into a learned vocabulary
+with a per-event confidence, measured once, offline, over records whose conditions were set by the operator —
+a `WORKING` instrument and not a behaviour; no module reads `reality.touch.encounter` or the belief yet. The
+admission gate it passed is separation above chance by seven times at n = 162. The gate it has not faced is live:
+the same modules in `_cs_pf_sl0` on the robot, the sonar wired, the twin and the brain clouds agreeing (the bench
+dashboard now shows the brain's cloud at the toe's height). **Re-use context:** the next lever is the consumer —
+a progress-deficit loop that, stuck, palpates and routes on this belief (the plan's arbitration) — and it is only
+worth building once a live session reproduces the six nodes. **Live in the sim** (`_sim60`, 4000 ticks on the flat room floor, read through the control port's
+`module_snapshot`): the chain ticks — the EPM held 6 nodes at 25 s and 8 at 40 s with its error moving (EMA 0.37) —
+on touches that are all "floor". Eight nodes for one surface is the position features at work: forward and lateral
+toe position differ per leg by ±0.1 m, a third of their range, so the vocabulary is partly a vocabulary of *which
+leg*, not *what was touched* — the second conditioning lever (centre the position per leg, or weight it down; §0
+rule 2 again). The body's JSONL shows this EPM at winner −1 and TLE 0 on most rows because an event-rate EPM has no
+input on most ticks; read its snapshot, not the per-tick row. **Fixed on the way:** the node count read from the
+wrong diag (`diag_snapshot` has no `nodes`; `diag_lite` does); the EPM's stale prune was eating event-rate nodes
+between touches; the `EncounterFeatures` height now uses the ToF floor when it reads (`belly_plane_m`, 0 = never);
+the sim's body_env allowlist had to admit `OGMA_PICRAWLER_TOE_Y` (a key not on that list is silently dropped — the
+first gain-0 run logged 0 brain touches and said so).
+Files: `cpp_core/{include,src}/ogma/modules/EncounterFeatures.*`, `cpp_core/tests/ogma/test_encounter_features.cpp`,
+`cpp_core/bench/encounter_replay.cpp`, `pi_host/include/ogma/hw/BrainInputs.hpp` (`ToeCalib`, `BrainTopics::toe_y`),
+`pi_host/src/ogma_host.cpp` (`--toe-y`, `--toe-calib`), `pi_host/tools/dash_run.py`, `picrawler_body.gd`
+(`OGMA_PICRAWLER_TOE_Y`), both `_cs_pf_sl0` configs; replay output `~/xaq_runs/robot_20261101_touch1/encounters.jsonl`.

@@ -29,7 +29,7 @@
    "height_homeostat",
    "panic"
   ],
-  "note": "2026-10-31. Same relation to _cs_pf_sl0 as sim_s60_p30 has to robot_p1: MAX_SERVO_SPEED 4.22 -> 6.0, period_ticks 50 -> 30, no US_DEADZONE. | 2026-11-01: + TouchMemory (touch_memory), an INSTRUMENT: the cloud of touches from the toes' commanded FK at each contact onset, carried by the odometry; publishes nothing, so the gait is byte-identical (checked seed 1 x 1500, corridor).",
+  "note": "2026-10-31. Same relation to _cs_pf_sl0 as sim_s60_p30 has to robot_p1: MAX_SERVO_SPEED 4.22 -> 6.0, period_ticks 50 -> 30, no US_DEADZONE. | 2026-11-01: + TouchMemory (touch_memory), an INSTRUMENT: the cloud of touches from the toes' commanded FK at each contact onset, carried by the odometry; publishes nothing, so the gait is byte-identical (checked seed 1 x 1500, corridor). 2026-11-02 encounter EPM: TouchMemory reads the toe TIP (reality.proprio.toe_y, ogma_host --toe-y with the floor calibration; the sim publishes it under OGMA_PICRAWLER_TOE_Y) instead of the gait's parity foot; EncounterFeatures -> EPM (touch/encounter) -> BeliefFilter added, nothing consumes them yet (instrument). Gain-0: the gait is unchanged.",
   "body": "measured_fsr",
   "gym_difficulty": 0.3,
   "body_env": {
@@ -51,7 +51,8 @@
    "OGMA_PICRAWLER_ODOM_SCALE": "2.0",
    "OGMA_PICRAWLER_HONEST_VEL_EGO": "1",
    "OGMA_PICRAWLER_PUBLISH_TILT": "1",
-   "OGMA_PICRAWLER_FEET_JAC": "1"
+   "OGMA_PICRAWLER_FEET_JAC": "1",
+   "OGMA_PICRAWLER_TOE_Y": "1"
   },
   "derived_from": "the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0.json"
  },
@@ -641,12 +642,73 @@
    "params": {
     "contact_topic": "reality.proprio.foot_contact",
     "feet_xz_topic": "reality.proprio.feet_xz",
-    "feet_y_topic": "reality.proprio.feet_y_gravity_cmd_imu",
+    "feet_y_topic": "reality.proprio.toe_y",
     "odom_topic": "reality.proprio.odom",
     "load_topic": "reality.proprio.foot_load",
     "voxel_m": 0.02,
     "max_voxels": 4000,
     "diag_max": 400
+   }
+  },
+  {
+   "id": "encounter",
+   "type": "EncounterFeatures",
+   "params": {
+    "feet_y_topic": "reality.proprio.toe_y",
+    "load_topic": "reality.proprio.foot_load",
+    "pre_ticks": 15,
+    "post_ticks": 25,
+    "belly_plane_m": -0.029
+   }
+  },
+  {
+   "id": "epm_encounter",
+   "type": "EPM",
+   "params": {
+    "modality_group": "touch",
+    "modality_name": "encounter",
+    "encoder_kind": "rbf",
+    "input_topic": "sense.touch_encounter",
+    "projection_dim": 48,
+    "proprio_state_dims": 10,
+    "max_nodes": 32,
+    "baking_threshold": 3,
+    "min_insertion_error": 0.12,
+    "subtract_descending_prediction": false,
+    "stale_prune_enabled": false,
+    "dim_min": [
+     -0.03,
+     -0.1,
+     -0.25,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     -1.0,
+     0.0
+    ],
+    "dim_max": [
+     0.09,
+     0.25,
+     0.25,
+     0.6,
+     0.8,
+     0.8,
+     0.03,
+     0.4,
+     1.5,
+     1.0
+    ]
+   }
+  },
+  {
+   "id": "belief_encounter",
+   "type": "BeliefFilter",
+   "params": {
+    "reality_topic": "reality.touch.encounter",
+    "obs_topic": "sense.touch_encounter",
+    "min_count": 2
    }
   }
  ],

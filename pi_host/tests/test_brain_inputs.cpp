@@ -164,6 +164,36 @@ TEST(BrainBodyCalib, ToesAtTheWalkingPoseFormASquareAroundTheChassisCentreAndHip
     EXPECT_GT(std::fabs(t1.z - t0[0].z), 0.01) << "hip1 swings the toe fore or aft";
 }
 
+TEST(BrainBodyCalib, ToeTipHeightIsNotTheParityFootAndTheCalibrationLandsInSimOrder) {
+    // The touch modules' height (reality.proprio.toe_y, 2026-11-02) is the toe TIP along gravity; the gait's channel
+    // (feet_y_gravity_cmd_imu) is the shank centre minus half a shank.  At the zero pose the shank hangs along the
+    // lower_leg_drop_angle, so the two differ; the difference is bounded by l3/2.
+    const auto b = real_body();
+    ASSERT_TRUE(b.ok) << b.why;
+    const Vec3f up(0.0f, 1.0f, 0.0f);
+    std::array<double, 12> zero{};
+    const auto parity = feet_y_gravity_cmd_fk(b, zero, up);
+    for (int i = 0; i < 4; ++i) {   // zero pose: the shank hangs near vertical, the two nearly agree (< 1 mm)
+        const double tip = double(b.toe_body(i, 0.0, 0.0, 0.0).dot(up));
+        EXPECT_LE(std::fabs(tip - double(parity[size_t(i)])), 2e-3) << "leg " << i;
+    }
+    std::array<double, 12> bent{};              // the palpation knee (the femur at 90 deg to the tibia): the shank tilts
+    for (int i = 0; i < 4; ++i) bent[size_t(i * 3 + 2)] = 0.9;
+    const auto parity_bent = feet_y_gravity_cmd_fk(b, bent, up);
+    for (int i = 0; i < 4; ++i) {
+        const double tip = double(b.toe_body(i, 0.0, 0.0, 0.9).dot(up));
+        EXPECT_GT(std::fabs(tip - double(parity_bent[size_t(i)])), 5e-3) << "leg " << i;
+        EXPECT_LE(std::fabs(tip - double(parity_bent[size_t(i)])), b.l3 * 0.5 + 1e-6) << "leg " << i;
+    }
+    // The calibration file: physical legs, read into sim order (sim fl = physical FR).
+    const auto tc = ToeCalib::load(kSrc + "/calib/toe_height_calib.json");
+    ASSERT_TRUE(tc.loaded) << tc.why;
+    EXPECT_NEAR(tc.a[0], -9.56e-3, 1e-6);   // sim fl = physical FR
+    EXPECT_NEAR(tc.a[1],  7.10e-3, 1e-6);   // sim fr = physical FL
+    EXPECT_NEAR(tc.apply(0, 0.5, 1.0), (-9.56 + 8.84 * 1.0 - 2.07 * 0.5) * 1e-3, 1e-6);
+    EXPECT_NEAR(ToeCalib{}.apply(2, 0.3, -1.6), 0.0, 1e-12);   // absent = the raw toe
+}
+
 TEST(BrainJoints, NormalisationMatchesTheSimAndIsJointMajor) {
     const BodyCalib b = real_body();
     ASSERT_TRUE(b.ok) << b.why;

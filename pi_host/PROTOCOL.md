@@ -276,12 +276,25 @@ draws two clouds in the twin's chassis frame and `[X]` hides them:
   changes after it count. `clear touches` or `[C]` empties it (the brain's cloud is the module's own state and stays). No robot-side change; it exists whenever the dashboard does.
 - **lavender — the brain's**: `TouchMemory`'s diag, read from ogma_host's control port (`list_modules` once, then
   `module_diag` at ~3 Hz on the same worker thread as `host_sensors`), present when the running config carries the
-  module (`_cs_pf_sl0` does). Its heights are relative to its support plane; the diag's `plane_y` places them.
+  module (`_cs_pf_sl0` does). Its heights are relative to its support plane; the diag's `plane_y` places them. Since
+  2026-11-02 its toe height is `reality.proprio.toe_y` — the toe TIP along the fused gravity with the floor calibration
+  applied in ogma_host (`--toe-y [--toe-calib pi_host/calib/toe_height_calib.json]`, which the launcher passes from
+  `body_env OGMA_PICRAWLER_TOE_Y=1`). The gait's `feet_y_gravity_cmd_imu` is NOT a toe height: it is the sim-parity
+  foot (shank centre minus half a shank), up to 43 mm below the toe tip at the palpation knee, and the brain's cloud
+  sat that much low until the channel was split. The same host publishes nothing new without the flag.
 
 Both apply the per-leg floor calibration (`pi_host/calib/toe_height_calib.json`, fitted by `toe_floor_calib.py` from a
 `palpate.py --cond floor --pose toes_up` pass over all four legs): a constant, a knee term and a hip1 term per leg that put
 the floor at one plane, anchored where the rear pair found it below the body origin (−29 mm, 2026-11-02); the dashboard's
-belly plane follows that anchor. The two clouds are the same idea through two FKs on one body: where they disagree is the
+belly plane follows that anchor. The twin applies it in GDScript on its own FK; the brain gets it inside `toe_y` from the
+host, so the two are the same correction on the same toe through two FKs.
+
+**The encounter EPM** (`EncounterFeatures` → `EPM` touch/encounter → `BeliefFilter`, in `_cs_pf_sl0`): one ten-feature
+token per contact onset on `sense.touch_encounter` (height over the floor, forward/lateral position, sole peak load,
+the bus current's rise before and after onset, belly rise, lean rise, sonar range or −1, the vertical fraction of the
+pre-onset travel), a RealityToken per touch on `reality.touch.encounter`. Offline, `cpp_core/bench/encounter_replay`
+rebuilds the same inputs from a benchd record (adc_fast `pulse` + telemetry + marks) and writes one JSON line per
+encounter with the features, the winner, the TLE and the belief; the ledger's 2026-11-02 entry is its first reading. The two clouds are the same idea through two FKs on one body: where they disagree is the
 servo sag made visible. The manual
 toe test is: the robot in front of a wall or a box, move one leg (slider or fader) until the toe touches, read the voxel.
 In the sim the same purple cloud is always drawn (body-locked, carried by the body's own odometry, so the footprints
