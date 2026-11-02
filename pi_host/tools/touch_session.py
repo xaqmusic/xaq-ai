@@ -59,6 +59,10 @@ def toe_body(p, phys, a_hip1, a_hip2, a_knee):
     hx, hz = HEADINGS[si]
     # hip1 anchor at the chassis corner in the heading's quadrant; the heading rotated about +Y by hip1.
     ax, az = math.copysign(p["hx"], hx), math.copysign(p["hz"], hz)
+    # The heading turned by hip1 about +Y (x' = x cos a + z sin a, z' = -x sin a + z cos a).  CHECKED ON THE BENCH
+    # (2026-11-02, the face probe): physical FL's heading is (+X, +Z) -- SIM_OF maps it to the sim's mirrored "fr" --
+    # and hip1 = -45 deg turned it straight forward into the wall, as this rotation predicts.  (An earlier run that went
+    # sideways had read the wrong leg's heading, not the wrong rotation.)  Heights never depend on this sign.
     c, s = math.cos(a_hip1), math.sin(a_hip1)
     dx, dz = hx * c + hz * s, -hx * s + hz * c
     r, y = toe_planar(p, a_hip2, a_knee)

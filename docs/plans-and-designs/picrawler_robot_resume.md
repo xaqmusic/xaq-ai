@@ -116,8 +116,10 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   ogma_host must be rebuilt for the new params). Pillow pass: 10/10 contacts at 62 ± 7 mm (box 62 ± 3), no current step; compliance over 120 µs separates on FL only —
   `PARTIAL` as a sole measurement; the deep press (400 µs ≈ 70 mm) settled it: compliance is in the BODY's response —
   current per commanded mm 0.045 A (box) vs 0.004 (pillow), lift 0.65 vs 0.15 mm/mm — `WORKING`; the sole is blind to it;
-  `palpate.py` now has a lean guard (12°). Next: the horizontal probe for faces, then the encounter EPM over (height,
-  spread, current step, current and lift per mm); the
+  `palpate.py` now has a lean guard (12°). **The horizontal probe** (`palpate_face.py --cond wall`): the sole FINDS a
+  wall face on a forward advance (4/4 probes at 150–154 mm reach, 4–15 mm before the sonar's wall); it floor-touches
+  at the start for its own height and reads the sonar for its travel. Next: the encounter EPM over (height, spread,
+  current step, current and lift per mm, sole-vs-current on approach); the
   front hip2 origin shifts (+49 µs P4, −62 µs P10) are a servo-map lever for a gait A/B, not applied. `touch_ready` leaves the FR toe on the floor (~300 g).
 - **Before climbing: the belly ToF's pitch compensation** ([register O73](open_items_register.md)). The brain reads the
   uncompensated clearance; a pitched chassis reads as a changed height to the stance press and the learned stance

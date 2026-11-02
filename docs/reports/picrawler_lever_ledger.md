@@ -9858,3 +9858,35 @@ can be dropped. `touch_curve.py` tabulates the probe log's traces in mm and gram
 `benchd_20261102_143447.jsonl` (the daemon restarted at 09:34 local; `benchd_20261101_220321.jsonl` holds the box and
 the shallow pillow). Re-use context: a short standard press (≈ 100 µs ≈ 18 mm) with the current and ToF read through
 it becomes the probe's default compliance measurement; the horizontal probe for faces is the remaining piece.
+
+### 2026-11-02 — THE HORIZONTAL PROBE (`pi_host/tools/palpate_face.py`), WALL PASS: one front toe advanced forward at a held height (hip2 and knee solved together on the shared FK, the height taken from a floor touch at the start reach, the sonar bounding the travel) — THE SOLE FINDS A WALL FACE at a reach of 150–154 mm on all four probes (two legs × 20 and 40 mm up), 4–15 mm before the sonar's wall, with no current rise because the probe stops at first touch — `WORKING` (instrument; n = 1 pass; record `benchd_20261102_143447.jsonl`, probe log `palpate_face_20261102_100332_wall.jsonl`)
+
+*Operator, during the first attempt: "the robot pressed the toes out to the side … I had to turn the robot … the
+height above ground was only about 1 inch." Both true and both now fixed: the first run's hip1 station had been set
+from the wrong (mirrored) leg's heading, so the toes swept outboard (the probe log recorded them at x = ±150–190 mm,
+z = 38); and the start height was extrapolated from the calibration at knee angles it was never fitted at. The
+rotation itself was right — the second run's −45° on FL went straight into the wall ahead. Each probe now lowers its
+toe to the floor at the start reach first and takes that touch as its own height reference, and reads the sonar to
+set its travel. The sonar read 0.086 m at the first placement — the toe would have started inside the wall — so the
+robot was backed to 0.15 m.*
+
+| probe | floor felt at start (FK, mm) | reach at stop | sole at stop | current | lean / ToF rise | sonar's expected reach |
+|---|---|---|---|---|---|---|
+| FL, 20 mm up | −37 | 150 | 546 | 0.10 → 0.11 A | 0.04° / 2 mm | 167 |
+| FL, 40 mm up | −33 | 154 | 1122 | 0.10 → 0.11 | 0.07° / 4 mm | 163 |
+| FR, 20 mm up | −22 | 152 | 285 | 0.09 → 0.11 | 0.07° / 2 mm | 156 |
+| FR, 40 mm up | −22 | 152 | 871 | 0.10 → 0.12 | 0.09° / 2 mm | 157 |
+
+**Reading.** Approached horizontally with the shin leaning forward, the sole faces the wall and fires on it: the
+open question from the plan (can the foot feel a face at all?) is yes for this approach, with the counts going from
+≤ 5 to 285–1122 in one millimetre step. The box pass's "faces show as current first" stands for the VERTICAL
+approach, where the toe tip meets the face edge-on; the two together are the probe's rule: sole first on a
+horizontal advance, current first on a vertical descent, and either ends the push. The four stops agree to 4 mm
+across two legs and two heights, so the wall's plane is measured; the sonar put it 4–15 mm further (its 49 mm
+face offset and the sole's own forward extent both enter — a cross-calibration the next pass can close). The
+floor the probe felt at its start reach (−37 / −33 on FL, −22 on FR, FK) differs from the calibrated −29 by the
+per-leg bias at these knee-folded poses, which is why the self-reference beats the extrapolation. **Fixed on the
+way:** the station sign, the start height, the IK's seeds and limit check, a 100 → 120 mm start (hip2 hits its
+500 µs limit lifting the toe at 100 mm). Re-use context: a second pass with heights to 80 mm to see the sole's
+angle dependence; the box face (the sole may not reach a 60 mm face at 40 mm up); the encounter EPM now has both
+rules' signatures.
