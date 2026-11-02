@@ -9831,3 +9831,30 @@ and a pillow keeps climbing slowly; and reading the belly ToF / IMU through the 
 compresses). Re-use context: the deeper pillow probe; the horizontal probe for faces (unbuilt); the encounter EPM's
 feature set gets (height at onset, its spread across the sweep, plateau, current step, compliance slope) from these
 three passes — the first real inputs for palpation stage 1.
+
+### 2026-11-02 — THE DEEP PILLOW PROBE (400 µs ≈ 70 mm of commanded descent after contact, knee A, both front legs) AND THE COMPLIANCE VERDICT: the SOLE is blind to compliance — its load stays 0–40 g whether the toe sinks 70 mm into a pillow or is stopped by a box — and the BODY tells it: per millimetre of commanded descent the bus current rises 0.045 A on the box and 0.004 A on the pillow (10×), the belly lifts 0.65 vs 0.15 mm, and the body leans 0.45° vs 0.28° — `WORKING` as a signature (n = 10 + 10 + 10 presses), with a correction to the day's earlier framing and a lean guard added to the probe
+
+*Correction first: "120 µs ≈ 2–3 mm" (the pillow entry above) was wrong by eight; at these poses 100 µs of hip2 is
+~18 mm of commanded toe travel (`touch_curve.py`), so the shallow pillow pass already commanded 22 mm and the box pass
+11 mm. The sole-counts-per-µs "compliance" of the two entries above was therefore never a depth measurement.*
+
+| press | commanded extra descent | belly lift (ToF max − pre) | lean rise | current rise | sole load over the press |
+|---|---|---|---|---|---|
+| box top (knee A, 10) | 60 µs ≈ 11 mm | 7.2 ± 6.9 mm | 5.0 ± 4.4° | 0.50 ± 0.21 A | flat, 10–40 g |
+| pillow (10) | 120 µs ≈ 22 mm | 4.0 ± 2.2 mm | 7.3 ± 3.2° | 0.16 ± 0.03 A | flat, 0–40 g |
+| pillow, deep (10) | 400 µs ≈ 70 mm | 10.8 ± 8.1 mm | 19.7 ± 3.7° | 0.25 ± 0.11 A | flat, 0–40 g (76 once) |
+
+**Reading.** The force–depth curve the sole gives is flat on everything: on a hard top the servo gives within a
+millimetre and the sole loads only to what the lever arm delivers; on the pillow the toe keeps sinking at the same
+few tens of grams. Compliance is in the EFFORT, as the regulated-quantity rule says: a surface that resists makes
+the servo work against the body's weight (current, lift), a surface that yields does not. The current rise per
+commanded millimetre separates the two by an order of magnitude on every station; lift per millimetre by four; the
+lean is the pillow's own signature (the body rolls on it rather than rising — up to 28° on the deep press, which the
+0.6 A guard never saw, so `palpate.py` now ends a press at `--lean-guard` 12°). The per-foot FSR scale (resume: the
+feet read the same load up to 5× apart) makes the sole's grams incomparable across feet anyway. **For the encounter
+vocabulary (palpation stage 1):** height at onset and its spread across the sweep, the current step at contact (face
+vs top), and the current and lift per commanded millimetre during a short press — the sole's plateau and its slope
+can be dropped. `touch_curve.py` tabulates the probe log's traces in mm and grams. Record:
+`benchd_20261102_143447.jsonl` (the daemon restarted at 09:34 local; `benchd_20261101_220321.jsonl` holds the box and
+the shallow pillow). Re-use context: a short standard press (≈ 100 µs ≈ 18 mm) with the current and ToF read through
+it becomes the probe's default compliance measurement; the horizontal probe for faces is the remaining piece.

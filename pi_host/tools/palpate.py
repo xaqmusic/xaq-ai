@@ -119,6 +119,7 @@ def main():
     ap.add_argument("--extra", type=int, default=60, help="us of further descent after contact (the compliance record)")
     ap.add_argument("--travel", type=int, default=900, help="cap on the descent before giving up (no contact); the FK sets a tighter one per knee setting")
     ap.add_argument("--thresh", type=int, default=200); ap.add_argument("--i-guard", type=float, default=0.6)
+    ap.add_argument("--lean-guard", type=float, default=12.0, help="degrees of body lean (fused up vs vertical) that end a press: the deep pillow press rolled the body 28 deg with the current never rising (2026-11-02)")
     ap.add_argument("--settle", type=float, default=1.5); ap.add_argument("--hold", type=float, default=0.6)
     ap.add_argument("--pose", default="touch_ready"); ap.add_argument("--body", default="measured_fsr")
     ap.add_argument("--dry", action="store_true", help="print the plan, command nothing")
@@ -234,6 +235,11 @@ def main():
             settled([c1, c2, c3]); wait(a.settle)
             b.call(verb="mark", text=f"palpate tap {n} cond={a.cond} leg={ph} knee={kn} hip1={st:+.0f} rep={rep} pose={a.pose}")
             f = b.wait_frame(); i_pre = i_a(f); i_max = i_pre
+            def lean_deg(fr_):
+                u = ((fr_ or {}).get("imu") or {}).get("up_fused")
+                if isinstance(u, list) and len(u) >= 3 and abs(float(u[1])) <= 1.0: return math.degrees(math.acos(max(-1.0, min(1.0, float(u[1])))))
+                return 0.0
+            lean0 = lean_deg(f)
             if counts(f, fsr) >= a.thresh:
                 print(f"{n:3d} {ph:3} {kn:4} {st:+5.0f} {rep:3d} | {u2:10d} {'-':>10} {'-':>8} {'-':>5} {'-':>5} {'-':>10} {'-':>8} {'-':>12} ALREADY IN CONTACT at the start — station skipped")
                 continue
@@ -251,6 +257,8 @@ def main():
                 if not math.isnan(ia): i_max = max(i_max, ia)
                 if not math.isnan(ia) and not math.isnan(i_pre) and ia - i_pre > a.i_guard:
                     result = "current guard"; break
+                if lean_deg(f) - lean0 > a.lean_guard:
+                    result = "lean guard"; break
                 if bool(f.get("stopped", False)): raise KeyboardInterrupt
                 if hit is None:
                     hits = hits + 1 if c >= a.thresh else 0
