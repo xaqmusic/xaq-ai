@@ -227,6 +227,22 @@ def main():
                     plane = statistics.median(others); plane_mm = plane * 1000; h_mm = (hg - plane) * 1000
                 else:
                     h_mm = hg * 1000
+            # COMPLIANCE: counts against the toe's descent after the onset, from the fast rows' own pulses -- the
+            # vertical toe travel per row through the FK (so a box and a pillow compare in counts per mm, not per
+            # us of a servo whose lever arm differs with the pose).  NaN without pulses or without descent.
+            stiff = float("nan")
+            if by_pj and len(adc[i_on]) > 2 and adc[i_on][2]:
+                c1, c2, c3 = by_pj[(phys, "hip1")], by_pj[(phys, "hip2")], by_pj[(phys, "knee")]
+                xs, ys_ = [], []
+                for j in range(i_on, min(i_off, i_on + int(a.hold_s * 50)) + 1):
+                    pl = adc[j][2] if len(adc[j]) > 2 else None
+                    if not pl: continue
+                    tb = toe_body(p, phys, angle(pl[c1], by_ch[c1]), angle(pl[c2], by_ch[c2]), angle(pl[c3], by_ch[c3]))
+                    xs.append(-(tb[0] * up[0] + tb[1] * up[1] + tb[2] * up[2]) * 1000.0); ys_.append(adc[j][1][ch])   # mm of descent
+                if len(xs) >= 4 and max(xs) - min(xs) > 0.5:
+                    mx, my = statistics.mean(xs), statistics.mean(ys_)
+                    sxx = sum((x - mx) ** 2 for x in xs); sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys_))
+                    stiff = sxy / sxx if sxx > 1e-9 else float("nan")
             # current and lean
             def i_a(f): return float(((f or {}).get("ina") or {}).get("i_a", float("nan")))
             i_pre = i_a(fr_pre); i_hold = max((i_a(frame_before(tele, t)) for t in range(int(t_on), int(min(t_off, t_on + a.hold_s * 1000)) + 1, 100)), default=float("nan"))
@@ -237,13 +253,13 @@ def main():
                 continue          # a palpate mark names the driven foot: the planted feet's co-events are the body's rock, not touches
             rows.append(dict(ch=ch, phys=phys, seg=seg, t=(t_on - t0) / 1000, t_off=t_off, dur=(t_off - t_on) / 1000,
                              onset=adc[i_on][1][ch], plateau=max(hold) if hold else adc[i_on][1][ch], moving=moving_lbl,
-                             h_mm=h_mm, toe_y_mm=toe_y_mm, plane_mm=plane_mm, i_pre=i_pre, i_hold=i_hold, lean=lean, pose=pose_src))
+                             h_mm=h_mm, toe_y_mm=toe_y_mm, plane_mm=plane_mm, i_pre=i_pre, i_hold=i_hold, lean=lean, pose=pose_src, stiff=stiff))
     rows.sort(key=lambda r: r["t"])
     print(f"\n{len(rows)} touch events (onset >= {a.thresh} counts for 60 ms, release < {a.off}):")
-    print(f"{'t(s)':>7} {'foot':4} {"segment":16} {'onset':>5} {'plat':>5} {'hold s':>6} {'h vs plane mm':>13} {'toe y mm':>8} {'I pre->hold A':>14} {'lean deg':>8} {'pose':4}  moving")
+    print(f"{'t(s)':>7} {'foot':4} {"segment":16} {'onset':>5} {'plat':>5} {'hold s':>6} {'h vs plane mm':>13} {'toe y mm':>8} {'I pre->hold A':>14} {'lean deg':>8} {'pose':4} {'c/mm':>6}  moving")
     for r in rows:
         print(f"{r['t']:7.1f} {r['phys']:4} {r["seg"][:16]:16} {r['onset']:5d} {r['plateau']:5d} {r['dur']:6.2f} "
-              f"{r['h_mm']:13.1f} {r['toe_y_mm']:8.1f} {r['i_pre']:6.2f}->{r['i_hold']:5.2f} {r['lean']:8.2f} {r['pose']:4}  {r['moving']}")
+              f"{r['h_mm']:13.1f} {r['toe_y_mm']:8.1f} {r['i_pre']:6.2f}->{r['i_hold']:5.2f} {r['lean']:8.2f} {r['pose']:4} {r['stiff']:6.0f}  {r['moving']}")
     # per segment / foot summary
     print("\nper segment and foot (n, onset counts mean±sd, plateau mean, h vs plane mm mean±sd, current step A mean):")
     groups = {}
@@ -264,7 +280,8 @@ def main():
         print("\nper condition, leg and knee setting across the hip1 stations (toe y = body-frame height at onset, from the fast rows' pulses):")
         for (cond, ph, kn), rs in sorted(passes.items(), key=lambda kv: min(r["t"] for r in kv[1])):
             print(f"  {cond:8} {ph} knee {kn}: n={len(rs):2d}  onset {msd([r['onset'] for r in rs])}  plateau {statistics.mean([r['plateau'] for r in rs]):6.0f}  "
-                  f"toe y {msd([r['toe_y_mm'] for r in rs])} mm  h vs plane {msd([r['h_mm'] for r in rs])} mm  I step {msd([r['i_hold'] - r['i_pre'] for r in rs])} A")
+                  f"toe y {msd([r['toe_y_mm'] for r in rs])} mm  h vs plane {msd([r['h_mm'] for r in rs])} mm  I step {msd([r['i_hold'] - r['i_pre'] for r in rs])} A  "
+                  f"stiffness {msd([r['stiff'] for r in rs])} counts/mm")
 
 
 if __name__ == "__main__":

@@ -9807,3 +9807,27 @@ the probe's retract loop waited for a pulse the clamp could never reach — fixe
 descent and retract stop when the clamp holds); a Ctrl-C mid-request left the REQ socket refusing the retract — the
 client remakes it. Re-use context: a second floor pass for n, the pillow through the calibrated heights, and the two
 front hip2 origin shifts as a servo-map lever with its own A/B on the gait.
+
+### 2026-11-02 — THE SCRIPTED PROBE, PILLOW PASS (knee A from `toes_up`, 120 µs of descent after contact): 10/10 contacts, the pillow's top at 62 ± 7 mm above the calibrated floor (the box was 62 ± 3), the sole's plateau the same as on the floor (~1260 counts) and the current step a third of the box's; the COMPLIANCE slope over 120 µs tells the pillow from the box on the left leg (≈ 0 or falling vs +8) but not on the right (6–9, the floor's range) — height spread is the cleaner signature so far, compliance needs a deeper probe — `PARTIAL` (instrument; n = 1 pass)
+
+| station | FL: height above floor (mm), slope (counts/µs) | FR: height, slope |
+|---|---|---|
+| −60 | 57.9, −3.6 | 70.3, +1.1 |
+| −30 | 67.3, −6.5 | 73.3, +6.1 |
+| 0 | 63.2, −2.4 | 48.2, +7.5 |
+| +30 | 56.8, −8.5 | 60.0, +9.3 |
+| +60 | 60.0, +2.1 | 67.3, +8.7 |
+
+**Reading.** The toe registers a pillow as surely as a box (10/10 onsets, plateaus 950–1790 counts, no current guard: a
+pillow never loads a servo the way a face does, 0.1–0.2 A against the box face's 0.6–0.9). Its top is where the toe
+first feels it, 48–73 mm up, and that spread across five stations (sd 7.0 mm) is three times the box's (2.6) on the
+same leg: the surface is uneven and soft, and the spread itself is information. **Compliance, as measured, is not yet
+a discriminator:** 120 µs of further descent is ~2–3 mm of commanded toe travel — enough to see the LEFT leg's counts
+stall or fall as the pillow yields (−8.5 … +2.1 counts/µs, against +7.6 on the floor and the box's +3 to +10), but the
+right leg's counts kept rising at the floor's rate (6–9), presumably where the toe met a firmer fold. The reader's
+counts-per-mm regression over the hold inherits the same ambiguity. **What would make compliance decisive:** a deeper
+probe (`--extra 400`, ~8 mm) recording the force–depth CURVE, where a box saturates within a millimetre of servo give
+and a pillow keeps climbing slowly; and reading the belly ToF / IMU through the press (a box lifts the body, a pillow
+compresses). Re-use context: the deeper pillow probe; the horizontal probe for faces (unbuilt); the encounter EPM's
+feature set gets (height at onset, its spread across the sweep, plateau, current step, compliance slope) from these
+three passes — the first real inputs for palpation stage 1.

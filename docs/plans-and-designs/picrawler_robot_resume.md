@@ -113,8 +113,9 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   (0.6–0.8 A) before the sole; knee B needs `--lift`. **The per-leg floor calibration is done** (`toe_floor_calib.py`
   → `pi_host/calib/toe_height_calib.json`, from `toes_up` with all four legs): one floor at −29 ± 1 mm on every leg,
   the box 61.7 ± 2.6 mm; applied in the reader, the bench twin and `_cs_pf_sl0`'s TouchMemory offsets (the Pi's
-  ogma_host must be rebuilt for the new params). Next: the pillow (compliance in counts per mm), the horizontal probe
-  for faces; the front hip2 origin shifts (+49 µs P4, −62 µs P10) are a servo-map lever for a gait A/B, not applied. `touch_ready` leaves the FR toe on the floor (~300 g).
+  ogma_host must be rebuilt for the new params). Pillow pass: 10/10 contacts at 62 ± 7 mm (box 62 ± 3), no current step; compliance over 120 µs separates on FL only —
+  `PARTIAL`, a deeper probe (`--extra 400`) with the force–depth curve is next, then the horizontal probe for faces; the
+  front hip2 origin shifts (+49 µs P4, −62 µs P10) are a servo-map lever for a gait A/B, not applied. `touch_ready` leaves the FR toe on the floor (~300 g).
 - **Before climbing: the belly ToF's pitch compensation** ([register O73](open_items_register.md)). The brain reads the
   uncompensated clearance; a pitched chassis reads as a changed height to the stance press and the learned stance
   height. The compensated channel exists in benchd at gain 0; switch and A/B it on slopes before any climb work.
