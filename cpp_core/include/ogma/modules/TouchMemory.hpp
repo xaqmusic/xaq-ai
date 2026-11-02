@@ -102,6 +102,11 @@ private:
     int    max_voxels_       = 4000;
     int    diag_max_         = 400;
     double plane_tau_ticks_  = 50.0;        // the support plane's EMA time constant
+    // THE FLOOR CALIBRATION's constant term per leg (m, sim leg order fl fr rl rr), added to every toe height
+    // before the plane and the voxel: the commanded FK reads one floor at different heights per leg (robot,
+    // 2026-11-02: left 7-12 mm lower than right).  toe_floor_calib.py fits it from a palpate floor pass; the
+    // knee and hip1 terms stay in the dashboard and the reader until the brain is handed joint angles.  0 = off.
+    double leg_y_offset_[4] = {0.0, 0.0, 0.0, 0.0};
 
     // latest inputs
     float contact_[4] = {0, 0, 0, 0}, prev_contact_[4] = {0, 0, 0, 0};

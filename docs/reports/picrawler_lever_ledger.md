@@ -9774,3 +9774,36 @@ knee A — not yet comparable: counts per µs of hip2 depends on the lever arm a
 is judged by it. Re-use context: `--lift 120` for the knee-B box pass; the pillow next (vertical probe, compliance in
 counts per mm); the horizontal probe for faces can now be specified from this data (advance at fixed height, stop on a
 current step of ~0.5 A or a sole crossing, whichever first).
+
+### 2026-11-02 — THE PER-LEG FLOOR CALIBRATION (`pi_host/tools/toe_floor_calib.py` → `pi_host/calib/toe_height_calib.json`): from `toes_up` (belly ToF 0.0 mm, lean 0.7°, front feet unloaded) all four legs probed the floor; the commanded FK read it at FL −36.5, FR −24.5/−29.8, RL −31, RR −29 mm (body `measured_fsr`, L3 87 mm); with one constant, a knee term and a hip1 term per leg the floor is ONE plane at −29 ± 1 mm on every leg and setting, and the 60 mm box reads 61.7 ± 2.6 mm from the left leg's clean top contacts — `BASELINE` (instrument; applied in the reader, the bench twin and the robot config's TouchMemory)
+
+*Operator: "in the rescue pose the toes touch the floor, not the chassis; use toes_up as a starting pose for true belly
+on floor." Checked: in `touch_ready` the FR toe carried ~300 g; in `toes_up` the belly clearance read 0.0 mm for the
+whole pass and the front feet 1–2 counts. The pose matters: the calibration's anchor is the floor while the belly
+rests, and the rear pair found it at −29 mm below the body origin — between the body file's lowest box (−26) and the
+sag study's origin-to-belly constant (−32); that measured −29 is the anchor, and the bench dashboard's belly plane now
+sits there when a calibration is loaded.*
+
+| leg | n | a (mm) | b (mm/rad knee) | c (mm/rad hip1) | raw floor sd → residual sd (mm) | the hip2 origin shift that would absorb a |
+|---|---|---|---|---|---|---|
+| FL | 9 | +7.1 | −0.3 | +0.9 | 0.9 → 0.6 | +5.2° (+49 µs on P4) |
+| FR | 10 | −9.6 | +8.8 | −2.1 | 4.0 → 1.1 | −6.5° (−62 µs on P10) |
+| RL | 10 | −0.4 | +2.3 | +0.5 | 1.7 → 1.4 | −0.3° |
+| RR | 10 | +0.2 | +4.5 | +0.5 | 1.9 → 0.6 | +0.1° |
+
+**Reading.** The rear pair is unbiased; the front pair carries opposite constants of 7 and 10 mm, and FR a knee term
+that the left leg does not have — the shape of a hip2 origin error on each front leg (the implied shifts are printed,
+and are a servo-map LEVER on the gait, not applied). The FSR body file matters: with the old 76.5 mm toe the left leg
+showed a 2–3 mm knee term that the real 87 mm shin removes; the bench twin now loads `measured_fsr` too. **Applied:**
+`touch_session.py` (default on), the dashboard's twin (`_toe_calib_m`, the knee and hip1 terms from the twin's own
+angles, the belly plane at the anchor), and `_cs_pf_sl0`'s TouchMemory `leg_y_offset_*` (constants only, SIM order:
+fr +7.1, fl −9.6, rr −0.4, rl +0.2 mm; the sim twin `_sim60` stays uncalibrated, its FK has no such bias; gain-0 on the
+robot config, corridor seed 1 × 1200, body JSON identical). **Validation on the box pass:** the left leg's clean top
+contacts 61.4 / 61.9 / 63.4 / 57.4 / 64.3 mm above the floor (mean 61.7 ± 2.6; raw it was 59.5 against its own floor);
+the dragging knee-B taps read the top EDGE at 50.8 ± 2.0 against the planted-feet plane with the body lifted; the right
+leg had no clean top (face and edge contacts only, 51–55 vs the plane). The residual ~2 mm over-read on the box is
+within the fit's spread. **Harness notes:** the rear hip2 channels' 640 µs minimum sits above `toes_up`'s 500, and
+the probe's retract loop waited for a pulse the clamp could never reach — fixed (the station takes the clamped start;
+descent and retract stop when the clamp holds); a Ctrl-C mid-request left the REQ socket refusing the retract — the
+client remakes it. Re-use context: a second floor pass for n, the pillow through the calibrated heights, and the two
+front hip2 origin shifts as a servo-map lever with its own A/B on the gait.

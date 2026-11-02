@@ -42,20 +42,27 @@ KNEE_DEG = {"A": 5.0, "B": 50.0}        # A: femur ~perpendicular to the tibia; 
 
 class Bench:
     def __init__(self, host: str, timeout_ms: int = 3000):
-        self.ctx = zmq.Context()
-        self.req = self.ctx.socket(zmq.REQ); self.req.setsockopt(zmq.RCVTIMEO, timeout_ms); self.req.setsockopt(zmq.LINGER, 0)
-        self.req.connect(f"tcp://{host}:5590")
+        self.ctx = zmq.Context(); self.host = host; self.timeout_ms = timeout_ms
+        self._open_req()
         self.sub = self.ctx.socket(zmq.SUB); self.sub.setsockopt(zmq.CONFLATE, 1); self.sub.setsockopt_string(zmq.SUBSCRIBE, "")
         self.sub.connect(f"tcp://{host}:5591")
         self.last_ping = 0.0
         self.frame = None
 
+    def _open_req(self):
+        self.req = self.ctx.socket(zmq.REQ); self.req.setsockopt(zmq.RCVTIMEO, self.timeout_ms); self.req.setsockopt(zmq.LINGER, 0)
+        self.req.connect(f"tcp://{self.host}:5590")
+
     def call(self, **req) -> dict:
-        self.req.send_string(json.dumps(req))
         try:
+            self.req.send_string(json.dumps(req))
             rep = json.loads(self.req.recv_string())
         except zmq.Again:
+            self.req.close(0); self._open_req()           # a REQ that missed its reply must be remade
             raise RuntimeError(f"no reply from benchd to {req.get('verb')}")
+        except zmq.ZMQError:
+            self.req.close(0); self._open_req()           # e.g. Ctrl-C between send and recv: remake and retry once
+            self.req.send_string(json.dumps(req)); rep = json.loads(self.req.recv_string())
         if not rep.get("ok", False):
             raise RuntimeError(f"{req.get('verb')}: {rep.get('error', rep)}")
         return rep
@@ -113,7 +120,7 @@ def main():
     ap.add_argument("--travel", type=int, default=900, help="cap on the descent before giving up (no contact); the FK sets a tighter one per knee setting")
     ap.add_argument("--thresh", type=int, default=200); ap.add_argument("--i-guard", type=float, default=0.6)
     ap.add_argument("--settle", type=float, default=1.5); ap.add_argument("--hold", type=float, default=0.6)
-    ap.add_argument("--pose", default="touch_ready"); ap.add_argument("--body", default="measured")
+    ap.add_argument("--pose", default="touch_ready"); ap.add_argument("--body", default="measured_fsr")
     ap.add_argument("--dry", action="store_true", help="print the plan, command nothing")
     ap.add_argument("--no-recall", action="store_true", help="do not pose.set the start pose first")
     ap.add_argument("--start-at", type=int, default=1, help="resume an interrupted pass at this tap number")
@@ -221,10 +228,11 @@ def main():
             if n < a.start_at: continue
             fsr = FSR_CH[ph]; c1, u1 = us_of(ph, "hip1", st); c3, u3 = us_of(ph, "knee", KNEE_DEG[kn]); c2 = by_pj[(ph, "hip2")]
             direction = start[(ph, kn, "dir")]; u2 = start[ph]; travel = start[(ph, kn, "travel")]
-            # station: raise hip2 to the start first (clear of the floor), then hip1 and the knee
-            set_us(c2, u2); wait(0.3); set_us(c1, u1); set_us(c3, u3)
+            # station: raise hip2 to the start first (clear of the floor), then hip1 and the knee.  The start is
+            # the pulse as the daemon CLAMPS it: a pose can sit below a channel's limit (toes_up 500 vs a 640 min).
+            u2 = set_us(c2, u2); wait(0.3); set_us(c1, u1); set_us(c3, u3)
             settled([c1, c2, c3]); wait(a.settle)
-            b.call(verb="mark", text=f"palpate tap {n} cond={a.cond} leg={ph} knee={kn} hip1={st:+.0f} rep={rep}")
+            b.call(verb="mark", text=f"palpate tap {n} cond={a.cond} leg={ph} knee={kn} hip1={st:+.0f} rep={rep} pose={a.pose}")
             f = b.wait_frame(); i_pre = i_a(f); i_max = i_pre
             if counts(f, fsr) >= a.thresh:
                 print(f"{n:3d} {ph:3} {kn:4} {st:+5.0f} {rep:3d} | {u2:10d} {'-':>10} {'-':>8} {'-':>5} {'-':>5} {'-':>10} {'-':>8} {'-':>12} ALREADY IN CONTACT at the start — station skipped")
@@ -232,7 +240,9 @@ def main():
             # descend
             us = u2; hit = None; hits = 0; result = "none"; trace = []
             while abs(us - u2) < min(a.travel, travel):
-                us = set_us(c2, us + direction * a.step)
+                nu = set_us(c2, us + direction * a.step)
+                if nu == us: result = "limit"; break          # clamped at the channel's limit: nothing reachable
+                us = nu
                 t_step = time.monotonic()
                 while time.monotonic() - t_step < a.dt:
                     b.ping(); time.sleep(0.01)
@@ -262,9 +272,11 @@ def main():
             out.write(json.dumps(dict(n=n, cond=a.cond, leg=ph, knee=kn, hip1=st, rep=rep, hip2_start=u2, contact_us=hit, result=result,
                                       trace=trace, plateau=plat, slope_counts_per_us=slope, toe_y_mm=ty, i_pre=i_pre, i_max=i_max,
                                       t_wall=time.time())) + "\n"); out.flush()
-            # retract in larger steps
+            # retract in larger steps (stop if the clamp holds the pulse)
             while abs(us - u2) > 0:
-                us = set_us(c2, us - direction * min(20, abs(us - u2))); wait(0.04)
+                nu = set_us(c2, us - direction * min(20, abs(us - u2))); wait(0.04)
+                if nu == us: break
+                us = nu
             wait(0.3)
         b.call(verb="mark", text=f"palpate end cond={a.cond}")
         print(f"\ndone: {len(plan)} taps -> {out_path}; the record is the Pi's benchd_*.jsonl (read with touch_session.py)")

@@ -96,6 +96,23 @@ def angle(us, e):
     return e["sign"] * (us - e["origin"]) / US_PER_RAD
 
 
+def load_calib(path):
+    """toe_floor_calib.py's file: physical leg -> (a_mm, b_mm_per_rad_knee, c_mm_per_rad_hip1); {} = none."""
+    if not path or not os.path.exists(path): return {}
+    try:
+        d = json.load(open(path)); out = {}
+        for ph, e in (d.get("legs") or {}).items():
+            out[ph] = (float(e.get("a_mm", 0.0)), float(e.get("b_mm_per_rad_knee", 0.0)), float(e.get("c_mm_per_rad_hip1", 0.0)))
+        return out
+    except Exception:
+        return {}
+
+
+def calib_mm(calib, ph, a_hip1, a_knee):
+    e = calib.get(ph)
+    return 0.0 if not e else e[0] + e[1] * a_knee + e[2] * a_hip1
+
+
 def frame_before(tele, t):
     lo, hi = 0, len(tele)
     while lo < hi:
@@ -131,7 +148,8 @@ def events(adc, ch, thresh, off, min_on=3, min_off=3):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("log"); ap.add_argument("--segments", default=""); ap.add_argument("--body", default="measured")
+    ap.add_argument("log"); ap.add_argument("--segments", default=""); ap.add_argument("--body", default="measured_fsr")
+    ap.add_argument("--calib", default=os.path.join(REPO, "pi_host/calib/toe_height_calib.json"), help="per-leg floor calibration (toe_floor_calib.py); '' = none")
     ap.add_argument("--thresh", type=int, default=200); ap.add_argument("--off", type=int, default=150)
     ap.add_argument("--hold-s", type=float, default=1.5); ap.add_argument("--min-gap-s", type=float, default=0.3)
     ap.add_argument("--all-feet", action="store_true", help="keep events on feet a palpate mark did not name (the planted feet's co-events)")
@@ -140,9 +158,11 @@ def main():
     if not adc: sys.exit("no adc_fast rows: was `adc.rate ms=20` on?")
     by_ch, by_pj = servo_map(smap)
     p = body_params(a.body)
+    calib = load_calib(a.calib)
     t0 = adc[0][0]
     print(f"session: {len(adc)} fast ADC samples over {(adc[-1][0]-t0)/1000:.1f} s, {len(tele)} telemetry frames, "
-          f"{len(sets)} servo.set, {len(marks)} marks, servo map {'from the log' if smap else 'MISSING'}")
+          f"{len(sets)} servo.set, {len(marks)} marks, servo map {'from the log' if smap else 'MISSING'}; body {a.body}; "
+          f"floor calibration {'on (' + ', '.join(sorted(calib)) + ')' if calib else 'OFF'}")
     # baseline per channel
     for ch in range(4):
         vals = [x[1][ch] for x in adc]
@@ -193,8 +213,10 @@ def main():
             def toe_h(ph):
                 try:
                     c1, c2, c3 = by_pj[(ph, "hip1")], by_pj[(ph, "hip2")], by_pj[(ph, "knee")]
-                    tb = toe_body(p, ph, angle(cur[c1], by_ch[c1]), angle(cur[c2], by_ch[c2]), angle(cur[c3], by_ch[c3]))
-                    return tb[0] * up[0] + tb[1] * up[1] + tb[2] * up[2], tb[1]
+                    a1, a2, a3 = angle(cur[c1], by_ch[c1]), angle(cur[c2], by_ch[c2]), angle(cur[c3], by_ch[c3])
+                    tb = toe_body(p, ph, a1, a2, a3)
+                    corr = calib_mm(calib, ph, a1, a3) / 1000.0           # the floor calibration, along gravity
+                    return tb[0] * up[0] + tb[1] * up[1] + tb[2] * up[2] + corr, tb[1] + corr
                 except KeyError:
                     return float("nan"), float("nan")
             if by_pj and cur:

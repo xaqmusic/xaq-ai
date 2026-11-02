@@ -647,7 +647,11 @@
     "load_topic": "reality.proprio.foot_load",
     "voxel_m": 0.02,
     "max_voxels": 4000,
-    "diag_max": 400
+    "diag_max": 400,
+    "leg_y_offset_fr": 0.0071,
+    "leg_y_offset_fl": -0.0096,
+    "leg_y_offset_rr": -0.0004,
+    "leg_y_offset_rl": 0.0002
    }
   }
  ],

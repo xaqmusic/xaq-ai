@@ -37,7 +37,7 @@ fov = 60.0
 
 [node name="Picrawler" type="Node3D" parent="."]
 script = ExtResource("3")
-body_geometry_path = "res://addons/ami_ogma/body/measured.json"
+body_geometry_path = "res://addons/ami_ogma/body/measured_fsr.json"
 config_path = "res://addons/ami_ogma/configs/the_picrawler_motor_epm_minimal.json"
 verbose_logging = false
 

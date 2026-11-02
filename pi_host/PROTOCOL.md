@@ -278,7 +278,11 @@ draws two clouds in the twin's chassis frame and `[X]` hides them:
   `module_diag` at ~3 Hz on the same worker thread as `host_sensors`), present when the running config carries the
   module (`_cs_pf_sl0` does). Its heights are relative to its support plane; the diag's `plane_y` places them.
 
-The two are the same idea through two FKs on one body: where they disagree is the servo sag made visible. The manual
+Both apply the per-leg floor calibration (`pi_host/calib/toe_height_calib.json`, fitted by `toe_floor_calib.py` from a
+`palpate.py --cond floor --pose toes_up` pass over all four legs): a constant, a knee term and a hip1 term per leg that put
+the floor at one plane, anchored where the rear pair found it below the body origin (−29 mm, 2026-11-02); the dashboard's
+belly plane follows that anchor. The two clouds are the same idea through two FKs on one body: where they disagree is the
+servo sag made visible. The manual
 toe test is: the robot in front of a wall or a box, move one leg (slider or fader) until the toe touches, read the voxel.
 In the sim the same purple cloud is always drawn (body-locked, carried by the body's own odometry, so the footprints
 slide as it drifts), with the brain's in lavender; `touch_vox` / `touch_n` / `touch_brain` are in the body's JSONL.

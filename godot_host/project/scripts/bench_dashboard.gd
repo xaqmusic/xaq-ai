@@ -152,6 +152,12 @@ var _touch_twin_tick := 0
 var _touch_frame := 0
 var _touch_lbl: Label = null
 var _fsr_prev: Array = [false, false, false, false]
+# THE FLOOR CALIBRATION (2026-11-02, pi_host/tools/toe_floor_calib.py -> pi_host/calib/toe_height_calib.json):
+# per physical leg, y_true = y_fk + a + b*knee + c*hip1 (mm; rad), fitted from a palpate floor pass.  Applied to the
+# twin's toe heights so a touch lands where the toe is, not where an uncorrected FK says.  Absent file = no correction.
+var _toe_calib: Dictionary = {}      # "FL" -> [a_mm, b_mm_per_rad_knee, c_mm_per_rad_hip1]
+var _toe_calib_note := ""
+var _toe_calib_belly_mm := NAN        # the calibration's floor anchor below the body origin; NAN = the body file's box
 const TOUCH_LOCAL_COLOR := Color(0.62, 0.25, 0.95)
 const TOUCH_BRAIN_COLOR := Color(0.80, 0.62, 1.00)
 # MIDI (2026-11-01, scripts/midi_servo_map.gd): a controller's faders and knobs on the twelve
@@ -197,6 +203,7 @@ func _ready() -> void:
 	call_deferred("_enter_calibrate_mode")
 	_refresh_all_rows()
 	_midi_setup()
+	_load_toe_calib()
 
 
 func _enter_calibrate_mode() -> void:
@@ -1664,7 +1671,7 @@ func _touch_twin_step(adc: Array) -> void:
 		contact.append(1.0 if float(adc[FSR_CH_FOR_SIM[i]]) >= FSR_CONTACT_COUNTS else 0.0)
 		var tl: Vector3 = inv * ((lowers[i] as Node3D).global_transform * (toe_off[i] as Vector3))
 		xz.append(tl.dot(left_l)); xz.append(tl.dot(fwd_l))               # [x = body +X, z = forward], levelled
-		ys.append(tl.dot(up))                                             # height along gravity, body origin 0
+		ys.append(tl.dot(up) + _toe_calib_m(i))                           # height along gravity, body origin 0, calibrated
 	_touch_twin_tick += 1
 	if not _fsr_primed:
 		_touch_local.prime(contact); _fsr_primed = true; return
@@ -1712,7 +1719,9 @@ func _grids_update() -> void:
 	if _grids == null or _body == null: return
 	var chassis: Variant = _body.get("_chassis")
 	if chassis == null: return
-	var bottom_dy := float(_body.get("_chassis_bottom_local"))
+	# The belly plane: the floor calibration's anchor when one is loaded (the rear pair's floor in toes_up, the
+	# measurement), else the body file's lowest chassis box.
+	var bottom_dy := (_toe_calib_belly_mm / 1000.0) if is_finite(_toe_calib_belly_mm) else float(_body.get("_chassis_bottom_local"))
 	var boom_z := float(_body.get("tof_boom_z"))
 	var clearance := NAN
 	# OGMA_BENCH_FAKE_TOF_M=<m>: a development hook with no robot — draws the ToF floor at that
@@ -1780,3 +1789,37 @@ func _drive_tilt(dt: float) -> void:
 	if axis.length() > 1e-6:
 		basis = Basis(axis.normalized(), acos(clampf(_twin_up.dot(Vector3.UP), -1.0, 1.0)))
 	_body.set("calib_tilt", basis)
+
+
+# ======================================================================================
+# The floor calibration of the toe kinematics (toe_floor_calib.py)
+# ======================================================================================
+func _load_toe_calib() -> void:
+	_toe_calib = {}
+	var path := ProjectSettings.globalize_path("res://").path_join("../../pi_host/calib/toe_height_calib.json")
+	if not FileAccess.file_exists(path):
+		_toe_calib_note = "no floor calibration (pi_host/calib/toe_height_calib.json)"; return
+	var f := FileAccess.open(path, FileAccess.READ)
+	var parsed: Variant = JSON.parse_string(f.get_as_text()) if f != null else null
+	if not (parsed is Dictionary) or not ((parsed as Dictionary).get("legs") is Dictionary):
+		_toe_calib_note = "floor calibration file unreadable"; return
+	for ph in ((parsed as Dictionary)["legs"] as Dictionary).keys():
+		var e: Dictionary = (parsed as Dictionary)["legs"][ph]
+		_toe_calib[str(ph)] = [float(e.get("a_mm", 0.0)), float(e.get("b_mm_per_rad_knee", 0.0)), float(e.get("c_mm_per_rad_hip1", 0.0))]
+	_toe_calib_belly_mm = float((parsed as Dictionary).get("anchor_belly_mm", NAN))
+	_toe_calib_note = "floor calibration %s (%s, anchor %s mm)" % [str((parsed as Dictionary).get("fitted", "?")).left(10),
+		str((parsed as Dictionary).get("source", "?")), str((parsed as Dictionary).get("anchor_belly_mm", "?"))]
+	print("BenchDashboard: " + _toe_calib_note + "  legs " + ", ".join(_toe_calib.keys()))
+
+
+# The correction (m) for SIM leg i at the twin's current joint angles: the sim leg's physical name through the
+# mirror, its hip1 and knee angles from the filtered pose the twin is drawn from.
+func _toe_calib_m(sim_i: int) -> float:
+	if _toe_calib.is_empty() or _twin_angles.size() != 12: return 0.0
+	var phys := ""
+	for k in MIRROR.keys():
+		if SIM_INDEX[MIRROR[k]] == sim_i: phys = k
+	if not _toe_calib.has(phys): return 0.0
+	var e: Array = _toe_calib[phys]
+	var hip1: float = float(_twin_angles[sim_i * 3 + 0]); var knee: float = float(_twin_angles[sim_i * 3 + 2])
+	return (float(e[0]) + float(e[1]) * knee + float(e[2]) * hip1) / 1000.0

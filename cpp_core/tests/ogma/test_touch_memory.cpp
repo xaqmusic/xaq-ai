@@ -134,3 +134,12 @@ TEST(TouchMemory, MaxVoxelsEvictsTheLeastRecentlyTouched) {
     EXPECT_EQ(f.m.voxels(), 2);
     for (auto const& b : f.m.body_voxels()) EXPECT_GT(b.fwd, -0.55) << "the first (now farthest) touch was evicted";
 }
+
+TEST(TouchMemory, ALegOffsetMovesThatLegsTouchesAndNotThePlaneItIsExcludedFrom) {
+    // Leg 3 reads the floor 10 mm too low (its FK bias); the calibration lifts its heights by +0.010.
+    Fix f({{"leg_y_offset_rr", ogma::ParamValue{0.010}}});
+    f.run(0, {1, 1, 1, 0}, kXZ, kY);          // plane from legs 0..2 (uncorrected, offsets 0)
+    std::vector<float> y_low = kY; y_low[3] = -0.10f;   // leg 3's FK says 10 mm deeper than the others on the same floor
+    f.run(1, {1, 1, 1, 1}, kXZ, y_low);
+    EXPECT_NEAR(leg3(f.m).h, 0.0, 1e-6) << "calibrated, leg 3's floor touch sits on the plane";
+}

@@ -56,6 +56,10 @@ ParamSchema TouchMemory::params_schema() const {
         {"max_voxels",       ParamMutability::HotMutable, "The memory's size; the least recently touched voxel goes first.", ParamValue{int64_t{4000}}},
         {"diag_max",         ParamMutability::HotMutable, "diag_snapshot lists at most this many voxels, nearest to the body first (0 = all).", ParamValue{int64_t{400}}},
         {"plane_tau_ticks",  ParamMutability::HotMutable, "EMA time constant (ticks) of the support plane: the median height of the toes that were already planted.", ParamValue{50.0}},
+        {"leg_y_offset_fl",  ParamMutability::HotMutable, "Floor calibration (m) added to leg fl's toe height (sim order; physical FR on the robot). toe_floor_calib.py's a_mm / 1000. 0 = none.", ParamValue{0.0}},
+        {"leg_y_offset_fr",  ParamMutability::HotMutable, "Floor calibration (m) added to leg fr's toe height (physical FL on the robot).", ParamValue{0.0}},
+        {"leg_y_offset_rl",  ParamMutability::HotMutable, "Floor calibration (m) added to leg rl's toe height (physical RR on the robot).", ParamValue{0.0}},
+        {"leg_y_offset_rr",  ParamMutability::HotMutable, "Floor calibration (m) added to leg rr's toe height (physical RL on the robot).", ParamValue{0.0}},
     };
 }
 
@@ -67,6 +71,8 @@ ParamMap TouchMemory::current_params() const {
     m["voxel_m"] = ParamValue{voxel_m_}; m["odom_translation"] = ParamValue{odom_translation_};
     m["max_voxels"] = ParamValue{int64_t(max_voxels_)}; m["diag_max"] = ParamValue{int64_t(diag_max_)};
     m["plane_tau_ticks"] = ParamValue{plane_tau_ticks_};
+    m["leg_y_offset_fl"] = ParamValue{leg_y_offset_[0]}; m["leg_y_offset_fr"] = ParamValue{leg_y_offset_[1]};
+    m["leg_y_offset_rl"] = ParamValue{leg_y_offset_[2]}; m["leg_y_offset_rr"] = ParamValue{leg_y_offset_[3]};
     return m;
 }
 
@@ -78,7 +84,8 @@ void TouchMemory::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "feet_y_topic",  [&](auto const& v){ feet_y_topic_  = get_string(v, "feet_y_topic"); });
     apply_param(params, "odom_topic",    [&](auto const& v){ odom_topic_    = get_string(v, "odom_topic"); });
     apply_param(params, "load_topic",    [&](auto const& v){ load_topic_    = get_string(v, "load_topic"); });
-    for (auto const& k : {"voxel_m", "odom_translation", "max_voxels", "diag_max", "plane_tau_ticks"})
+    for (auto const& k : {"voxel_m", "odom_translation", "max_voxels", "diag_max", "plane_tau_ticks",
+                          "leg_y_offset_fl", "leg_y_offset_fr", "leg_y_offset_rl", "leg_y_offset_rr"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     sub_ids_.push_back(bus_->subscribe(contact_topic_, SubscriptionKind::Direct, [this](std::string_view, MessagePtr p){ handle_contact(p); }));
     sub_ids_.push_back(bus_->subscribe(feet_xz_topic_, SubscriptionKind::Direct, [this](std::string_view, MessagePtr p){ handle_feet_xz(p); }));
@@ -95,6 +102,10 @@ void TouchMemory::on_param_change(std::string_view key, ParamValue const& value)
     else if (k == "max_voxels")       max_voxels_ = std::max(1, int(get_double(value, k)));
     else if (k == "diag_max")         diag_max_ = std::max(0, int(get_double(value, k)));
     else if (k == "plane_tau_ticks")  plane_tau_ticks_ = std::max(1.0, get_double(value, k));
+    else if (k == "leg_y_offset_fl")  leg_y_offset_[0] = get_double(value, k);
+    else if (k == "leg_y_offset_fr")  leg_y_offset_[1] = get_double(value, k);
+    else if (k == "leg_y_offset_rl")  leg_y_offset_[2] = get_double(value, k);
+    else if (k == "leg_y_offset_rr")  leg_y_offset_[3] = get_double(value, k);
     else throw std::invalid_argument("TouchMemory: param '" + k + "' is construction-only / unknown");
 }
 
@@ -116,7 +127,7 @@ void TouchMemory::handle_feet_y(MessagePtr p) {
     if (!input_allowed(p->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
     if (!pt || pt->values.size() < 4) return;
-    for (int i = 0; i < 4; ++i) feet_y_[i] = pt->values[i];
+    for (int i = 0; i < 4; ++i) feet_y_[i] = pt->values[i] + float(leg_y_offset_[i]);   // the floor calibration
     have_y_ = true;
 }
 void TouchMemory::handle_odom(MessagePtr p) {
@@ -245,6 +256,7 @@ nlohmann::json TouchMemory::diag_snapshot() const {
                           {"odom", {ox_, oy_, oyaw_}}, {"have_odom", have_odom_}, {"odom_translation", odom_translation_},
                           // Input health, so a dashboard can say WHICH stream is missing rather than show an empty cloud.
                           {"have_contact", have_contact_}, {"have_xz", have_xz_}, {"have_y", have_y_}, {"have_load", have_load_},
+                          {"leg_y_offset", {leg_y_offset_[0], leg_y_offset_[1], leg_y_offset_[2], leg_y_offset_[3]}},
                           {"ticks", last_tick_}};
 }
 

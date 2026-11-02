@@ -1,0 +1,43 @@
+{
+ "version": 1,
+ "fitted": "2026-11-02T09:15:40",
+ "source": "benchd_20261101_220321.jsonl",
+ "body": "measured_fsr",
+ "pose": "toes_up",
+ "anchor_belly_mm": -29.0,
+ "model": "y_true_mm = y_fk_mm + a + b*knee_rad + c*hip1_rad",
+ "legs": {
+  "FL": {
+   "a_mm": 7.1,
+   "b_mm_per_rad_knee": -0.29,
+   "c_mm_per_rad_hip1": 0.89,
+   "n": 9,
+   "residual_sd_mm": 0.59,
+   "kind": "probed"
+  },
+  "FR": {
+   "a_mm": -9.56,
+   "b_mm_per_rad_knee": 8.84,
+   "c_mm_per_rad_hip1": -2.07,
+   "n": 10,
+   "residual_sd_mm": 1.1,
+   "kind": "probed"
+  },
+  "RL": {
+   "a_mm": -0.37,
+   "b_mm_per_rad_knee": 2.26,
+   "c_mm_per_rad_hip1": 0.54,
+   "n": 10,
+   "residual_sd_mm": 1.43,
+   "kind": "probed"
+  },
+  "RR": {
+   "a_mm": 0.17,
+   "b_mm_per_rad_knee": 4.48,
+   "c_mm_per_rad_hip1": 0.51,
+   "n": 10,
+   "residual_sd_mm": 0.64,
+   "kind": "probed"
+  }
+ }
+}
