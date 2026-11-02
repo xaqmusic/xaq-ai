@@ -9750,3 +9750,27 @@ exclude it or the operator's pose should lift it. **Harness notes:** a stale ter
 stalled at tap 6 and it was interrupted; `--start-at` resumes a pass. Re-use context: the box pass at the middle
 stations (`--stations -30,0,30 --cond box5`), the pillow, then the horizontal probe for faces (not built: the script
 descends only).
+
+### 2026-11-02 — THE SCRIPTED PROBE, BOX PASS (a 60 mm box in front; same 20 stations): THE TOE READS THE BOX TOP AT 57.5 ± 4.6 mm ABOVE ITS OWN FLOOR REFERENCE (6 top contacts, knee A), A FACE PUSH SHOWS AS CURRENT BEFORE THE FOOT SENSOR (FR at −30/0/+30: 0.6–0.8 A within 200 µs of travel, the guard ended it), and the bent knee's start pose sits AT box height so it dragged along the top edge (operator: "only the 90° knee cleared the top") — `BASELINE` (n = 1 pass; record `~/xaq_runs/robot_20261101_touch1/benchd_20261101_220321.jsonl`, probe log `palpate_20261102_081728_box60.jsonl`)
+
+| leg, knee | what the five stations met | toe height at onset vs the floor pass (mm) |
+|---|---|---|
+| FL, A | the box top at all five | +59.5, +59.5, +60.5, +55.6, +61.5 |
+| FL, B | the top EDGE while dragging: one current guard (1.0 A), two stations already in contact at the start, two edge contacts | +16.5, +9.5, +14.6 (the edge, not the top) |
+| FR, A | the floor at −60; the box FACE at −30 / 0 / +30 (current guard 0.73 / 0.90 / 0.83 A, foot sensor silent until the toe slid onto the edge a moment later); the top edge at +60 | +0.8, (+38.5 edge), —, (+38.5 edge), +48.1 |
+| FR, B | the floor at all five (the bent knee's shorter reach lands short of the box) | −0.1 … −0.8 |
+
+**Reading.** **Height:** with each leg's own floor as the reference (the floor pass, same leg and knee), the 60 mm box reads
+57.5 ± 4.6 mm across six top contacts; the FL knee-A stations alone read 59.3 ± 2.1 mm. The per-leg bias cancels in the
+difference, which is why the floor calibration comes first. **Faces:** the open question from the plan is answered on
+the right leg: a toe meeting a vertical face loads the servo before it loads the sole — the bus current rose 0.6–0.8 A
+within 200 µs of travel while the foot sensor stayed under threshold; the sole fired only as the toe slid up onto the
+edge. The current step is the face channel, the sole is the top channel, and the probe's guard already separates them.
+**The bent knee:** at knee B the `touch_ready` start already has the toe at a 60 mm box's height, so the descent met the
+top edge and dragged (the foot was in contact before the station began at two stations); `palpate.py --lift <us>` now
+starts hip2 further up for tall objects. **Compliance** on the box top read 3.5 counts/µs against the floor's 8–16 at
+knee A — not yet comparable: counts per µs of hip2 depends on the lever arm at the contact pulse (~700 µs on the box,
+~1060 on the floor); the reader should convert to counts per mm of vertical toe travel through the FK before the pillow
+is judged by it. Re-use context: `--lift 120` for the knee-B box pass; the pillow next (vertical probe, compliance in
+counts per mm); the horizontal probe for faces can now be specified from this data (advance at fixed height, stop on a
+current step of ~0.5 A or a sole crossing, whichever first).

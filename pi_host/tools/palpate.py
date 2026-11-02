@@ -117,6 +117,7 @@ def main():
     ap.add_argument("--dry", action="store_true", help="print the plan, command nothing")
     ap.add_argument("--no-recall", action="store_true", help="do not pose.set the start pose first")
     ap.add_argument("--start-at", type=int, default=1, help="resume an interrupted pass at this tap number")
+    ap.add_argument("--lift", type=int, default=0, help="start hip2 this many us further UP than the start pose (tall objects: at knee B the pose's own start already sits a 60 mm box's height)")
     a = ap.parse_args()
 
     b = Bench(a.host)
@@ -154,8 +155,8 @@ def main():
     # that distance plus a margin.  (Session 1's floor taps sat near that minimum: FL hip2 ~1080 us, knee A.)
     start = {}
     for ph in legs:
-        c2 = by_pj[(ph, "hip2")]; start[ph] = pose_us[c2]
-        lo, hi = lims[c2]
+        c2 = by_pj[(ph, "hip2")]; lo, hi = lims[c2]
+        start[ph] = pose_us[c2]
         for kn in knees:
             cur = dict(enumerate(pose_us)); cur[by_pj[(ph, "knee")]] = us_of(ph, "knee", KNEE_DEG[kn])[1]
             best_us, best_y = None, 1e9
@@ -163,6 +164,8 @@ def main():
                 cur[c2] = us; y = toe_y(ph, cur)
                 if y < best_y: best_y, best_us = y, us
             start[(ph, kn, "dir")] = +1 if best_us > start[ph] else -1
+            if a.lift > 0:        # further from the lowest point, within the channel's limits
+                start[ph] = max(lo + 10, min(hi - 10, pose_us[c2] - start[(ph, kn, "dir")] * a.lift))
             start[(ph, kn, "travel")] = min(900, abs(best_us - start[ph]) + 150)
             start[(ph, kn, "lowest")] = (best_us, best_y)
     print(f"palpate --cond {a.cond}: {len(plan)} taps; start pose '{a.pose}'; stations {stations} deg; knees {knees}")
