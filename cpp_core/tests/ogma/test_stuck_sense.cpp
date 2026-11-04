@@ -134,3 +134,23 @@ TEST(StuckSense, MedianWindowEndsResolveAWalkUnderTheSonarsJitterWhereSingleSamp
     EXPECT_GT(m_stall.score(), 0.8f) << "the wall does not approach: a full deficit, jitter or not";
     EXPECT_TRUE(m_stall.m.measured());
 }
+
+TEST(StuckSense, WithATurnCommandTopic_AnUncommandedYawDoesNotHideTheStall_ACommandedOneDoes) {
+    Fix f({{"window_ticks", int64_t{10}}, {"v_ema_alpha", 0.05}, {"odom_topic", std::string("reality.proprio.odom")},
+           {"turn_cmd_topic", std::string("reality.cognitive.avoid_value")}});
+    uint64_t t = 0; double yaw = 0.0;
+    auto step = [&](float vfwd, double dyaw, float cmd) {
+        f.bus.begin_tick(t); yaw += dyaw;
+        f.bus.publish("sense.range", pv({1.5f, 0.0f})); f.bus.publish("reality.proprio.stride_v", pv({0.0f, vfwd}));
+        f.bus.publish("reality.proprio.speed_cmd", pv({1.0f})); f.bus.publish("reality.proprio.odom", pv({0.0f, 0.0f, float(yaw)}));
+        f.bus.publish("reality.cognitive.avoid_value", pv({cmd}));
+        f.m.tick(t); f.bus.end_tick(); ++t;
+    };
+    for (int i = 0; i < 500; ++i) step(0.03f, 0.0, 0.0f);            // walking free, straight, no loop steering
+    for (int i = 0; i < 300; ++i) step(0.0f, 0.3 / 50.0, 0.0f);      // yawing at 0.3 rad/s with NO command: the ground is turning it
+    EXPECT_GT(f.m.stall(), 0.9f) << "an uncommanded yaw with zero stride, commanding forward: a stall";
+    for (int i = 0; i < 500; ++i) step(0.03f, 0.0, 0.0f);            // walking again: the stall clears
+    EXPECT_LT(f.m.stall(), 0.2f);
+    for (int i = 0; i < 300; ++i) step(0.0f, 0.3 / 50.0, 1.0f);      // the same yaw while the avoid loop commands it
+    EXPECT_FLOAT_EQ(f.m.stall(), 0.0f) << "a commanded turn: the sense abstains, as before";
+}

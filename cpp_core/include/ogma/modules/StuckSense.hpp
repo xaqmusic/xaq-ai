@@ -77,6 +77,12 @@ private:
     // reads the rocking as turning and abstains on a pinned body (S3b, escape-only arm v4: zero
     // escapes).  The net yaw over yaw_window_ticks is what a turn is.
     std::string odom_topic_   = "";
+    // 2026-11-04: the yaw abstention applies only while a turn is COMMANDED (a loop's value on this topic >= turn_cmd_min);
+    // a body yawing with no loop steering it is being turned by the ground, and that is the stall, not a reason to
+    // abstain.  "" = every real turn abstains (the 2026-10 form, byte-identical).
+    std::string turn_cmd_topic_ = "";
+    double turn_cmd_min_ = 0.05;
+    double turn_cmd_ = 0.0; bool have_turn_cmd_ = false;
     double yaw_rate_max_      = 0.15;   // rad/s, net over the window
     int    yaw_window_ticks_  = 150;    // 3 s: two strides and change
     int    window_ticks_   = 50;      // 1 s at 50 Hz

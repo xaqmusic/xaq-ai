@@ -10030,3 +10030,41 @@ the instrument), `_sim60_terrain_g4a` (one operating point: the control that sep
 situation" at 6 rad/s, where the 2026-10-26 null was at 4.22), `_sim60_terrain_g4b` (the lever). **Gate** (the G4
 decision): A/B against the fixed settings on the terrain arena, n ≥ 20 varied worlds, the full battery, and the (d)
 test; nothing is claimed until the long battery says the stall regime is reached and the vocabulary separates it.
+
+### 2026-11-04 — STEP 2, THE LONG BATTERY (`_sim60_terrain`, n = 4 × 24 000 ticks, varied worlds, the planted feet's floor): the touch vocabulary SEES THE TERRAIN, weakly and mostly as step-DOWN touches; the walker never stalls, it SLOWS (4–5 m per 2400 ticks on the flat, 0.1–2 m in the 38 / 50 mm bands and the bowl, 0 resets); and the progress error the plan rests on is sensed in StuckSense's stride-speed EMA (0.00 ± 0.02 in the slow windows vs 0.08 ± 0.03 in the fast) but PUBLISHED ALMOST NEVER, because the channel speaks only while the body walks straight and this walker turns ~4 rad per 2400 ticks everywhere — `PARTIAL` (instrument; n = 4)
+
+**The floor reference, fixed.** With the planted feet's plane as the floor the flat centre reads h p50 −4 mm,
+p90 +8 mm (the ToF reference had read +12 / +25 on the same body: the boom ToF's pitch sensitivity, O73). Against
+that floor the bands show in the height feature as the fraction of touches more than 2 cm BELOW the plane — a foot
+landing late, on a lower surface than the planted ones: centre 2 %, ring 3 (25 mm) 1 %, ring 4 (38 mm) 10 %, ring 5
+(50 mm) 13 %, the bowl 22 %; the step-UP fraction (> +2 cm) is 0 / 0 / 3 / 6 / 15 %. The terrain document predicted
+exactly this asymmetry ("a step down lands late with a missing support"). The vertical fraction and the lean rise
+stay in their walking bands in every ring (p50 0.17–0.22, lean p90 0.25–0.31): per-footfall features in a gait, not
+per-obstacle ones.
+
+**The walker does not stall at 6 rad/s; it slows.** Real displacement per 2400-tick window: 4–5 m on the flat and
+through ring 3, then 0.1–2 m in ring 4, ring 5 and the bowl (seeds reached 11, 12, 18 and 19 m; two sat 16 000
+ticks in ring 4–5 moving 1–2 m per window, two crossed into the bowl). Zero resets. The 2026-10-25 capability map's
+hard stalls were the robot-speed walker (4.22 rad/s); the sim-ideal twin's failure mode on this course is a 3–5×
+slowdown with constant turning (net yaw ~4 rad per window in every band — the body wanders; `straight` 0.40).
+
+**The error signal: present, gated away.** Three stall instruments were read. The body's own 2 s displacement deficit
+(`stuck_deficit`) is DEAD under `OGMA_PICRAWLER_HONEST_DISTRESS=1` (it is only computed on the other branch) and the
+honest `distress` stayed at 0 (max 0.02): neither can gate anything on this config. StuckSense's stride-speed
+channel does carry the slowdown — the raw stride forward (`stuck_vf`) averages 0.00 ± 0.02 over the four windows
+with < 0.5 m of real travel against 0.08 ± 0.03 over the 28 windows with > 2 m — but its published `stall` is
+0 on 90 % of rows, because it speaks only while the body is `commanding && straight` (net yaw rate ≤ 0.15 rad/s over
+150 ticks) and the walker's wandering trips the straight gate most of the time; `v_ref`'s 20 s peak-hold then
+decays toward the slow EMA and the stall fades by design. The odometry's path length is no help (it integrates the
+stride oscillation: 66–77 m claimed against 11–19 m of radial travel). **So the rewrite rule's second step reads:**
+the observation exists (the stride-speed EMA against the body's recent best) and the gate on it was designed for a
+heading-holding walker; on a wandering one the gate must come from the stall itself (a slow body that is also turning
+is still a slow body) or the turning must be charged as the stall it is. The body log now carries the channel's
+internals (`stuck_stall`, `stuck_vema`, `stuck_vref`, `stuck_yr`) so the next battery can show which.
+
+**What this means for step 3.** The descent's `e_stall` term is mostly 0 on this config, so the per-situation
+lift descent is judged here on swing contact and tilt spread plus the harness's displacement metrics; the three
+arms (fixed / one point / per situation, n = 4 varied worlds, 24 000 ticks, ultrasonic OFF per the 2026-10-25 rule)
+are running. The step that makes the plan's error live — the stall gate — is the next instrument lever, before any
+verdict on the consumer leans on it. Files: `stall_events.py` (session scratch), the three `_sim60_terrain*`
+configs, `picrawler_body.gd` (the stuck keys).

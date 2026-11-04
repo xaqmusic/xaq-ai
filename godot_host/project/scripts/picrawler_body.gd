@@ -12856,6 +12856,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["stuck_exp"] = snappedf(float(ss.get("expected", 0.0)), 0.0001)
 		line["stuck_obs"] = snappedf(float(ss.get("observed", 0.0)), 0.0001)
 		line["stuck_vf"] = snappedf(float(ss.get("vfwd", 0.0)), 0.0001)
+		# The stall channel's internals (2026-11-04): the stride forward's EMA against the body's own recent best, and the
+		# straight gate that lets it speak -- on the terrain arena the walker turns most of the time, so the published
+		# score abstains while the EMA already shows the slowdown.
+		line["stuck_stall"] = snappedf(float(ss.get("stall", 0.0)), 0.001)
+		line["stuck_vema"] = snappedf(float(ss.get("v_ema", 0.0)), 0.0001)
+		line["stuck_vref"] = snappedf(float(ss.get("v_ref", 0.0)), 0.0001)
+		line["stuck_yr"] = snappedf(float(ss.get("yaw_rate", 0.0)), 0.001)
 		line["stuck_cmd"] = snappedf(float(ss.get("speed_cmd", 0.0)), 0.001)
 	if metrics.has("load_phase"):
 		# LoadPhaseGait (gait audit 2026-10-12): the load-held per-leg phase's own instruments.

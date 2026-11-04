@@ -1,7 +1,7 @@
 {
  "metadata": {
   "name": "LEVER G4b · _sim60_terrain + LiftDescent PER SITUATION, the situation = the encounter EPM's node (reality.touch.encounter, held by a 60-tick occupancy) — the consumer of the touch vocabulary: each kind of touch keeps its own swing-lift operating point (2026-11-02)",
-  "description": "_sim60_terrain (encounter chain live) + LiftDescent with situation_topic reality.touch.encounter: one (front, rear) swing-lift multiplier PER encounter node, each found by local descent on the gait's own errors (swing contact, stall, tilt spread); a trial counts for the node that held 60 % of it. MotorEPMv2 reads handle.lift. Controls: _sim60_terrain (fixed lift) and _sim60_terrain_g4a (one point).",
+  "description": "_sim60_terrain (encounter chain live) + LiftDescent with situation_topic reality.touch.encounter: one (front, rear) swing-lift multiplier PER encounter node, each found by local descent on the gait's own errors (swing contact, stall, tilt spread); a trial counts for the node that held 60 % of it. MotorEPMv2 reads handle.lift. Controls: _sim60_terrain (fixed lift) and _sim60_terrain_g4a (one point). Ultrasonic OFF for the terrain battery (operator rule 2026-10-25: step faces trip the avoid reflex). StuckSense gates its yaw abstention on a COMMANDED turn (turn_cmd_topic = the avoid value; 2026-11-04), so the ground turning the body does not hide the stall.",
   "env_target": "picrawler",
   "gym_mode": "terrain",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -45,7 +45,7 @@
    "OGMA_PICRAWLER_JOINT_TORQUE_ZERO": "1",
    "OGMA_PICRAWLER_STAB_GAIN": "0",
    "OGMA_PICRAWLER_HEIGHT_PENALTY_GAIN": "0",
-   "OGMA_PICRAWLER_ULTRASONIC": "1",
+   "OGMA_PICRAWLER_ULTRASONIC": "0",
    "OGMA_PICRAWLER_CAMERA_ROBOT": "1",
    "OGMA_PICRAWLER_ODOM": "1",
    "OGMA_PICRAWLER_ODOM_SCALE": "2.0",
@@ -634,7 +634,8 @@
     "hz": 50.0,
     "odom_topic": "reality.proprio.odom",
     "yaw_rate_max": 0.15,
-    "yaw_window_ticks": 150
+    "yaw_window_ticks": 150,
+    "turn_cmd_topic": "reality.cognitive.avoid_value"
    }
   },
   {

@@ -1,7 +1,7 @@
 {
  "metadata": {
   "name": "LEVER G4a on the sim twin · _sim60_terrain + LiftDescent with ONE operating point (the global swing-lift descent, 2026-10-26 NULL at 4.22 rad/s, here at 6 rad/s) — the control that separates \"descent at all\" from \"per situation\"",
-  "description": "_sim60_terrain (encounter chain live) + LiftDescent enabled, no situation topic: one (front, rear) swing-lift multiplier found by local descent on swing contact, stall and tilt spread. MotorEPMv2 reads handle.lift.",
+  "description": "_sim60_terrain (encounter chain live) + LiftDescent enabled, no situation topic: one (front, rear) swing-lift multiplier found by local descent on swing contact, stall and tilt spread. MotorEPMv2 reads handle.lift. Ultrasonic OFF for the terrain battery (operator rule 2026-10-25: step faces trip the avoid reflex). StuckSense gates its yaw abstention on a COMMANDED turn (turn_cmd_topic = the avoid value; 2026-11-04), so the ground turning the body does not hide the stall.",
   "env_target": "picrawler",
   "gym_mode": "terrain",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -45,7 +45,7 @@
    "OGMA_PICRAWLER_JOINT_TORQUE_ZERO": "1",
    "OGMA_PICRAWLER_STAB_GAIN": "0",
    "OGMA_PICRAWLER_HEIGHT_PENALTY_GAIN": "0",
-   "OGMA_PICRAWLER_ULTRASONIC": "1",
+   "OGMA_PICRAWLER_ULTRASONIC": "0",
    "OGMA_PICRAWLER_CAMERA_ROBOT": "1",
    "OGMA_PICRAWLER_ODOM": "1",
    "OGMA_PICRAWLER_ODOM_SCALE": "2.0",
@@ -634,7 +634,8 @@
     "hz": 50.0,
     "odom_topic": "reality.proprio.odom",
     "yaw_rate_max": 0.15,
-    "yaw_window_ticks": 150
+    "yaw_window_ticks": 150,
+    "turn_cmd_topic": "reality.cognitive.avoid_value"
    }
   },
   {

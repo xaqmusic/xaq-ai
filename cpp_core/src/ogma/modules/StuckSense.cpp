@@ -52,6 +52,8 @@ ParamSchema StuckSense::params_schema() const {
         {"output_topic", ParamMutability::ConstructionOnly, "Output: [score, deficit, expected_m, observed_m].", ParamValue{std::string("reality.proprio.stuck")}},
         {"odom_topic",   ParamMutability::ConstructionOnly, "Optional ProprioToken [x, y, yaw]: the body's heading. The sense abstains while the body IS turning (|yaw rate| > yaw_rate_max): a turn zeroes forward stride legitimately. Empty = no gate.", ParamValue{std::string("")}},
         {"yaw_rate_max", ParamMutability::HotMutable, "The NET yaw rate over yaw_window_ticks above which the sense abstains (rad/s). The gait's own per-stride rocking averages out over the window; a turn does not.", ParamValue{0.15}},
+        {"turn_cmd_topic", ParamMutability::ConstructionOnly, "Optional ProprioToken [value]: a loop's steering value (TofAvoidLoop's reality.cognitive.avoid_value). With it, the yaw abstention applies only while value >= turn_cmd_min: a commanded turn zeroes forward stride legitimately; an uncommanded yaw is the ground turning the body, and the stall channel judges through it (2026-11-04). \"\" = every real turn abstains.", ParamValue{std::string("")}},
+        {"turn_cmd_min",   ParamMutability::HotMutable, "The steering value at or above which a turn counts as commanded.", ParamValue{0.05}},
         {"yaw_window_ticks", ParamMutability::HotMutable, "The window the net yaw is measured over (ticks); whole strides (the gait period is ~70).", ParamValue{int64_t{150}}},
         {"window_ticks",   ParamMutability::HotMutable, "The window the range must have closed over (ticks).", ParamValue{int64_t{50}}},
         {"min_expected_m", ParamMutability::HotMutable, "Below this much claimed walking the window says too little to judge.", ParamValue{0.05}},
@@ -91,6 +93,8 @@ void StuckSense::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "speed_topic",  [&](auto const& v){ speed_topic_  = get_string(v, "speed_topic"); });
     apply_param(params, "output_topic", [&](auto const& v){ output_topic_ = get_string(v, "output_topic"); });
     apply_param(params, "odom_topic",   [&](auto const& v){ odom_topic_   = get_string(v, "odom_topic"); });
+    apply_param(params, "turn_cmd_topic", [&](auto const& v){ turn_cmd_topic_ = get_string(v, "turn_cmd_topic"); });
+    apply_param(params, "turn_cmd_min",   [&](auto const& v){ turn_cmd_min_   = get_double(v, "turn_cmd_min"); });
     apply_param(params, "yaw_rate_max", [&](auto const& v){ yaw_rate_max_ = get_double(v, "yaw_rate_max"); });
     apply_param(params, "yaw_window_ticks", [&](auto const& v){ yaw_window_ticks_ = std::max(2, int(get_double(v, "yaw_window_ticks"))); });
     apply_param(params, "window_ticks",   [&](auto const& v){ window_ticks_   = std::max(2, int(get_double(v, "window_ticks"))); });
@@ -116,6 +120,13 @@ void StuckSense::on_setup(Bus* bus, ParamMap const& params) {
     if (!odom_topic_.empty())
         sub_ids_.push_back(bus_->subscribe(odom_topic_, SubscriptionKind::Direct,
             [this](std::string_view, MessagePtr p){ handle_odom(p); }));
+    if (!turn_cmd_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(turn_cmd_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+                if (pt && pt->values.size() >= 1) { turn_cmd_ = double(pt->values[0]); have_turn_cmd_ = true; }
+            }));
 }
 
 bool StuckSense::end_range(size_t begin, size_t end, double& r_out) const {
@@ -142,6 +153,7 @@ void StuckSense::on_param_change(std::string_view key, ParamValue const& value) 
     else if (k == "min_expected_m") min_expected_m_ = get_double(value, k);
     else if (k == "cmd_min")        cmd_min_        = get_double(value, k);
     else if (k == "range_max_m")    range_max_m_    = get_double(value, k);
+    else if (k == "turn_cmd_min")   turn_cmd_min_   = get_double(value, k);
     else if (k == "ema_alpha")      ema_alpha_      = get_double(value, k);
     else if (k == "decay")          decay_          = get_double(value, k);
     else if (k == "v_ema_alpha")    v_ema_alpha_    = get_double(value, k);
@@ -184,7 +196,9 @@ void StuckSense::tick(uint64_t tick_id) {
         yaw_rate_ = (int(yaw_ring_.size()) == yaw_window_ticks_ + 1)
                   ? (yaw_ring_.back() - yaw_ring_.front()) * hz_ / double(yaw_window_ticks_) : 0.0;
     }
-    const bool straight   = odom_topic_.empty() || !have_odom_ || std::fabs(yaw_rate_) <= yaw_rate_max_;
+    const bool turning    = !odom_topic_.empty() && have_odom_ && std::fabs(yaw_rate_) > yaw_rate_max_;
+    const bool turn_cmd   = turn_cmd_topic_.empty() || (have_turn_cmd_ && turn_cmd_ >= turn_cmd_min_);
+    const bool straight   = !(turning && turn_cmd);   // a real turn abstains only when a loop commands it
     const bool commanding = (speed_topic_.empty() || !have_speed_ || speed_cmd_ >= cmd_min_) && straight;
     // Channel 1: the stall.  The stride forward's EMA against the body's own recent best.
     v_ema_ += v_ema_alpha_ * (vfwd_ - v_ema_);
@@ -236,7 +250,7 @@ nlohmann::json StuckSense::diag_snapshot() const {
                           {"v_ema", v_ema_}, {"v_ref", v_ref_}, {"deficit", deficit_}, {"measured", measured_},
                           {"expected", expected_}, {"observed", observed_}, {"measurements", measurements_},
                           {"range", d_}, {"valid", valid_}, {"vfwd", vfwd_}, {"speed_cmd", speed_cmd_},
-                          {"yaw_rate", yaw_rate_}};
+                          {"yaw_rate", yaw_rate_}, {"turn_cmd", turn_cmd_}};
 }
 
 } // namespace ogma
