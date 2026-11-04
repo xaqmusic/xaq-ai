@@ -256,7 +256,9 @@ godot4 --headless --fixed-fps 60 --quit-after 4000000 \
   `h_ema`/`h_max`/`h_bias`, chassis `y`, `knee[]`, `feet_y[]`, `auto_reset_count`).
 - **UI:** `[P]` toggles the per-metre path trail; `[X]` hides the cloud of touches (purple: the body's own FK
   footprints, body-locked, so the odometry's drift is seen; lavender: the brain's `TouchMemory` when the config
-  carries it); `[1]`/`[2]`/`[5]`/`[6]` live-swap arena/corridor/room/terrain; the
+  carries it); `[Y]` the forward 8x8 time-of-flight field's rays (green floor, orange thing, magenta leg), `[7]`/`[8]`
+  its pitch, `[9]`/`[0]` its mount height (`OGMA_PICRAWLER_TOF8=1`, `scripts/tof8.gd`, 2026-11-04);
+  `[1]`/`[2]`/`[5]`/`[6]` live-swap arena/corridor/room/terrain; the
   MOTOR-EPM panel has live sliders for every lever. The live viewer is
   [`tools/xaq_inspector`](tools/xaq_inspector/README.md). **Operator/UI-driven diagnosis is
   first-class** — not a fallback.

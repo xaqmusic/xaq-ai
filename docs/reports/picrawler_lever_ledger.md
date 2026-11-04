@@ -10111,3 +10111,43 @@ stride period or the stance press, not the lift); the stall gate measured live, 
 situation defined by the rare node's recency with a trial rule that keeps the trials. The machinery stays
 (`LiftDescent situation_topic`, tests pass, default off). Files: the three `_sim60_terrain*` configs, the
 session's `ab_compare.py`; logs under the session scratch `ab/`.
+
+### 2026-11-04 — THE FORWARD 8x8 TIME-OF-FLIGHT FIELD IN THE SIM (`scripts/tof8.gd`, `sense.tof8`): 64 zones, a 45° square field, 4 m, 15 Hz, cast against the world AND the body's own legs from a mount on the front face whose height and pitch are live (`[7]`–`[0]`), the rays drawn by the body's own classification (`[Y]`), the grid in the body log — the sensor the terrain plan was missing, built first as an instrument so the mount can be chosen before the part is fitted — `BASELINE` (instrument)
+
+**Why this sensor, from the two batteries above.** The progress error has no honest exteroceptive source: the legs'
+odometry overclaims four to six times on terrain, and the one forward beam works only on a hard surface within 1.4 m.
+A depth field ahead gives the closing rate on whatever is stopping the body (the stall, readable through soft and
+dark surfaces the sonar loses), the floor profile seconds before a toe reaches it (the context the per-situation
+descent lacked: an obstacle seen for seconds rather than a rare footfall node), and the body's pitch against the
+floor (O73). The duck's model (`mj_host/src/Tof.hpp`) is the precedent; the picrawler's adds the self-cast, because
+on this body the front legs swing through the field and the mount is judged by how much of it they take.
+
+**The contract** (`pi_host/PROTOCOL.md`): float32[64], slant range in metres, row-major, row 0 the top, column 0 the
+left, −1 none; a leg in the beam is a return at the leg. The classification is for the rays and the log and is
+egocentric — a beam is "floor" when its return reaches 85 % of the distance the belly clearance and the body's own
+gravity estimate predict for the ground, "a thing" when it stops short, "a leg" when the body's own leg is the
+return, "too close" under 10 cm. **First cast** (the terrain spawn, 30° down, 70 mm above the chassis bottom): the
+bottom row lands 0.18 m ahead and the top row 0.86 m, all 64 floor, no leg in the field at that instant. **The mount
+study** (pitch 20–50° × height 40–100 mm above the chassis bottom, centred on the front face, 900 ticks of walking
+from the terrain spawn each; near / far = the median range of the bottom / top row; the floor spacing = the ground
+distance between adjacent rows at the near and far edge on a flat floor, the field's resolution for a step):
+
+| pitch | height | near | far | floor % | none % | a leg in the field | floor spacing near / far |
+|---|---|---|---|---|---|---|---|
+| 20° | 40 / 70 / 100 mm | 0.17 / 0.22 / 0.27 m | 1.4 / 1.8 / 2.2 m | 63 | 14–15 | never | 3–4 cm / the horizon |
+| 30° | 40 / 70 / 100 | 0.15 / 0.19 / 0.23 | 0.66 / 0.85 / 1.05 | 82 | 1 | never | 2–3 cm / 20–32 cm |
+| 40° | 40 / 70 / 100 | 0.13 / 0.17 / 0.20 | 0.34 / 0.43 / 0.52 | 93 | 0 | never | 1.4–2.2 cm / 6–10 cm |
+| 50° | 40 / 70 / 100 | 0.12 / 0.15 / 0.19 | 0.23 / 0.29 / 0.35 | 92–99 | 0 | never | 1.2–1.9 cm / 3–5 cm |
+
+The legs never enter a CENTRED field at any of these: the front toes swing at x = ±0.10–0.15 m, and the field is
+±0.04 m wide at 0.1 m and ±0.08 m at 0.2 m. That the self-cast is live was checked by moving the mount 60 mm to the
+left: the front-left leg then takes 25 (40°) to 38 (50°) zones on average, up to 57, and the same mount with the
+self-cast off reads zero — so "never" is a measurement, not a dead path. The non-floor zones at 20–30° are the rings
+and pyramids 1–2 m out, the look-ahead the plan wants; at 40–50° the field is all floor on the flat and resolves a
+step at 2–10 cm per row. **The trade, for the robot:** 30° at 70–100 mm reaches 0.85–1.05 m ahead with a 2–3 cm
+near-edge resolution and sees the course coming; 40° trades the reach for a 6–10 cm resolution at the far edge
+where a 38 mm step sits a stride away. The UI's `[7]`–`[0]` move the mount live on the terrain course with the rays
+drawn, so the choice is the operator's by eye before a bracket is made; a two-regime field (a stop-and-look pitch
+down, a walking pitch up) is the camera-tilt idea in a cheaper form and needs no new sensor. The brain reads nothing
+from the field yet — StuckSense's closing channel on it and an EPM over it are the two consumers in line, after the
+robot's driver, so the sim and the robot admit the same channel together.

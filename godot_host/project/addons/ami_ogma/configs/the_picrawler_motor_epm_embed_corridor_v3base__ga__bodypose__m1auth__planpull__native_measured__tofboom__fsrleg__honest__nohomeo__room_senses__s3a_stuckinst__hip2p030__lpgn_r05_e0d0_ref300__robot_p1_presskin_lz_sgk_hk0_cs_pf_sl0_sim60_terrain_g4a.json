@@ -52,7 +52,10 @@
    "OGMA_PICRAWLER_HONEST_VEL_EGO": "1",
    "OGMA_PICRAWLER_PUBLISH_TILT": "1",
    "OGMA_PICRAWLER_FEET_JAC": "1",
-   "OGMA_PICRAWLER_TOE_Y": "1"
+   "OGMA_PICRAWLER_TOE_Y": "1",
+   "OGMA_PICRAWLER_TOF8": "1",
+   "OGMA_PICRAWLER_TOF8_PITCH_DEG": "30",
+   "OGMA_PICRAWLER_TOF8_HEIGHT_MM": "70"
   },
   "derived_from": "the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0_sim60_terrain.json"
  },

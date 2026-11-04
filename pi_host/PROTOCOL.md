@@ -300,6 +300,18 @@ toe test is: the robot in front of a wall or a box, move one leg (slider or fade
 In the sim the same purple cloud is always drawn (body-locked, carried by the body's own odometry, so the footprints
 slide as it drifts), with the brain's in lavender; `touch_vox` / `touch_n` / `touch_brain` are in the body's JSONL.
 
+## The forward 8x8 time-of-flight field (2026-11-04)
+
+`sense.tof8`, ProprioToken float32[64]: the slant range per zone in metres, row-major, row 0 = the TOP of the field,
+column 0 = the LEFT as the robot sees it, −1 = no return; 15 Hz; a leg in the beam is a return at the leg. The part is
+a VL53L5CX / VL53L8CX class 8×8 (45° square field, zone pitch 5.6°, 4 m). The sim publishes it from `scripts/tof8.gd`
+(`OGMA_PICRAWLER_TOF8=1`, mount `OGMA_PICRAWLER_TOF8_HEIGHT_MM` above the chassis bottom on the front face, pitched
+down `OGMA_PICRAWLER_TOF8_PITCH_DEG`; `[7]`/`[8]`/`[9]`/`[0]` move it live, `[Y]` draws the 64 rays coloured by the
+body's own classification: floor where a beam meets the ground the belly clearance and gravity estimate predict,
+a thing otherwise, a leg when the body's own leg is the return) so the mount can be chosen before it is drilled;
+the body log carries `tof8` (cm) and its summary every row. The robot's host publishes the same topic from the
+part when it is fitted (not yet: the driver is the next piece). Nothing in the brain reads it yet.
+
 ## Local record (SPEC §3)
 
 `pi_host/log/benchd_<YYYYMMDD_HHMMSS>.jsonl` on the Pi: every verb (with reply) and every

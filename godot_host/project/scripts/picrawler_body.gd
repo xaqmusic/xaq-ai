@@ -1698,6 +1698,22 @@ var publish_feet_xz: bool = false
 # centre minus half a shank) the gait reads, which sits below the toe by up to L3/2 depending on the pose.  ogma_host
 # --toe-y publishes the same, with the robot's per-leg floor calibration applied; the sim needs none.
 var publish_toe_y: bool = false
+# THE FORWARD 8x8 TIME-OF-FLIGHT FIELD (OGMA_PICRAWLER_TOF8=1; 2026-11-04, scripts/tof8.gd): 64 slant ranges on
+# sense.tof8 at 15 Hz from a mount on the front face whose height (OGMA_PICRAWLER_TOF8_HEIGHT_MM above the chassis
+# bottom) and downward pitch (OGMA_PICRAWLER_TOF8_PITCH_DEG) are live: [7]/[8] pitch -/+ 5 deg, [9]/[0] height -/+ 10 mm,
+# [Y] the rays on/off (the model itself toggles with [Y] when it was off).  OGMA_PICRAWLER_TOF8_SELF=0 stops casting the
+# body's own legs.  The rays: green = floor, orange = a thing, magenta = a leg, red = too close, faint = nothing.
+var tof8_model: bool = false
+var _tof8 = null
+var _tof8_view = null
+var _tof8_show: bool = true
+var _tof8_last_slot: int = -1
+var _tof8_hud: Label = null
+var _tof8_pitch_env: float = 30.0
+var _tof8_height_env: float = 0.070
+var _tof8_fwd_env: float = 0.0
+var _tof8_lat_env: float = 0.0
+var _tof8_self_env: bool = true
 const _US_AZ_DEG: Array = [-7.5, -3.75, 0.0, 3.75, 7.5]   # the ~15 deg lobe, 5 x 3 rays
 const _US_EL_DEG: Array = [-5.0, 0.0, 5.0]
 var _us_range: float = 1.5
@@ -1747,6 +1763,7 @@ var _odom = null                                # DeadReckonNode
 # are drawn too, in LAVENDER: two implementations of one idea on one body, so they can
 # disagree visibly.  [X] hides both.  An instrument: nothing in the brain reads this.
 const TouchCloudScript = preload("res://scripts/touch_cloud.gd")
+const Tof8Script = preload("res://scripts/tof8.gd")   # the forward 8x8 time-of-flight field (2026-11-04)
 const TOUCH_LOCAL_COLOR := Color(0.62, 0.25, 0.95)     # = FOOT_SHOW_PURPLE
 const TOUCH_BRAIN_COLOR := Color(0.80, 0.62, 1.00)
 const TOUCH_DRAW_EVERY: int = 5
@@ -3419,6 +3436,11 @@ func _ready() -> void:
 			"float32[2]: FORWARD ultrasonic [distance_m, valid] — the robot's HC-SR04-class module on the front face, level, 20 Hz, max 1.5 m. valid=0 means no echo (beyond range OR a glancing surface), and distance then reads max range, never 0. Egocentric. Instrument-only until S1's separation study admits a consumer.", true)
 		print("PicrawlerBody: ULTRASONIC model ON — sense.range [m, valid], %.0f Hz, max %.2f m, lobe +/-7.5 deg, glancing limit %.0f deg, mount %.0f mm above the chassis bottom, no pitch" % [
 			ULTRASONIC_HZ, ULTRASONIC_MAX_RANGE_M, ULTRASONIC_GLANCE_DEG, ULTRASONIC_MOUNT_ABOVE_BOTTOM * 1000.0])
+	if tof8_model:
+		brain.register_source("Tof8", "sense.tof8",
+			"float32[64]: the FORWARD 8x8 time-of-flight field (VL53L5CX class), slant range per zone (m), row-major, row 0 = top, column 0 = left; -1 = no return (beyond 4 m); 15 Hz; a leg in the beam is a return at the leg. The robot publishes the same.", true)
+		print("PicrawlerBody: TOF8 model ON — sense.tof8 [64 m], 15 Hz, 45 deg field, max 4 m, mount %.0f mm above the chassis bottom, pitch %.0f deg down, self-occlusion %s" % [
+			_tof8_height_env * 1000.0, _tof8_pitch_env, "on" if _tof8_self_env else "off"])
 	if camera_robot:
 		vision_res_w = CAMERA_ROBOT_RES
 		vision_res_h = CAMERA_ROBOT_RES
@@ -3790,7 +3812,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
-			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_ROOM_SIZE",
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_TOF8", "OGMA_PICRAWLER_TOF8_PITCH_DEG", "OGMA_PICRAWLER_TOF8_HEIGHT_MM", "OGMA_PICRAWLER_TOF8_FWD_MM", "OGMA_PICRAWLER_TOF8_LAT_MM", "OGMA_PICRAWLER_TOF8_SELF", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
 			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
@@ -3842,6 +3864,12 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_FEET_JAC":          publish_feet_jac  = (v != "0" and v != "")
 			"OGMA_PICRAWLER_FEET_XZ":           publish_feet_xz   = (v != "0" and v != "")
 			"OGMA_PICRAWLER_TOE_Y":             publish_toe_y     = (v != "0" and v != "")
+			"OGMA_PICRAWLER_TOF8":              tof8_model        = (v != "0" and v != "")
+			"OGMA_PICRAWLER_TOF8_PITCH_DEG":    _tof8_pitch_env   = v.to_float()
+			"OGMA_PICRAWLER_TOF8_HEIGHT_MM":    _tof8_height_env  = v.to_float() / 1000.0
+			"OGMA_PICRAWLER_TOF8_FWD_MM":       _tof8_fwd_env     = v.to_float() / 1000.0
+			"OGMA_PICRAWLER_TOF8_LAT_MM":       _tof8_lat_env     = v.to_float() / 1000.0
+			"OGMA_PICRAWLER_TOF8_SELF":         _tof8_self_env    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ROOM_SIZE":         room_size         = clampf(v.to_float(), 1.0, 18.0)
 			"OGMA_PICRAWLER_CAMERA_ROBOT":      camera_robot      = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ODOM":              publish_odom      = (v != "0" and v != "")
@@ -6572,6 +6600,23 @@ func _input(event: InputEvent) -> void:
 		if _ray_overlay_on:
 			_update_ray_overlay()   # immediate refresh, don't wait for the loom tick
 		print("PicrawlerBody: [V] ray_overlay = %s" % _ray_overlay_on)
+	elif key == KEY_Y:
+		# 2026-11-04 — the forward 8x8 time-of-flight field: on when it was off; its rays on/off when it is on.
+		if not tof8_model:
+			tof8_model = true; _tof8_show = true
+			print("PicrawlerBody: [Y] tof8 model ON (publishing sense.tof8)")
+		else:
+			_tof8_show = not _tof8_show
+			if _tof8_view != null: _tof8_view.set_visible(_tof8_show)
+			print("PicrawlerBody: [Y] tof8 rays = %s" % _tof8_show)
+	elif key == KEY_7:
+		_tof8_adjust(-5.0, 0.0)
+	elif key == KEY_8:
+		_tof8_adjust(5.0, 0.0)
+	elif key == KEY_9:
+		_tof8_adjust(0.0, -0.010)
+	elif key == KEY_0:
+		_tof8_adjust(0.0, 0.010)
 	elif key == KEY_X:
 		# 2026-11-01 — hide / show the cloud of touches (both the body's own and the brain's).
 		_touch_show = not _touch_show
@@ -8024,6 +8069,9 @@ func _step_one() -> void:
 		_update_us_hud()
 		if tick_counter % 10 == 0 and DisplayServer.get_name() != "headless":
 			_update_reflex_hud()
+	# (2c) the forward 8x8 time-of-flight field (2026-11-04): cast at 15 Hz, the held field published every tick.
+	if tof8_model:
+		_tof8_step()
 	if _gym_mode_active == "room":
 		_room_instruments_step()
 	# Beacon magnitude.  Published every tick from the cached capture (the capture itself is
@@ -11184,6 +11232,64 @@ func _update_us_hud() -> void:
 	_us_hud.add_theme_color_override("font_color",
 		Color(0.95, 0.85, 0.45, 1.0) if _us_valid > 0.5 else Color(0.6, 0.6, 0.6, 1.0))
 
+# THE FORWARD 8x8 TIME-OF-FLIGHT FIELD (2026-11-04).  The model and the rays live in scripts/tof8.gd; this casts at the
+# sensor's rate from the chassis's front face, publishes the held 64 ranges every tick, draws the rays and keeps a
+# text grid on the HUD.  The floor rule reads the body's own belly clearance and gravity estimate, nothing god's-eye.
+func _tof8_ensure() -> void:
+	if _tof8 == null:
+		_tof8 = Tof8Script.Model.new()
+		_tof8.pitch_deg = _tof8_pitch_env; _tof8.height_above_bottom_m = _tof8_height_env
+		_tof8.fwd_m = _tof8_fwd_env; _tof8.lateral_m = _tof8_lat_env; _tof8.self_occlusion = _tof8_self_env
+	if _tof8_view == null and DisplayServer.get_name() != "headless":
+		_tof8_view = Tof8Script.View.new(self)
+		_tof8_view.set_visible(_tof8_show)
+
+func _tof8_step() -> void:
+	_tof8_ensure()
+	var slot: int = int(floor(float(tick_counter) * Tof8Script.HZ * TAU))
+	if slot != _tof8_last_slot and _chassis != null:
+		_tof8_last_slot = slot
+		var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+		if space != null:
+			var xf: Transform3D = _chassis.global_transform
+			var up_body: Vector3 = _up_est_body if _up_est_body.length() > 0.5 else Vector3.UP
+			var up_world: Vector3 = (xf.basis * up_body).normalized()
+			_tof8.cast(space, xf, _chassis_bottom_local, CHASSIS_Z, _chassis.get_rid(), _LAYER_WORLD, _LAYER_BODY, up_world, _dbg_gc_raw)
+			if _tof8_view != null and _tof8_show:
+				_tof8_view.update(_tof8)
+			if DisplayServer.get_name() != "headless" and (slot % 3) == 0:
+				_update_tof8_hud()
+	var arr := PackedFloat64Array()
+	arr.resize(Tof8Script.ZONES)
+	for z in range(Tof8Script.ZONES):
+		arr[z] = _tof8.ranges[z]
+	brain.publish_token(arr, "sense.tof8", "tof8")
+
+func _update_tof8_hud() -> void:
+	if _tof8_hud == null:
+		var hud := get_tree().get_root().find_child("HUD", true, false)
+		if hud == null:
+			return
+		_tof8_hud = Label.new()
+		_tof8_hud.name = "Tof8Grid"
+		_tof8_hud.add_theme_font_size_override("font_size", 12)
+		_tof8_hud.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		_tof8_hud.position = Vector2(-250, -200)
+		hud.add_child(_tof8_hud)
+	var mn: float = _tof8.min_range(Tof8Script.Cls.HIT)
+	_tof8_hud.text = "tof8  pitch %.0f deg  mount %.0f mm  floor %d  hit %d  leg %d  nearest %s\n%s" % [
+		_tof8.pitch_deg, _tof8.height_above_bottom_m * 1000.0, _tof8.count(Tof8Script.Cls.FLOOR),
+		_tof8.count(Tof8Script.Cls.HIT), _tof8.count(Tof8Script.Cls.SELF),
+		("%.2f m" % mn) if mn < INF else "-", _tof8.text_grid()]
+	_tof8_hud.add_theme_color_override("font_color", Color(0.85, 0.95, 0.85, 1.0))
+
+func _tof8_adjust(dpitch: float, dheight: float) -> void:
+	_tof8_ensure()
+	_tof8.pitch_deg = clampf(_tof8.pitch_deg + dpitch, -30.0, 90.0)
+	_tof8.height_above_bottom_m = clampf(_tof8.height_above_bottom_m + dheight, 0.0, 0.20)
+	print("PicrawlerBody: tof8 mount pitch %.0f deg, height %.0f mm above the chassis bottom (OGMA_PICRAWLER_TOF8_PITCH_DEG=%.0f OGMA_PICRAWLER_TOF8_HEIGHT_MM=%.0f)" % [
+		_tof8.pitch_deg, _tof8.height_above_bottom_m * 1000.0, _tof8.pitch_deg, _tof8.height_above_bottom_m * 1000.0])
+
 # The REFLEX line (S3): what the loop modules are saying, read from their diagnostics every
 # 10 ticks.  Absent modules leave their fields out.  Windowed only; nothing here touches physics.
 func _update_reflex_hud() -> void:
@@ -12780,6 +12886,19 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["us_v"]     = _us_valid
 		line["us_true"]  = snappedf(_us_true, 0.0001)
 		line["us_pings"] = _us_pings
+	if tof8_model and _tof8 != null:
+		# the field's summary every row and the grid itself (cm), for the mount study and the stall sense
+		line["tof8_pitch"] = _tof8.pitch_deg
+		line["tof8_h_mm"] = snappedf(_tof8.height_above_bottom_m * 1000.0, 0.1)
+		line["tof8_floor"] = _tof8.count(Tof8Script.Cls.FLOOR)
+		line["tof8_hit"] = _tof8.count(Tof8Script.Cls.HIT)
+		line["tof8_self"] = _tof8.count(Tof8Script.Cls.SELF)
+		var mn: float = _tof8.min_range(Tof8Script.Cls.HIT)
+		line["tof8_min_hit"] = snappedf(mn, 0.001) if mn < INF else -1.0
+		var grid: Array = []
+		for z in range(Tof8Script.ZONES):
+			grid.append(int(round(_tof8.ranges[z] * 100.0)) if _tof8.ranges[z] >= 0.0 else -1)
+		line["tof8"] = grid
 	if _gym_mode_active == "terrain" and _terrain_gym != null:
 		# Scoring-only ground truth (god's-eye; never published to the brain): the terrain
 		# type, band and height under the chassis, from the spec that built the course.
