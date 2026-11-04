@@ -54,6 +54,7 @@ ParamSchema TouchMemory::params_schema() const {
         {"voxel_m",          ParamMutability::HotMutable, "Voxel edge (m). The kinematic error is ~3 cm, so 2 cm voxels make agreement visible without hiding it.", ParamValue{0.02}},
         {"odom_translation", ParamMutability::HotMutable, "How much of the odometry's TRANSLATION carries the stored touches (ProxMemory's knob): 1 = the literal odometry, 0 = rotation only.", ParamValue{1.0}},
         {"max_voxels",       ParamMutability::HotMutable, "The memory's size; the least recently touched voxel goes first.", ParamValue{int64_t{4000}}},
+        {"max_age_ticks",    ParamMutability::HotMutable, "A voxel not touched for this many ticks leaves (the odometry's drift makes an old claim unlocatable; operator 2026-11-04). 1500 = 30 s at 50 Hz. 0 = forever.", ParamValue{int64_t{1500}}},
         {"diag_max",         ParamMutability::HotMutable, "diag_snapshot lists at most this many voxels, nearest to the body first (0 = all).", ParamValue{int64_t{400}}},
         {"plane_tau_ticks",  ParamMutability::HotMutable, "EMA time constant (ticks) of the support plane: the median height of the toes that were already planted.", ParamValue{50.0}},
         {"leg_y_offset_fl",  ParamMutability::HotMutable, "Floor calibration (m) added to leg fl's toe height (sim order; physical FR on the robot). toe_floor_calib.py's a_mm / 1000. 0 = none.", ParamValue{0.0}},
@@ -70,6 +71,7 @@ ParamMap TouchMemory::current_params() const {
     m["load_topic"] = ParamValue{load_topic_};
     m["voxel_m"] = ParamValue{voxel_m_}; m["odom_translation"] = ParamValue{odom_translation_};
     m["max_voxels"] = ParamValue{int64_t(max_voxels_)}; m["diag_max"] = ParamValue{int64_t(diag_max_)};
+    m["max_age_ticks"] = ParamValue{int64_t(max_age_ticks_)};
     m["plane_tau_ticks"] = ParamValue{plane_tau_ticks_};
     m["leg_y_offset_fl"] = ParamValue{leg_y_offset_[0]}; m["leg_y_offset_fr"] = ParamValue{leg_y_offset_[1]};
     m["leg_y_offset_rl"] = ParamValue{leg_y_offset_[2]}; m["leg_y_offset_rr"] = ParamValue{leg_y_offset_[3]};
@@ -84,7 +86,7 @@ void TouchMemory::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "feet_y_topic",  [&](auto const& v){ feet_y_topic_  = get_string(v, "feet_y_topic"); });
     apply_param(params, "odom_topic",    [&](auto const& v){ odom_topic_    = get_string(v, "odom_topic"); });
     apply_param(params, "load_topic",    [&](auto const& v){ load_topic_    = get_string(v, "load_topic"); });
-    for (auto const& k : {"voxel_m", "odom_translation", "max_voxels", "diag_max", "plane_tau_ticks",
+    for (auto const& k : {"voxel_m", "odom_translation", "max_voxels", "max_age_ticks", "diag_max", "plane_tau_ticks",
                           "leg_y_offset_fl", "leg_y_offset_fr", "leg_y_offset_rl", "leg_y_offset_rr"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     sub_ids_.push_back(bus_->subscribe(contact_topic_, SubscriptionKind::Direct, [this](std::string_view, MessagePtr p){ handle_contact(p); }));
@@ -100,6 +102,7 @@ void TouchMemory::on_param_change(std::string_view key, ParamValue const& value)
     if      (k == "voxel_m")          voxel_m_ = std::max(0.002, get_double(value, k));
     else if (k == "odom_translation") odom_translation_ = get_double(value, k);
     else if (k == "max_voxels")       max_voxels_ = std::max(1, int(get_double(value, k)));
+    else if (k == "max_age_ticks")    max_age_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "diag_max")         diag_max_ = std::max(0, int(get_double(value, k)));
     else if (k == "plane_tau_ticks")  plane_tau_ticks_ = std::max(1.0, get_double(value, k));
     else if (k == "leg_y_offset_fl")  leg_y_offset_[0] = get_double(value, k);
@@ -180,6 +183,9 @@ void TouchMemory::evict_if_full() {
 
 void TouchMemory::tick(uint64_t tick_id) {
     last_tick_ = tick_id;
+    if (max_age_ticks_ > 0)
+        for (auto it = vox_.begin(); it != vox_.end();)
+            it = (tick_id > it->second.last_t && tick_id - it->second.last_t > uint64_t(max_age_ticks_)) ? vox_.erase(it) : std::next(it);
     if (!have_contact_) return;
     // Which feet LAND this tick: the rising edge of their contact flag.
     bool rising[4];

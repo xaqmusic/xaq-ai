@@ -10151,3 +10151,5 @@ drawn, so the choice is the operator's by eye before a bracket is made; a two-re
 down, a walking pitch up) is the camera-tilt idea in a cheaper form and needs no new sensor. The brain reads nothing
 from the field yet — StuckSense's closing channel on it and an EPM over it are the two consumers in line, after the
 robot's driver, so the sim and the robot admit the same channel together.
+
+### 2026-11-04 — VOXEL LIFETIME 30 s AND THE FIELD'S OWN CLOUD (operator): every cloud of claims — the body's touch cloud, the brain's `TouchMemory` (`max_age_ticks`, default 1500 = 30 s at 50 Hz, 0 = forever; the bench twin 300 at 10 Hz) and the new cloud of the 8x8 field's returns (3 cm voxels within 1.5 m, green floor / yellow thing, the body's own classification, body-locked and odometry-carried like the touches) — forgets a voxel 30 s after its last reading, because the odometry's drift makes an older claim a claim about a place the body can no longer locate; voxels dim over their lifetime — `BASELINE` (instrument; TouchMemory has no consumer, so the default's change moves no behaviour; 11 tests)

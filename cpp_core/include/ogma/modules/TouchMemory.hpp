@@ -100,6 +100,7 @@ private:
     double voxel_m_          = 0.02;
     double odom_translation_ = 1.0;
     int    max_voxels_       = 4000;
+    int    max_age_ticks_    = 1500;        // 30 s at 50 Hz; 0 = forever
     int    diag_max_         = 400;
     double plane_tau_ticks_  = 50.0;        // the support plane's EMA time constant
     // THE FLOOR CALIBRATION's constant term per leg (m, sim leg order fl fr rl rr), added to every toe height

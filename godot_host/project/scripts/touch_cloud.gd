@@ -24,6 +24,11 @@ extends RefCounted
 var voxel_m: float = 0.02
 var max_voxels: int = 4000
 var plane_tau_ticks: float = 50.0
+## LIFETIME (operator, 2026-11-04): the odometry drifts, so a claim older than this is a claim about a place the
+## body can no longer locate; it leaves.  1500 ticks = 30 s at 50 Hz (the bench, at its 10 Hz telemetry, sets 300).
+## 0 = forever.
+var max_age_ticks: int = 1500
+var points: int = 0                # add_point() calls (the field's returns), beside `touches`
 
 var touches: int = 0
 var plane_y: float = 0.0
@@ -50,6 +55,7 @@ func prime(contact: Array) -> void:
 ## none; load [4] optional.  Returns how many touches this tick added.
 func step(tick: int, contact: Array, feet_xz: Array, feet_y: Array, odom: Array, load: Array = []) -> int:
 	_tick = tick
+	if (tick % 25) == 0: prune(tick)
 	if contact.size() < 4: return 0
 	var rising: Array = [false, false, false, false]
 	for i in range(4):
@@ -94,6 +100,35 @@ func add_touch(leg: int, fwd: float, lat: float, h: float, odom: Array, load: fl
 	touches += 1
 
 
+## Drop every voxel not touched for max_age_ticks (0 = never).
+func prune(tick: int) -> int:
+	_tick = tick
+	if max_age_ticks <= 0: return 0
+	var gone: Array = []
+	for k in _vox.keys():
+		if tick - int(_vox[k]["last"]) > max_age_ticks: gone.append(k)
+	for k in gone: _vox.erase(k)
+	return gone.size()
+
+
+## A generic point with a CLASS (the 8x8 field's returns: 1 floor, 2 a thing, 4 too close), at body-frame
+## (fwd, lat, h) where h is the height in the level body frame (origin 0), carried into the odom frame.
+func add_point(cls: int, fwd: float, lat: float, h: float, odom: Array, tick: int) -> void:
+	var px := 0.0; var py := 0.0; var c := 1.0; var s := 0.0
+	if odom.size() >= 3:
+		px = float(odom[0]); py = float(odom[1]); c = cos(float(odom[2])); s = sin(float(odom[2]))
+	var X: float = px + fwd * c - lat * s
+	var Y: float = py + fwd * s + lat * c
+	var key := Vector3i(int(floor(X / voxel_m)), int(floor(Y / voxel_m)), int(floor(h / voxel_m)))
+	if not _vox.has(key):
+		_evict_if_full()
+		_vox[key] = {"sx": 0.0, "sy": 0.0, "sh": 0.0, "hits": 0, "first": tick, "last": tick, "mask": 0, "load": 0.0, "cls": cls}
+	var v: Dictionary = _vox[key]
+	v["sx"] += X; v["sy"] += Y; v["sh"] += h; v["hits"] += 1; v["last"] = tick
+	v["cls"] = cls   # the latest reading's class wins (a floor that became a thing is a thing)
+	points += 1
+
+
 func _evict_if_full() -> void:
 	while _vox.size() >= max_voxels:
 		var oldest_k = null; var oldest_t := 1 << 62
@@ -116,7 +151,7 @@ func body_voxels(odom: Array, n: int = 0) -> Array:
 		var dx: float = float(v["sx"]) / hits - px
 		var dy: float = float(v["sy"]) / hits - py
 		out.append([dx * c + dy * s, -dx * s + dy * c, float(v["sh"]) / hits, hits, int(v["mask"]),
-			maxi(0, _tick - int(v["last"])), float(v["load"])])
+			maxi(0, _tick - int(v["last"])), float(v["load"]), int(v.get("cls", 0))])
 	out.sort_custom(func(a, b): return a[0] * a[0] + a[1] * a[1] + a[2] * a[2] < b[0] * b[0] + b[1] * b[1] + b[2] * b[2])
 	if n > 0 and out.size() > n: out.resize(n)
 	return out
@@ -144,6 +179,8 @@ class View extends RefCounted:
 	var color: Color
 	var size: float
 	var _mat: StandardMaterial3D
+	var class_colors: Dictionary = {}     # class (row[7]) -> Color; empty = one colour
+	var max_age_ticks: int = 0            # > 0: a voxel dims over its lifetime (row[5] = age)
 
 	func _init(parent: Node, col: Color, edge: float, nm: String = "TouchCloud") -> void:
 		color = col; size = edge
@@ -177,7 +214,12 @@ class View extends RefCounted:
 			mm.set_instance_transform(i, Transform3D(Basis(), base * local))
 			var hits := int(r[3]) if r.size() > 3 else 1
 			var a: float = clampf(0.45 + 0.14 * float(hits), 0.45, 1.0)
-			mm.set_instance_color(i, Color(color.r, color.g, color.b, a))
+			if max_age_ticks > 0 and r.size() > 5:
+				a *= 1.0 - 0.6 * clampf(float(r[5]) / float(max_age_ticks), 0.0, 1.0)
+			var col: Color = color
+			if not class_colors.is_empty() and r.size() > 7 and class_colors.has(int(r[7])):
+				col = class_colors[int(r[7])]
+			mm.set_instance_color(i, Color(col.r, col.g, col.b, a))
 
 	func set_visible(v: bool) -> void:
 		if mmi != null: mmi.visible = v

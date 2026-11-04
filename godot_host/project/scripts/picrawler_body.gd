@@ -1713,6 +1713,16 @@ var _tof8_pitch_env: float = 30.0
 var _tof8_height_env: float = 0.070
 var _tof8_fwd_env: float = 0.0
 var _tof8_lat_env: float = 0.0
+# The field's own cloud (operator, 2026-11-04): every return within TOF_CLOUD_MAX_M becomes a voxel in the same
+# odom-carried, body-locked store the touches use, GREEN where the body read floor and YELLOW where it read a thing;
+# 30 s lifetime like the touches (the odometry's drift makes an older claim unlocatable).  Instrument only.
+const TOF_CLOUD_MAX_M: float = 1.5
+const TOF_CLOUD_VOXEL_M: float = 0.03
+const TOF_COLOR_FLOOR := Color(0.30, 0.90, 0.45, 1.0)
+const TOF_COLOR_THING := Color(0.98, 0.88, 0.20, 1.0)
+var _tof_cloud = null
+var _tof_view = null
+var _tof_casts_drawn: int = 0
 var _tof8_self_env: bool = true
 const _US_AZ_DEG: Array = [-7.5, -3.75, 0.0, 3.75, 7.5]   # the ~15 deg lobe, 5 x 3 rays
 const _US_EL_DEG: Array = [-5.0, 0.0, 5.0]
@@ -6622,6 +6632,7 @@ func _input(event: InputEvent) -> void:
 		_touch_show = not _touch_show
 		if _touch_view_local != null: _touch_view_local.set_visible(_touch_show)
 		if _touch_view_brain != null: _touch_view_brain.set_visible(_touch_show)
+		if _tof_view != null: _tof_view.set_visible(_touch_show)
 		print("PicrawlerBody: [X] touch_cloud = %s (local %d voxels, %d touches%s)" % [_touch_show,
 			_touch_cloud.count() if _touch_cloud != null else 0, _touch_cloud.touches if _touch_cloud != null else 0,
 			(", brain %d" % _touch_brain_n) if _touch_brain_n >= 0 else ""])
@@ -11257,6 +11268,7 @@ func _tof8_step() -> void:
 			_tof8.cast(space, xf, _chassis_bottom_local, CHASSIS_Z, _chassis.get_rid(), _LAYER_WORLD, _LAYER_BODY, up_world, _dbg_gc_raw)
 			if _tof8_view != null and _tof8_show:
 				_tof8_view.update(_tof8)
+			_tof_cloud_add(xf)
 			if DisplayServer.get_name() != "headless" and (slot % 3) == 0:
 				_update_tof8_hud()
 	var arr := PackedFloat64Array()
@@ -11264,6 +11276,28 @@ func _tof8_step() -> void:
 	for z in range(Tof8Script.ZONES):
 		arr[z] = _tof8.ranges[z]
 	brain.publish_token(arr, "sense.tof8", "tof8")
+
+# The field's returns into the body-locked cloud: floor and things, within TOF_CLOUD_MAX_M, legs left out.
+func _tof_cloud_add(xf: Transform3D) -> void:
+	if _tof_cloud == null:
+		_tof_cloud = TouchCloudScript.new()
+		_tof_cloud.voxel_m = TOF_CLOUD_VOXEL_M; _tof_cloud.max_voxels = 6000
+	var inv: Transform3D = TouchCloudScript.level_frame(xf).affine_inverse()
+	var odom: Array = _touch_odom()
+	for z in range(Tof8Script.ZONES):
+		var cls: int = _tof8.classes[z]
+		if cls == Tof8Script.Cls.NONE or cls == Tof8Script.Cls.SELF: continue
+		if _tof8.ranges[z] < 0.0 or _tof8.ranges[z] > TOF_CLOUD_MAX_M or _tof8.points[z] == null: continue
+		var lp: Vector3 = inv * (_tof8.points[z] as Vector3)      # level body frame: x = left, y = up, z = forward
+		_tof_cloud.add_point(cls, lp.z, lp.x, lp.y, odom, _touch_tick)
+	_tof_cloud.prune(_touch_tick)
+	_tof_casts_drawn += 1
+	if DisplayServer.get_name() == "headless" or not _touch_show or (_tof_casts_drawn % 3) != 0: return
+	if _tof_view == null:
+		_tof_view = TouchCloudScript.View.new(self, TOF_COLOR_THING, TOF_CLOUD_VOXEL_M * 0.9, "TofCloud")
+		_tof_view.class_colors = {Tof8Script.Cls.FLOOR: TOF_COLOR_FLOOR, Tof8Script.Cls.HIT: TOF_COLOR_THING, Tof8Script.Cls.TOO_CLOSE: TOF_COLOR_THING}
+		_tof_view.max_age_ticks = _tof_cloud.max_age_ticks
+	_tof_view.show(_tof_cloud.body_voxels(odom, 3000), TouchCloudScript.level_frame(xf), 0.0)
 
 func _update_tof8_hud() -> void:
 	if _tof8_hud == null:
@@ -12895,6 +12929,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["tof8_self"] = _tof8.count(Tof8Script.Cls.SELF)
 		var mn: float = _tof8.min_range(Tof8Script.Cls.HIT)
 		line["tof8_min_hit"] = snappedf(mn, 0.001) if mn < INF else -1.0
+		if _tof_cloud != null: line["tof8_vox"] = _tof_cloud.count()
 		var grid: Array = []
 		for z in range(Tof8Script.ZONES):
 			grid.append(int(round(_tof8.ranges[z] * 100.0)) if _tof8.ranges[z] >= 0.0 else -1)
@@ -14193,6 +14228,7 @@ func _touch_cloud_step(contact: PackedFloat64Array) -> void:
 		return
 	if _touch_view_local == null:
 		_touch_view_local = TouchCloudScript.View.new(self, TOUCH_LOCAL_COLOR, _touch_cloud.voxel_m, "TouchCloudLocal")
+		_touch_view_local.max_age_ticks = _touch_cloud.max_age_ticks
 		_touch_view_brain = TouchCloudScript.View.new(self, TOUCH_BRAIN_COLOR, _touch_cloud.voxel_m * 0.8, "TouchCloudBrain")
 	var base: Transform3D = TouchCloudScript.level_frame(_chassis.global_transform)
 	_touch_view_local.show(_touch_cloud.body_voxels(_touch_odom(), 600), base, _touch_cloud.plane_y)

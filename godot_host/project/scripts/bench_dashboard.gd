@@ -1649,7 +1649,9 @@ func _text_focused() -> bool:
 # at plane_y + h: a floor touch sits at the planted feet, a box top at the box's height above them.
 func _touch_twin_step(adc: Array) -> void:
 	if _body == null: return
-	if _touch_local == null: _touch_local = TouchCloudScript.new()
+	if _touch_local == null:
+		_touch_local = TouchCloudScript.new()
+		_touch_local.max_age_ticks = 300   # 30 s at the 10 Hz telemetry (operator, 2026-11-04)
 	var lowers: Variant = _body.get("_lowers"); var toe_off: Variant = _body.get("_toe_off_c"); var chassis: Variant = _body.get("_chassis")
 	if not (lowers is Array) or not (toe_off is Array) or chassis == null: return
 	if (lowers as Array).size() < 4 or (toe_off as Array).size() < 4: return

@@ -143,3 +143,16 @@ TEST(TouchMemory, ALegOffsetMovesThatLegsTouchesAndNotThePlaneItIsExcludedFrom) 
     f.run(1, {1, 1, 1, 1}, kXZ, y_low);
     EXPECT_NEAR(leg3(f.m).h, 0.0, 1e-6) << "calibrated, leg 3's floor touch sits on the plane";
 }
+
+TEST(TouchMemory, AVoxelLeavesAfterItsLifetime_AndStaysForeverAtZero) {
+    Fix f({{"max_age_ticks", ogma::ParamValue{int64_t{100}}}});
+    f.run(1, {1, 1, 1, 0}, kXZ, kY);
+    for (uint64_t t = 2; t < 20; ++t) f.run(t, {1, 1, 1, 0}, kXZ, kY);
+    ASSERT_EQ(f.m.body_voxels().size(), 3u) << "three feet painted the floor";
+    for (uint64_t t = 20; t <= 150; ++t) f.run(t, {0, 0, 0, 0}, kXZ, kY);   // nothing touches for 130 ticks
+    EXPECT_EQ(f.m.body_voxels().size(), 0u) << "all three aged out at 100 ticks";
+    Fix g({{"max_age_ticks", ogma::ParamValue{int64_t{0}}}});
+    g.run(1, {1, 1, 1, 0}, kXZ, kY);
+    for (uint64_t t = 2; t <= 5000; ++t) g.run(t, {0, 0, 0, 0}, kXZ, kY);
+    EXPECT_EQ(g.m.body_voxels().size(), 3u) << "0 = forever";
+}
