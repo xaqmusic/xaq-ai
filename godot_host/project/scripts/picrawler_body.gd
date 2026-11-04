@@ -1716,7 +1716,8 @@ var _tof8_lat_env: float = 0.0
 # The field's own cloud (operator, 2026-11-04): every return within TOF_CLOUD_MAX_M becomes a voxel in the same
 # odom-carried, body-locked store the touches use, GREEN where the body read floor and YELLOW where it read a thing;
 # 30 s lifetime like the touches (the odometry's drift makes an older claim unlocatable).  Instrument only.
-const TOF_CLOUD_MAX_M: float = 1.5
+var tof_cloud_max_m: float = 4.0            # OGMA_PICRAWLER_TOF8_CLOUD_M; the sensor's own reach by default (2026-11-04: the
+                                             # operator wants the terrain ahead in the model before the feet reach it)
 const TOF_CLOUD_VOXEL_M: float = 0.03
 const TOF_COLOR_FLOOR := Color(0.30, 0.90, 0.45, 1.0)
 const TOF_COLOR_THING := Color(0.98, 0.88, 0.20, 1.0)
@@ -3822,7 +3823,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
-			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_TOF8", "OGMA_PICRAWLER_TOF8_PITCH_DEG", "OGMA_PICRAWLER_TOF8_HEIGHT_MM", "OGMA_PICRAWLER_TOF8_FWD_MM", "OGMA_PICRAWLER_TOF8_LAT_MM", "OGMA_PICRAWLER_TOF8_SELF", "OGMA_PICRAWLER_ROOM_SIZE",
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_TOF8", "OGMA_PICRAWLER_TOF8_PITCH_DEG", "OGMA_PICRAWLER_TOF8_HEIGHT_MM", "OGMA_PICRAWLER_TOF8_FWD_MM", "OGMA_PICRAWLER_TOF8_LAT_MM", "OGMA_PICRAWLER_TOF8_SELF", "OGMA_PICRAWLER_TOF8_CLOUD_M", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
 			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
@@ -3879,6 +3880,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_TOF8_HEIGHT_MM":    _tof8_height_env  = v.to_float() / 1000.0
 			"OGMA_PICRAWLER_TOF8_FWD_MM":       _tof8_fwd_env     = v.to_float() / 1000.0
 			"OGMA_PICRAWLER_TOF8_LAT_MM":       _tof8_lat_env     = v.to_float() / 1000.0
+			"OGMA_PICRAWLER_TOF8_CLOUD_M":      tof_cloud_max_m   = maxf(0.1, v.to_float())
 			"OGMA_PICRAWLER_TOF8_SELF":         _tof8_self_env    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ROOM_SIZE":         room_size         = clampf(v.to_float(), 1.0, 18.0)
 			"OGMA_PICRAWLER_CAMERA_ROBOT":      camera_robot      = (v != "0" and v != "")
@@ -11281,13 +11283,13 @@ func _tof8_step() -> void:
 func _tof_cloud_add(xf: Transform3D) -> void:
 	if _tof_cloud == null:
 		_tof_cloud = TouchCloudScript.new()
-		_tof_cloud.voxel_m = TOF_CLOUD_VOXEL_M; _tof_cloud.max_voxels = 6000
+		_tof_cloud.voxel_m = TOF_CLOUD_VOXEL_M; _tof_cloud.max_voxels = 12000
 	var inv: Transform3D = TouchCloudScript.level_frame(xf).affine_inverse()
 	var odom: Array = _touch_odom()
 	for z in range(Tof8Script.ZONES):
 		var cls: int = _tof8.classes[z]
 		if cls == Tof8Script.Cls.NONE or cls == Tof8Script.Cls.SELF: continue
-		if _tof8.ranges[z] < 0.0 or _tof8.ranges[z] > TOF_CLOUD_MAX_M or _tof8.points[z] == null: continue
+		if _tof8.ranges[z] < 0.0 or _tof8.ranges[z] > tof_cloud_max_m or _tof8.points[z] == null: continue
 		var lp: Vector3 = inv * (_tof8.points[z] as Vector3)      # level body frame: x = left, y = up, z = forward
 		_tof_cloud.add_point(cls, lp.z, lp.x, lp.y, odom, _touch_tick)
 	_tof_cloud.prune(_touch_tick)
@@ -11297,7 +11299,7 @@ func _tof_cloud_add(xf: Transform3D) -> void:
 		_tof_view = TouchCloudScript.View.new(self, TOF_COLOR_THING, TOF_CLOUD_VOXEL_M * 0.9, "TofCloud")
 		_tof_view.class_colors = {Tof8Script.Cls.FLOOR: TOF_COLOR_FLOOR, Tof8Script.Cls.HIT: TOF_COLOR_THING, Tof8Script.Cls.TOO_CLOSE: TOF_COLOR_THING}
 		_tof_view.max_age_ticks = _tof_cloud.max_age_ticks
-	_tof_view.show(_tof_cloud.body_voxels(odom, 3000), TouchCloudScript.level_frame(xf), 0.0)
+	_tof_view.show(_tof_cloud.body_voxels(odom, 6000), TouchCloudScript.level_frame(xf), 0.0)
 
 func _update_tof8_hud() -> void:
 	if _tof8_hud == null:

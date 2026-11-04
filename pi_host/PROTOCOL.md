@@ -309,8 +309,8 @@ a VL53L5CX / VL53L8CX class 8×8 (45° square field, zone pitch 5.6°, 4 m). The
 down `OGMA_PICRAWLER_TOF8_PITCH_DEG`; `[7]`/`[8]`/`[9]`/`[0]` move it live, `[Y]` draws the 64 rays coloured by the
 body's own classification: floor where a beam meets the ground the belly clearance and gravity estimate predict,
 a thing otherwise, a leg when the body's own leg is the return) so the mount can be chosen before it is drilled;
-the body log carries `tof8` (cm) and its summary every row. The field's returns within 1.5 m also feed a body-locked
-cloud of their own (3 cm voxels, green where the body read floor, yellow where it read a thing), beside the purple
+the body log carries `tof8` (cm) and its summary every row. The field's returns within `OGMA_PICRAWLER_TOF8_CLOUD_M` (default 4 m,
+the sensor's reach) also feed a body-locked cloud of their own (3 cm voxels, green where the body read floor, yellow where it read a thing), beside the purple
 touch cloud; **every cloud's voxel lives 30 s** (operator, 2026-11-04: the odometry drifts, so an older claim is about
 a place the body can no longer locate) — `TouchMemory max_age_ticks` 1500 at 50 Hz, the bench twin 300 at its 10 Hz,
 0 = forever. The robot's host publishes the same topic from the
