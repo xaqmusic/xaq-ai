@@ -10073,3 +10073,41 @@ reads a full stall, the same yaw under a command reads none). The three terrain 
 next battery through the new log keys — `IN_FLIGHT`. Re-use on the robot: the same gate on `_cs_pf_sl0`, where the
 sonar's avoid loop is the commanded turn and the steps' deflections are not. Files: `stall_events.py` (session scratch), the three `_sim60_terrain*`
 configs, `picrawler_body.gd` (the stuck keys).
+
+### 2026-11-04 — STEP 3, THE FIRST A/B OF THE TOUCH VOCABULARY'S CONSUMER: fixed lift vs one-point descent (G4a) vs per-situation descent (G4b, the situation = the encounter node), `_sim60_terrain`, n = 4 varied worlds × 24 000 ticks, ultrasonic off — THE THREE ARMS TIE ON EVERY METRIC, AND THE DESCENT NEVER STEPPED IN EITHER FORM (0 steps in 8 runs; every operating point still 1.00 / 1.00 after 39–59 trials) — `NULL` in this context, for the same reason as G4a's 2026-10-26 null: the dither's slope never clears its standard error (|g| 0.4–17 against SE 4–106), the terrain's swing of the errors swamps a ±25 % lift change, and the stall term is still 0 on 90 % of ticks
+
+| arm | net_disp (m) | straight | slow windows (< 1 m / 2400 ticks) | swing contact (row fraction) | resets | falls | descent steps |
+|---|---|---|---|---|---|---|---|
+| fixed | 16.3 ± 3.2 | 0.65 | 5.3 ± 1.3 | 0.46 ± 0.15 | 0 | 0 | — |
+| G4a, one point | 16.7 ± 2.3 | 0.63 | 4.8 ± 1.5 | 0.37 ± 0.00 | 0 | 0 | 0 (59 trials, 0 discarded) |
+| G4b, per situation | 16.0 ± 3.3 | 0.64 | 5.3 ± 1.8 | 0.36 ± 0.01 | 0 | 0 | 0 (39–47 trials, 12–20 discarded) |
+
+Paired against the fixed arm by world: net_disp +0.5 ± 2.8 (G4a) and −0.3 ± 0.4 (G4b), t ≤ 1.4 at n = 4 — a tie. The
+swing-contact difference (0.46 vs 0.37) is one fixed-arm seed at 0.75 (its chassis sat low, p50 y 0.069: a seed
+perched or dragging, not a lever effect), and the row metric is quantised to quarters (the fraction of four legs
+touching in swing at the sample instant). Since no operating point moved, all three arms ran the same lift; the
+table is three draws of the same walker and the spread (12–20 m final radius between worlds) is the measurement
+of the course, not of the arms.
+
+**Why the descent did not step, in both forms.** (1) The outcome does not answer the handle at this amplitude:
+over 59 trials of ±0.25 → ±0.13 dithers the fitted front slope sits at 1 SE or less in every run, as at 4.22 rad/s.
+Whether a LARGER lift change would move swing contact on this course at 6 rad/s is unmeasured — the fixed-setting
+dose response (×0.5 / ×1.5 / ×2.0, paired worlds) that settled it at 4.22 is the cheap next measurement, and until
+it is done the handle is not known to be a handle here. (2) The stall term was 0 in six of eight runs' last trial
+(0.58 and 0.06 in the other two): the gate was built after these arms launched, so the descent optimised swing
+contact and tilt only. (3) The per-situation partition did not partition: held by a 60-tick occupancy at 0.5, the
+situation was the ordinary-footfall node (node 2, or 0 / 2 in two worlds) for 23 of 24 reports in one world and the
+majority everywhere; the rarer step-down touches (10–22 % of touches in the 38 / 50 mm bands) never held a trial,
+and the situation-change rule discarded 12–20 of ~59 trials. A per-footfall vocabulary held by occupancy is a
+vocabulary of the common footfall; the obstacle is the rare node, and a context for the gait has to be built from
+the rare node's recency (or from a slow EPM over the touch stream, the hierarchy the EPM note describes), not from
+occupancy.
+
+**Verdict and re-use.** `NULL` for the per-situation swing-lift descent on the sim-ideal walker's terrain course at
+n = 4: not a verdict on per-situation selection — nothing was selected because nothing was measurable — and a
+repeat of G4a's lesson with the vocabulary in place. Three things justify retrying, in order: a dose response that
+shows the lift handle moves swing contact or progress on this course at 6 rad/s (if it does not, the handle is the
+stride period or the stance press, not the lift); the stall gate measured live, so `e_stall` is an outcome; a
+situation defined by the rare node's recency with a trial rule that keeps the trials. The machinery stays
+(`LiftDescent situation_topic`, tests pass, default off). Files: the three `_sim60_terrain*` configs, the
+session's `ab_compare.py`; logs under the session scratch `ab/`.
