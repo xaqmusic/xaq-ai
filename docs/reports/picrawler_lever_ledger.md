@@ -10065,6 +10065,11 @@ internals (`stuck_stall`, `stuck_vema`, `stuck_vref`, `stuck_yr`) so the next ba
 **What this means for step 3.** The descent's `e_stall` term is mostly 0 on this config, so the per-situation
 lift descent is judged here on swing contact and tilt spread plus the harness's displacement metrics; the three
 arms (fixed / one point / per situation, n = 4 varied worlds, 24 000 ticks, ultrasonic OFF per the 2026-10-25 rule)
-are running. The step that makes the plan's error live — the stall gate — is the next instrument lever, before any
-verdict on the consumer leans on it. Files: `stall_events.py` (session scratch), the three `_sim60_terrain*`
+are running. The step that makes the plan's error live — the stall gate — is built the same day: `StuckSense
+turn_cmd_topic` (the avoid loop's value): a real yaw abstains the stall channel only while a loop COMMANDS the turn;
+an uncommanded yaw is the ground turning the body and the channel judges through it. Default "" keeps the
+2026-10 form byte for byte (the eleven tests: ten unchanged, one new — an uncommanded 0.3 rad/s yaw with zero stride
+reads a full stall, the same yaw under a command reads none). The three terrain configs take it; measured in the
+next battery through the new log keys — `IN_FLIGHT`. Re-use on the robot: the same gate on `_cs_pf_sl0`, where the
+sonar's avoid loop is the commanded turn and the steps' deflections are not. Files: `stall_events.py` (session scratch), the three `_sim60_terrain*`
 configs, `picrawler_body.gd` (the stuck keys).
