@@ -12976,6 +12976,15 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		if _touch_brain_n >= 0: line["touch_brain"] = _touch_brain_n
 	# The encounter chain (2026-11-02): the module's event count and every event since the last row, as the module's
 	# own rows [tick, leg, h_floor, fwd, lat, load_peak, i_pre, i_post, belly_rise, lean_rise, range, vert_frac].
+	if metrics.has("tof8_range"):
+		# the field reduced to the nearest feature ahead (2026-11-05): what StuckSense's closing channel reads
+		var tr: Dictionary = metrics["tof8_range"]
+		line["tofr_m"] = snappedf(float(tr.get("nearest_m", 0.0)), 0.001)
+		line["tofr_v"] = 1 if bool(tr.get("valid", false)) else 0
+		line["tofr_up"] = int(tr.get("n_thing_up", 0))
+		line["tofr_down"] = int(tr.get("n_thing_down", 0))
+		line["tofr_floor"] = int(tr.get("n_floor", 0))
+		line["tofr_fit"] = 1 if bool(tr.get("floor_ok", false)) else 0
 	if metrics.has("encounter"):
 		var em: Dictionary = metrics["encounter"]
 		line["enc_n"] = int(em.get("events", 0))

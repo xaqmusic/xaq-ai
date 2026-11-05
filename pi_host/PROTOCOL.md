@@ -314,7 +314,12 @@ the sensor's reach) also feed a body-locked cloud of their own (3 cm voxels, gre
 touch cloud; **every cloud's voxel lives 30 s** (operator, 2026-11-04: the odometry drifts, so an older claim is about
 a place the body can no longer locate) — `TouchMemory max_age_ticks` 1500 at 50 Hz, the bench twin 300 at its 10 Hz,
 0 = forever. The robot's host publishes the same topic from the
-part when it is fitted (not yet: the driver is the next piece). Nothing in the brain reads it yet.
+part when it is fitted (not yet: the driver is the next piece). **What reads it** (2026-11-05): `Tof8Range` reduces
+the field to the nearest FEATURE ahead on `sense.range_tof` as ProprioToken [distance_m, valid], the sonar's own
+contract — the floor is a plane fitted to the field's bottom rows (no IMU; the robot's reading is the sim's), a return
+2 cm above it is a thing, 2 cm below it a drop, either a feature; no feature = [max_range, 0]; a second token
+`reality.proprio.tof8_cols` [8] is the nearest feature per column. `StuckSense` reads `sense.range_tof` on its
+closing-rate channel in the terrain configs, so the stall sense works through soft, dark and distant things.
 
 ## Local record (SPEC §3)
 

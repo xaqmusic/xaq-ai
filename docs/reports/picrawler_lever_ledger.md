@@ -10153,3 +10153,18 @@ from the field yet — StuckSense's closing channel on it and an EPM over it are
 robot's driver, so the sim and the robot admit the same channel together.
 
 ### 2026-11-04 — VOXEL LIFETIME 30 s AND THE FIELD'S OWN CLOUD (operator): every cloud of claims — the body's touch cloud, the brain's `TouchMemory` (`max_age_ticks`, default 1500 = 30 s at 50 Hz, 0 = forever; the bench twin 300 at 10 Hz) and the new cloud of the 8x8 field's returns (3 cm voxels within 1.5 m, green floor / yellow thing, the body's own classification, body-locked and odometry-carried like the touches) — forgets a voxel 30 s after its last reading, because the odometry's drift makes an older claim a claim about a place the body can no longer locate; voxels dim over their lifetime — `BASELINE` (instrument; TouchMemory has no consumer, so the default's change moves no behaviour; 11 tests)
+
+### 2026-11-05 — STEP 1 OF THE TERRAIN PLAN, BUILT: `Tof8Range`, the field reduced to the nearest feature ahead in the sonar's contract (`sense.range_tof` [distance, valid]; the floor a plane fitted to the field's own bottom rows, re-fitted without outliers, no IMU; a return 2 cm above it a thing, 2 cm below a drop; no floor in the bottom rows = everything is a thing), read by StuckSense's closing-rate channel in the three terrain configs — `IN_FLIGHT` (five tests; the smoke run reads the first band's risers at 0.29–0.33 m with 24–29 thing zones, a step-down edge as 26 drop zones, and the channel's measurements start the moment a feature is in the field; the admission battery, n = 4 × 24 000 varied worlds, is running)
+
+The operator's observation that the REAR legs swing lower and hang more often shaped the reduction: a body hung by its
+rear legs has open floor ahead, so the thing that must stop closing is a feature AHEAD — the next band's riser, a
+pyramid — not the edge under the body; the reduction therefore reports the nearest feature anywhere in the field, and
+risers register at 2 cm of rise from any distance the part reaches. One artefact seen in the smoke run and expected
+from the sonar's history: when a nearer feature enters the field the nearest range JUMPS up or down between windows,
+and the closing channel reads a spurious full deficit for one window (the score's EMA holds it to 0.36); the
+per-column token exists so a later form can track one feature rather than the nearest. The admission test is the
+one the 2026-11-04 battery could not pass: does the published stall track the windows where real displacement
+collapses? `stuck_stall`, `stuck_vema`, `stuck_vref`, `stuck_yr` and the field's `tofr_*` keys are in the body log for
+it. Files: `cpp_core/{include,src}/ogma/modules/Tof8Range.*`, `cpp_core/tests/ogma/test_tof8_range.cpp`, the three
+`_sim60_terrain*` configs (StuckSense `range_topic sense.range_tof`, `range_max_m 3.0`), `picrawler_body.gd` (the
+`tofr_*` keys), `OgmaBrain.cpp` (the diag passthrough), `PROTOCOL.md`.
