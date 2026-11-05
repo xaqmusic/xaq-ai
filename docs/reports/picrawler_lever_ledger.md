@@ -10168,3 +10168,31 @@ collapses? `stuck_stall`, `stuck_vema`, `stuck_vref`, `stuck_yr` and the field's
 it. Files: `cpp_core/{include,src}/ogma/modules/Tof8Range.*`, `cpp_core/tests/ogma/test_tof8_range.cpp`, the three
 `_sim60_terrain*` configs (StuckSense `range_topic sense.range_tof`, `range_max_m 3.0`), `picrawler_body.gd` (the
 `tofr_*` keys), `OgmaBrain.cpp` (the diag passthrough), `PROTOCOL.md`.
+
+### 2026-11-05 — THE STALL SENSE'S ADMISSION, BATTERIES 1 AND 2 (`_sim60_terrain`, n = 4 × 24 000 varied worlds, the field reduced to the nearest feature and read by StuckSense's closing channel; the body's path identical between batteries because no sensor acts): the stride stall now SPEAKS in stalls — 0.17 ± 0.15 (battery 1) → 0.28 ± 0.27 (battery 2) in windows under a metre of real travel against 0.00 ± 0.01 while walking — but the published score still flags 36 % of walking windows at the threshold that catches 62 % of slow ones, and the hard stalls in three of four worlds are missed; each battery found one gate and one bias, and each is a parameter already in the module — `PARTIAL` (instrument; battery 3 running)
+
+Per 2400-tick window, real displacement against the published channels (21 slow windows under 1 m, 10 of them under
+0.3 m; 14 walking windows over 2.5 m; 5 between):
+
+| | stride stall (`stall`) slow / walking | range deficit slow / walking | score slow / walking |
+|---|---|---|---|
+| battery 1: commanded-turn gate | 0.17 ± 0.15 / 0.00 | 0.59 / 0.33 | 0.30 ± 0.17 / 0.24 ± 0.11 |
+| battery 2: + stall judged against the command, median over columns | 0.28 ± 0.27 / 0.00 | 0.49 / 0.33 | 0.44 ± 0.28 / 0.23 ± 0.10 |
+
+**What each battery found.** (1) In the one world with a five-minute stall the commanded speed sat at 0.20 for
+minutes — the heading loop slows the body while it turns back from a deflection — and the stall abstained below
+`cmd_min` 0.3; judged against the command instead (`stall_cmd_scaled`), that world's stall reads 0.35–0.91 throughout.
+(2) The nearest feature jumped more than 25 cm about twice per window while walking (a new thing entering one column),
+each jump a false full deficit for one closing window; the median over columns (`reduce median`) did not lower the
+walking windows' deficit (0.33 both batteries), so the jumps are not the main bias. (3) The main bias of the closing
+channel is its EXPECTATION: it expects the window's closing to match the stride odometry's displacement, and on this
+terrain the legs overclaim two to three times (0.085 m/s of stride in windows that cover 0.07 m/s; 0.03 in windows
+that cover 0.01), so an honest closing always falls short of it. (4) The hard stalls the stride channel still misses
+(three worlds, 0.07–0.19 m per window) have `v_ema` ≈ `v_ref` ≈ 0.02–0.05: the 20 s peak-hold of the reference has
+decayed to the stall's own speed, and a body that has forgotten it ever walked faster cannot be stalled by its own
+rule. **Battery 3 therefore sets** `v_ref_tau_s` 120 (a stall of minutes needs a reference older than the stall;
+the slowest-loop rule) and `expect_from_cmd` 0.07 m/s (the closing expected from the COMMAND at this body's own
+flat-floor speed, the channel's documented alternative to the stride). **The re-use context, named now:** every
+remaining gap is the legs' claim standing in for the body's motion; the field's closing is the honest one and should
+become the reference the stride is judged against, not the other way round — that is the next form if battery 3
+is not clean.

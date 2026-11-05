@@ -1,7 +1,7 @@
 {
  "metadata": {
   "name": "INSTRUMENT · the robot base _cs_pf_sl0 with ideal servos on the TERRAIN arena, the encounter chain live (2026-11-02) — step 2 of the terrain plan: what the touch vocabulary says at a stall",
-  "description": "_cs_pf_sl0_sim60 unchanged except gym_mode terrain (concentric step / bar / rough bands 12-50 mm, then the bowl). Nothing acts on the encounter belief; the body log carries enc_events (one row per touch: height over the floor, position, load, belly and lean rise, vertical fraction) beside stuck_deficit / distress, so stall-time touches can be compared with free walking. The sim has no servo current, so soft-vs-hard is not in this vocabulary; a wall vs a low step is. Height reference: the planted feet's plane (belly_plane_m 0), not the belly ToF — on the walking sim body the ToF floor wandered ±15 mm on the flat centre (battery 1, 2026-11-02), so the robot config keeps the ToF for seated palpation and this one takes the plane. Ultrasonic OFF for the terrain battery (operator rule 2026-10-25: step faces trip the avoid reflex). StuckSense gates its yaw abstention on a COMMANDED turn (turn_cmd_topic = the avoid value; 2026-11-04), so the ground turning the body does not hide the stall. 2026-11-05: Tof8Range reduces the field to the nearest feature ahead (sense.range_tof, the sonar's contract) and StuckSense's closing-rate channel reads it (range_max_m 3.0) — the stall sense through the field; the sonar stays off. Battery 2026-11-05 #1 found the stall abstaining below a 0.2 command and the nearest feature jumping: StuckSense stall_cmd_scaled (judged against the command, cmd_min 0.05) and Tof8Range reduce median.",
+  "description": "_cs_pf_sl0_sim60 unchanged except gym_mode terrain (concentric step / bar / rough bands 12-50 mm, then the bowl). Nothing acts on the encounter belief; the body log carries enc_events (one row per touch: height over the floor, position, load, belly and lean rise, vertical fraction) beside stuck_deficit / distress, so stall-time touches can be compared with free walking. The sim has no servo current, so soft-vs-hard is not in this vocabulary; a wall vs a low step is. Height reference: the planted feet's plane (belly_plane_m 0), not the belly ToF — on the walking sim body the ToF floor wandered ±15 mm on the flat centre (battery 1, 2026-11-02), so the robot config keeps the ToF for seated palpation and this one takes the plane. Ultrasonic OFF for the terrain battery (operator rule 2026-10-25: step faces trip the avoid reflex). StuckSense gates its yaw abstention on a COMMANDED turn (turn_cmd_topic = the avoid value; 2026-11-04), so the ground turning the body does not hide the stall. 2026-11-05: Tof8Range reduces the field to the nearest feature ahead (sense.range_tof, the sonar's contract) and StuckSense's closing-rate channel reads it (range_max_m 3.0) — the stall sense through the field; the sonar stays off. Battery 2026-11-05 #1 found the stall abstaining below a 0.2 command and the nearest feature jumping: StuckSense stall_cmd_scaled (judged against the command, cmd_min 0.05) and Tof8Range reduce median. Battery #2: the stall reference decayed to the stall within 20 s (v_ref_tau_s 120) and the closing channel expected the legs' overclaimed stride (expect_from_cmd 0.07 m/s at full command, this body's walking speed on the flat).",
   "env_target": "picrawler",
   "gym_mode": "terrain",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -648,7 +648,9 @@
     "yaw_rate_max": 0.15,
     "yaw_window_ticks": 150,
     "turn_cmd_topic": "reality.cognitive.avoid_value",
-    "stall_cmd_scaled": true
+    "stall_cmd_scaled": true,
+    "v_ref_tau_s": 120.0,
+    "expect_from_cmd": 0.07
    }
   },
   {
