@@ -65,6 +65,10 @@ private:
     int    fit_rows_    = 3;         // the bottom rows the floor is fitted from
     double fit_slope_max_ = 0.55;    // |slope| of a believable floor fit (tan 29 deg) -- beyond it the rows hit a wall
     int    col_lo_ = 0, col_hi_ = 7; // the columns the nearest feature is taken over
+    std::string reduce_ = "nearest"; // "nearest": the single nearest feature zone; "median": the median of the per-column
+                                     // nearest features over the valid columns (>= median_min_cols), else the nearest --
+                                     // a feature entering one column no longer jumps the range (2026-11-05)
+    int    median_min_cols_ = 3;
 
     std::array<float, kZones> field_{};
     bool have_field_ = false; uint64_t field_tick_ = 0, last_reduced_tick_ = ~uint64_t(0);

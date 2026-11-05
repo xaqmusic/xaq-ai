@@ -83,6 +83,12 @@ private:
     std::string turn_cmd_topic_ = "";
     double turn_cmd_min_ = 0.05;
     double turn_cmd_ = 0.0; bool have_turn_cmd_ = false;
+    // 2026-11-05: the stall JUDGED AGAINST the commanded speed instead of gated by it.  The heading loop slows the body to
+    // 0.2 while it turns back from a deflection, for minutes on terrain; below cmd_min the channel abstained and a stall
+    // of minutes went unpublished.  Scaled: the sensed speed is compared with (stall_frac * v_ref * cmd_ema), v_ref is the
+    // peak-hold of the COMMAND-NORMALISED speed, and cmd_min becomes a floor near zero.  Default off (byte-identical).
+    bool   stall_cmd_scaled_ = false;
+    double cmd_ema_ = 1.0;
     double yaw_rate_max_      = 0.15;   // rad/s, net over the window
     int    yaw_window_ticks_  = 150;    // 3 s: two strides and change
     int    window_ticks_   = 50;      // 1 s at 50 Hz

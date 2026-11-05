@@ -154,3 +154,20 @@ TEST(StuckSense, WithATurnCommandTopic_AnUncommandedYawDoesNotHideTheStall_AComm
     for (int i = 0; i < 300; ++i) step(0.0f, 0.3 / 50.0, 1.0f);      // the same yaw while the avoid loop commands it
     EXPECT_FLOAT_EQ(f.m.stall(), 0.0f) << "a commanded turn: the sense abstains, as before";
 }
+
+TEST(StuckSense, ScaledByTheCommand_ASlowCommandWalkedIsNoStall_ASlowCommandNotWalkedIs) {
+    Fix f({{"window_ticks", int64_t{10}}, {"v_ema_alpha", 0.05}, {"stall_cmd_scaled", true}, {"cmd_min", 0.05}});
+    uint64_t t = 0;
+    for (; t < 500; ++t) f.run(t, 1.5f, false, 0.03f);                      // full command, walking at 0.03
+    for (int i = 0; i < 400; ++i, ++t) f.run(t, 1.5f, false, 0.006f, 0.2f);  // command 0.2, walking at 0.2 of its best
+    EXPECT_LT(f.m.stall(), 0.05f) << "a fifth of the speed at a fifth of the command is not a stall";
+    for (int i = 0; i < 400; ++i, ++t) f.run(t, 1.5f, false, 0.0f, 0.2f);    // command 0.2, not moving
+    EXPECT_GT(f.m.stall(), 0.9f) << "commanding 0.2 and going nowhere IS a stall (the old gate abstained below 0.3)";
+    for (int i = 0; i < 400; ++i, ++t) f.run(t, 1.5f, false, 0.03f);         // back to full command, walking
+    EXPECT_LT(f.m.stall(), 0.1f) << "the reference survived the slow stretch: full speed at full command clears it";
+    // the old form, for contrast: command 0.2 and not moving is not judged
+    Fix g({{"window_ticks", int64_t{10}}, {"v_ema_alpha", 0.05}});
+    t = 0; for (; t < 500; ++t) g.run(t, 1.5f, false, 0.03f);
+    for (int i = 0; i < 400; ++i, ++t) g.run(t, 1.5f, false, 0.0f, 0.2f);
+    EXPECT_FLOAT_EQ(g.m.stall(), 0.0f);
+}

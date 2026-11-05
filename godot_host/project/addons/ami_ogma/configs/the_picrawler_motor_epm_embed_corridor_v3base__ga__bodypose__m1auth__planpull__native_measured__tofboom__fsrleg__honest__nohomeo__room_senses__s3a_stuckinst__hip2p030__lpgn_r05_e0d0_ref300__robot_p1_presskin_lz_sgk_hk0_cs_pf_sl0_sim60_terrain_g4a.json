@@ -1,7 +1,7 @@
 {
  "metadata": {
   "name": "LEVER G4a on the sim twin · _sim60_terrain + LiftDescent with ONE operating point (the global swing-lift descent, 2026-10-26 NULL at 4.22 rad/s, here at 6 rad/s) — the control that separates \"descent at all\" from \"per situation\"",
-  "description": "_sim60_terrain (encounter chain live) + LiftDescent enabled, no situation topic: one (front, rear) swing-lift multiplier found by local descent on swing contact, stall and tilt spread. MotorEPMv2 reads handle.lift. Ultrasonic OFF for the terrain battery (operator rule 2026-10-25: step faces trip the avoid reflex). StuckSense gates its yaw abstention on a COMMANDED turn (turn_cmd_topic = the avoid value; 2026-11-04), so the ground turning the body does not hide the stall. 2026-11-05: Tof8Range reduces the field to the nearest feature ahead (sense.range_tof, the sonar's contract) and StuckSense's closing-rate channel reads it (range_max_m 3.0) — the stall sense through the field; the sonar stays off.",
+  "description": "_sim60_terrain (encounter chain live) + LiftDescent enabled, no situation topic: one (front, rear) swing-lift multiplier found by local descent on swing contact, stall and tilt spread. MotorEPMv2 reads handle.lift. Ultrasonic OFF for the terrain battery (operator rule 2026-10-25: step faces trip the avoid reflex). StuckSense gates its yaw abstention on a COMMANDED turn (turn_cmd_topic = the avoid value; 2026-11-04), so the ground turning the body does not hide the stall. 2026-11-05: Tof8Range reduces the field to the nearest feature ahead (sense.range_tof, the sonar's contract) and StuckSense's closing-rate channel reads it (range_max_m 3.0) — the stall sense through the field; the sonar stays off. Battery 2026-11-05 #1 found the stall abstaining below a 0.2 command and the nearest feature jumping: StuckSense stall_cmd_scaled (judged against the command, cmd_min 0.05) and Tof8Range reduce median.",
   "env_target": "picrawler",
   "gym_mode": "terrain",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -626,7 +626,8 @@
    "params": {
     "pitch_deg": 30.0,
     "max_range_m": 4.0,
-    "thing_min_m": 0.02
+    "thing_min_m": 0.02,
+    "reduce": "median"
    }
   },
   {
@@ -639,7 +640,7 @@
     "output_topic": "reality.proprio.stuck",
     "window_ticks": 50,
     "min_expected_m": 0.05,
-    "cmd_min": 0.3,
+    "cmd_min": 0.05,
     "range_max_m": 3.0,
     "ema_alpha": 0.05,
     "decay": 0.01,
@@ -647,7 +648,8 @@
     "odom_topic": "reality.proprio.odom",
     "yaw_rate_max": 0.15,
     "yaw_window_ticks": 150,
-    "turn_cmd_topic": "reality.cognitive.avoid_value"
+    "turn_cmd_topic": "reality.cognitive.avoid_value",
+    "stall_cmd_scaled": true
    }
   },
   {

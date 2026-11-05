@@ -54,6 +54,7 @@ ParamSchema StuckSense::params_schema() const {
         {"yaw_rate_max", ParamMutability::HotMutable, "The NET yaw rate over yaw_window_ticks above which the sense abstains (rad/s). The gait's own per-stride rocking averages out over the window; a turn does not.", ParamValue{0.15}},
         {"turn_cmd_topic", ParamMutability::ConstructionOnly, "Optional ProprioToken [value]: a loop's steering value (TofAvoidLoop's reality.cognitive.avoid_value). With it, the yaw abstention applies only while value >= turn_cmd_min: a commanded turn zeroes forward stride legitimately; an uncommanded yaw is the ground turning the body, and the stall channel judges through it (2026-11-04). \"\" = every real turn abstains.", ParamValue{std::string("")}},
         {"turn_cmd_min",   ParamMutability::HotMutable, "The steering value at or above which a turn counts as commanded.", ParamValue{0.05}},
+        {"stall_cmd_scaled", ParamMutability::HotMutable, "true: the stall is judged against the COMMANDED speed (v_ema vs stall_frac * v_ref * EMA(speed_cmd), v_ref the peak-hold of the command-normalised speed) instead of abstaining below cmd_min -- the heading loop commands 0.2 for minutes while it turns back from a terrain deflection, and the old gate hid those stalls (2026-11-05). false = the 2026-10 form.", ParamValue{false}},
         {"yaw_window_ticks", ParamMutability::HotMutable, "The window the net yaw is measured over (ticks); whole strides (the gait period is ~70).", ParamValue{int64_t{150}}},
         {"window_ticks",   ParamMutability::HotMutable, "The window the range must have closed over (ticks).", ParamValue{int64_t{50}}},
         {"min_expected_m", ParamMutability::HotMutable, "Below this much claimed walking the window says too little to judge.", ParamValue{0.05}},
@@ -77,7 +78,7 @@ ParamMap StuckSense::current_params() const {
     m["speed_topic"] = ParamValue{speed_topic_}; m["output_topic"] = ParamValue{output_topic_};
     m["odom_topic"] = ParamValue{odom_topic_}; m["yaw_rate_max"] = ParamValue{yaw_rate_max_}; m["yaw_window_ticks"] = ParamValue{int64_t(yaw_window_ticks_)};
     m["window_ticks"] = ParamValue{int64_t(window_ticks_)}; m["min_expected_m"] = ParamValue{min_expected_m_};
-    m["cmd_min"] = ParamValue{cmd_min_}; m["range_max_m"] = ParamValue{range_max_m_};
+    m["cmd_min"] = ParamValue{cmd_min_}; m["range_max_m"] = ParamValue{range_max_m_}; m["stall_cmd_scaled"] = ParamValue{stall_cmd_scaled_};
     m["ema_alpha"] = ParamValue{ema_alpha_}; m["decay"] = ParamValue{decay_}; m["hz"] = ParamValue{hz_};
     m["v_ema_alpha"] = ParamValue{v_ema_alpha_}; m["v_ref_tau_s"] = ParamValue{v_ref_tau_s_};
     m["v_floor"] = ParamValue{v_floor_}; m["stall_frac"] = ParamValue{stall_frac_}; m["expect_from_cmd"] = ParamValue{expect_from_cmd_};
@@ -95,6 +96,7 @@ void StuckSense::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "odom_topic",   [&](auto const& v){ odom_topic_   = get_string(v, "odom_topic"); });
     apply_param(params, "turn_cmd_topic", [&](auto const& v){ turn_cmd_topic_ = get_string(v, "turn_cmd_topic"); });
     apply_param(params, "turn_cmd_min",   [&](auto const& v){ turn_cmd_min_   = get_double(v, "turn_cmd_min"); });
+    apply_param(params, "stall_cmd_scaled", [&](auto const& v){ if (auto b = std::get_if<bool>(&v)) stall_cmd_scaled_ = *b; else stall_cmd_scaled_ = get_double(v, "stall_cmd_scaled") != 0.0; });
     apply_param(params, "yaw_rate_max", [&](auto const& v){ yaw_rate_max_ = get_double(v, "yaw_rate_max"); });
     apply_param(params, "yaw_window_ticks", [&](auto const& v){ yaw_window_ticks_ = std::max(2, int(get_double(v, "yaw_window_ticks"))); });
     apply_param(params, "window_ticks",   [&](auto const& v){ window_ticks_   = std::max(2, int(get_double(v, "window_ticks"))); });
@@ -154,6 +156,7 @@ void StuckSense::on_param_change(std::string_view key, ParamValue const& value) 
     else if (k == "cmd_min")        cmd_min_        = get_double(value, k);
     else if (k == "range_max_m")    range_max_m_    = get_double(value, k);
     else if (k == "turn_cmd_min")   turn_cmd_min_   = get_double(value, k);
+    else if (k == "stall_cmd_scaled") { if (auto b = std::get_if<bool>(&value)) stall_cmd_scaled_ = *b; else stall_cmd_scaled_ = get_double(value, k) != 0.0; }
     else if (k == "ema_alpha")      ema_alpha_      = get_double(value, k);
     else if (k == "decay")          decay_          = get_double(value, k);
     else if (k == "v_ema_alpha")    v_ema_alpha_    = get_double(value, k);
@@ -199,14 +202,25 @@ void StuckSense::tick(uint64_t tick_id) {
     const bool turning    = !odom_topic_.empty() && have_odom_ && std::fabs(yaw_rate_) > yaw_rate_max_;
     const bool turn_cmd   = turn_cmd_topic_.empty() || (have_turn_cmd_ && turn_cmd_ >= turn_cmd_min_);
     const bool straight   = !(turning && turn_cmd);   // a real turn abstains only when a loop commands it
-    const bool commanding = (speed_topic_.empty() || !have_speed_ || speed_cmd_ >= cmd_min_) && straight;
+    const double cmd_now = (speed_topic_.empty() || !have_speed_) ? 1.0 : std::max(0.0, speed_cmd_);
+    cmd_ema_ += v_ema_alpha_ * (cmd_now - cmd_ema_);
+    const double cmd_for_gate = stall_cmd_scaled_ ? cmd_ema_ : speed_cmd_;
+    const bool commanding = (speed_topic_.empty() || !have_speed_ || cmd_for_gate >= cmd_min_) && straight;
     // Channel 1: the stall.  The stride forward's EMA against the body's own recent best.
     v_ema_ += v_ema_alpha_ * (vfwd_ - v_ema_);
-    v_ref_  = std::max(v_floor_, std::max(v_ema_, v_ref_ * (1.0 - 1.0 / std::max(1.0, v_ref_tau_s_ * hz_))));
+    const double decay_ref = v_ref_ * (1.0 - 1.0 / std::max(1.0, v_ref_tau_s_ * hz_));
+    if (stall_cmd_scaled_) {
+        // the reference is the body's best COMMAND-NORMALISED speed, so a slow command neither lowers it nor reads as a stall
+        const double v_norm = cmd_ema_ > 0.05 ? v_ema_ / cmd_ema_ : 0.0;
+        v_ref_ = std::max(v_floor_, std::max(v_norm, decay_ref));
+    } else {
+        v_ref_ = std::max(v_floor_, std::max(v_ema_, decay_ref));
+    }
     // A body that has never walked has no stall: the channel speaks only once v_ref has risen
     // above its floor (so a standing start, servos ramping, is not an escape).
+    const double expected = stall_cmd_scaled_ ? stall_frac_ * v_ref_ * std::max(cmd_ema_, 1e-3) : stall_frac_ * v_ref_;
     stall_  = (commanding && v_ref_ > v_floor_)
-            ? float(std::clamp(1.0 - v_ema_ / (stall_frac_ * v_ref_), 0.0, 1.0)) : 0.0f;
+            ? float(std::clamp(1.0 - v_ema_ / expected, 0.0, 1.0)) : 0.0f;
     // Channel 2: the range deficit (the slip case).
     if (int(ring_.size()) == window_ticks_ + 1 && commanding) {
         const Sample& a = ring_.front(); const Sample& b = ring_.back();
@@ -250,7 +264,7 @@ nlohmann::json StuckSense::diag_snapshot() const {
                           {"v_ema", v_ema_}, {"v_ref", v_ref_}, {"deficit", deficit_}, {"measured", measured_},
                           {"expected", expected_}, {"observed", observed_}, {"measurements", measurements_},
                           {"range", d_}, {"valid", valid_}, {"vfwd", vfwd_}, {"speed_cmd", speed_cmd_},
-                          {"yaw_rate", yaw_rate_}, {"turn_cmd", turn_cmd_}};
+                          {"yaw_rate", yaw_rate_}, {"turn_cmd", turn_cmd_}, {"cmd_ema", cmd_ema_}, {"stall_cmd_scaled", stall_cmd_scaled_}};
 }
 
 } // namespace ogma

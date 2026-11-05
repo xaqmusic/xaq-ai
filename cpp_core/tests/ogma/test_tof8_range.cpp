@@ -91,3 +91,17 @@ TEST(Tof8Range, AHeldFieldIsReducedOnceAndRepublishedEveryTick) {
     f.bus.begin_tick(3); f.m.tick(3); f.bus.end_tick();
     EXPECT_EQ(f.n, 3); EXPECT_EQ(f.m.diag_snapshot()["frames"].get<int>(), 1);
 }
+
+TEST(Tof8Range, TheMedianOverColumnsIgnoresAThingInOneColumn_AndFollowsABroadRiser) {
+    // a wide box at 0.60 m plus a narrow post at 0.35 m in the leftmost column
+    auto field = synth(0.13, 30.0, 0.05, 0.60, 0.80, 0.30);
+    auto post  = synth(0.13, 30.0, 0.05, 0.35, 0.37, 2.0);
+    for (int r = 0; r < 8; ++r) { const int z = r * 8 + 0; if (post[size_t(z)] > 0 && (field[size_t(z)] < 0 || post[size_t(z)] < field[size_t(z)])) field[size_t(z)] = post[size_t(z)]; }
+    ogma::InProcessBus bus; ogma::Tof8Range near; near.set_id("n"); near.on_setup(&bus, {{"pitch_deg", ogma::ParamValue{30.0}}});
+    ogma::InProcessBus bus2; ogma::Tof8Range med; med.set_id("m"); med.on_setup(&bus2, {{"pitch_deg", ogma::ParamValue{30.0}}, {"reduce", ogma::ParamValue{std::string("median")}}});
+    auto feed = [&](ogma::InProcessBus& b, ogma::Tof8Range& m) { b.begin_tick(1); auto p = pv(field); p->tick_id = 1; b.publish("sense.tof8", p); m.tick(1); b.end_tick(); };
+    feed(bus, near); feed(bus2, med);
+    EXPECT_NEAR(near.nearest_m(), 0.36, 0.04) << "nearest: the post";
+    EXPECT_NEAR(med.nearest_m(), 0.61, 0.04) << "median: the box the other seven columns see";
+    EXPECT_TRUE(med.nearest_valid());
+}

@@ -47,6 +47,8 @@ ParamSchema Tof8Range::params_schema() const {
         {"fit_slope_max", ParamMutability::HotMutable, "A fitted floor steeper than this (|dy/dz| or |dy/dx|) is not a floor (the rows hit a wall): then every valid return is a feature.", ParamValue{0.55}},
         {"col_lo",       ParamMutability::HotMutable, "First column the nearest feature is taken over (0 = left).", ParamValue{int64_t{0}}},
         {"col_hi",       ParamMutability::HotMutable, "Last column (7 = right).", ParamValue{int64_t{7}}},
+        {"reduce",       ParamMutability::HotMutable, "\"nearest\": the single nearest feature zone (the sonar's habit; a feature entering one column jumps the range and spoils a closing-rate window). \"median\": the median of the per-column nearest features over the valid columns within col_lo..col_hi (at least median_min_cols of them; fewer = the nearest) -- a broad riser closes smoothly, a narrow thing in one column does not move it (2026-11-05).", ParamValue{std::string("nearest")}},
+        {"median_min_cols", ParamMutability::HotMutable, "Valid columns the median needs.", ParamValue{int64_t{3}}},
     };
 }
 
@@ -54,7 +56,8 @@ ParamMap Tof8Range::current_params() const {
     return {{"input_topic", ParamValue{input_topic_}}, {"output_topic", ParamValue{output_topic_}}, {"cols_topic", ParamValue{cols_topic_}},
             {"pitch_deg", ParamValue{pitch_deg_}}, {"max_range_m", ParamValue{max_range_m_}}, {"thing_min_m", ParamValue{thing_min_m_}},
             {"fit_rows", ParamValue{int64_t(fit_rows_)}}, {"fit_slope_max", ParamValue{fit_slope_max_}},
-            {"col_lo", ParamValue{int64_t(col_lo_)}}, {"col_hi", ParamValue{int64_t(col_hi_)}}};
+            {"col_lo", ParamValue{int64_t(col_lo_)}}, {"col_hi", ParamValue{int64_t(col_hi_)}},
+            {"reduce", ParamValue{reduce_}}, {"median_min_cols", ParamValue{int64_t(median_min_cols_)}}};
 }
 
 void Tof8Range::on_setup(Bus* bus, ParamMap const& params) {
@@ -63,7 +66,7 @@ void Tof8Range::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "input_topic",  [&](auto const& v){ input_topic_  = get_string(v, "input_topic"); });
     apply_param(params, "output_topic", [&](auto const& v){ output_topic_ = get_string(v, "output_topic"); });
     apply_param(params, "cols_topic",   [&](auto const& v){ cols_topic_   = get_string(v, "cols_topic"); });
-    for (auto const& k : {"pitch_deg", "max_range_m", "thing_min_m", "fit_rows", "fit_slope_max", "col_lo", "col_hi"})
+    for (auto const& k : {"pitch_deg", "max_range_m", "thing_min_m", "fit_rows", "fit_slope_max", "col_lo", "col_hi", "reduce", "median_min_cols"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     for (auto& c : cols_) c = float(max_range_m_);
     sub_ids_.push_back(bus_->subscribe(input_topic_, SubscriptionKind::Direct, [this](std::string_view, MessagePtr p){ handle(p); }));
@@ -78,6 +81,8 @@ void Tof8Range::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "fit_slope_max") fit_slope_max_ = std::max(0.05, get_double(value, k));
     else if (k == "col_lo")        col_lo_ = std::clamp(int(get_double(value, k)), 0, kCols - 1);
     else if (k == "col_hi")        col_hi_ = std::clamp(int(get_double(value, k)), 0, kCols - 1);
+    else if (k == "reduce")        { reduce_ = get_string(value, k); if (reduce_ != "nearest" && reduce_ != "median") throw std::invalid_argument("Tof8Range: reduce must be nearest or median"); }
+    else if (k == "median_min_cols") median_min_cols_ = std::max(1, int(get_double(value, k)));
     else throw std::invalid_argument("Tof8Range: param '" + k + "' is construction-only / unknown");
 }
 
@@ -164,6 +169,15 @@ void Tof8Range::reduce() {
         const int col = z % kCols; const double r = field_[size_t(z)];
         cols_[size_t(col)] = std::min(cols_[size_t(col)], float(r));
         if (col >= col_lo_ && col <= col_hi_ && r < nearest_) { nearest_ = r; nearest_valid_ = true; nearest_zone_ = z; }
+    }
+    if (reduce_ == "median" && nearest_valid_) {
+        std::vector<float> v;
+        for (int c = col_lo_; c <= col_hi_; ++c) if (cols_[size_t(c)] < float(max_range_m_)) v.push_back(cols_[size_t(c)]);
+        if (int(v.size()) >= median_min_cols_) {
+            std::sort(v.begin(), v.end());
+            const size_t n = v.size();
+            nearest_ = (n % 2) ? v[n / 2] : 0.5 * (v[n / 2 - 1] + v[n / 2]);
+        }
     }
 }
 
