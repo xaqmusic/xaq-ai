@@ -10190,7 +10190,10 @@ terrain the legs overclaim two to three times (0.085 m/s of stride in windows th
 that cover 0.01), so an honest closing always falls short of it. (4) The hard stalls the stride channel still misses
 (three worlds, 0.07–0.19 m per window) have `v_ema` ≈ `v_ref` ≈ 0.02–0.05: the 20 s peak-hold of the reference has
 decayed to the stall's own speed, and a body that has forgotten it ever walked faster cannot be stalled by its own
-rule. **Battery 3 therefore sets** `v_ref_tau_s` 120 (a stall of minutes needs a reference older than the stall;
+rule. **Read alone, the stride channel is already admissible after battery 2:** a mean `stall` above 0.05 over a
+window flags 85 % of the windows under 0.3 m of travel (11 of 13) and 0 of 14 walking windows; it is the published
+score — the max of the stride stall and the closing channel's deficit — that flags a third of walking windows, and
+every one of those false flags is the closing channel's. **Battery 3 therefore sets** `v_ref_tau_s` 120 (a stall of minutes needs a reference older than the stall;
 the slowest-loop rule) and `expect_from_cmd` 0.07 m/s (the closing expected from the COMMAND at this body's own
 flat-floor speed, the channel's documented alternative to the stride). **The re-use context, named now:** every
 remaining gap is the legs' claim standing in for the body's motion; the field's closing is the honest one and should
