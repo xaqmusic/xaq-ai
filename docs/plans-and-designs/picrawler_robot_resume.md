@@ -133,10 +133,15 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   session scratch reads stall-vs-free; the 9000-tick battery met no stall below 38 mm, the 24 000-tick varied-world
   battery is the one that counts); step 3 built and first-measured (LiftDescent per encounter situation, G4b; configs `_sim60_terrain_g4a`
   control and `_sim60_terrain_g4b` lever, all three in the launcher): the three arms TIE at n = 4 and the descent
-  never stepped in either form — `NULL` in context (ledger 2026-11-04). Next in the sim, in order: the swing-lift
-  dose response on this course at 6 rad/s (is the lift a handle here at all?), the stall gate measured live
-  (`StuckSense turn_cmd_topic`, built, in the terrain configs, unmeasured), then a situation built from the rare
-  touch node's recency rather than occupancy. The robot's next session: the sonar through
+  never stepped in either form — `NULL` in context (ledger 2026-11-04). **The forward 8x8 field** (ledger 2026-11-04/05/06): `scripts/tof8.gd` in the sim (rays `[Y]`, mount `[7]`–`[0]`,
+  30° / 70 mm chosen for now), its own cloud (green floor / yellow thing), every cloud's voxel living 30 s;
+  `Tof8Range` reduces it to the nearest feature in the sonar's contract and **StuckSense's stall sense is ADMITTED
+  through it** (battery 3: a mean score > 0.5 flags 92 % of stalled windows and 7 % of walking ones; the stride
+  channel alone, with its commanded-turn gate and command scaling, 92 % / 0 %). Next in the sim, in order: the
+  swing-lift dose response on this course at 6 rad/s (is the lift a handle here at all?), then step 3 — an EPM over
+  the field as the look, and the consumer judged against the admitted stall. On the robot: step 2, the VL53L5CX
+  driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
+  and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through
   ogma_host, the brain's cloud against the twin's at the toe height, whether the six nodes reappear. The
   front hip2 origin shifts (+49 µs P4, −62 µs P10) are a servo-map lever for a gait A/B, not applied. `touch_ready` leaves the FR toe on the floor (~300 g).
 - **Before climbing: the belly ToF's pitch compensation** ([register O73](open_items_register.md)). The brain reads the

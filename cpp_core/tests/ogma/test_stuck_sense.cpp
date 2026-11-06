@@ -171,3 +171,15 @@ TEST(StuckSense, ScaledByTheCommand_ASlowCommandWalkedIsNoStall_ASlowCommandNotW
     for (int i = 0; i < 400; ++i, ++t) g.run(t, 1.5f, false, 0.0f, 0.2f);
     EXPECT_FLOAT_EQ(g.m.stall(), 0.0f);
 }
+
+TEST(StuckSense, ScaledByTheCommand_ASlowCommandCannotInflateTheReference) {
+    Fix f({{"window_ticks", int64_t{10}}, {"v_ema_alpha", 0.05}, {"stall_cmd_scaled", true}, {"cmd_min", 0.05}});
+    uint64_t t = 0;
+    for (; t < 500; ++t) f.run(t, 1.5f, false, 0.03f);                      // full command, the body's best 0.03
+    const float ref_walk = f.m.diag_snapshot()["v_ref"].get<float>();
+    for (int i = 0; i < 600; ++i, ++t) f.run(t, 1.5f, false, 0.03f, 0.2f);   // command 0.2 while the legs still cycle at 0.03
+    const float ref_slow = f.m.diag_snapshot()["v_ref"].get<float>();
+    EXPECT_LT(ref_slow, 2.5f * ref_walk) << "the reference may not grow past the body's best because the command was small";
+    for (int i = 0; i < 600; ++i, ++t) f.run(t, 1.5f, false, 0.03f);         // full command again, walking at its best
+    EXPECT_LT(f.m.stall(), 0.1f) << "an honest walk after the slow stretch is not a stall";
+}

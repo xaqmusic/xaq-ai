@@ -210,8 +210,10 @@ void StuckSense::tick(uint64_t tick_id) {
     v_ema_ += v_ema_alpha_ * (vfwd_ - v_ema_);
     const double decay_ref = v_ref_ * (1.0 - 1.0 / std::max(1.0, v_ref_tau_s_ * hz_));
     if (stall_cmd_scaled_) {
-        // the reference is the body's best COMMAND-NORMALISED speed, so a slow command neither lowers it nor reads as a stall
-        const double v_norm = cmd_ema_ > 0.05 ? v_ema_ / cmd_ema_ : 0.0;
+        // the reference is the body's best COMMAND-NORMALISED speed, so a slow command neither lowers it nor reads as a stall;
+        // the normaliser is floored at 0.5 so a stride spike under a 0.2 command cannot inflate the reference (battery 3,
+        // 2026-11-06: v_ref reached 1.2 m/s, fourteen times the body's best, and would have read every later walk as a stall)
+        const double v_norm = cmd_ema_ > 0.05 ? v_ema_ / std::max(cmd_ema_, 0.5) : 0.0;
         v_ref_ = std::max(v_floor_, std::max(v_norm, decay_ref));
     } else {
         v_ref_ = std::max(v_floor_, std::max(v_ema_, decay_ref));

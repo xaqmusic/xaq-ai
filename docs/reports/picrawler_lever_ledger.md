@@ -10199,3 +10199,31 @@ flat-floor speed, the channel's documented alternative to the stride). **The re-
 remaining gap is the legs' claim standing in for the body's motion; the field's closing is the honest one and should
 become the reference the stride is judged against, not the other way round — that is the next form if battery 3
 is not clean.
+
+### 2026-11-06 — THE STALL SENSE THROUGH THE FIELD, ADMITTED (battery 3: `_sim60_terrain`, n = 4 × 24 000 varied worlds, the same body paths as batteries 1–2): with the closing channel's expectation taken from the COMMAND (`expect_from_cmd` 0.07 m/s, this body's flat-floor speed) and the stall reference remembering two minutes (`v_ref_tau_s` 120), the published score reads 0.70 ± 0.12 in windows under 0.3 m of real travel, 0.68 ± 0.10 under 1 m, 0.29 ± 0.16 while walking — a mean score above 0.5 flags 12 of 13 stalled windows, 20 of 21 slow ones and 1 of 14 walking ones — `WORKING` (n = 4, a signal; the first honest progress error the terrain plan has had)
+
+| | stalled (< 0.3 m, n = 13) | slow (< 1 m, n = 21) | walking (≥ 2.5 m, n = 14) |
+|---|---|---|---|
+| score (max of the two channels) | 0.70 ± 0.12 | 0.68 ± 0.10 | 0.29 ± 0.16 |
+| the field's closing deficit | 0.65 | 0.65 | 0.36 |
+| the stride stall | 0.50 ± 0.27 | 0.35 ± 0.28 | 0.01 ± 0.01 |
+| flagged at mean score > 0.5 | 92 % | 95 % | 7 % |
+| flagged at mean stall > 0.05 (the stride alone) | 92 % | 90 % | 0 % |
+
+**Reading.** The closing channel is the carrier once its expectation stops being the legs' claim: measuring on
+2300 of every 2400 ticks (a feature is in the field 84–100 % of the time in the bands and 60 % on the flat), its
+deficit is 0.65 in stalls against 0.36 walking, and the residual 0.36 is the walker's real pace against a fixed
+0.07 m/s expectation (the windows cover 0.07 m/s on the flat and less in the bands). The stride channel is the
+cleaner detector at a low threshold and the weaker one at a high one: it speaks in nine of ten stalls and never
+while walking, but at 0.5 in stalls on average because the legs still claim stride while the body is held. The two
+agree on every stall world and disagree on nothing walking; the max of them is the published score. **Fixed on the
+way:** the command-normalised reference inflated to 1.2 m/s in the long-stall world (a stride spike divided by a
+0.2 command), harmless in that world and a false stall waiting for the next walk — the normaliser is floored at
+0.5 (13 tests). **Named constants:** `expect_from_cmd` is a per-body speed (0.07 for the sim-ideal walker, the
+module's docstring says 0.03 for the robot); the doctrine's rule is to adapt such a constant from the body's own
+running dynamics, and the next form — the field's closing as the reference the stride is judged against — removes
+it. **What this admits:** the terrain plan's error signal exists and is published; the consumer (step 3, the look
+over the field and the per-situation descent or the step-up primitive) can now be judged against it, and the lift
+dose response at 6 rad/s is still owed before the descent is trusted as a handle. **On the robot:** the stride
+channel's two gates (the commanded turn, the command scaling) apply to the sonar configuration as they are and are
+a lever for `_cs_pf_sl0` to A/B on the bench; the closing channel waits for the part (step 2).
