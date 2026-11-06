@@ -10227,3 +10227,33 @@ over the field and the per-situation descent or the step-up primitive) can now b
 dose response at 6 rad/s is still owed before the descent is trusted as a handle. **On the robot:** the stride
 channel's two gates (the commanded turn, the command scaling) apply to the sonar configuration as they are and are
 a lever for `_cs_pf_sl0` to A/B on the bench; the closing channel waits for the part (step 2).
+
+### 2026-11-06 — THE SWING-LIFT DOSE RESPONSE AT 6 rad/s (`_sim60_terrain`, five fixed settings × 4 paired worlds × 24 000 ticks, the admitted stall score among the outcomes): lift ×0.75 and ×1.5 on all legs, the rear ×1.5 and ×2.0 of the front — EVERY ARM TIES THE BASE on every metric (|t| ≤ 1.3 at n = 4), and the stall score sits at 0.48–0.52 in all five: at this servo speed, as at the robot's 4.22, the swing lift is NOT a handle on this course — `NULL` as a handle (n = 4, a signal; the October verdict repeated with the error signal now live)
+
+| arm | final radius (m) | slow windows | stalled windows | stall score | stride stall | swing contact | resets |
+|---|---|---|---|---|---|---|---|
+| base (hip2 −0.40, knee 0.27, rear ×1) | 16.3 ± 3.2 | 5.3 | 3.3 | 0.51 | 0.18 | 0.46 | 0 |
+| all ×0.75 | 15.6 ± 3.7 | 5.5 | 3.3 | 0.52 | 0.10 | 0.36 | 0 |
+| rear ×1.5 | 12.3 ± 4.5 | 4.8 | 3.0 | 0.48 | 0.12 | 0.37 | 0 |
+| rear ×2.0 | 17.3 ± 2.5 | 4.8 | 2.8 | 0.52 | 0.13 | 0.38 | 0 |
+| all ×1.5 | 16.3 ± 2.2 | 5.0 | 3.8 | 0.50 | 0.10 | 0.38 | 0 |
+
+Paired against the base by world, no difference reaches 1.3 standard errors; the rear ×1.5 arm's lower mean radius
+is one world that wandered (5.9 m, with the longest path of any run), not a lift effect, and the base's swing contact
+of 0.46 is the one seed that sat low for its whole run (the other arms' 0.36–0.38 is the walker's ordinary rate).
+The stall score, read for the first time as an outcome, says the same thing as the displacement: these worlds stall
+the walker in the 38 / 50 mm bands and the bowl for a quarter of their windows whatever the lift command is.
+
+**Reading.** A factor of 2.7 in commanded lift (×0.75 to ×2.0) does not change swing contact, the rate of
+stalls or the distance covered. The October entry's explanation at 4.22 rad/s was the slew (the servo cannot
+complete a larger lift inside the stride); at 6 rad/s the slew is not the limit, so the reason is the course:
+the bands that stop this walker are 38–50 mm steps and the bowl's pyramids, and a leg that lifts higher still
+lands on the riser or the slope — the obstacle is not cleared by a taller swing but by WHERE the foot is put
+down. **Verdict and re-use.** The swing lift is not the handle the per-situation descent should turn, at either
+servo speed, on this course; `LiftDescent` keeps its machinery for a handle that moves the outcome. Candidates,
+in the order the evidence suggests: the stride period (the October re-use context), the stance press / belly
+height against a riser, and — the one the field and the touches now make placeable — a discrete step-up: the
+front toe placed on the top the look and the touch agree on. The dose response is the cheap test for each: run
+it before any descent. Files: `configs/sim60_terrain_dose_{base,all075,rear15,rear20,all15}.json` (battery arms,
+short names because the lever chain's name is at the filename limit; not in the launcher), the session's
+`dose_compare.py`.

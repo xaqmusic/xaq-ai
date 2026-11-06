@@ -137,9 +137,11 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   30° / 70 mm chosen for now), its own cloud (green floor / yellow thing), every cloud's voxel living 30 s;
   `Tof8Range` reduces it to the nearest feature in the sonar's contract and **StuckSense's stall sense is ADMITTED
   through it** (battery 3: a mean score > 0.5 flags 92 % of stalled windows and 7 % of walking ones; the stride
-  channel alone, with its commanded-turn gate and command scaling, 92 % / 0 %). Next in the sim, in order: the
-  swing-lift dose response on this course at 6 rad/s (is the lift a handle here at all?), then step 3 — an EPM over
-  the field as the look, and the consumer judged against the admitted stall. On the robot: step 2, the VL53L5CX
+  channel alone, with its commanded-turn gate and command scaling, 92 % / 0 %). The swing-lift dose response at 6 rad/s (ledger 2026-11-06): ×0.75 to ×2.0 all tie, the lift is NOT a handle on
+  this course at either servo speed. Next in the sim: a handle that moves the outcome — the stride period, the
+  stance press against a riser, or the discrete step-up the field and the touches make placeable — each by its own
+  dose response first; then step 3, an EPM over the field as the look and the consumer judged against the admitted
+  stall. On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through
   ogma_host, the brain's cloud against the twin's at the toe height, whether the six nodes reappear. The
