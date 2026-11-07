@@ -10347,10 +10347,15 @@ touched at the other level of a riser's edge disagrees by the riser, and the dat
 moving. The median window (5, then 3) rejects single such touches on the graded flight (re-contact 1.9 cm, 11 %) but
 is a wash at n = 4 on the fixed flights and lags the climb (a 5-window under-read it by 7 cm). The residual that
 remains has a scale: a 3 cm voxel straddling a riser is touched at two levels, and the toes land within 1.5 cm of
-an edge about a tenth of the time on a 30 cm tread — alone that is ~1.6 cm RMS, most of what is left. **The next
-test, running:** 1.5 cm voxels (the field's footprint is 6–10 cm, so its claims pool across cells; a toe's claim
-is point-like and benefits). **Re-use:** the datum needs its own second source — the field's floor plane under the
-body gives the sensor's height over the local ground every frame, an independent height the touches can be
-checked against on a tread; and the registration should feed the odometry's trust back to the stall sense
-(the shift it finds IS the legs' overclaim). Files: `TerrainMemory.*` (`register_*`, `datum_window`; 8 tests),
+an edge about a tenth of the time on a 30 cm tread — alone that is ~1.6 cm RMS, most of what is left. **1.5 cm voxels** (the same levers, `sim60_stairs_v15.json`, 4 seeds): re-contact at 50 mm 2.3 → 1.9 cm RMS,
+20 % → 13 % beyond 3 cm; at 25 mm 1.8 cm, 8 %; first contact 2.4 → 2.2 cm at 50 mm — but a third as many touches land
+on touched cells (314 against 811 at 50 mm), and the datum under-reads the climb by 6–8 cm. The RMS floors near
+1.8–1.9 cm at every setting, which is the field's own precision plus the datum's jitter — the datum's standard
+deviation against the truth is 3–4 cm in every registered arm, and it enters every prediction. The launcher config
+keeps 3 cm; the fine arm stays as a battery config. **Re-use, in order:** the datum needs its second source — the
+field's floor plane under the body gives the sensor's height over the LOCAL ground every frame, and that ground's
+datum height is in the memory, so the body's height above the datum is measurable from the field alone, at the
+plane fit's half-centimetre, independent of the toes; fused with the touch estimate it should take the 3–4 cm
+jitter out, which the table says is most of what remains. Then the registration's shift fed back to the stall
+sense as the legs' measured overclaim. Files: `TerrainMemory.*` (`register_*`, `datum_window`; 8 tests),
 `_sim60_stairs` (gain 0.5, window 3), the session's `stairs_table*.py`.
