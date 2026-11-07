@@ -13162,6 +13162,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["sg_ht"]   = int(lp.get("sg_hold_ticks", 0))
 			line["sg_rel"]  = int(lp.get("sg_released", 0))
 			line["sg_m"]    = snappedf(float(lp.get("sg_margin", 0.0)), 0.0001)
+		if bool(lp.get("have_margin", false)):
+			# the model's margin gate (2026-11-08): holds, hold ticks, releases at the cap, lift-offs, the longest hold, the deadlock ticks
+			line["mg_hold"] = int(lp.get("mg_holds", 0)); line["mg_ht"] = int(lp.get("mg_hold_ticks", 0)); line["mg_rel"] = int(lp.get("mg_released", 0))
+			line["mg_lo"] = int(lp.get("mg_liftoffs", 0)); line["mg_max"] = int(lp.get("mg_max_hold", 0)); line["mg_all"] = int(lp.get("mg_all_held", 0))
+			line["mg_m"] = snappedf(float(lp.get("mg_margin", 0.0)), 0.0001)
+			var hn: Array = lp.get("hold_n", [])
+			if hn.size() >= 4: line["mg_hn"] = [int(hn[0]), int(hn[1]), int(hn[2]), int(hn[3])]
 			var th: Array = lp.get("sg_theta", [])
 			var th_s: Array = []
 			for v in th: th_s.append(snappedf(float(v), 0.0001))

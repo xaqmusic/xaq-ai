@@ -114,6 +114,18 @@ private:
     float belly_ = 0.0f;
     int64_t sg_holds_ = 0, sg_hold_ticks_ = 0, sg_released_ = 0, sg_liftoffs_ = 0, sg_dips_ = 0, sg_learned_ = 0;
     float sg_margin_ema_ = 0.0f;
+    // THE MARGIN GATE (2026-11-08, the crawl question): the same hold at the end of stance, but the margin comes from the
+    // SUPPORT MODEL (margin_topic = support.state: per leg, the signed margin the OTHER bearing toes would give the centre
+    // of mass if this toe left -- levelled by gravity, with the leg masses) and the rule is "no lift while that margin is
+    // below margin_min_m", with NO cap by default (margin_hold_max 0): the question the operator asked is whether the trot
+    // relaxes into a statically supported crawl under that rule or deadlocks, and a cap would hide the answer.  When a
+    // margin token has been seen this gate replaces the geometric one above; the counters are its own (mg_*).  "" = off.
+    std::string margin_topic_ = "";
+    double margin_min_m_ = 0.0; int margin_hold_max_ = 0;
+    std::vector<float> lift_margin_; bool have_margin_ = false;
+    int64_t mg_holds_ = 0, mg_hold_ticks_ = 0, mg_released_ = 0, mg_liftoffs_ = 0, mg_max_hold_ = 0, mg_all_held_ticks_ = 0;
+    float mg_margin_ema_ = 0.0f;
+    void handle_margin(MessagePtr p);
     // 0 = shares (deployed); 1 = absolute load, Owaki's form (see the params schema).
     int    load_mode_     = 0;
     std::vector<float> load_ref_;

@@ -10540,3 +10540,37 @@ tie-break is the next measurement. **Re-use context:** the depth handle stays as
 (the step-up's crouch to clear a riser, the belly's clearance over an edge), measured on the graded flight; the speed
 cost of a pitched body wants a diagnosis first (the swing detector's foot-height reference, or the front stroke's
 shortened reach).
+
+### 2026-11-08 — THE CRAWL QUESTION (operator: "let's find out if the trot can relax into a true stable crawl; if not we will need the separate sequencer"): `LoadPhaseGait margin_topic`, a GATE on the lift — a leg about to cross into swing is held at the end of its stance while the support model's lift margin for it is below 0 (the centre of mass must sit inside the toes that stay down), no cap (and a 60-tick cap as the second arm) — on the flat corridor (3000 ticks × 2 seeds) and the graded flight (12 000 × 2): THE TROT RELAXES HALFWAY AND NO FURTHER — on the flat the rows with static support go 0.28–0.34 → 0.56–0.62, three-toe rows 16–21 → 36–37 of 50, the swing fraction 0.35–0.37 → 0.23–0.26 (a crawl's duty), the longest hold 3–4 s, no deadlock, distance −10 to −20 %; on the stairs supported rows 0.33–0.38 → 0.41–0.46, max tilt 0.62–0.64 → 0.44–0.48 rad, the same climb as the control (every arm stops at the 64 mm riser, 2.0–2.2 m), and 20–29 % of the run with every bearing leg held — all-held stretches of up to 7.5 s that nothing in the gait can end except a perturbation — `PARTIAL` as a relaxation, `NULL` as a crawl (n = 2 per arm, a signal); the capped arm released legs 91–109 times into the trot's lift and flipped once (seed 5) where the uncapped one did not
+
+The gate (`margin_topic` = `support.state`, `margin_min_m` 0, `margin_hold_max` 0 = unbounded; it supersedes the
+geometric `support_gate` when a token has been seen; 3 tests; `mg_*` in the log): the hold is the one the deployed
+stack already uses for its 30 mm allowance and 25-tick cap, with the model's levelled, mass-weighted margin in place of
+the fixed-CoG geometry and the cap removed, because a cap would have hidden the answer.
+
+| arm | flat: supported rows | 3-toe rows / 50 | swing frac | z at 3000 | longest hold | all-held ticks | stairs: supported | 3-toe rows / 200 | 4-toe | max tilt | z at 12 000 | all-held ticks / 12 000 | rows with ≥ 3 legs held |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| control (s3 / s5) | 0.34 / 0.28 | 21 / 16 | 0.37 / 0.35 | 5.50 / 5.34 | — | — | 0.33 / 0.38 | 82 / 104 | 7 / 6 | 0.64 / 0.62 | 2.10 / 2.04 | — | — |
+| gate, no cap | 0.62 / 0.56 | 37 / 36 | 0.23 / 0.26 | 4.96 / 4.36 | 163 / 185 | 140 / 55 | 0.41 / 0.46 | 121 / 128 | 5 / 18 | 0.48 / 0.44 | 2.18 / 2.09 | 3434 / 2360 | 63 / 42 |
+| gate, cap 60 | 0.68 / 0.62 | 33 / 39 | 0.32 / 0.27 | 4.82 / 4.55 | 60 / 60 | 57 / 38 | 0.50 / 0.41 | 119 / 106 | 12 / 12 | 0.48 / **2.82** | 2.11 / 2.10 | 2303 / 2634 | 44 / 51 |
+
+**What happened, and why it stops there.** On the flat the gate does what a gate can: a leg that would have left the
+body on a diagonal waits a few ticks, the stroke of the others carries the weight over, and it goes — the trot's
+swing fraction falls to a crawl's and the body stands on three toes three quarters of the time. On the stairs the same
+rule meets the geometry of the riser: with the body nose-up and one front toe often off, every rear toe's departure
+leaves two toes, so every rear leg is held; the held legs sit at the END of their stroke, so nothing translates the
+body, so the margins do not change, so nothing is released — the deadlock the design predicted, lasting until a
+contact flickers or the body sags. The gate cannot CREATE support; it can only refuse to destroy it. The climb is
+unchanged because the thing that stops this walker at 64 mm (a rear toe that cannot reach the tread from where the body
+stands) is not a timing. The cap is worse than either: it turns a refused lift into the trot's lift after a 1.2 s
+wait, in whatever posture the wait produced, and one of those flipped the body.
+
+**Verdict for the operator's question: no.** The trot does not relax into a true crawl under a lift gate alone. The
+missing half is the one the gate has no handle on — moving the body over the planted toes while they stay planted,
+which on this body is the planted legs' hip1 stroke run as a POSE command rather than as a rhythm — and that is the
+separate sequencer: own the four legs' hip1 (the translation) and one leg's lift at a time, choose the next pose from
+the support model (translate until the next leg's lift margin is positive, lift it, place it where the memory
+predicts the tread, repeat), hand the rhythm back when the terrain is flat. **Re-use context:** the gate stays as the
+crawl's safety (a sequencer's own lift goes through the same margin test), and on the flat it is a cheap 2× in static
+support for a 10–20 % speed cost if a slow careful walk is wanted there too (not promoted; the robot's stack is the
+geometric gate at 30 mm).

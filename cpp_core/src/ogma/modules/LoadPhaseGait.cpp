@@ -139,6 +139,9 @@ ParamSchema LoadPhaseGait::params_schema() const {
         {"support_hold_max", ParamMutability::HotMutable,
          "Longest a leg is held at lift-off (ticks); then it lifts regardless (and the result still teaches).",
          ParamValue{int64_t{25}}},
+        {"margin_topic", ParamMutability::ConstructionOnly, "THE MARGIN GATE (2026-11-08): SupportModel's support.state; a leg about to lift is held at the end of its stance while the model's lift margin for it (the margin the other bearing toes would give the centre of mass) is below margin_min_m. Replaces the geometric gate when a token has been seen. \"\" = off, byte-identical.", ParamValue{std::string("")}},
+        {"margin_min_m", ParamMutability::HotMutable, "The lift margin (m) a leg needs before it may lift (0 = the centre of mass inside the remaining toes).", ParamValue{0.0}},
+        {"margin_hold_max", ParamMutability::HotMutable, "The longest hold (ticks); 0 = unbounded -- the crawl-or-deadlock question wants no cap.", ParamValue{int64_t{0}}},
         {"support_cog", ParamMutability::HotMutable,
          "The CoG's horizontal position in the chassis frame [x, z] (m); [0, 0] = the chassis centre.",
          ParamValue{std::vector<double>{0.0, 0.0}}},
@@ -165,6 +168,7 @@ ParamMap LoadPhaseGait::current_params() const {
     m["support_learn_rate"] = ParamValue{support_learn_rate_}; m["support_dip_target"] = ParamValue{support_dip_target_};
     m["support_dip_m"] = ParamValue{support_dip_m_}; m["support_dip_window"] = ParamValue{int64_t(support_dip_window_)};
     m["support_hold_max"] = ParamValue{int64_t(support_hold_max_)}; m["support_cog"] = ParamValue{support_cog_};
+    m["margin_topic"] = ParamValue{margin_topic_}; m["margin_min_m"] = ParamValue{margin_min_m_}; m["margin_hold_max"] = ParamValue{int64_t(margin_hold_max_)};
     return m;
 }
 
@@ -192,10 +196,11 @@ void LoadPhaseGait::on_setup(Bus* bus, ParamMap const& params) {
         if (auto p = std::get_if<int64_t>(&v)) seed_ = *p; else seed_ = int64_t(get_double(v, "seed")); });
     apply_param(params, "init_phase",    [&](auto const& v){ init_phase_    = get_double_vec(v, "init_phase"); });
     apply_param(params, "support_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) support_topic_ = *p; });
+    apply_param(params, "margin_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) margin_topic_ = *p; });
     apply_param(params, "belly_topic",   [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) belly_topic_ = *p; });
     for (const char* k : {"support_gate", "support_margin_init", "support_margin_min", "support_margin_max",
                           "support_learn_rate", "support_dip_target", "support_dip_m", "support_dip_window",
-                          "support_hold_max", "support_cog"})
+                          "support_hold_max", "support_cog", "margin_min_m", "margin_hold_max"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     if (int(output_topics_.size()) != n_legs_)
         throw std::invalid_argument("LoadPhaseGait: output_topics length must equal n_legs");
@@ -210,6 +215,7 @@ void LoadPhaseGait::on_setup(Bus* bus, ParamMap const& params) {
     load_ref_.assign(n, 0.0f);
     toe_x_.assign(n, 0.0f); toe_z_.assign(n, 0.0f); theta_.assign(n, float(support_margin_init_));
     hold_n_.assign(n, 0); watch_left_.assign(n, 0); watch_ref_.assign(n, 0.0f); watch_min_.assign(n, 0.0f);
+    lift_margin_.assign(n, 0.0f);
     const size_t np = n * (n - 1) / 2;
     pair_c_.assign(np, 0.0f); pair_s_.assign(np, 0.0f);
     if (!init_phase_.empty()) {
@@ -234,6 +240,9 @@ void LoadPhaseGait::on_setup(Bus* bus, ParamMap const& params) {
     if (!belly_topic_.empty())
         sub_ids_.push_back(bus_->subscribe(belly_topic_, SubscriptionKind::Direct,
             [this](std::string_view, MessagePtr p){ handle_belly(p); }));
+    if (!margin_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(margin_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_margin(p); }));
 }
 
 void LoadPhaseGait::on_param_change(std::string_view key, ParamValue const& value) {
@@ -248,6 +257,8 @@ void LoadPhaseGait::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "load_mode")    load_mode_    = int(get_double(value, k));
     else if (k == "load_norm_tau") load_norm_tau_ = get_double(value, k);
     else if (k == "support_gate")        support_gate_        = get_double(value, k);
+    else if (k == "margin_min_m")        margin_min_m_        = get_double(value, k);
+    else if (k == "margin_hold_max")     margin_hold_max_     = std::max(0, int(get_double(value, k)));
     else if (k == "support_margin_init") {
         support_margin_init_ = get_double(value, k);
         for (auto& t : theta_) t = float(support_margin_init_);           // a new start for every leg
@@ -288,6 +299,13 @@ void LoadPhaseGait::handle_support(MessagePtr p) {
     if (!pt || int(pt->values.size()) < 2 * n_legs_) return;
     for (int i = 0; i < n_legs_; ++i) { toe_x_[size_t(i)] = pt->values[2 * i]; toe_z_[size_t(i)] = pt->values[2 * i + 1]; }
     have_support_ = true;
+}
+void LoadPhaseGait::handle_margin(MessagePtr p) {
+    if (!input_allowed(p->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+    if (!pt || int(pt->values.size()) < 6 + 5 * n_legs_) return;   // SupportModel's layout: 6 header values, then [gap, has, contact, load, lift_margin] per leg
+    for (int i = 0; i < n_legs_; ++i) lift_margin_[size_t(i)] = pt->values[10 + 5 * i];
+    have_margin_ = true;
 }
 void LoadPhaseGait::handle_belly(MessagePtr p) {
     if (!input_allowed(p->producer_id)) return;
@@ -368,11 +386,26 @@ void LoadPhaseGait::tick(uint64_t tick_id) {
     }
     // ---- the rule, and the instruments it feeds ----
     int retro = 0, sw_n = 0, agree = 0;
-    const bool gate = support_gate_ > 0.0 && have_support_ && have_contact_;
+    const bool mgate = have_margin_ && have_contact_;                 // the model's margin gate supersedes the geometric one
+    const bool gate = !mgate && support_gate_ > 0.0 && have_support_ && have_contact_;
+    int held_now = 0, bearing_now = 0;
     for (size_t i = 0; i < n; ++i) {
         const float d = omega * (1.0f - float(sigma_ratio_) * share_[i] * std::cos(phase_[i]));
         const float before = phase_[i];
         phase_[i] = wrap(phase_[i] + d);
+        if (mgate && std::sin(before) < 0.0f && std::sin(phase_[i]) > 0.0f && d > 0.0f) {   // about to lift off: may it?
+            const float mg = lift_margin_[i];
+            mg_margin_ema_ += 0.05f * (mg - mg_margin_ema_);
+            if (mg < float(margin_min_m_) && (margin_hold_max_ <= 0 || hold_n_[i] < margin_hold_max_)) {
+                phase_[i] = kTwoPi - 1e-3f;                           // held at the end of its stance
+                if (hold_n_[i] == 0) ++mg_holds_;
+                ++hold_n_[i]; ++mg_hold_ticks_; mg_max_hold_ = std::max<int64_t>(mg_max_hold_, hold_n_[i]);
+            } else {
+                if (margin_hold_max_ > 0 && hold_n_[i] >= margin_hold_max_ && mg < float(margin_min_m_)) ++mg_released_;
+                hold_n_[i] = 0; ++mg_liftoffs_;
+            }
+        }
+        if (contact_[i] > 0.5f) { ++bearing_now; if (hold_n_[i] > 0) ++held_now; }
         if (gate && std::sin(before) < 0.0f && std::sin(phase_[i]) > 0.0f && d > 0.0f) {   // about to lift off
             const float mg = support_margin(i);
             sg_margin_ema_ += 0.05f * (mg - sg_margin_ema_);
@@ -427,6 +460,7 @@ void LoadPhaseGait::tick(uint64_t tick_id) {
             pair_c_[pi] += kPairAlpha * (std::cos(dp) - pair_c_[pi]);
             pair_s_[pi] += kPairAlpha * (std::sin(dp) - pair_s_[pi]);
         }
+    if (mgate && bearing_now >= 2 && held_now == bearing_now) ++mg_all_held_ticks_;   // every bearing leg wants to lift and none may: the deadlock's signature
     retro_ema_ += kEmaAlpha * (float(retro) / float(n) - retro_ema_);
     swing_ema_ += kEmaAlpha * (float(sw_n) / float(n) - swing_ema_);
     agree_ema_ += kEmaAlpha * (float(agree) / float(n) - agree_ema_);
@@ -480,7 +514,9 @@ nlohmann::json LoadPhaseGait::diag_snapshot() const {
         {"have_load", have_load_}, {"have_contact", have_contact_},
         {"sg_theta", theta_}, {"sg_holds", sg_holds_}, {"sg_hold_ticks", sg_hold_ticks_}, {"sg_released", sg_released_},
         {"sg_liftoffs", sg_liftoffs_}, {"sg_dips", sg_dips_}, {"sg_learned", sg_learned_}, {"sg_margin", sg_margin_ema_},
-        {"have_support", have_support_}};
+        {"have_support", have_support_}, {"have_margin", have_margin_},
+        {"mg_holds", mg_holds_}, {"mg_hold_ticks", mg_hold_ticks_}, {"mg_released", mg_released_}, {"mg_liftoffs", mg_liftoffs_},
+        {"mg_max_hold", mg_max_hold_}, {"mg_all_held", mg_all_held_ticks_}, {"mg_margin", mg_margin_ema_}, {"hold_n", hold_n_}};
 }
 
 } // namespace ogma

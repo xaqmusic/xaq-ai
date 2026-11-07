@@ -245,3 +245,51 @@ TEST(LoadPhaseGait, DipsAfterLiftOffShrinkTheAllowanceAndCleanLiftOffsGrowIt) {
         else      EXPECT_GT(th, 0.045f) << "clean lift-offs grow it (by rate x target per lift-off: slower than a dip shrinks it)";
     }
 }
+
+// ---- the margin gate (2026-11-08) ----
+namespace {
+// SupportModel's token: 6 header values, then [gap, has, contact, load, lift_margin] per leg
+std::vector<float> margin_token(std::vector<float> lift) {
+    std::vector<float> v(26, 0.0f);
+    for (int i = 0; i < 4; ++i) { v[size_t(7 + 5 * i)] = 1.0f; v[size_t(8 + 5 * i)] = 1.0f; v[size_t(9 + 5 * i)] = 0.25f; v[size_t(10 + 5 * i)] = lift[size_t(i)]; }
+    return v;
+}
+struct MFix : Fix {
+    explicit MFix(ogma::ParamMap p) : Fix(with(std::move(p))) {}
+    static ogma::ParamMap with(ogma::ParamMap p) { p["margin_topic"] = std::string("support.state"); p["sigma_ratio"] = 0.0; return p; }
+    void runm(uint64_t t, std::vector<float> contact, std::vector<float> const* lift) {
+        bus.begin_tick(t);
+        bus.publish("reality.proprio.foot_contact", pv(contact));
+        if (lift) bus.publish("support.state", pv(margin_token(*lift)));
+        m.tick(t); bus.end_tick();
+    }
+};
+}
+TEST(LoadPhaseGait, MarginGateWiredWithoutATokenIsByteIdentical) {
+    Fix plain({{"sigma_ratio", 0.0}, {"init_phase", std::vector<double>{1.9 * kPi, 1.2 * kPi, 0.5, 1.0}}});
+    MFix gated({{"init_phase", std::vector<double>{1.9 * kPi, 1.2 * kPi, 0.5, 1.0}}});
+    for (uint64_t t = 0; t < 300; ++t) {
+        plain.run(t, {1, 1, 0, 1}); gated.runm(t, {1, 1, 0, 1}, nullptr);
+        for (int leg = 0; leg < 4; ++leg) ASSERT_EQ(plain.m.phase(leg), gated.m.phase(leg)) << "tick " << t;
+    }
+}
+TEST(LoadPhaseGait, ALegIsHeldWithoutLimitWhileTheModelSaysItsLeavingLeavesNoSupport_AndLiftsWhenItDoes) {
+    MFix f({{"init_phase", std::vector<double>{2.0 * kPi - 0.02, 0.5 * kPi, 0.5 * kPi, 0.5 * kPi}}});
+    std::vector<float> no = {-0.05f, 0.05f, 0.05f, 0.05f}, yes = {0.01f, 0.05f, 0.05f, 0.05f};
+    for (uint64_t t = 0; t < 400; ++t) { f.runm(t, {1, 1, 1, 1}, &no); ASSERT_FALSE(f.m.swing(0)) << "tick " << t << ": lifted without support"; }
+    auto d = f.m.diag_snapshot();
+    EXPECT_EQ(d["mg_holds"].get<int>(), 1); EXPECT_GT(d["mg_max_hold"].get<int>(), 350);
+    const int lifts_before = d["mg_liftoffs"].get<int>();   // the other three legs lifted freely every period
+    f.runm(400, {1, 1, 1, 1}, &yes); f.runm(401, {1, 1, 1, 1}, &yes);
+    EXPECT_TRUE(f.m.swing(0)) << "released the tick the margin turns positive";
+    EXPECT_EQ(f.m.diag_snapshot()["mg_liftoffs"].get<int>(), lifts_before + 1);
+}
+TEST(LoadPhaseGait, TheMarginGatesCapReleasesTheLeg_AndAllLegsHeldIsCountedAsTheDeadlock) {
+    MFix f({{"margin_hold_max", int64_t{10}}, {"init_phase", std::vector<double>{2.0 * kPi - 0.02, 2.0 * kPi - 0.02, 2.0 * kPi - 0.02, 2.0 * kPi - 0.02}}});
+    std::vector<float> no = {-0.05f, -0.05f, -0.05f, -0.05f};
+    int held = 0;
+    for (uint64_t t = 0; t < 40; ++t) { f.runm(t, {1, 1, 1, 1}, &no); if (!f.m.swing(0)) ++held; else break; }
+    EXPECT_GE(held, 10); EXPECT_LE(held, 12); EXPECT_TRUE(f.m.swing(0));
+    auto d = f.m.diag_snapshot();
+    EXPECT_GE(d["mg_released"].get<int>(), 1); EXPECT_GT(d["mg_all_held"].get<int>(), 5) << "four bearing legs all held is the deadlock signature";
+}
