@@ -10448,3 +10448,28 @@ triggered by the prediction (a rise ahead of a leg) and judged by the foothold e
 module beside the gait, named as a scaffold, absent-equals-identical, with the gait's stance keeping the body up.
 The socket and the policy stay (the socket is the right place for the step-up's per-leg targets too); gains stay 0
 in every config but the arms. Files: `FootholdShaper.*` (form 2), the arm logs in the session scratch.
+
+### 2026-11-07 — THE BACKWARD FLIP ON THE STAIRS, REPRODUCED (operator, in the UI: "the front legs are pressing to keep the chassis high, which pushes the robot to flip over backward when the rear legs attempt to lift"; the falls are on the 3rd–5th risers; the stalls are the rear legs on the step): on the graded flight the step-2 config flips at the 64 mm riser at tick ~10 300 and the instrument config does not — the FLIP IS THE POLICY'S: it lifts the hung rear legs ×1.8–2.3 and the front legs ×1.5–1.6 (their next landing is the 89 mm tread) on a body already nose-up 17–22° with its belly reading 3–5 cm against a 6 cm target, so the stance press is up on every leg; the rear supports leave, the front presses, the body goes over at tilt 2.1 rad — `REGRESSION` (the mechanism; the fixed-flight batteries never reached it because they stop at 50 mm risers in 3600 ticks)
+
+The frames before the flip (step-2 config, graded flight, two runs identical because the scratch runner had pinned the
+seed — fixed): rows 165–170, the chassis on the 50 mm level with three toes on the 64 mm tread and the right rear
+still below; pitch −0.23 to −0.39 rad (nose-up); belly 0.029–0.056 m (the aft boom over the riser edge reads the
+body low, and it IS low at the rear); the stall 0.94–1.00; the policy's lift multipliers [1.6, 1.0–1.9, 1.7–2.2,
+1.5–2.3] by leg (fl, fr, rl, rr). Row 171: tilt 2.14 rad, belly 0.30 (the boom looks at the sky), the body on its
+back; the reset fires (the surface-relative rule, in place on the tread) and the run continues from the 12 mm
+level. The instrument config at the same place sits nose-up at the 64 mm riser for the rest of the run, stalled,
+upright (max tilt 0.62 rad).
+
+**Reading.** The operator's physics is right: the height homeostat and the learned press answer a low belly by
+extending every leg, which on a straddled riser means the front legs lift the front; a swing lift that then takes a
+rear foot off the lower tread removes the rear support under a body already pitched back, and a doubled lift does
+it faster. The press's attitude term has the right sign (it relaxes the front and loads the rear when nose-up; both
+tilt paths agree that nose-up is negative pitch) but it is one term against the belly deficit. A careful stepper
+lifts a rear leg only after the weight has moved forward — the front crouches, the press lets the chassis down at
+the front — which is the weight-transfer phase of the discrete step-up and is what the oscillating gait with a
+scaled lift cannot do. **Levers, in order of cost:** (1) a pitch gate in the policy — no rear lift while the body is
+nose-up past ~0.2 rad (a guard, not a fix; it trades the flip for the stall); (2) the stance press's target lowered
+with nose-up pitch (`press_target_m` and the stance height relaxed by k·|pitch| for the FRONT legs when nose-up: the
+body is allowed to sit down at the front on a riser instead of pushing itself over) — a MotorEPMv2 lever, gain-0,
+measurable on the graded flight by flips per run and risers climbed; (3) the step-up primitive with its weight
+shift. The graded flight at 12 000 ticks, flips and resets counted, is the bench for (1) and (2).
