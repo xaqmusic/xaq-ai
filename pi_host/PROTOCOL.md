@@ -321,6 +321,21 @@ contract — the floor is a plane fitted to the field's bottom rows (no IMU; the
 `reality.proprio.tof8_cols` [8] is the nearest feature per column. `StuckSense` reads `sense.range_tof` on its
 closing-rate channel in the terrain configs, so the stall sense works through soft, dark and distant things.
 
+## The staircase and the terrain memory (2026-11-07)
+
+Gym `stairs` (`OGMA_PICRAWLER_GYM=stairs` or a config's `gym_mode`): a flat approach, risers one tread apart along
++Z, a landing, a mirrored down flight, side walls; `OGMA_PICRAWLER_STAIRS_H_MM` = `graded` (12, 19, 25, 38, 50, 64,
+89), a number (a fixed flight of `_N` risers) or a list; `_TREAD_M`, `_START_M`, `_WIDTH_M`, `_WALLS`, `_DOWN`. The body
+log carries `stairs_level` (the tread under the chassis) and `stairs_truth_h` (under each toe) — god's-eye, log only.
+
+`reality.proprio.up_body` float32[3]: the body's gravity-up in the body frame (the fused estimate), published with
+`toe_y` by the sim and by `ogma_host --toe-y`. `TerrainMemory` reads the field, the toes, the odometry and `up_body`
+into one memory of heights on a datum the body carries; it publishes `predict.foothold` ([h_pred, precision, has,
+fwd, lat] × 4, every tick: the height each leg's next landing will meet, in the body's gravity frame) and
+`predict.foothold_error` ([e, valid] × 4 at a touch). The log carries `tm_vox`, `tm_datum` (the body's climb from its
+touches), `tm_h_pred`, `tm_prec`, `tm_has`, `tm_err`, `tm_rms`, and `tm_events` rows [tick, leg, h_pred, prec, h_touch,
+e, n_touch_before, n_field_before, landing offset]. Nothing acts on the prediction yet.
+
 ## Local record (SPEC §3)
 
 `pi_host/log/benchd_<YYYYMMDD_HHMMSS>.jsonl` on the Pi: every verb (with reply) and every

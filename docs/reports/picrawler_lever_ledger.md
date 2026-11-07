@@ -10257,3 +10257,59 @@ front toe placed on the top the look and the touch agree on. The dose response i
 it before any descent. Files: `configs/sim60_terrain_dose_{base,all075,rear15,rear20,all15}.json` (battery arms,
 short names because the lever chain's name is at the filename limit; not in the launcher), the session's
 `dose_compare.py`.
+
+### 2026-11-07 — THE STRIDE-PERIOD DOSE RESPONSE AT 6 rad/s (`_sim60_terrain`, periods 24 / 40 / 50 / 60 ticks against the base 30, 4 paired worlds × 24 000 ticks): the SHORT periods halve the stalled windows (24: 1.3, 40: 1.0, base 3.3 per run; paired t −1.6 / −1.4) with the same sign on every metric (slow windows, the stride stall, swing contact all down, distance up 0.7–1.1 m), the long periods lose distance (50: −2.5 m, 60: −2.0 m) and stall as much — a WEAK SIGNAL in the short direction, not a handle (nothing past 1.6 standard errors at n = 4) — `PARTIAL`
+
+| period | final radius (m) | slow windows | stalled windows | stall score | stride stall | swing contact |
+|---|---|---|---|---|---|---|
+| 24 | 17.4 ± 3.0 | 4.3 | 1.3 | 0.50 | 0.05 | 0.37 |
+| 30 (base) | 16.3 ± 3.2 | 5.3 | 3.3 | 0.51 | 0.18 | 0.46 |
+| 40 | 17.0 ± 2.8 | 3.8 | 1.0 | 0.50 | 0.06 | 0.34 |
+| 50 | 13.8 ± 2.2 | 4.5 | 2.3 | 0.49 | 0.12 | 0.34 |
+| 60 | 14.3 ± 3.1 | 4.3 | 2.5 | 0.45 | 0.10 | 0.34 |
+
+Reading: the base's 30 is not an optimum (24 and 40 both do slightly better on stalls), and the effect is a third
+of the lift's null band — the period moves the error the lift did not, weakly. Re-use: a period A/B at n ≥ 20 is
+cheap if a stall-rate improvement of two windows per run is ever worth a lever; the operator's reading of the
+dose responses together stands — the obstacle is cleared by WHERE the foot is put, not by how high or how often —
+so the handle the plan builds is the predictive placement (the careful stepper, below), and the period is kept as
+a tuning for later. Files: `configs/sim60_terrain_dose_per{24,40,50,60}.json`.
+
+### 2026-11-07 — THE STAIRCASE ARENA AND THE TERRAIN MEMORY'S FOOTHOLD PREDICTION (the careful stepper, step 1): gym `stairs` (graded 12–89 mm risers in the lumber sizes or a fixed flight, 0.30 m treads, a landing and a down flight, side walls, a god's-eye truth of the surface under each toe for the log only) and `TerrainMemory` (the field's returns and the toes' touches in one memory of heights on a gravity-levelled DATUM the body carries, a per-leg prediction of the height its next landing will meet, and the error at the touch) — first readings on a single seed: the body's climb from its touches alone tracks the tread level to ±2.4 cm; the prediction's error at FIRST contact is 2.5 cm RMS with a fifth to a quarter of touches beyond 3 cm; at RE-contact it is no better, and the cause is the frame, not the heights — `BASELINE` (instrument; the fixed-height battery is running)
+
+**What the first run on the stairs said before any memory:** the 6 rad/s walker climbs 12, 19, 25 and 38 mm and
+hangs on the 50 mm riser with the front pair up and the rear pair below; the admitted stall reads 0.7–0.95 and the
+field reports the next riser 20 cm ahead — the operator's rear-leg observation on a bench that repeats it.
+
+**The memory, and what it took to get a consistent height.** Three frames were tried in a day. (1) Heights over
+the floor the FIELD fits to its bottom rows: on a staircase that floor jumps a tread ahead of the body, so the same
+tread was stored at different heights as the body climbed and the rear legs' errors ran to −20 cm. (2) Heights in
+the body's gravity frame (`up_body`, published by both bodies now) plus a DATUM `b`, the body's height above where
+the memory began, tracked from the toes: a toe meeting ground the toes already measured moves `b` (the ground did
+not move; the body did), a toe meeting ground only the field saw corrects the ground. `b` is the body's climb from
+touches alone, and it tracked the tread truth to ±2.4 cm once two guards were added — the datum moves only for a
+toe that comes to BEAR within half a second (a scrape on a riser face is not a climb; without the guard it
+overshot by 5 cm) and by at most 3 cm per touch. (3) The field no longer moves a voxel a toe has touched: at 15 Hz
+its 2 cm claims had been erasing a toe's 0.5 cm one within a second.
+
+| reading (single seed, graded flight, 3600 ticks) | value |
+|---|---|
+| datum − tread truth after the approach | +0.3 ± 2.4 cm (max 5.6) |
+| prediction error, first contact (ground the field alone had seen), n = 368 | 2.5 cm RMS, 23 % beyond 3 cm |
+| prediction error, re-contact (ground a toe had touched), n = 294 | 2.5 cm RMS, 24 % beyond 3 cm |
+| re-contact within 3 cm of the predicted spot, n = 159 | 2.6 cm RMS |
+
+**Why re-contact is no better, and what did not fix it.** Lowering the datum's gain to a quarter steadied it (sd
+1.7 cm) but made it lag the climb (−3.4 cm) and improved re-contact only to 2.1 cm; predicting from the single
+nearest voxel instead of a 4.5 cm pool was worse at first contact; gating the memory's frame by the stall (a held
+body's legs claim stride the body does not make: 0.3 m over the hang) made the datum under-read by 9 cm, because on
+the stairs the stall reads 0.4–0.9 while the body still creeps forward — the gate stays in the module, default off,
+and out of the config. The cause that remains is REGISTRATION: during the hang the memory slides 0.3 m under a body
+that barely moves, and a 3 cm voxel on a riser's edge is touched at two levels; the fix the evidence points at is
+to register the frame by re-observation — the field re-sees the riser it placed, a toe lands on ground it knows —
+correcting the translation as the datum corrects the height, not a gate. That is the next lever before the
+prediction becomes the gait's input (step 2), because a 2.5 cm error is a third of the riser that stops this walker.
+
+Files: `picrawler_body.gd` (`_build_stairs`, `stairs_truth_y`, `_toe_world`, `up_body`, the `tm_*` log keys),
+`experiment_config.gd`, `cpp_core/include/ogma/body/Tof8Geometry.hpp`, `cpp_core/{include,src}/ogma/modules/TerrainMemory.*`
+(7 tests), `pi_host` (`up_body` with `--toe-y`), `configs/..._sim60_stairs.json` (in the launcher), `PROTOCOL.md`.

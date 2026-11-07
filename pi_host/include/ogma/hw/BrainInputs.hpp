@@ -371,6 +371,7 @@ struct BrainTopics {
     std::array<float, 4>  toe_y{};
     float distress = 0.0f;
     float upright  = 1.0f;
+    std::array<float, 3>  up_body{0.0f, 1.0f, 0.0f};   // the fused gravity-up in the body frame (published with --toe-y)
     bool  fsr_stale = false;                // fsr_ok was false: foot values are the last good ones
     // S1 of the MicroDuck port (opt-in at the host: --odom / --vel-ego).  Same layouts as
     // the sim publishes them (picrawler_body.gd: ego_heading, odom, place_in, vel_ego).
@@ -444,6 +445,7 @@ public:
             t.toe_y[size_t(i)] = float(double(toe_c.dot(up)) + toe_calib_.apply(i, cmd[size_t(i * 3 + 0)], cmd[size_t(i * 3 + 2)]));
         }
         t.upright = up.y;
+        t.up_body = {up.x, up.y, up.z};
 
         // 6. Foot sensors.  A failed read holds the last good values and says so.
         if (in.fsr_ok) last_fsr_ = in.fsr;

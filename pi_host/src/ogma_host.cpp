@@ -1065,7 +1065,7 @@ int main(int argc, char** argv) {
                     pub("feet_y_gravity_cmd_imu", t.feet_y_gravity_cmd_imu.data(), t.feet_y_gravity_cmd_imu.size());
                     if (a.feet_jac) pub("feet_jac", t.feet_jac.data(), t.feet_jac.size());
                     if (a.feet_xz)  pub("feet_xz", t.feet_xz.data(), t.feet_xz.size());
-                    if (a.toe_y)    pub("toe_y", t.toe_y.data(), t.toe_y.size());
+                    if (a.toe_y)  { pub("toe_y", t.toe_y.data(), t.toe_y.size()); pub("up_body", t.up_body.data(), t.up_body.size()); }
                     pub("distress", &t.distress, 1);
                     if (a.odom) {
                         pub("ego_heading", &t.ego_heading, 1);

@@ -1736,6 +1736,21 @@ var _us_hud: Label = null
 var _reflex_hud: Label = null                  # S3: avoid / intent / stuck / escape, live
 # ---- THE ROOM (gym "room"): a flat floor inside vertical walls, with boxes ----------
 @export var room_size: float = 3.0              # OGMA_PICRAWLER_ROOM_SIZE, metres inside the walls
+# THE STAIRCASE (gym "stairs", 2026-11-07; the careful stepper's bench).  A flat approach, a flight of risers one tread
+# apart along +Z, a landing, and a mirrored down flight, between low side walls.  OGMA_PICRAWLER_STAIRS_H_MM = "graded"
+# (12, 19, 25, 38, 50, 64, 89: the lumber sizes the terrain arena uses, one riser each, taller as it goes), a single
+# number (a fixed flight of OGMA_PICRAWLER_STAIRS_N risers of that height), or a comma list.  _TREAD_M (0.30, longer
+# than the leg span, so the front pair is on the new tread while the rear pair is still below), _START_M (0.5 ahead of
+# the spawn), _WIDTH_M (1.0), _WALLS (1), _DOWN (1).  The surface height under any (x, z) is known to the body for the
+# log only (stairs_truth), never published to the brain.
+var stairs_h_spec: String = "graded"
+var stairs_n: int = 7
+var stairs_tread_m: float = 0.30
+var stairs_start_m: float = 0.50
+var stairs_width_m: float = 1.0
+var stairs_walls: bool = true
+var stairs_down: bool = true
+var _stairs_steps: Array = []        # [z_from, z_to, top_y] per tread, in order along +Z
 var _room_bodies: Array = []                    # the walls and boxes (StaticBody3D), for the contact instrument
 var _room_contact_ticks: int = 0                # INSTRUMENT: ticks with the chassis or a lower leg against a wall/box
 var _room_contact_episodes: int = 0             # INSTRUMENT: rising edges of the above
@@ -1787,6 +1802,7 @@ var _touch_feet_xz: PackedFloat64Array = PackedFloat64Array()
 var _touch_feet_y: PackedFloat64Array = PackedFloat64Array()
 var _touch_brain_n: int = -1                    # -1 = no TouchMemory module seen in the metrics
 var _enc_last_tick: float = -1.0   # the last encounter event row written to the JSONL (enc_events)
+var _tm_last_tick: float = -1.0    # the last terrain-memory prediction-error row written (tm_events)
 var _odom_need_anchor: bool = true
 var _odom_yaw0: float = 0.0
 var _odom_origin_world: Vector3 = Vector3.ZERO
@@ -3387,6 +3403,8 @@ func _ready() -> void:
 		brain.register_source("FeetXz", "reality.proprio.feet_xz",
 			"float32[8]: per leg [x, z] (m) of the toe in the chassis rest frame at the commanded pose — the support polygon LoadPhaseGait's lift-off gate reads.", true)
 	if publish_toe_y:
+		brain.register_source("UpBody", "reality.proprio.up_body",
+			"float32[3]: the body's own gravity-up vector in the body frame (the fused estimate), for levelling body-frame points (TerrainMemory). Published with toe_y.", true)
 		brain.register_source("ToeY", "reality.proprio.toe_y",
 			"float32[4]: per leg height (m) of the toe TIP along the fused gravity, body origin 0, commanded pose — the touch modules' height (ogma_host --toe-y publishes the same, calibrated).", true)
 	if publish_feet_jac:
@@ -3823,7 +3841,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
-			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_TOF8", "OGMA_PICRAWLER_TOF8_PITCH_DEG", "OGMA_PICRAWLER_TOF8_HEIGHT_MM", "OGMA_PICRAWLER_TOF8_FWD_MM", "OGMA_PICRAWLER_TOF8_LAT_MM", "OGMA_PICRAWLER_TOF8_SELF", "OGMA_PICRAWLER_TOF8_CLOUD_M", "OGMA_PICRAWLER_ROOM_SIZE",
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_STAIRS_H_MM", "OGMA_PICRAWLER_STAIRS_N", "OGMA_PICRAWLER_STAIRS_TREAD_M", "OGMA_PICRAWLER_STAIRS_START_M", "OGMA_PICRAWLER_STAIRS_WIDTH_M", "OGMA_PICRAWLER_STAIRS_WALLS", "OGMA_PICRAWLER_STAIRS_DOWN", "OGMA_PICRAWLER_TOF8", "OGMA_PICRAWLER_TOF8_PITCH_DEG", "OGMA_PICRAWLER_TOF8_HEIGHT_MM", "OGMA_PICRAWLER_TOF8_FWD_MM", "OGMA_PICRAWLER_TOF8_LAT_MM", "OGMA_PICRAWLER_TOF8_SELF", "OGMA_PICRAWLER_TOF8_CLOUD_M", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
 			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
@@ -3883,6 +3901,13 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_TOF8_CLOUD_M":      tof_cloud_max_m   = maxf(0.1, v.to_float())
 			"OGMA_PICRAWLER_TOF8_SELF":         _tof8_self_env    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ROOM_SIZE":         room_size         = clampf(v.to_float(), 1.0, 18.0)
+			"OGMA_PICRAWLER_STAIRS_H_MM":       stairs_h_spec     = v
+			"OGMA_PICRAWLER_STAIRS_N":          stairs_n          = clampi(v.to_int(), 1, 30)
+			"OGMA_PICRAWLER_STAIRS_TREAD_M":    stairs_tread_m    = clampf(v.to_float(), 0.08, 2.0)
+			"OGMA_PICRAWLER_STAIRS_START_M":    stairs_start_m    = clampf(v.to_float(), 0.2, 5.0)
+			"OGMA_PICRAWLER_STAIRS_WIDTH_M":    stairs_width_m    = clampf(v.to_float(), 0.4, 6.0)
+			"OGMA_PICRAWLER_STAIRS_WALLS":      stairs_walls      = (v != "0" and v != "")
+			"OGMA_PICRAWLER_STAIRS_DOWN":       stairs_down       = (v != "0" and v != "")
 			"OGMA_PICRAWLER_CAMERA_ROBOT":      camera_robot      = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ODOM":              publish_odom      = (v != "0" and v != "")
 			"OGMA_PICRAWLER_ODOM_SCALE":        odom_scale_m      = maxf(0.1, v.to_float())
@@ -4178,6 +4203,9 @@ func _rebuild_world_contents() -> void:
 		return
 	if mode == "room":
 		_build_room()
+		return
+	if mode == "stairs":
+		_build_stairs()
 		return
 
 	# Concentric reference rings on the floor.  Visual-only (no collision)
@@ -4565,6 +4593,85 @@ func _build_room() -> void:
 	]:
 		_room_add_box(spec[0], spec[1], box_mat)
 	print("PicrawlerBody: [gym] ROOM %.1f x %.1f m, walls %.2f m high, 3 boxes; spawn at the origin facing +Z" % [room_size, room_size, wall_h])
+
+# THE STAIRCASE (gym "stairs").  Treads are solid boxes from -0.1 m up to their top; the first riser stands
+# stairs_start_m ahead of the spawn.  Heights from stairs_h_spec; the landing is two treads long; the down flight
+# mirrors the up flight; low walls either side keep the wanderer on the stairs.
+func _stairs_heights() -> Array:
+	var spec: String = stairs_h_spec.strip_edges().to_lower()
+	if spec == "" or spec == "graded":
+		return [0.012, 0.019, 0.025, 0.038, 0.050, 0.064, 0.089]
+	if spec.find(",") >= 0:
+		var out: Array = []
+		for tok in spec.split(","):
+			if tok.strip_edges() != "": out.append(maxf(0.0, tok.to_float() / 1000.0))
+		return out
+	var h: float = maxf(0.0, spec.to_float() / 1000.0)
+	var fixed: Array = []
+	for i in range(stairs_n): fixed.append(h)
+	return fixed
+
+func _build_stairs() -> void:
+	_pyramid_xz_positions.clear()
+	_pyramid_xz_radii.clear()
+	_pyramid_engagement_counts.clear()
+	_pyramid_meshes.clear()
+	_pyramid_default_mats.clear()
+	_room_bodies.clear()
+	_stairs_steps.clear()
+	_build_floor_rings()
+	var rises: Array = _stairs_heights()
+	var tread_mat := StandardMaterial3D.new()
+	tread_mat.albedo_color = Color(0.62, 0.48, 0.30, 1.0)   # plywood
+	tread_mat.roughness = 0.9
+	var wall_mat := StandardMaterial3D.new()
+	wall_mat.albedo_color = Color(0.55, 0.50, 0.42, 1.0)
+	wall_mat.roughness = 0.9
+	var bottom: float = -0.10
+	var z: float = stairs_start_m
+	var top: float = 0.0
+	var landing: float = 2.0 * stairs_tread_m
+	# the up flight
+	for h in rises:
+		top += float(h)
+		var length: float = stairs_tread_m if h != rises[rises.size() - 1] else landing
+		_stairs_steps.append([z, z + length, top])
+		_room_add_box(Vector3(0.0, (bottom + top) * 0.5, z + length * 0.5), Vector3(stairs_width_m, top - bottom, length), tread_mat)
+		z += length
+	# the down flight: the same risers in reverse
+	if stairs_down:
+		for i in range(rises.size() - 1, -1, -1):
+			top -= float(rises[i])
+			if top <= 1e-6: break
+			_stairs_steps.append([z, z + stairs_tread_m, top])
+			_room_add_box(Vector3(0.0, (bottom + top) * 0.5, z + stairs_tread_m * 0.5), Vector3(stairs_width_m, top - bottom, stairs_tread_m), tread_mat)
+			z += stairs_tread_m
+	var z_end: float = z + 1.0
+	if stairs_walls:
+		var wall_h: float = 0.30
+		var wall_t: float = 0.05
+		var z_from: float = -0.5
+		var length: float = z_end - z_from
+		for sx in [-1.0, 1.0]:
+			_room_add_box(Vector3(sx * (stairs_width_m * 0.5 + wall_t * 0.5), wall_h * 0.5, z_from + length * 0.5), Vector3(wall_t, wall_h, length), wall_mat)
+	var hs: Array = []
+	for h in rises: hs.append(int(round(float(h) * 1000.0)))
+	print("PicrawlerBody: [gym] STAIRS risers %s mm, tread %.2f m, first riser %.2f m ahead, width %.1f m, walls %s, down flight %s; %d treads to z = %.2f m" % [
+		str(hs), stairs_tread_m, stairs_start_m, stairs_width_m, str(stairs_walls), str(stairs_down), _stairs_steps.size(), z])
+
+# The toe tip's world position from the physics body (the lower leg's transform through the construction toe offset).
+func _toe_world(i: int) -> Vector3:
+	if i < 0 or i >= _lowers.size() or _lowers[i] == null: return Vector3.ZERO
+	var off = _toe_off_c[i] if i < _toe_off_c.size() else Vector3.ZERO
+	if off is Transform3D: return (_lowers[i].global_transform * (off as Transform3D)).origin
+	return _lowers[i].global_transform * (off as Vector3)
+
+# The surface height at a world (x, z) on the staircase: the tread's top, else the floor (0).  God's-eye, for the log.
+func stairs_truth_y(x: float, z: float) -> float:
+	if absf(x) > stairs_width_m * 0.5: return 0.0
+	for st in _stairs_steps:
+		if z >= float(st[0]) and z < float(st[1]): return float(st[2])
+	return 0.0
 
 func _room_add_box(center: Vector3, size: Vector3, mat: StandardMaterial3D) -> void:
 	var body := StaticBody3D.new()
@@ -7893,6 +8000,12 @@ func _step_one() -> void:
 			toe_arr.append(tb.dot(_up_est_body))
 		if publish_toe_y:
 			brain.publish_proprio(toe_arr, "toe_y")
+			# the body's own gravity-up in the body frame (the complementary filter's), for levelling a point the body
+			# frame holds (TerrainMemory, 2026-11-07); the robot host publishes the same under --toe-y
+			var upb := PackedFloat64Array()
+			var ub: Vector3 = _up_est_body if _up_est_body.length() > 0.5 else Vector3.UP
+			upb.append(ub.x); upb.append(ub.y); upb.append(ub.z)
+			brain.publish_proprio(upb, "up_body")
 		# The twin's cloud reads the same height the brain's TouchMemory does: the toe tip when toe_y is published,
 		# else the parity foot.
 		_touch_feet_y = toe_arr if publish_toe_y else imu_arr
@@ -12922,6 +13035,15 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["us_v"]     = _us_valid
 		line["us_true"]  = snappedf(_us_true, 0.0001)
 		line["us_pings"] = _us_pings
+	if _gym_mode_active == "stairs" and _chassis != null:
+		# the staircase's ground truth (god's-eye, log only): the tread level under the chassis and under each toe
+		var cx: Vector3 = _chassis.global_transform.origin
+		line["stairs_level"] = snappedf(stairs_truth_y(cx.x, cx.z), 0.001)
+		var truth: Array = []
+		for i in range(4):
+			var tw: Vector3 = _toe_world(i)
+			truth.append(snappedf(stairs_truth_y(tw.x, tw.z), 0.001))
+		line["stairs_truth_h"] = truth
 	if tof8_model and _tof8 != null:
 		# the field's summary every row and the grid itself (cm), for the mount study and the stall sense
 		line["tof8_pitch"] = _tof8.pitch_deg
@@ -12976,6 +13098,31 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		if _touch_brain_n >= 0: line["touch_brain"] = _touch_brain_n
 	# The encounter chain (2026-11-02): the module's event count and every event since the last row, as the module's
 	# own rows [tick, leg, h_floor, fwd, lat, load_peak, i_pre, i_post, belly_rise, lean_rise, range, vert_frac].
+	if metrics.has("terrain_memory"):
+		# the terrain memory's foothold prediction and its error (2026-11-07): per leg h_pred / precision / has, the last
+		# error, the running RMS; the voxel count; the floor fit
+		var tm: Dictionary = metrics["terrain_memory"]
+		line["tm_vox"] = int(tm.get("count", 0))
+		line["tm_n_err"] = int(tm.get("n_err", 0))
+		line["tm_floor"] = 1 if bool(tm.get("floor_ok", false)) else 0
+		line["tm_datum"] = snappedf(float(tm.get("datum", 0.0)), 0.001)   # the body's climb since the memory began, from its touches
+		var pr: Array = tm.get("prediction", [])
+		if pr.size() >= 4:
+			var hp: Array = []; var pc: Array = []; var hs: Array = []
+			for i in range(4):
+				var row: Array = pr[i]
+				hp.append(snappedf(float(row[0]), 0.001)); pc.append(snappedf(float(row[1]), 1.0)); hs.append(int(row[2]))
+			line["tm_h_pred"] = hp; line["tm_prec"] = pc; line["tm_has"] = hs
+		var el: Array = tm.get("err_last", []); var rm: Array = tm.get("err_rms", [])
+		if el.size() >= 4: line["tm_err"] = [snappedf(float(el[0]), 0.001), snappedf(float(el[1]), 0.001), snappedf(float(el[2]), 0.001), snappedf(float(el[3]), 0.001)]
+		if rm.size() >= 4: line["tm_rms"] = [snappedf(float(rm[0]), 0.001), snappedf(float(rm[1]), 0.001), snappedf(float(rm[2]), 0.001), snappedf(float(rm[3]), 0.001)]
+		var fresh: Array = []
+		for row in tm.get("recent", []):
+			if row is Array and (row as Array).size() >= 6 and float((row as Array)[0]) > _tm_last_tick:
+				fresh.append(row)
+		if fresh.size() > 0:
+			line["tm_events"] = fresh
+			_tm_last_tick = float((fresh[fresh.size() - 1] as Array)[0])
 	if metrics.has("tof8_range"):
 		# the field reduced to the nearest feature ahead (2026-11-05): what StuckSense's closing channel reads
 		var tr: Dictionary = metrics["tof8_range"]

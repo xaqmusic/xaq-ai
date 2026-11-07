@@ -138,10 +138,13 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   `Tof8Range` reduces it to the nearest feature in the sonar's contract and **StuckSense's stall sense is ADMITTED
   through it** (battery 3: a mean score > 0.5 flags 92 % of stalled windows and 7 % of walking ones; the stride
   channel alone, with its commanded-turn gate and command scaling, 92 % / 0 %). The swing-lift dose response at 6 rad/s (ledger 2026-11-06): ×0.75 to ×2.0 all tie, the lift is NOT a handle on
-  this course at either servo speed. Next in the sim: a handle that moves the outcome — the stride period, the
-  stance press against a riser, or the discrete step-up the field and the touches make placeable — each by its own
-  dose response first; then step 3, an EPM over the field as the look and the consumer judged against the admitted
-  stall. On the robot: step 2, the VL53L5CX
+  this course at either servo speed. The stride period (ledger 2026-11-07): short periods halve the stalled windows, a weak signal, not a handle. **The
+  careful stepper** (operator, 2026-11-06: predictive, not stall-driven — "if I place my foot on these voxels my FSRs
+  will report x and my IMU y"): the STAIRCASE gym and `TerrainMemory` with the per-leg foothold prediction are built
+  (ledger 2026-11-07; `_sim60_stairs` in the launcher). The datum tracks the climb to ±2.4 cm; the prediction's error
+  is 2.5 cm RMS at first contact and the same at re-contact because the frame slides under a hung body. Next: register
+  the memory's frame by re-observation (the field re-seeing a riser it placed, a toe on known ground), then step 2 —
+  per-leg swing lift and reach in MotorEPMv2 read from the prediction, gain-0 guarded. On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through
   ogma_host, the brain's cloud against the twin's at the toe height, whether the six nodes reappear. The
