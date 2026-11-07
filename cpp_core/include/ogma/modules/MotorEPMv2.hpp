@@ -548,6 +548,17 @@ private:
     double swing_reach_rad_per_m_ = 7.0;
     std::vector<float> swing_lift_mult_, swing_reach_m_, swing_reach_held_;
     bool swing_target_seen_ = false;
+    // THE STANCE DEPTH HANDLE (2026-11-08, the careful stepper's second socket): a ProprioToken [delta_m, weight] x 4 on
+    // stance_depth_topic asks each PLANTED leg to stand delta_m deeper (+, that corner up) or shallower (-, that corner
+    // down).  Two routes, so the learned press does not fight it: the request is added to the press's own deficit for
+    // that leg (the learner then agrees with it), and stance_depth_gain of it goes straight to the joints along the
+    // leg's kinematic lift direction (press_lift_dir, metres of depth per action unit; needs jac_topic), bounded by
+    // stance_depth_max_u.  A pose planner's weight shift is a depth change on one pair; nothing else in the gait can
+    // make one.  Empty topic = no subscription, byte-identical; gain 0 = the press route only.
+    std::string stance_depth_topic_;
+    double stance_depth_gain_ = 0.0, stance_depth_max_u_ = 0.3;
+    std::vector<float> stance_depth_m_, stance_depth_w_, stance_depth_u_;
+    bool stance_depth_seen_ = false;
     // Kinematics-aware press (press_kin): the host's per-leg lift gains and the action-to-angle ranges.
     std::string jac_topic_;
     std::vector<float> jac_;

@@ -232,6 +232,7 @@ add_library(ogma_core
     src/ogma/modules/TerrainMemory.cpp
     src/ogma/modules/FootholdShaper.cpp
     src/ogma/modules/SupportModel.cpp
+    src/ogma/modules/ConstantSource.cpp
     src/ogma/modules/BearingToIntent.cpp
     src/ogma/modules/StuckSense.cpp
     src/ogma/modules/LoadPhaseGait.cpp
@@ -349,6 +350,8 @@ add_executable(test_foothold_shaper tests/ogma/test_foothold_shaper.cpp)
 target_link_libraries(test_foothold_shaper PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_support_model tests/ogma/test_support_model.cpp)
 target_link_libraries(test_support_model PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_stance_depth tests/ogma/test_stance_depth.cpp)
+target_link_libraries(test_stance_depth PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_bearing_to_intent tests/ogma/test_bearing_to_intent.cpp)
 target_link_libraries(test_bearing_to_intent PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_load_phase_gait tests/ogma/test_load_phase_gait.cpp)
@@ -635,6 +638,7 @@ gtest_discover_tests(test_tof8_range)
 gtest_discover_tests(test_terrain_memory)
 gtest_discover_tests(test_foothold_shaper)
 gtest_discover_tests(test_support_model)
+gtest_discover_tests(test_stance_depth)
 gtest_discover_tests(test_bearing_to_intent)
 gtest_discover_tests(test_load_phase_gait)
 gtest_discover_tests(test_generator)

@@ -154,11 +154,15 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   stairs configs): bearing toes, static load shares, the support margin and each toe's LIFT margin from the commanded
   FK, the up vector and the terrain memory — the shares track the FSR shares at r ≈ 0.7, and the model shows the
   gait is a TROT with no static margin anywhere (two or three toes bearing in 87 % of rows, 55–75 % of lifts unsafe
-  in both configs), so the flip is the trot's unsupported phase stretched by the policy's lift. **Next: the per-leg
-  stance depth handle in MotorEPMv2** (the weight shift is a depth change on the front pair; the model's lift margin
-  of the leg about to go is the error it serves), then **the discrete step-up as a CRAWL beside the gait** — three toes
-  down, the weight moved into their triangle, one toe lifted and placed on the predicted tread, judged by the
-  foothold error, the margin and flips on the graded flight (12 000 ticks, 2+ seeds), gain-0. Then the robot: the
+  in both configs), so the flip is the trot's unsupported phase stretched by the policy's lift. **The stance depth
+  handle** (`MotorEPMv2 stance_depth_topic`, ledger 2026-11-08; arms `sim60_stairs_shift*` with the `ConstantSource`
+  scaffold) pitches the body as asked, byte-identical when off, and does NOT move the FSR share — a pitch is not a
+  weight shift, as the model predicted; the shift a crawl needs is the body's translation over the planted toes, which
+  the stance stroke already makes. **Next, pending the operator's call: the crawl as a GATE on the lift** — a leg's
+  phase held in stance (LoadPhaseGait's hold) until the model's lift margin for it is positive, so the trot relaxes
+  into a statically supported crawl where support is short (or deadlocks, which the first run will show); judged by
+  the margin, the FSR shares, risers climbed and flips on the graded flight (12 000 ticks, 2+ seeds), gain-0. The
+  depth handle stays as the planner's posture control (the crouch to clear a riser). Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through

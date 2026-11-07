@@ -1259,6 +1259,19 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"swing_reach_rad_per_m", ParamMutability::HotMutable,
          "Hip1 radians per metre of requested reach (the toe's lever about hip1 along the body's forward, ~0.2 m x cos 45 deg -> 7).",
          ParamValue{7.0}, std::nullopt, std::nullopt},
+        {"stance_depth_topic", ParamMutability::ConstructionOnly,
+         "THE STANCE DEPTH HANDLE (2026-11-08): a ProprioToken [delta_m, weight] x 4 asking each PLANTED leg to stand delta_m "
+         "deeper (+ = that corner up) or shallower (-); added to the learned press's deficit for the leg (the learner agrees) and, "
+         "x stance_depth_gain, applied along the leg's kinematic lift direction (needs jac_topic).  Feedback.  Empty = no "
+         "subscription, byte-identical.",
+         ParamValue{std::string("")}, std::nullopt, std::nullopt},
+        {"stance_depth_gain", ParamMutability::HotMutable,
+         "The direct route's gain: the fraction of the requested depth change commanded through the joints at once (0 = the press "
+         "route only; 1 = the whole request, as the Jacobian converts it).",
+         ParamValue{0.0}, std::nullopt, std::nullopt},
+        {"stance_depth_max_u", ParamMutability::HotMutable,
+         "The direct route's bound in action units per leg.",
+         ParamValue{0.3}, std::nullopt, std::nullopt},
         {"leg_phase_lift_rear_mult", ParamMutability::HotMutable,
          "REAR SWING LIFT, as a multiple of the front (operator 2026-10-25: the front legs step over bars, the rear "
          "legs bind; terrain arena, 6 rad/s: swing-phase contact on 25 mm+ edges rear 57 % vs front 31 %).  Scales "
@@ -1603,6 +1616,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_lift_rear_mult"] = leg_phase_lift_rear_mult_;
     m["lift_handle_topic"] = lift_handle_topic_;
     m["swing_target_topic"] = swing_target_topic_; m["swing_reach_rad_per_m"] = swing_reach_rad_per_m_;
+    m["stance_depth_topic"] = stance_depth_topic_; m["stance_depth_gain"] = stance_depth_gain_; m["stance_depth_max_u"] = stance_depth_max_u_;
     m["jac_topic"] = jac_topic_; m["press_kin"] = press_kin_; m["press_kin_min"] = press_kin_min_;
     m["press_hip2_range"] = press_hip2_range_; m["press_knee_fold"] = press_knee_fold_; m["press_knee_hyperext"] = press_knee_hyperext_;
     m["leg_phase_lift_lead"] = leg_phase_lift_lead_;
@@ -1885,6 +1899,9 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "lift_handle_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) lift_handle_topic_ = *p; });
     apply_param(params, "swing_target_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) swing_target_topic_ = *p; });
     apply_param(params, "swing_reach_rad_per_m", [&](auto const& v){ swing_reach_rad_per_m_ = get_double(v, "swing_reach_rad_per_m"); });
+    apply_param(params, "stance_depth_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) stance_depth_topic_ = *p; });
+    apply_param(params, "stance_depth_gain", [&](auto const& v){ stance_depth_gain_ = get_double(v, "stance_depth_gain"); });
+    apply_param(params, "stance_depth_max_u", [&](auto const& v){ stance_depth_max_u_ = get_double(v, "stance_depth_max_u"); });
     apply_param(params, "jac_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) jac_topic_ = *p; });
     apply_param(params, "press_kin", [&](auto const& v){ press_kin_ = get_double(v, "press_kin"); });
     apply_param(params, "press_kin_min", [&](auto const& v){ press_kin_min_ = get_double(v, "press_kin_min"); });
@@ -2271,6 +2288,19 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
                 if (int(swing_lift_mult_.size()) != n_legs_) { swing_lift_mult_.assign(size_t(n_legs_), 1.0f); swing_reach_m_.assign(size_t(n_legs_), 0.0f); swing_reach_held_.assign(size_t(n_legs_), 0.0f); }
                 for (int i = 0; i < n_legs_; ++i) { swing_lift_mult_[size_t(i)] = pt->values[2 * i]; swing_reach_m_[size_t(i)] = pt->values[2 * i + 1]; }
                 swing_target_seen_ = true;
+            }));
+    }
+    // The stance depth handle (2026-11-08): Feedback, empty = no subscription -> byte-identical.
+    if (!stance_depth_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            stance_depth_topic_, SubscriptionKind::Feedback,
+            [this](std::string_view /*topic*/, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+                if (!pt || pt->values.size() < 2 * n_legs_) return;
+                if (int(stance_depth_m_.size()) != n_legs_) { stance_depth_m_.assign(size_t(n_legs_), 0.0f); stance_depth_w_.assign(size_t(n_legs_), 0.0f); stance_depth_u_.assign(size_t(n_legs_), 0.0f); }
+                for (int i = 0; i < n_legs_; ++i) { stance_depth_m_[size_t(i)] = pt->values[2 * i]; stance_depth_w_[size_t(i)] = std::max(0.0f, pt->values[2 * i + 1]); }
+                stance_depth_seen_ = true;
             }));
     }
     // PLAN-objective socket (PART III lever b) — the planner's band-gated posture
@@ -3646,6 +3676,8 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "press_learn_leak") press_learn_leak_ = get_double(value, "press_learn_leak");
     else if (key == "press_learn_max") press_learn_max_ = get_double(value, "press_learn_max");
     else if (key == "press_target_m") press_target_m_ = get_double(value, "press_target_m");
+    else if (key == "stance_depth_gain") stance_depth_gain_ = get_double(value, "stance_depth_gain");
+    else if (key == "stance_depth_max_u") stance_depth_max_u_ = get_double(value, "stance_depth_max_u");
     else if (key == "press_lever_m") press_lever_m_ = get_double(value, "press_lever_m");
     else if (key == "press_knee") press_knee_ = get_double(value, "press_knee");
     else if (key == "press_phase") press_phase_ = get_double(value, "press_phase");
@@ -6402,7 +6434,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 && tilt_seen_) {
                 const float front = (leg == 0 || leg == 1) ? 1.0f : -1.0f;
                 const float left  = (leg == 0 || leg == 2) ? 1.0f : -1.0f;
-                const float def = float(press_target_m_) - belly_m_ + float(press_lever_m_) * (front * tilt_pitch_ + left * tilt_roll_);
+                float def = float(press_target_m_) - belly_m_ + float(press_lever_m_) * (front * tilt_pitch_ + left * tilt_roll_);
+                if (stance_depth_seen_ && leg < int(stance_depth_m_.size())) def += stance_depth_w_[size_t(leg)] * stance_depth_m_[size_t(leg)];   // the handle: this corner's requested offset
                 press_def_[size_t(leg)] += 0.05f * (def - press_def_[size_t(leg)]);
                 float k = float(press_learn_rate_) * def;
                 // KINEMATICS-AWARE: a leg whose press direction can no longer lift its corner (lift gain below
@@ -6435,6 +6468,22 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     y[m - 1] += float(press_knee_) * P;
                 }
             }
+        }
+        // THE STANCE DEPTH HANDLE's direct route (2026-11-08; see the header): on a planted leg, the requested depth change
+        // x gain, converted to action units by the leg's lift gain and applied along its lift direction.  Bounded.
+        if (stance_depth_gain_ > 0.0 && stance_depth_seen_ && m >= 2 && leg < int(stance_depth_m_.size())) {
+            const bool planted = have_contact_ && int(foot_contact_.size()) == n_legs_ && foot_contact_[size_t(leg)] > 0.5f;
+            float u = 0.0f;
+            if (planted && stance_depth_w_[size_t(leg)] > 0.0f) {
+                float d2 = 1.0f, d3 = 0.0f;
+                const float cap = press_lift_dir(leg, y[m - 1], d2, d3);
+                if (cap > 1e-4f) {
+                    u = std::clamp(float(stance_depth_gain_) * stance_depth_w_[size_t(leg)] * stance_depth_m_[size_t(leg)] / cap,
+                                   -float(stance_depth_max_u_), float(stance_depth_max_u_));
+                    y[1] += u * d2; y[m - 1] += u * d3;
+                }
+            }
+            stance_depth_u_[size_t(leg)] = u;
         }
         // STRIDE-CENTRE HOMEOSTAT (stride_center_gain; see the header note).
         if (stride_center_gain_ > 0.0 && m >= 1 && n >= 1) {
@@ -7712,6 +7761,7 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["press_c"] = press_c_;
     mod["press_def"] = press_def_;
     mod["press_cap"] = press_cap_;
+    mod["stance_depth_u"] = stance_depth_u_;
     mod["track_ratio"]            = trk_ratio_;
     mod["swing_touch_frac"]       = swing_mid_n_ > 0.0 ? float(swing_touch_n_ / swing_mid_n_) : 0.0f;
     mod["belly_ema"]              = belly_ema_;
@@ -8198,6 +8248,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["press_b"] = press_b_;
     j["press_c"] = press_c_;
     j["press_def"] = press_def_;
+    j["stance_depth_u"] = stance_depth_u_;
     j["press_cap"] = press_cap_;
     j["track_ratio"]         = trk_ratio_;
     j["swing_touch_frac"]    = swing_mid_n_ > 0.0 ? float(swing_touch_n_ / swing_mid_n_) : 0.0f;

@@ -10520,3 +10520,23 @@ per-leg stance height / depth (the weight shift IS a depth change on the front p
 sequencer beside the gait is after it. **Re-use context:** the gap rule as a bearing predictor returns when the
 memory's heights reach ~5 mm (it is the right tool for candidate poses regardless); the static margin as a FALL
 predictor returns once the walker is a crawl on the stairs — then an unsafe lift is a defect, not a trot.
+
+### 2026-11-08 — THE STANCE DEPTH HANDLE (`MotorEPMv2 stance_depth_topic`: a per-leg [delta_m, weight] asking each planted leg to stand deeper or shallower, added to the learned press's deficit for that leg and, × `stance_depth_gain`, commanded at once along the leg's kinematic lift direction), admitted as a SOCKET on the flat corridor (2 seeds × 1200 ticks; a `ConstantSource` scaffold asks the front pair 2 cm shallower and the rear 2 cm deeper from tick 300 to 900): byte-identical before the request (0 of 16 fields differ from the control in both arms); the direct route pitches the body nose-down as asked (sin pitch +0.063 / +0.062 in the window against −0.017 / −0.057 control; front hip2 down, rear up; height and belly unchanged) and the body returns after it — and the FSR FRONT SHARE DOES NOT MOVE (0.531 / 0.540 against 0.571 / 0.549), which the support model had predicted (0.507 / 0.520 against 0.542 / 0.521): at 8 cm of leg a tenth of a radian of pitch moves the weight's projection by millimetres; the pitched body also walks at less than half speed (0.61 / 0.52 m at tick 840 against 1.49 / 1.34) — `WORKING` as a handle, `NULL` as a weight shift (n = 2, a signal)
+
+The press-only route (gain 0, the request in the press's deficit alone) moves nothing inside the window — the learner's
+rate (0.02 × 0.02 m per tick, leak 0.0005) is a posture integrator, not an actuator — and leaves a different trajectory
+after it, as any small perturbation of this gait does. Tests: `test_stance_depth` (2): the wired socket at gain 0 is
+byte-identical; a planted leg's hip2 moves in the requested sense and an airborne one not at all; the bound holds.
+
+**Reading.** A pitch is not a weight shift. The model says why in one line — the weight's horizontal position is set by
+where the body is OVER the toes, and the toes' heights move it only by the leg length times the sine of the pitch — and
+the FSRs confirm it. The weight shift a crawl needs is a fore-aft TRANSLATION of the body over the planted toes, which
+on this body is the stance stroke of the planted legs (hip1): the trot already does it continuously at 0.07 m/s, so the
+crawl's shift is not a new motion but a TIMING — hold a leg's lift until the body has moved far enough over the other
+three that its lift margin is positive. That is a gate on the lift driven by the model's error, and it belongs where
+the lift is decided (the leg's phase, `LoadPhaseGait`, which already holds a leg's phase by its load), not in a new
+sequencer; whether the trot then relaxes into a crawl on its own, deadlocks (four symmetric legs all held), or needs a
+tie-break is the next measurement. **Re-use context:** the depth handle stays as the pose planner's posture control
+(the step-up's crouch to clear a riser, the belly's clearance over an edge), measured on the graded flight; the speed
+cost of a pitched body wants a diagnosis first (the swing detector's foot-height reference, or the front stroke's
+shortened reach).
