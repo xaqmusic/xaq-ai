@@ -2891,9 +2891,6 @@ var hud_hidden:     bool = false
 # (3D lines coloured by what each ray hits — RED = self-occlusion, the
 # camera-inside-chassis tell); M = toggle the camera+LiDAR pixel panels.  For V1
 # vision recon: verify the ray origin clears the chassis + see what the EPM sees.
-var _ray_overlay_on:  bool = false
-var _ray_overlay_mi:  MeshInstance3D = null
-var _ray_overlay_mat: StandardMaterial3D = null
 var _vision_panel_on: bool = false
 const RAY_OVERLAY_SELF_OCCLUSION_M: float = 0.12   # hit nearer than this → RED (origin inside body)
 # 2026-06-13 — vision "brain view": a forward-facing perspective raycast → RGB
@@ -6711,14 +6708,6 @@ func _input(event: InputEvent) -> void:
 	elif key == KEY_4:
 		# Mouse-guided teleport placement — X follows the mouse, left-click to drop.
 		_set_place_mode(not _place_mode)
-	elif key == KEY_V:
-		# 2026-06-13 — toggle the loom/vision ray overlay (camera-placement debug).
-		_ray_overlay_on = not _ray_overlay_on
-		if _ray_overlay_mi != null:
-			_ray_overlay_mi.visible = _ray_overlay_on
-		if _ray_overlay_on:
-			_update_ray_overlay()   # immediate refresh, don't wait for the loom tick
-		print("PicrawlerBody: [V] ray_overlay = %s" % _ray_overlay_on)
 	elif key == KEY_Y:
 		# 2026-11-04 — the forward 8x8 time-of-flight field: on when it was off; its rays on/off when it is on.
 		if not tof8_model:
@@ -7634,8 +7623,6 @@ func _step_one() -> void:
 	if _loom_recompute_counter >= LOOM_RECOMPUTE_EVERY:
 		_loom_recompute_counter = 0
 		_last_target_loom = _compute_target_loom()
-		if _ray_overlay_on:
-			_update_ray_overlay()   # refresh the debug ray lines at the loom cadence
 		_update_vision_panel()      # camera+LiDAR pixel panels (captures only in top-down view)
 	var loom_pkt := PackedFloat64Array()
 	loom_pkt.append(_last_target_loom)
@@ -11718,76 +11705,6 @@ func _clear_pyramid_target() -> void:
 		_rebuild_beacon_surface_map()   # recolouring redefines what IS a beacon
 	walk_target_idx = -1
 
-func _update_ray_overlay() -> void:
-	# 2026-06-13 — debug overlay: draw the loom/vision FOV rays as 3D lines from
-	# the SAME origin + geometry the loom uses, coloured by what each ray hits.
-	# Purpose: verify the vision ray origin clears the chassis before V1 wiring —
-	# RED segments (hit nearer than the chassis half-extent) = the origin is INSIDE
-	# the body and perception would be self-occluded.  Toggled by KEY_V; refreshed
-	# at the loom cadence.  Off by default (extra raycasts only when inspecting).
-	if _chassis == null:
-		return
-	var space_state: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
-	if space_state == null:
-		return
-	if _ray_overlay_mi == null:
-		_ray_overlay_mat = StandardMaterial3D.new()
-		_ray_overlay_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_ray_overlay_mat.vertex_color_use_as_albedo = true
-		_ray_overlay_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_ray_overlay_mi = MeshInstance3D.new()
-		_ray_overlay_mi.name = "RayOverlay"
-		_ray_overlay_mi.top_level = true   # vertices are WORLD-space; ignore body transform
-		_ray_overlay_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(_ray_overlay_mi)
-	_ray_overlay_mi.visible = true
-	var chassis_xf: Transform3D = _chassis.global_transform
-	var origin: Vector3  = chassis_xf.origin + Vector3(0.0, 0.08, 0.0)   # MATCHES _compute_target_loom
-	var forward: Vector3 = chassis_xf.basis.z   # body forward = +basis.z (see loom fix)
-	var right: Vector3   = -chassis_xf.basis.x  # = forward × up (un-mirror L/R)
-	var tan_v: float = tan(LOOM_FOV_V_RAD * 0.5)
-	var target_collider: Node = null
-	if walk_target_idx >= 0 and walk_target_idx < _pyramid_meshes.size():
-		var tm: MeshInstance3D = _pyramid_meshes[walk_target_idx]
-		if tm != null:
-			target_collider = tm.get_parent()
-	var query := PhysicsRayQueryParameters3D.new()
-	query.collision_mask = 0xFFFFFFFF
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-	var c_self   := Color(1.0, 0.15, 0.15, 0.95)   # RED  — origin inside/too close to body
-	var c_target := Color(0.75, 0.35, 1.0, 0.95)   # purple — hit the active target
-	var c_other  := Color(1.0, 0.6, 0.1, 0.5)      # orange — hit something else
-	var c_miss   := Color(0.3, 0.85, 0.9, 0.16)    # faint cyan — no hit
-	var im := ImmediateMesh.new()
-	im.surface_begin(Mesh.PRIMITIVE_LINES, _ray_overlay_mat)
-	for j in range(LOOM_RES_V):
-		var v: float = -1.0 + 2.0 * (float(j) + 0.5) / float(LOOM_RES_V)
-		for i in range(LOOM_RES_H):
-			var ang_h: float = -LOOM_FOV_H_RAD * 0.5 \
-							 + LOOM_FOV_H_RAD * (float(i) + 0.5) / float(LOOM_RES_H)
-			var dir_h: Vector3 = forward * cos(ang_h) + right * sin(ang_h)
-			var dir: Vector3 = (dir_h + chassis_xf.basis.y * (v * tan_v)).normalized()
-			query.from = origin
-			query.to   = origin + dir * LOOM_RAY_LEN
-			var hit := space_state.intersect_ray(query)
-			var endp: Vector3
-			var col: Color
-			if hit.is_empty():
-				endp = origin + dir * LOOM_RAY_LEN
-				col  = c_miss
-			else:
-				endp = hit.position
-				if origin.distance_to(endp) < RAY_OVERLAY_SELF_OCCLUSION_M:
-					col = c_self
-				elif target_collider != null and hit.collider == target_collider:
-					col = c_target
-				else:
-					col = c_other
-			im.surface_set_color(col); im.surface_add_vertex(origin)
-			im.surface_set_color(col); im.surface_add_vertex(endp)
-	im.surface_end()
-	_ray_overlay_mi.mesh = im
 
 # ---- 2026-08-04 · beacon-surface lookup (the honest replacement for the identity test) --
 # Keyed on a collider's OWN albedo, not on which pyramid is the target.  Built once and

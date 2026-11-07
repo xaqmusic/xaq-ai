@@ -542,7 +542,7 @@ func _process(_delta: float) -> void:
 	var imu_hint: String = ""
 	if _imu_scope != null:
 		imu_hint = "   [I] imu: %s" % ("ON" if _imu_scope.visible else "hidden")
-	# Remaining body toggles that were never surfaced: place-mode, ray overlay, vision panel.
+	# Remaining body toggles: place-mode, the clouds and the field, the vision panel.
 	var place_v: Variant = body.get("_place_mode")
 	var place_hint: String = ""
 	if place_v != null:
@@ -555,10 +555,26 @@ func _process(_delta: float) -> void:
 			var pt_v: Variant = body.get("_place_target")
 			if pt_v is Vector3:
 				place_hint += "  target(%.2f, %.2f, %.2f)" % [pt_v.x, pt_v.y, pt_v.z]
-	var rays_v: Variant = body.get("_ray_overlay_on")
-	var rays_hint: String = ""
-	if rays_v != null:
-		rays_hint = "   [V] rays: %s" % ("ON" if _as_bool(rays_v) else "off")
+	# 2026-11-07 — the clouds of touches and the forward 8x8 field: [X] hides every cloud (purple touches, lavender
+	# brain touches, green/yellow field), [Y] turns the field on and then its rays on/off, [7/8] pitch it, [9/0] move
+	# its mount; the mount reads back so the values can be copied into a config's body_env.
+	var clouds_v: Variant = body.get("_touch_show")
+	var clouds_hint: String = ""
+	if clouds_v != null:
+		clouds_hint = "   [X] clouds: %s" % ("ON" if _as_bool(clouds_v) else "hidden")
+	var tof8_v: Variant = body.get("tof8_model")
+	var tof8_hint: String = ""
+	if tof8_v != null:
+		if not _as_bool(tof8_v):
+			tof8_hint = "   [Y] tof8: off"
+		else:
+			var rays_on: bool = _as_bool(body.get("_tof8_show"))
+			var mount_s: String = ""
+			var tof8_obj: Variant = body.get("_tof8")
+			if tof8_obj != null:
+				mount_s = "  [7/8] pitch %.0f°  [9/0] mount %.0f mm" % [float(tof8_obj.pitch_deg), float(tof8_obj.height_above_bottom_m) * 1000.0]
+			var rays_s: String = "ON" if rays_on else "hidden"
+			tof8_hint = "   [Y] tof8 rays: %s%s" % [rays_s, mount_s]
 	var vis_v: Variant = body.get("_vision_panel_on")
 	var vis_hint: String = ""
 	if vis_v != null:
@@ -586,7 +602,7 @@ func _process(_delta: float) -> void:
 		jb_hint + ts_hint, seed_hint]
 	var hint_view: String = "%s%s%s%s%s%s%s%s%s%s   [,/.] time  [/] 1x   [`] graph   [F1/F2] clip   [F5] save   [F9] load   [ESC] quit" % [
 		panels_hint, mpanel_hint, abl_hint, cc_hint, imu_hint, hud_hint, path_hint, plan_hint,
-		rays_hint, vis_hint]
+		clouds_hint, tof8_hint, vis_hint]
 	var hint_line: String = hint_run + "\n" + hint_view
 	if hud_is_hidden:
 		# Hidden mode: render ONLY the hint line so the user keeps the
