@@ -146,8 +146,13 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   re-observation is built and measured (ledger 2026-11-07, PARTIAL): first contact 2.6 → 2.3 cm at 50 mm, re-contact
   2.5 → 2.1, the 1 cm bar missed by two; the residual is the 3 cm voxel on a riser's edge: 1.5 cm voxels and a flat-ground gate on the datum take the
   error beyond 3 cm from 22 % to 13–16 % at 50 mm but the RMS floors near 2 cm, and the field cannot be the datum's
-  second source (ledger, same day). Next: step 2 — the prediction carries its local spread (an edge reads as
-  uncertain by the riser), and MotorEPMv2 takes per-leg swing lift and reach from the prediction, gain-0 guarded. On the robot: step 2, the VL53L5CX
+  second source (ledger, same day). Step 2 built and measured (ledger 2026-11-07, two forms): the prediction carries its spread; MotorEPMv2 has a
+  per-leg `swing_target_topic` ([lift_mult, reach_m] × 4); `FootholdShaper` lifts the leg whose toe must rise and reaches
+  past an up-edge — PARTIAL: a weak gain at 38 mm, a loss at 50, a scaled swing lift is not a step up. **Next: the
+  discrete step-up** — a gated sequence beside the gait (lift above the predicted tread, reach past its edge, lower
+  until the sole reports it, shift weight, next leg), triggered by a predicted rise and judged by the foothold error,
+  gain-0, on the fixed flights (base 6.0 / 3.8 / 2.2 of 7). Then the robot: the VL53L5CX driver and the staircase
+  from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through
   ogma_host, the brain's cloud against the twin's at the toe height, whether the six nodes reappear. The

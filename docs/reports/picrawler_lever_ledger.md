@@ -10422,3 +10422,29 @@ the legs, a different gait rather than an edge policy. **Form 2, running:** the 
 toe last stood (its height at its last touchdown), which gives a hung rear leg its full riser and a front leg
 already up nothing; the reach gated on an up-edge (spread AND rise). The arms are the same three; the base is the
 same instrument run.
+
+### 2026-11-07 — STEP 2, FORM 2 (the rise measured from where each toe last stood; the reach gated on an up-edge), the same three arms on the fixed flights: the lift now lands on the legs that hang (the rear pair, 17–27 % of rows, three quarters of them with the toe a step below the body), and the outcome is a WEAK SIGNAL at 38 mm (lift +0.5 risers, t +2.0; reach +0.5, t +0.9), a LOSS at 50 mm (−0.5 each, t −2.0 / −1.2) and a regression with both together (−1.25 at 38, t −3.0) — `PARTIAL` as a policy, `NULL` as a capability: a per-leg scaled swing lift, even aimed at the right leg from a prediction that is right about where, does not climb the riser that stops this walker
+
+| arm (form 2) | 25 mm risers of 7 | 38 mm | 50 mm | stall at 38 / 50 | 50 mm first-contact error |
+|---|---|---|---|---|---|
+| the instrument alone | 6.0 | 3.8 | 2.2 | 0.55 / 0.64 | 2.2 cm, 16 % |
+| lift from each leg's own rise | 6.2 | 4.2 | 1.8 | 0.51 / 0.66 | 2.4 cm, 18 % |
+| reach onto the tread past an up-edge | 6.5 | 4.2 | 1.8 | 0.52 / 0.66 | 2.4 cm, 19 % |
+| both | 6.2 | 2.5 | 1.8 | 0.58 / 0.68 | 2.4 cm, 18 % |
+
+Paired by seed against the base: lift +0.25 / +0.50 / −0.50 risers at 25 / 38 / 50 (t +1.2 / +2.0 / −2.0); reach
++0.50 / +0.50 / −0.50 (t +0.9 / +0.9 / −1.2); both +0.25 / −1.25 / −0.50 (t +0.6 / −3.0 / −0.7). The reach fired on
+14 % of leg-rows (form 1: 49 %), the up-edges it was meant for.
+
+**Reading.** The prediction did its part: form 2's lift goes where a toe must rise, and the stall score at 38 mm
+falls from 0.55 to 0.51. The action did not: at 50 mm, the riser that stops this walker, lifting the hung leg
+higher costs half a riser per flight, and lifting it while also reaching forward costs more — the same lesson as
+the two dose responses, now with the aim right. A phase-shaped swing lift scaled by a number is not a step up: the
+hung rear toe needs to be lifted ABOVE the tread, brought FORWARD over its edge and set DOWN on it while the other
+three carry the body, which the oscillating gait does not do on command. **What this decides:** the careful
+stepper's action is the discrete step-up the plan named — a sequence with sensory gates (lift to the predicted
+height plus a margin, reach past the predicted edge, lower until the sole reports the tread, shift weight, next leg),
+triggered by the prediction (a rise ahead of a leg) and judged by the foothold error at the touch — built as a
+module beside the gait, named as a scaffold, absent-equals-identical, with the gait's stance keeping the body up.
+The socket and the policy stay (the socket is the right place for the step-up's per-leg targets too); gains stay 0
+in every config but the arms. Files: `FootholdShaper.*` (form 2), the arm logs in the session scratch.
