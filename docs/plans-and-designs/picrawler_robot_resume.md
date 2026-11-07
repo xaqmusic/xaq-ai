@@ -148,11 +148,18 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   error beyond 3 cm from 22 % to 13–16 % at 50 mm but the RMS floors near 2 cm, and the field cannot be the datum's
   second source (ledger, same day). Step 2 built and measured (ledger 2026-11-07, two forms): the prediction carries its spread; MotorEPMv2 has a
   per-leg `swing_target_topic` ([lift_mult, reach_m] × 4); `FootholdShaper` lifts the leg whose toe must rise and reaches
-  past an up-edge — PARTIAL: a weak gain at 38 mm, a loss at 50, a scaled swing lift is not a step up. **Next: the
-  discrete step-up** — a gated sequence beside the gait (lift above the predicted tread, reach past its edge, lower
-  until the sole reports it, shift weight, next leg), triggered by a predicted rise and judged by the foothold error,
-  gain-0, on the fixed flights (base 6.0 / 3.8 / 2.2 of 7). Then the robot: the VL53L5CX driver and the staircase
-  from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
+  past an up-edge — PARTIAL: a weak gain at 38 mm, a loss at 50, a scaled swing lift is not a step up; on the graded
+  flight it FLIPS the body backward at the 64 mm riser (ledger 2026-11-07, the mechanism reproduced). **The pose
+  evaluator** `SupportModel` (ledger 2026-11-08; `TerrainMemory patch_topic` feeds it; `sm_*` in the log of both
+  stairs configs): bearing toes, static load shares, the support margin and each toe's LIFT margin from the commanded
+  FK, the up vector and the terrain memory — the shares track the FSR shares at r ≈ 0.7, and the model shows the
+  gait is a TROT with no static margin anywhere (two or three toes bearing in 87 % of rows, 55–75 % of lifts unsafe
+  in both configs), so the flip is the trot's unsupported phase stretched by the policy's lift. **Next: the per-leg
+  stance depth handle in MotorEPMv2** (the weight shift is a depth change on the front pair; the model's lift margin
+  of the leg about to go is the error it serves), then **the discrete step-up as a CRAWL beside the gait** — three toes
+  down, the weight moved into their triangle, one toe lifted and placed on the predicted tread, judged by the
+  foothold error, the margin and flips on the graded flight (12 000 ticks, 2+ seeds), gain-0. Then the robot: the
+  VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through
   ogma_host, the brain's cloud against the twin's at the toe height, whether the six nodes reappear. The

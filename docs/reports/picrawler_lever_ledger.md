@@ -10473,3 +10473,50 @@ with nose-up pitch (`press_target_m` and the stance height relaxed by k·|pitch|
 body is allowed to sit down at the front on a riser instead of pushing itself over) — a MotorEPMv2 lever, gain-0,
 measurable on the graded flight by flips per run and risers climbed; (3) the step-up primitive with its weight
 shift. The graded flight at 12 000 ticks, flips and resets counted, is the bench for (1) and (2).
+
+### 2026-11-08 — THE POSE EVALUATOR (`SupportModel`, the careful stepper's model of its own support: from the toes' commanded positions, the body's gravity-up and `TerrainMemory`'s new body-centred PATCH of heights, the bearing toes, each toe's static share of the weight, the signed margin of the centre of mass inside the bearing toes' hull, and for each toe the margin the others would give if it left now) — ADMITTED as an instrument on the graded flight (2 seeds × 12 000 ticks × the instrument and the step-2 configs; nothing reads it, the gait byte-identical over 110 compared fields): the predicted load SHARES track the FSR shares at r = 0.69–0.74 over ~30 000 bearing ticks per run; and what the model then says about the walker is the finding — THE GAIT IS A TROT WITH NO STATIC MARGIN ANYWHERE: diagonal support (loads [0, .46, .54, 0] between the four-toe instants), the margin negative in 99 % of rows on the stairs and on the flat alike, the rear toes' lift margin −0.095 m on average, 55–75 % of every toe lift "unsafe" (the toe leaving while its lift margin is below −2 cm) in BOTH configs, and every flip of the step-2 config preceded by unsafe lifts — as are thousands of survivable ticks — `WORKING` as a model of the FSRs, `BASELINE` as a safety criterion (n = 2, a signal)
+
+The model (`cpp_core/.../SupportModel.*`, 6 tests; `TerrainMemory patch_topic` = a 16 × 16 grid of 3 cm cells of
+remembered height and precision around the body, published every tick, `""` = off): a toe at body-frame (x, z) with
+gravity height `toe_y` is completed to a body point from the up vector and LEVELLED, because a toe 8 cm below a body
+pitched nose-up 20° stands 2.7 cm further forward of the body's weight than its body-frame z says — which is the flip.
+The centre of mass is the chassis (0.3 kg at the origin) plus each leg (0.075 kg) at 0.48 of the way from its hip to
+its toe; the static shares are the barycentric loads on three bearing toes, the minimum-norm loads on four with a
+toe that would pull unloaded to zero; the margin is the least signed distance from the weight's projection to the
+hull's edges. Which toes bear, for the pose the body is IN, is the contact flag (`support_source flag`): the FSR is the
+sensor of bearing, and the memory's gap cannot stand in for it — a swing toe clears the ground by MILLIMETRES (the
+gap of airborne toes with remembered ground: median +3 to +6 mm; a 1.5 cm tolerance catches 86 % of the bearing toes
+and 36 % of the airborne), so the gap prediction is graded (65 % agreement) and kept for CANDIDATE poses, where
+"will this toe meet ground within 2 cm" is the question. The hip rectangle's side sign was read back from the toes'
+frame (legs 0 and 2 at −x), a first-battery correction.
+
+**What the FSR says about the model.** Per tick, on bearing toes, the predicted share against the measured share
+(each toe's load over the four's sum, when the four carry ≥ 0.3 of the weight): r = 0.727 / 0.691 (instrument,
+seeds 3 / 5), 0.705 / 0.744 (step 2). The raw fraction correlates at ~0 because the FSR fractions sum to ~1.4 on
+average (impacts; the sim's load is EMA'd and clamped at 2) — the share is the honest comparison. So the body's
+weight is where the model says it is, to the FSRs' resolution, from the commanded FK alone.
+
+**What the model says about the gait.** The bearing set is four toes in 4 % of rows, three in 41 %, two in 46 %, one
+in 9 %. On two the loads sit on a diagonal and the margin is −1 to −2 cm (the weight a centimetre off the diagonal
+line); on three the margin is +0.5 to +4 cm; the rear toes' lift margin averages −0.095 m (the floor is −0.1) on the
+flat and on the stairs; the fraction of ticks without static support runs 0.54–0.98 (the 0.98 is the instrument
+config leaning on the 64 mm riser with its belly — a support the model does not see; the belly range reads it).
+Unsafe lifts: 1338 of 2027 (instrument, seed 3), 1231 of 2020 (seed 5), 1190 of 1925 and 1189 of 1809 (step 2). A trot
+is dynamically balanced — the next diagonal lands before the body falls over the current one — and that is what
+survives on the flat and on the 12–50 mm risers in both configs. The step-2 policy's ×1.5–2.4 lifts lengthen the
+unsupported phase at the one place (the 64–89 mm risers, the body nose-up) where the fall has further to go than
+the swing has time, and the body goes over: rows 57–64 before the seed-3 flip show the support alternating 2 / 3
+toes with lift margins −0.1 on the rear pair while the policy asks ×1.4–2.3 of them.
+
+**Reading, and the plan's correction.** The static margin is NECESSARY for a careful stepper and NOT SUFFICIENT as a
+predictor of this walker's falls, because this walker does not stand still at any instant: it trots. A per-leg policy
+riding the trot — the step-2 lift, the pitch gate, the relaxed press — cannot buy static support, because the trot has
+none to give. The step-up the operator described (a search over whole-body poses, "all legs managing the CoG and the
+lift/push") is therefore a GAIT-MODE change at the riser, not a modulation: three toes down, the weight moved into
+their triangle (the model's `lift_margin` of the leg about to go is the error to drive to positive), ONE toe in the
+air, placed where the memory predicts the tread, the weight moved again — a crawl, statically supported at every
+instant, with the model's margin as its objective and the FSR shares as its check. The handle it needs in the gait is
+per-leg stance height / depth (the weight shift IS a depth change on the front pair), which is the next build; the
+sequencer beside the gait is after it. **Re-use context:** the gap rule as a bearing predictor returns when the
+memory's heights reach ~5 mm (it is the right tool for candidate poses regardless); the static margin as a FALL
+predictor returns once the walker is a crawl on the stairs — then an unsafe lift is a defect, not a trot.

@@ -13062,6 +13062,31 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			var arr: Array = fs.get(key, [])
 			if arr.size() >= 4: line["fs_" + key] = [snappedf(float(arr[0]), 0.001), snappedf(float(arr[1]), 0.001), snappedf(float(arr[2]), 0.001), snappedf(float(arr[3]), 0.001)]
 		line["fs_lift_ticks"] = int(fs.get("lift_ticks", 0)); line["fs_shift_ticks"] = int(fs.get("shift_ticks", 0))
+	if metrics.has("support_model"):
+		# the pose evaluator (2026-11-08): the support margin, each toe's lift margin, the predicted load shares and their
+		# error against the FSRs, the gaps to the remembered ground, the centre of mass's projection
+		var sm: Dictionary = metrics["support_model"]
+		line["sm_margin"] = snappedf(float(sm.get("margin", 0.0)), 0.001)
+		line["sm_n"] = int(sm.get("n_support", 0))
+		for key in ["lift_margin", "load", "load_err", "load_rms", "gap"]:
+			var arr: Array = sm.get(key, [])
+			if arr.size() >= 4: line["sm_" + key] = [snappedf(float(arr[0]), 0.001), snappedf(float(arr[1]), 0.001), snappedf(float(arr[2]), 0.001), snappedf(float(arr[3]), 0.001)]
+		var cm: Array = sm.get("com", [])
+		if cm.size() >= 2: line["sm_com"] = [snappedf(float(cm[0]), 0.001), snappedf(float(cm[1]), 0.001)]
+		var hs: Array = sm.get("has", []); var cn: Array = sm.get("contact", [])
+		if hs.size() >= 4: line["sm_has"] = [int(hs[0]), int(hs[1]), int(hs[2]), int(hs[3])]
+		if cn.size() >= 4: line["sm_contact"] = [int(cn[0]), int(cn[1]), int(cn[2]), int(cn[3])]
+		for key in ["unsafe_lifts", "lifts"]:
+			var u: Array = sm.get(key, [])
+			if u.size() >= 4: line["sm_" + key] = [int(u[0]), int(u[1]), int(u[2]), int(u[3])]
+		line["sm_unsup"] = snappedf(float(sm.get("unsup_frac", 0.0)), 0.001)
+		line["sm_unsup_max"] = int(sm.get("unsup_streak_max", 0))
+		line["sm_corr"] = snappedf(float(sm.get("load_corr", 0.0)), 0.001)
+		line["sm_scorr"] = snappedf(float(sm.get("share_corr", 0.0)), 0.001)
+		line["sm_agree"] = snappedf(float(sm.get("agree", 0.0)), 0.001)
+		for key in ["gap_on", "gap_off"]:
+			var g: Array = sm.get(key, [])
+			if g.size() >= 3: line["sm_" + key] = [snappedf(float(g[0]), 0.001), snappedf(float(g[1]), 0.001), int(g[2])]
 	if metrics.has("tof8_range"):
 		# the field reduced to the nearest feature ahead (2026-11-05): what StuckSense's closing channel reads
 		var tr: Dictionary = metrics["tof8_range"]

@@ -867,7 +867,7 @@ Dictionary OgmaBrain::get_module_metrics() const {
         // without a per-type block each (the keys are the modules' own diag names).
         else if (type == "ProxMemory" || type == "TofAvoidLoop" || type == "BearingToIntent" ||
                  type == "StuckSense" || type == "StuckEscape" || type == "LoadPhaseGait" ||
-                 type == "TouchMemory" || type == "EncounterFeatures" || type == "Tof8Range" || type == "TerrainMemory" || type == "FootholdShaper") {
+                 type == "TouchMemory" || type == "EncounterFeatures" || type == "Tof8Range" || type == "TerrainMemory" || type == "FootholdShaper" || type == "SupportModel") {
             const nlohmann::json dj = m->diag_snapshot();   // a named object: items() of a temporary dangles
             for (auto const& [k, v] : dj.items()) {
                 if (v.is_boolean())     d[String(k.c_str())] = v.get<bool>();

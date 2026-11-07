@@ -27,6 +27,7 @@
 #include "ogma/modules/Tof8Range.hpp"
 #include "ogma/modules/TerrainMemory.hpp"
 #include "ogma/modules/FootholdShaper.hpp"
+#include "ogma/modules/SupportModel.hpp"
 #include "ogma/modules/BearingToIntent.hpp"
 #include "ogma/modules/StuckSense.hpp"
 #include "ogma/modules/LoadPhaseGait.hpp"
@@ -165,6 +166,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("Tof8Range",             [](){ return std::make_unique<Tof8Range>(); });
         reg.register_type("TerrainMemory",         [](){ return std::make_unique<TerrainMemory>(); });
         reg.register_type("FootholdShaper",        [](){ return std::make_unique<FootholdShaper>(); });       // the careful stepper's first policy: per-leg swing targets from the prediction (2026-11-07)        // the terrain's heights from the field and the toes, and the foothold prediction (2026-11-07)            // the 8x8 field -> the nearest feature ahead, the sonar's contract (2026-11-05)    // palpation stage 1 (2026-11-02): one vector per touch, the encounter vocabulary\'s input
+        reg.register_type("SupportModel",          [](){ return std::make_unique<SupportModel>(); });         // the careful stepper's pose evaluator: bearing toes, load shares, the support and lift margins (2026-11-08)
         reg.register_type("BearingToIntent",       [](){ return std::make_unique<BearingToIntent>(); });      // picrawler S3: a loop's bearing -> goal bearing + speed, holding a reference when silent
         reg.register_type("StuckSense",            [](){ return std::make_unique<StuckSense>(); });           // picrawler S3 lever 2: the range beam as re-afference against the stride's efference
         reg.register_type("LoadPhaseGait",         [](){ return std::make_unique<LoadPhaseGait>(); });        // picrawler gait audit 2026-10-12: a per-leg phase the leg's own load holds (Tegotae)

@@ -67,6 +67,7 @@ public:
     int    n_errors() const { return n_err_; }
     int    count() const { return int(vox_.size()); }
     bool   floor_ok() const { return plane_.ok; }
+    double height_at(double fwd, double lat, bool& has) const;   // the remembered height (body gravity frame) under a body-frame point, nearest voxel
 
 private:
     struct Key { int64_t ix, iy; bool operator==(Key const& o) const { return ix == o.ix && iy == o.iy; } };
@@ -108,6 +109,16 @@ private:
     double stall_gate_ = 1.0;   // the memory's frame advances by the odometry's increment x (1 - stall_gate x stall): a body that is
                                 // held does not move, whatever its legs claim (the admitted stall sense, 2026-11-07)
     int    diag_max_ = 300, recent_max_ = 32;
+    // THE PATCH (2026-11-08, the pose evaluator's input): the memory's heights on a body-centred grid, every tick, so a
+    // module that evaluates POSES (where the toes would stand, what the body would meet) reads the terrain without
+    // owning it.  ProprioToken [N, cell_m, datum, pad, then N x N heights (body gravity frame, origin 0; kNoHeight where
+    // nothing is remembered), then N x N precisions]; cell (i, j) is at fwd = (i - N/2 + 0.5) cell, lat = (j - N/2 + 0.5)
+    // cell in the toes' frame (feet_xz).  "" = not published, byte-identical.
+    std::string patch_topic_ = ""; int patch_cells_ = 16; double patch_cell_m_ = 0.0;   // 0 = the voxel size
+public:
+    static constexpr float kNoHeight = -99.0f;
+    static constexpr int   kPatchHeader = 4;
+private:
 
     // inputs
     std::array<float, body::tof8::kZones> field_{}; bool have_field_ = false; uint64_t field_tick_ = 0, field_done_ = ~uint64_t(0);

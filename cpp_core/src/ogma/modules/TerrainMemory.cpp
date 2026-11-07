@@ -33,7 +33,9 @@ std::vector<TopicSpec> TerrainMemory::input_topics() const {
     return v;
 }
 std::vector<TopicSpec> TerrainMemory::output_topics() const {
-    return { TopicSpec{predict_topic_, std::type_index(typeid(ProprioToken))}, TopicSpec{error_topic_, std::type_index(typeid(ProprioToken))} };
+    std::vector<TopicSpec> v{ TopicSpec{predict_topic_, std::type_index(typeid(ProprioToken))}, TopicSpec{error_topic_, std::type_index(typeid(ProprioToken))} };
+    if (!patch_topic_.empty()) v.push_back(TopicSpec{patch_topic_, std::type_index(typeid(ProprioToken))});
+    return v;
 }
 
 ParamSchema TerrainMemory::params_schema() const {
@@ -75,6 +77,9 @@ ParamSchema TerrainMemory::params_schema() const {
         {"datum_min_load", ParamMutability::HotMutable, "The load (fraction of body weight) a touching toe must reach within 25 ticks for its disagreement to move the datum.", ParamValue{0.15}},
         {"datum_step_max_m", ParamMutability::HotMutable, "The most one touch moves the datum (m): a riser takes a few bearing touches, a single bad one cannot run away with it.", ParamValue{0.03}},
         {"datum_window", ParamMutability::HotMutable, "The datum moves toward the MEDIAN of this many recent bearing innovations (1 = each touch alone, the 2026-11-07 morning form): a toe on a voxel straddling a riser's edge disagrees by the riser, and one such touch must not move the body.", ParamValue{int64_t{5}}},
+        {"patch_topic",  ParamMutability::ConstructionOnly, "THE PATCH for a pose evaluator (SupportModel): ProprioToken [N, cell_m, datum, 0, N*N heights (body gravity frame, origin 0, -99 = none), N*N precisions] on a body-centred grid in the toes' frame, every tick. \"\" = not published (byte-identical).", ParamValue{std::string("")}},
+        {"patch_cells",  ParamMutability::ConstructionOnly, "The patch's side, in cells (16 x 3 cm = +/- 24 cm around the body).", ParamValue{int64_t{16}}},
+        {"patch_cell_m", ParamMutability::ConstructionOnly, "The patch's cell (m); 0 = the voxel size.", ParamValue{0.0}},
         {"diag_max",    ParamMutability::HotMutable, "Voxels listed in the diag, nearest first (0 = all).", ParamValue{int64_t{300}}},
         {"recent_max",  ParamMutability::HotMutable, "Recent prediction errors kept in the diag as rows [tick, leg, h_pred, prec, h_touch, e].", ParamValue{int64_t{32}}},
     };
@@ -92,7 +97,7 @@ ParamMap TerrainMemory::current_params() const {
             {"datum_min_load", ParamValue{datum_min_load_}}, {"datum_step_max_m", ParamValue{datum_step_max_m_}},
             {"stall_topic", ParamValue{stall_topic_}}, {"stall_gate", ParamValue{stall_gate_}}, {"register_gain", ParamValue{register_gain_}}, {"datum_window", ParamValue{int64_t(datum_window_)}},
             {"register_range_m", ParamValue{register_range_m_}}, {"register_min_points", ParamValue{int64_t(register_min_points_)}}, {"register_min_spread_m", ParamValue{register_min_spread_m_}},
-            {"datum_edge_max_m", ParamValue{datum_edge_max_m_}}};
+            {"datum_edge_max_m", ParamValue{datum_edge_max_m_}}, {"patch_topic", ParamValue{patch_topic_}}, {"patch_cells", ParamValue{int64_t(patch_cells_)}}, {"patch_cell_m", ParamValue{patch_cell_m_}}};
 }
 
 void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
@@ -100,12 +105,14 @@ void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
     if (!bus_) throw std::invalid_argument("TerrainMemory requires a non-null Bus");
     for (auto pr : std::initializer_list<std::pair<const char*, std::string*>>{
             {"field_topic", &field_topic_}, {"contact_topic", &contact_topic_}, {"feet_xz_topic", &feet_xz_topic_}, {"feet_y_topic", &feet_y_topic_},
-            {"odom_topic", &odom_topic_}, {"predict_topic", &predict_topic_}, {"error_topic", &error_topic_}, {"up_topic", &up_topic_}, {"load_topic", &load_topic_}, {"stall_topic", &stall_topic_}})
+            {"odom_topic", &odom_topic_}, {"predict_topic", &predict_topic_}, {"error_topic", &error_topic_}, {"up_topic", &up_topic_}, {"load_topic", &load_topic_}, {"stall_topic", &stall_topic_}, {"patch_topic", &patch_topic_}})
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     for (auto const& k : {"pitch_deg", "sensor_x_m", "sensor_y_m", "sensor_z_m", "max_range_m", "thing_min_m", "fit_rows", "fit_slope_max", "voxel_m",
                           "max_voxels", "max_age_ticks", "sigma_field_m", "sigma_touch_m", "predict_tau_touches", "predict_radius_m", "plane_tau_ticks",
                           "err_alpha", "diag_max", "recent_max", "datum_gain", "datum_min_load", "datum_step_max_m", "stall_gate", "register_gain", "register_range_m", "register_min_points", "register_min_spread_m", "datum_window", "datum_edge_max_m"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
+    apply_param(params, "patch_cells", [&](auto const& v){ patch_cells_ = std::clamp(int(get_double(v, "patch_cells")), 2, 64); });
+    apply_param(params, "patch_cell_m", [&](auto const& v){ patch_cell_m_ = std::max(0.0, get_double(v, "patch_cell_m")); });
     auto sub = [&](std::string const& topic, std::string which) {
         if (topic.empty()) return;
         sub_ids_.push_back(bus_->subscribe(topic, SubscriptionKind::Direct, [this, which](std::string_view, MessagePtr p){ handle(which, p); }));
@@ -389,6 +396,31 @@ void TerrainMemory::tick(uint64_t tick_id) {
     eo->tick_id = tick_id; eo->producer_id = out->producer_id; eo->sensor = "foothold_error";
     eo->values = Eigen::VectorXf(8); for (int k = 0; k < 8; ++k) eo->values[k] = err_out[size_t(k)];
     bus_->publish(error_topic_, eo);
+    if (!patch_topic_.empty()) {   // the patch: each cell reads the voxel under its centre (nearest), precision = 1/var
+        const int N = patch_cells_; const double cell = patch_cell_m_ > 0.0 ? patch_cell_m_ : voxel_m_;
+        auto po = std::make_shared<ProprioToken>();
+        po->tick_id = tick_id; po->producer_id = out->producer_id; po->sensor = "terrain_patch";
+        po->values = Eigen::VectorXf::Constant(kPatchHeader + 2 * N * N, kNoHeight);
+        po->values[0] = float(N); po->values[1] = float(cell); po->values[2] = float(datum_); po->values[3] = 0.0f;
+        double px, py, c, s; odom_pose(px, py, c, s);
+        for (int i = 0; i < N; ++i) for (int j = 0; j < N; ++j) {
+            const double fwd = (i - N / 2 + 0.5) * cell, lat = (j - N / 2 + 0.5) * cell;
+            const double X = px + fwd * c - lat * s, Y = py + fwd * s + lat * c;
+            auto it = vox_.find(Key{int64_t(std::floor(X / voxel_m_)), int64_t(std::floor(Y / voxel_m_))});
+            const int k = kPatchHeader + i * N + j;
+            if (it != vox_.end()) { po->values[k] = float(it->second.h - datum_); po->values[k + N * N] = float(1.0 / std::max(1e-9, it->second.var)); }
+            else po->values[k + N * N] = 0.0f;
+        }
+        bus_->publish(patch_topic_, po);
+    }
+}
+
+double TerrainMemory::height_at(double fwd, double lat, bool& has) const {
+    double px, py, c, s; odom_pose(px, py, c, s);
+    const double X = px + fwd * c - lat * s, Y = py + fwd * s + lat * c;
+    auto it = vox_.find(Key{int64_t(std::floor(X / voxel_m_)), int64_t(std::floor(Y / voxel_m_))});
+    has = it != vox_.end();
+    return has ? it->second.h - datum_ : 0.0;
 }
 
 std::vector<TerrainMemory::BodyVoxel> TerrainMemory::body_voxels(int n) const {
