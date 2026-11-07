@@ -10310,6 +10310,21 @@ to register the frame by re-observation — the field re-sees the riser it place
 correcting the translation as the datum corrects the height, not a gate. That is the next lever before the
 prediction becomes the gait's input (step 2), because a 2.5 cm error is a third of the riser that stops this walker.
 
-Files: `picrawler_body.gd` (`_build_stairs`, `stairs_truth_y`, `_toe_world`, `up_body`, the `tm_*` log keys),
+**The fixed-flight battery** (n = 4 brain seeds per height, 3600 ticks, seven risers of one height): the walker's
+capability on a flight and the instrument's numbers per riser height, the first table the careful stepper will be
+judged against.
+
+| riser | risers climbed of 7 (mean, per seed) | stall score | datum − truth | first-contact error, n / RMS / beyond 3 cm | re-contact error, n / RMS / beyond 3 cm |
+|---|---|---|---|---|---|
+| 25 mm | 6.0 (6, 6, 5, 7) | 0.47 | −1.3 ± 3.0 cm | 1678 / 2.3 cm / 18 % | 733 / 2.1 cm / 14 % |
+| 38 mm | 3.8 (3, 4, 4, 4) | 0.55 | −1.1 ± 3.0 cm | 1456 / 2.3 cm / 21 % | 868 / 2.3 cm / 18 % |
+| 50 mm | 2.2 (1, 3, 3, 2) | 0.64 | −0.2 ± 2.9 cm | 1426 / 2.6 cm / 24 % | 985 / 2.5 cm / 22 % |
+
+The base walker climbs a flight of 25 mm risers in a minute (one seed the whole flight), half a flight of 38 mm and
+two of seven at 50 mm, where one seed never left the first riser; the stall score grades the three in order. The
+memory's numbers are the same at every height: the datum within 3 cm, the prediction 2.3–2.6 cm RMS on first
+contact, and re-contact better than first contact only where the body does not hang (25 mm: 2.1 cm, 14 % beyond 3 cm
+against 18 %) — the frame slides exactly where the stepper is needed. The bar for the registration lever is set by
+this table: re-contact under 1 cm at 50 mm, where the toes land on ground they already measured. Files: `picrawler_body.gd` (`_build_stairs`, `stairs_truth_y`, `_toe_world`, `up_body`, the `tm_*` log keys),
 `experiment_config.gd`, `cpp_core/include/ogma/body/Tof8Geometry.hpp`, `cpp_core/{include,src}/ogma/modules/TerrainMemory.*`
 (7 tests), `pi_host` (`up_body` with `--toe-y`), `configs/..._sim60_stairs.json` (in the launcher), `PROTOCOL.md`.
