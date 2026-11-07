@@ -5008,8 +5008,10 @@ func _surface_y_at(x: float, z: float) -> float:
 	return float(h.position.y) if not h.is_empty() else 0.0
 
 func _teleport_to_ramp() -> void:
-	if _gym_mode_active != "corridor":
-		_ui_notify("[teleport] the ramp only exists in the corridor gym (press 2)")
+	# The corridor's ramp by default; on the stairs and the terrain the same drop lands wherever TELEPORT_XZ says, on
+	# the surface there (2026-11-07: the way to put the body belly-up on a tread and watch the reset fire).
+	if _gym_mode_active not in ["corridor", "stairs", "terrain"]:
+		_ui_notify("[teleport] the drop exists in the corridor, stairs and terrain gyms (press 2 / 6)")
 		return
 	var tx: float = 0.0
 	var tz: float = 3.0   # hump peak by default
