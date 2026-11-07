@@ -1250,6 +1250,15 @@ ParamSchema MotorEPMv2::params_schema() const {
          "G4a (LiftDescent): a ProprioToken [front, rear] of multipliers on the phase-shaped swing lift, legs 0-1 and "
          "2-3.  Feedback (may lag a tick).  Empty = no subscription, byte-identical; until a token arrives the lift is unscaled.",
          ParamValue{std::string("")}, std::nullopt, std::nullopt},
+        {"swing_target_topic", ParamMutability::ConstructionOnly,
+         "The careful stepper's socket (2026-11-07): a ProprioToken [lift_mult, reach_m] x 4 (FootholdShaper over "
+         "TerrainMemory's foothold prediction).  lift_mult scales this leg's phase-shaped swing lift; reach_m shifts its "
+         "hip1 by reach_m x swing_reach_rad_per_m in the stroke's sign, taken up in swing and held through stance.  "
+         "Empty = no subscription, byte-identical.",
+         ParamValue{std::string("")}, std::nullopt, std::nullopt},
+        {"swing_reach_rad_per_m", ParamMutability::HotMutable,
+         "Hip1 radians per metre of requested reach (the toe's lever about hip1 along the body's forward, ~0.2 m x cos 45 deg -> 7).",
+         ParamValue{7.0}, std::nullopt, std::nullopt},
         {"leg_phase_lift_rear_mult", ParamMutability::HotMutable,
          "REAR SWING LIFT, as a multiple of the front (operator 2026-10-25: the front legs step over bars, the rear "
          "legs bind; terrain arena, 6 rad/s: swing-phase contact on 25 mm+ edges rear 57 % vs front 31 %).  Scales "
@@ -1593,6 +1602,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_lift_knee"] = leg_phase_lift_knee_;
     m["leg_phase_lift_rear_mult"] = leg_phase_lift_rear_mult_;
     m["lift_handle_topic"] = lift_handle_topic_;
+    m["swing_target_topic"] = swing_target_topic_; m["swing_reach_rad_per_m"] = swing_reach_rad_per_m_;
     m["jac_topic"] = jac_topic_; m["press_kin"] = press_kin_; m["press_kin_min"] = press_kin_min_;
     m["press_hip2_range"] = press_hip2_range_; m["press_knee_fold"] = press_knee_fold_; m["press_knee_hyperext"] = press_knee_hyperext_;
     m["leg_phase_lift_lead"] = leg_phase_lift_lead_;
@@ -1873,6 +1883,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "leg_phase_lift_knee", [&](auto const& v){ leg_phase_lift_knee_ = get_double(v, "leg_phase_lift_knee"); });
     apply_param(params, "leg_phase_lift_rear_mult", [&](auto const& v){ leg_phase_lift_rear_mult_ = get_double(v, "leg_phase_lift_rear_mult"); });
     apply_param(params, "lift_handle_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) lift_handle_topic_ = *p; });
+    apply_param(params, "swing_target_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) swing_target_topic_ = *p; });
+    apply_param(params, "swing_reach_rad_per_m", [&](auto const& v){ swing_reach_rad_per_m_ = get_double(v, "swing_reach_rad_per_m"); });
     apply_param(params, "jac_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) jac_topic_ = *p; });
     apply_param(params, "press_kin", [&](auto const& v){ press_kin_ = get_double(v, "press_kin"); });
     apply_param(params, "press_kin_min", [&](auto const& v){ press_kin_min_ = get_double(v, "press_kin_min"); });
@@ -2246,6 +2258,19 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
                 auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
                 if (!pt || pt->values.size() < 2) return;
                 lift_handle_front_ = pt->values[0]; lift_handle_rear_ = pt->values[1]; lift_handle_seen_ = true;
+            }));
+    }
+    // The careful stepper's socket: Feedback, empty = no subscription -> byte-identical.
+    if (!swing_target_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            swing_target_topic_, SubscriptionKind::Feedback,
+            [this](std::string_view /*topic*/, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+                if (!pt || pt->values.size() < 2 * n_legs_) return;
+                if (int(swing_lift_mult_.size()) != n_legs_) { swing_lift_mult_.assign(size_t(n_legs_), 1.0f); swing_reach_m_.assign(size_t(n_legs_), 0.0f); swing_reach_held_.assign(size_t(n_legs_), 0.0f); }
+                for (int i = 0; i < n_legs_; ++i) { swing_lift_mult_[size_t(i)] = pt->values[2 * i]; swing_reach_m_[size_t(i)] = pt->values[2 * i + 1]; }
+                swing_target_seen_ = true;
             }));
     }
     // PLAN-objective socket (PART III lever b) — the planner's band-gated posture
@@ -6286,6 +6311,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             }
             if (leg >= 2 && leg_phase_lift_rear_mult_ != 1.0) lscale *= float(leg_phase_lift_rear_mult_);   // rear legs
             if (lift_handle_seen_) lscale *= (leg < 2 ? lift_handle_front_ : lift_handle_rear_);           // G4a handle
+            if (swing_target_seen_ && leg < int(swing_lift_mult_.size())) lscale *= std::max(0.0f, swing_lift_mult_[size_t(leg)]);   // the careful stepper's per-leg lift
             y[1]     += float(leg_phase_lift_hip2_) * lift * lscale;
             y[m - 1] += float(leg_phase_lift_knee_) * lift * lscale;
             ext_lift_acc_ += double(lift); ++ext_lift_n_;
@@ -6814,6 +6840,14 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 ++ext_stroke_ticks_;
             }
             y[0] += (1.0f - pe) * amp * std::sin(stroke_ph + stroke_off) * (leg_phase_stroke_ > 0.0 ? conf_eff_ : 1.0f);
+        }
+        // The careful stepper's REACH: a per-leg hip1 bias in the stroke's sign, taken up while the leg swings (its phase's
+        // sin > 0) and held through stance, so the touchdown moves where the policy asks and a loaded foot is never dragged.
+        if (swing_target_seen_ && leg < int(swing_reach_held_.size()) && m >= 1) {
+            const bool swinging = leg < int(ext_seen_.size()) && ext_seen_[size_t(leg)] && ext_sin_[size_t(leg)] > 0.0f;
+            if (swinging) swing_reach_held_[size_t(leg)] = swing_reach_m_[size_t(leg)];
+            const float sgn_r = leg < int(stroke_signs_.size()) ? float(stroke_signs_[size_t(leg)]) : 1.0f;
+            y[0] += sgn_r * swing_reach_held_[size_t(leg)] * float(swing_reach_rad_per_m_);
         }
         // --- Per-leg propulsive-credit homeostat (functional L/R propulsion balance).
         // Credit = the hip1 motion component phase-aligned with the fore-aft power

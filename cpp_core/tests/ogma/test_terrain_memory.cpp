@@ -100,7 +100,7 @@ TEST(TerrainMemory, ATouchLowerThanPredictedIsAnErrorAndCorrectsTheMemoryStrongl
 TEST(TerrainMemory, NoFieldNoTouchesNoCrash_AndAVoxelAgesOut) {
     Fix f({{"max_age_ticks", ogma::ParamValue{int64_t{50}}}});
     f.run(1, nullptr, {0, 0, 0, 0}, kXZ, kY);
-    EXPECT_EQ(f.m.count(), 0); EXPECT_EQ(f.pred.size(), 20u);
+    EXPECT_EQ(f.m.count(), 0); EXPECT_EQ(f.pred.size(), 24u);
     auto field = synth(kH, 30.0);
     f.run(2, &field, {0, 0, 0, 0}, kXZ, kY);
     EXPECT_GT(f.m.count(), 30);
@@ -224,4 +224,23 @@ TEST(TerrainMemory, ATouchOnAnEdgeCellDoesNotMoveTheDatum) {
         if (gate > 0.0) { EXPECT_NEAR(f.m.datum(), 0.0, 1e-6) << "an edge cell: the datum holds"; EXPECT_GT(f.m.datum_edge_skips(), 0); }
         else EXPECT_LT(f.m.datum(), -0.02) << "no gate: the edge touch moved the body down 3 cm";
     }
+}
+
+TEST(TerrainMemory, ThePredictionCarriesItsSpread_AnEdgeReadsAsTheRiser) {
+    // leg 0's landing spot on the tread's interior: spread ~ 0; moved onto the tread's edge: spread ~ the riser
+    Fix f; auto field = synth(kH, 30.0, 0.05, 0.40, 0.60, 0.30);
+    uint64_t t = 1;
+    for (int k = 0; k < 10; ++k, ++t) f.run(t, &field, {0, 1, 1, 1}, kXZ, kY);
+    std::vector<float> xz = kXZ; xz[1] = 0.50f;                 // the tread's interior
+    std::vector<float> y = kY; y[0] = float(kFloorY + 0.05);
+    f.run(t++, &field, {1, 1, 1, 1}, xz, y); f.run(t++, &field, {0, 1, 1, 1}, xz, kY);
+    ASSERT_FLOAT_EQ(f.pred[2], 1.0f);
+    EXPECT_LT(f.pred[5], 0.02) << "interior: the pooled heights agree";
+    // a leg whose landings sit at the edge: its mean landing is at 0.40 (the face)
+    Fix g;
+    for (int k = 0; k < 10; ++k) g.run(uint64_t(k + 1), &field, {0, 1, 1, 1}, kXZ, kY);
+    std::vector<float> xz2 = kXZ; xz2[1] = 0.40f;
+    g.run(11, &field, {1, 1, 1, 1}, xz2, kY); g.run(12, &field, {0, 1, 1, 1}, xz2, kY);
+    ASSERT_FLOAT_EQ(g.pred[2], 1.0f);
+    EXPECT_GT(g.pred[5], 0.03) << "the edge: the pooled heights span the riser";
 }

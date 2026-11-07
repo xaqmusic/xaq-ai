@@ -52,7 +52,7 @@ ParamSchema TerrainMemory::params_schema() const {
         {"register_min_spread_m", ParamMutability::HotMutable, "The spread (sd) of the frame's heights needed: a flat floor registers nothing (and drifts harmlessly).", ParamValue{0.015}},
         {"datum_edge_max_m", ParamMutability::HotMutable, "A touch on known ground moves the datum only where the remembered heights around it (the 3x3 cells) spread less than this: a cell on a riser's edge is touched at two levels and must not move the body. 0 = no gate.", ParamValue{0.02}},
         {"load_topic",    ParamMutability::ConstructionOnly, "ProprioToken [4] foot load as a fraction of body weight: the datum moves only for a toe that comes to BEAR (a scrape on a riser face is not the body climbing). \"\" = every touch counts.", ParamValue{std::string("reality.proprio.foot_load")}},
-        {"predict_topic", ParamMutability::ConstructionOnly, "ProprioToken [h_pred, precision, has, fwd, lat] x 4: what each leg's next landing will meet, every tick.", ParamValue{std::string("predict.foothold")}},
+        {"predict_topic", ParamMutability::ConstructionOnly, "ProprioToken [h_pred, precision, has, fwd, lat, spread] x 4: what each leg's next landing will meet, every tick; spread = the range of the remembered heights pooled at the landing point (a riser's edge reads as the riser: uncertain by that much).", ParamValue{std::string("predict.foothold")}},
         {"error_topic",   ParamMutability::ConstructionOnly, "ProprioToken [e, valid] x 4: at a touch, h_touch - h_pred for that leg (0 otherwise).", ParamValue{std::string("predict.foothold_error")}},
         {"pitch_deg",   ParamMutability::HotMutable, "The field's mount: downward pitch (deg).", ParamValue{30.0}},
         {"sensor_x_m",  ParamMutability::HotMutable, "The field's mount in the body frame: x (+ = the body's left).", ParamValue{0.0}},
@@ -334,16 +334,16 @@ TerrainMemory::Prediction TerrainMemory::predict_at(double fwd, double lat) cons
     const double X = px + fwd * c - lat * s, Y = py + fwd * s + lat * c;
     const int64_t ix = int64_t(std::floor(X / voxel_m_)), iy = int64_t(std::floor(Y / voxel_m_));
     const int reach = int(std::ceil(predict_radius_m_ / voxel_m_));
-    double sw = 0, swh = 0;
+    double sw = 0, swh = 0, lo = 1e9, hi = -1e9;
     for (int64_t dx = -reach; dx <= reach; ++dx) for (int64_t dy = -reach; dy <= reach; ++dy) {
         auto it = vox_.find(Key{ix + dx, iy + dy});
         if (it == vox_.end()) continue;
         const double cx = (double(ix + dx) + 0.5) * voxel_m_, cy = (double(iy + dy) + 0.5) * voxel_m_;
         if (std::hypot(cx - X, cy - Y) > predict_radius_m_ + 0.5 * voxel_m_) continue;
         const double w = 1.0 / std::max(1e-9, it->second.var);
-        sw += w; swh += w * it->second.h;
+        sw += w; swh += w * it->second.h; lo = std::min(lo, it->second.h); hi = std::max(hi, it->second.h);
     }
-    if (sw > 0) { p.h = swh / sw - datum_; p.prec = sw; p.has = true; }
+    if (sw > 0) { p.h = swh / sw - datum_; p.prec = sw; p.has = true; p.spread = hi - lo; }
     return p;
 }
 
@@ -377,12 +377,12 @@ void TerrainMemory::tick(uint64_t tick_id) {
     // the predictions, every tick
     auto out = std::make_shared<ProprioToken>();
     out->tick_id = tick_id; out->producer_id = id().empty() ? std::string("terrain_memory") : std::string(id()); out->sensor = "foothold";
-    out->values = Eigen::VectorXf(20);
+    out->values = Eigen::VectorXf(24);
     for (int i = 0; i < 4; ++i) {
         pred_[size_t(i)] = land_n_[size_t(i)] > 0 ? predict_at(land_mean_[size_t(i)][0], land_mean_[size_t(i)][1]) : Prediction{};
         auto const& p = pred_[size_t(i)];
-        out->values[5 * i] = float(p.h); out->values[5 * i + 1] = float(p.prec); out->values[5 * i + 2] = p.has ? 1.0f : 0.0f;
-        out->values[5 * i + 3] = float(p.fwd); out->values[5 * i + 4] = float(p.lat);
+        out->values[6 * i] = float(p.h); out->values[6 * i + 1] = float(p.prec); out->values[6 * i + 2] = p.has ? 1.0f : 0.0f;
+        out->values[6 * i + 3] = float(p.fwd); out->values[6 * i + 4] = float(p.lat); out->values[6 * i + 5] = float(p.spread);
     }
     bus_->publish(predict_topic_, out);
     auto eo = std::make_shared<ProprioToken>();
@@ -409,7 +409,7 @@ nlohmann::json TerrainMemory::diag_snapshot() const {
     for (auto const& b : body_voxels(diag_max_))
         vs.push_back({std::round(b.fwd * 1e3) / 1e3, std::round(b.lat * 1e3) / 1e3, std::round(b.h * 1e4) / 1e4, std::round(b.var * 1e6) / 1e6, b.n_field, b.n_touch, b.cls, b.age});
     nlohmann::json pr = nlohmann::json::array(), er = nlohmann::json::array(), rms = nlohmann::json::array(), rec = nlohmann::json::array();
-    for (int i = 0; i < 4; ++i) { pr.push_back({pred_[size_t(i)].h, pred_[size_t(i)].prec, pred_[size_t(i)].has ? 1 : 0, pred_[size_t(i)].fwd, pred_[size_t(i)].lat});
+    for (int i = 0; i < 4; ++i) { pr.push_back({pred_[size_t(i)].h, pred_[size_t(i)].prec, pred_[size_t(i)].has ? 1 : 0, pred_[size_t(i)].fwd, pred_[size_t(i)].lat, pred_[size_t(i)].spread});
                                   er.push_back(err_valid_[size_t(i)] ? err_last_[size_t(i)] : 0.0); rms.push_back(std::sqrt(err_ms_[size_t(i)])); }
     for (auto const& r : recent_) { nlohmann::json row = nlohmann::json::array(); for (float x : r) row.push_back(x); rec.push_back(row); }
     return nlohmann::json{{"voxels", vs}, {"count", int(vox_.size())}, {"frames", frames_}, {"touches", touches_}, {"floor_ok", plane_.ok},

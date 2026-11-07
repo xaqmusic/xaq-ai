@@ -13123,6 +13123,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		if fresh.size() > 0:
 			line["tm_events"] = fresh
 			_tm_last_tick = float((fresh[fresh.size() - 1] as Array)[0])
+	if metrics.has("foothold"):
+		# the careful stepper's policy (2026-11-07): per-leg lift multiplier and reach shift it asks of the gait, and the rise it predicts
+		var fs: Dictionary = metrics["foothold"]
+		for key in ["lift", "reach", "rise"]:
+			var arr: Array = fs.get(key, [])
+			if arr.size() >= 4: line["fs_" + key] = [snappedf(float(arr[0]), 0.001), snappedf(float(arr[1]), 0.001), snappedf(float(arr[2]), 0.001), snappedf(float(arr[3]), 0.001)]
+		line["fs_lift_ticks"] = int(fs.get("lift_ticks", 0)); line["fs_shift_ticks"] = int(fs.get("shift_ticks", 0))
 	if metrics.has("tof8_range"):
 		# the field reduced to the nearest feature ahead (2026-11-05): what StuckSense's closing channel reads
 		var tr: Dictionary = metrics["tof8_range"]

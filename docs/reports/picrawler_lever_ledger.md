@@ -10394,3 +10394,31 @@ decide the edge's height to a centimetre. That is the carefulness the operator a
 information is. The datum's lag is accepted as a known defect of the instrument for now (the predictions it feeds
 are consistent with each other; the lag biases only the comparison with the truth). Files: `TerrainMemory.*`
 (`datum_edge_max_m`, the field source removed), 9 tests, `_sim60_stairs`.
+
+### 2026-11-07 — STEP 2, THE FIRST POLICY THAT ACTS ON THE PREDICTION (`FootholdShaper` → `MotorEPMv2 swing_target_topic`: per-leg swing lift from the predicted rise, an edge landing moved 4 cm forward), form 1 on the fixed flights (25 / 38 / 50 mm × 4 paired seeds): a REGRESSION at 38 and 50 mm — lift alone −0.75 risers at 38 (t −3.5) and −1.0 at 50; reach alone +0.5 at 25 (t +2.0) and −1.0 at 38; both −1.0 at 50 — and the diagnosis is in the log: the lift went to the FRONT legs, which never hang, and the reach was on half the time — `REGRESSION` (form 1; form 2 running)
+
+| arm | 25 mm risers of 7 | 38 mm | 50 mm | stall score at 50 |
+|---|---|---|---|---|
+| the instrument alone (base) | 6.0 | 3.8 | 2.2 | 0.64 |
+| lift from the prediction | 6.0 | 3.0 | 1.2 | 0.66 |
+| reach onto the tread | 6.5 | 2.8 | 1.5 | 0.67 |
+| both | 5.5 | 3.8 | 1.2 | 0.68 |
+
+**The socket** (`MotorEPMv2 swing_target_topic`, Feedback, empty = byte-identical; 36 motor tests unchanged): a
+ProprioToken [lift_mult, reach_m] × 4; the multiplier scales that leg's phase-shaped swing lift beside the pair
+handle; the reach is a hip1 bias in the leg's stroke sign, taken up while the leg swings and HELD through stance so a
+loaded foot is never dragged by a changing bias. **The policy** (`FootholdShaper`, gains default 0): lift 1 + 20 ×
+rise (×2 at 5 cm, capped 2.5), ramped by the prediction's precision; reach 4 cm forward when the prediction's spread
+exceeds the edge threshold.
+
+**What the 38 mm logs say about form 1.** The lift fired on 7 % / 17 % of rows for the front pair and 3 % / 12 % for
+the rear, and the rear toes stand a step BELOW the chassis level 40–47 % of the time in the base runs (the hang the
+operator described) while the front toes never do: the policy lifted the legs that did not need it. The cause is the
+reference the rise was measured from — the planted toes' MEDIAN, which on a straddled riser sits between the two
+levels, so a rear toe a step below saw no rise and a front toe already up saw one. The reach was on for 49 % of
+leg-rows at the 3 cm spread threshold (the first smoke, at 2 cm, had it on always): on a staircase the memory's
+pooled heights span more than 3 cm near every riser, so a "move onto the tread" became a standing hip1 bias on half
+the legs, a different gait rather than an edge policy. **Form 2, running:** the rise measured from where THIS leg's
+toe last stood (its height at its last touchdown), which gives a hung rear leg its full riser and a front leg
+already up nothing; the reach gated on an up-edge (spread AND rise). The arms are the same three; the base is the
+same instrument run.

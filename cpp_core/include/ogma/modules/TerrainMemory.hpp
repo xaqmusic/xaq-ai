@@ -52,7 +52,7 @@ public:
 
     struct Voxel { double h = 0.0, var = 1.0; int n_field = 0, n_touch = 0; uint64_t first_t = 0, last_t = 0; int cls = 0; };
     struct BodyVoxel { double fwd, lat, h, var; int n_field, n_touch, cls; uint64_t age; };
-    struct Prediction { double h = 0.0, prec = 0.0, fwd = 0.0, lat = 0.0; bool has = false; };
+    struct Prediction { double h = 0.0, prec = 0.0, fwd = 0.0, lat = 0.0, spread = 0.0; bool has = false; };   // spread: the range of the pooled heights (an edge reads as the riser)
     // ---- for tests ----
     std::vector<BodyVoxel> body_voxels(int n = 0) const;
     Prediction const& prediction(int leg) const { return pred_[size_t(leg)]; }

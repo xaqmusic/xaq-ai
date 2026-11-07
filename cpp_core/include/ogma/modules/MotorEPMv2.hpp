@@ -539,6 +539,15 @@ private:
     std::string lift_handle_topic_;
     float lift_handle_front_ = 1.0f, lift_handle_rear_ = 1.0f;
     bool  lift_handle_seen_ = false;
+    // THE CAREFUL STEPPER'S SOCKET (swing_target_topic, 2026-11-07): a ProprioToken [lift_mult, reach_m] x 4 from a
+    // foothold policy (FootholdShaper over TerrainMemory's prediction).  lift_mult scales THIS leg's phase-shaped swing
+    // lift (beside the pair handle); reach_m shifts this leg's hip1 by reach_m x swing_reach_rad_per_m in the leg's
+    // stroke sign, taken up during swing and HELD through stance (a loaded foot is never dragged by a changing bias):
+    // where the foot is put down.  Empty topic = no subscription, byte-identical.
+    std::string swing_target_topic_;
+    double swing_reach_rad_per_m_ = 7.0;
+    std::vector<float> swing_lift_mult_, swing_reach_m_, swing_reach_held_;
+    bool swing_target_seen_ = false;
     // Kinematics-aware press (press_kin): the host's per-leg lift gains and the action-to-angle ranges.
     std::string jac_topic_;
     std::vector<float> jac_;
