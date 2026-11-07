@@ -50,6 +50,7 @@ ParamSchema TerrainMemory::params_schema() const {
         {"register_range_m", ParamMutability::HotMutable, "The forward shifts searched, +/- (m), in half-voxel steps.", ParamValue{0.15}},
         {"register_min_points", ParamMutability::HotMutable, "Returns of the frame that must land on remembered ground for a match to count.", ParamValue{int64_t{16}}},
         {"register_min_spread_m", ParamMutability::HotMutable, "The spread (sd) of the frame's heights needed: a flat floor registers nothing (and drifts harmlessly).", ParamValue{0.015}},
+        {"datum_edge_max_m", ParamMutability::HotMutable, "A touch on known ground moves the datum only where the remembered heights around it (the 3x3 cells) spread less than this: a cell on a riser's edge is touched at two levels and must not move the body. 0 = no gate.", ParamValue{0.02}},
         {"load_topic",    ParamMutability::ConstructionOnly, "ProprioToken [4] foot load as a fraction of body weight: the datum moves only for a toe that comes to BEAR (a scrape on a riser face is not the body climbing). \"\" = every touch counts.", ParamValue{std::string("reality.proprio.foot_load")}},
         {"predict_topic", ParamMutability::ConstructionOnly, "ProprioToken [h_pred, precision, has, fwd, lat] x 4: what each leg's next landing will meet, every tick.", ParamValue{std::string("predict.foothold")}},
         {"error_topic",   ParamMutability::ConstructionOnly, "ProprioToken [e, valid] x 4: at a touch, h_touch - h_pred for that leg (0 otherwise).", ParamValue{std::string("predict.foothold_error")}},
@@ -90,7 +91,8 @@ ParamMap TerrainMemory::current_params() const {
             {"diag_max", ParamValue{int64_t(diag_max_)}}, {"recent_max", ParamValue{int64_t(recent_max_)}}, {"up_topic", ParamValue{up_topic_}}, {"datum_gain", ParamValue{datum_gain_}}, {"load_topic", ParamValue{load_topic_}},
             {"datum_min_load", ParamValue{datum_min_load_}}, {"datum_step_max_m", ParamValue{datum_step_max_m_}},
             {"stall_topic", ParamValue{stall_topic_}}, {"stall_gate", ParamValue{stall_gate_}}, {"register_gain", ParamValue{register_gain_}}, {"datum_window", ParamValue{int64_t(datum_window_)}},
-            {"register_range_m", ParamValue{register_range_m_}}, {"register_min_points", ParamValue{int64_t(register_min_points_)}}, {"register_min_spread_m", ParamValue{register_min_spread_m_}}};
+            {"register_range_m", ParamValue{register_range_m_}}, {"register_min_points", ParamValue{int64_t(register_min_points_)}}, {"register_min_spread_m", ParamValue{register_min_spread_m_}},
+            {"datum_edge_max_m", ParamValue{datum_edge_max_m_}}};
 }
 
 void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
@@ -102,7 +104,7 @@ void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     for (auto const& k : {"pitch_deg", "sensor_x_m", "sensor_y_m", "sensor_z_m", "max_range_m", "thing_min_m", "fit_rows", "fit_slope_max", "voxel_m",
                           "max_voxels", "max_age_ticks", "sigma_field_m", "sigma_touch_m", "predict_tau_touches", "predict_radius_m", "plane_tau_ticks",
-                          "err_alpha", "diag_max", "recent_max", "datum_gain", "datum_min_load", "datum_step_max_m", "stall_gate", "register_gain", "register_range_m", "register_min_points", "register_min_spread_m", "datum_window"})
+                          "err_alpha", "diag_max", "recent_max", "datum_gain", "datum_min_load", "datum_step_max_m", "stall_gate", "register_gain", "register_range_m", "register_min_points", "register_min_spread_m", "datum_window", "datum_edge_max_m"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which) {
         if (topic.empty()) return;
@@ -138,6 +140,7 @@ void TerrainMemory::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "stall_gate")    stall_gate_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "register_gain") register_gain_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "datum_window")  datum_window_ = std::max(1, int(get_double(value, k)));
+    else if (k == "datum_edge_max_m") datum_edge_max_m_ = std::max(0.0, get_double(value, k));
     else if (k == "register_range_m") register_range_m_ = std::max(0.0, get_double(value, k));
     else if (k == "register_min_points") register_min_points_ = std::max(1, int(get_double(value, k)));
     else if (k == "register_min_spread_m") register_min_spread_m_ = std::max(0.0, get_double(value, k));
@@ -187,7 +190,7 @@ void TerrainMemory::observe(double X, double Y, double h, double sigma, int cls,
     auto it = vox_.find(k);
     if (it == vox_.end()) {
         evict_if_full();
-        Voxel v; v.h = h; v.var = sigma * sigma; v.cls = cls; v.last_t = tick_id; (touch ? v.n_touch : v.n_field) = 1;
+        Voxel v; v.h = h; v.var = sigma * sigma; v.cls = cls; v.first_t = tick_id; v.last_t = tick_id; (touch ? v.n_touch : v.n_field) = 1;
         vox_.emplace(k, v); return;
     }
     Voxel& v = it->second;
@@ -290,6 +293,14 @@ void TerrainMemory::ingest_touch(int leg, double fwd, double lat, double h, uint
         const double innov = (h + datum_) - it->second.h;     // > 0: the body reads higher than the ground it knew -> it is lower
         it->second.last_t = tick_id; ++it->second.n_touch;
         it->second.var = std::max(sigma_touch_m_ * sigma_touch_m_, it->second.var * 0.5);
+        if (datum_edge_max_m_ > 0.0) {   // only flat known ground may move the body: an edge cell is ambiguous by the riser
+            const Key k0 = it->first; double lo = 1e9, hi = -1e9;
+            for (int64_t dx = -1; dx <= 1; ++dx) for (int64_t dy = -1; dy <= 1; ++dy) {
+                auto n = vox_.find(Key{k0.ix + dx, k0.iy + dy}); if (n == vox_.end()) continue;
+                lo = std::min(lo, n->second.h); hi = std::max(hi, n->second.h);
+            }
+            if (hi - lo > datum_edge_max_m_) { ++datum_edge_skips_; return; }
+        }
         if (load_topic_.empty() || !have_load_) datum_move(innov);
         else { pending_datum_[size_t(leg)] = 25; pending_innov_[size_t(leg)] = innov; }   // the toe must come to bear first
         return;
@@ -403,6 +414,7 @@ nlohmann::json TerrainMemory::diag_snapshot() const {
     for (auto const& r : recent_) { nlohmann::json row = nlohmann::json::array(); for (float x : r) row.push_back(x); rec.push_back(row); }
     return nlohmann::json{{"voxels", vs}, {"count", int(vox_.size())}, {"frames", frames_}, {"touches", touches_}, {"floor_ok", plane_.ok},
                           {"datum", datum_}, {"datum_updates", datum_updates_}, {"have_up", have_up_}, {"frame", {ox_, oy_, oyaw_}}, {"stall", stall_},
+                          {"datum_edge_skips", datum_edge_skips_},
                           {"reg_applied", reg_applied_}, {"reg_count", reg_count_}, {"reg_last_shift", reg_last_shift_}, {"reg_last_matched", reg_last_matched_}, {"reg_last_ratio", reg_last_gain_ratio_},
                           {"plane", {plane_.a, plane_.b, plane_.c}}, {"prediction", pr}, {"err_last", er}, {"err_rms", rms}, {"n_err", n_err_}, {"recent", rec}};
 }

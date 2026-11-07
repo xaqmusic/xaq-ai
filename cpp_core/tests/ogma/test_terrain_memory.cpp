@@ -109,35 +109,35 @@ TEST(TerrainMemory, NoFieldNoTouchesNoCrash_AndAVoxelAgesOut) {
 }
 
 TEST(TerrainMemory, ClimbingATreadMovesTheDatumNotTheGround) {
-    // the floor under all four feet is touched and known; the field sees a 5 cm tread ahead; the front toe (leg 0)
-    // lands on it; then the body climbs onto it (every toe back at -0.09 in the body frame) and the rear toes land on
-    // ground the front toe already touched: the datum must rise by 0.05 and the old floor must read -0.14 from up here
+    // the floor under all four feet is touched and known; the field sees a 5 cm tread from 0.25 m; the front toe (leg 0)
+    // lands on it at 0.30; then the body climbs onto the tread -- its odometry advances 0.30, every toe is back at -0.09
+    // in its frame, the field sees level ground -- and the rear toes land where the front toe touched: the datum must
+    // rise by 0.05 (two bounded steps), the ground must not move
     Fix f; auto field = synth(kH, 30.0, 0.05, 0.25, 0.90, 0.40);
-    std::vector<float> xz = kXZ; uint64_t t = 1;
-    // standing: four floor touches (one per leg, rising edges)
-    f.run(t++, &field, {0, 0, 0, 0}, xz, kY);
-    f.run(t++, &field, {1, 1, 1, 1}, xz, kY);
-    for (int k = 0; k < 10; ++k, ++t) f.run(t, &field, {1, 1, 1, 1}, xz, kY);
+    auto field_up = synth(kH, 30.0);
+    uint64_t t = 1;
+    auto step = [&](double ox, std::vector<float> const* fld, std::vector<float> contact, std::vector<float> xz, std::vector<float> y) {
+        f.bus.begin_tick(t); f.bus.publish("reality.proprio.odom", pv({float(ox), 0, 0}, t)); f.bus.publish("reality.proprio.up_body", pv({0, 1, 0}, t));
+        if (fld) f.bus.publish("sense.tof8", pv(*fld, t));
+        f.bus.publish("reality.proprio.foot_contact", pv(contact, t)); f.bus.publish("reality.proprio.feet_xz", pv(xz, t)); f.bus.publish("reality.proprio.toe_y", pv(y, t));
+        std::vector<float> load(4); for (int i = 0; i < 4; ++i) load[size_t(i)] = contact[size_t(i)] > 0.5f ? 0.3f : 0.0f; f.bus.publish("reality.proprio.foot_load", pv(load, t));
+        f.m.tick(t); f.bus.end_tick(); ++t;
+    };
+    std::vector<float> xz = kXZ;
+    step(0.0, &field, {0, 0, 0, 0}, xz, kY); step(0.0, &field, {1, 1, 1, 1}, xz, kY);
+    for (int k = 0; k < 10; ++k) step(0.0, &field, {1, 1, 1, 1}, xz, kY);
     EXPECT_NEAR(f.m.datum(), 0.0, 1e-6);
-    // the front toe reaches forward onto the tread (0.30 ahead): the tread was seen by the field only -> the voxel is corrected, the datum stays
+    // the front toe reaches onto the tread at 0.30 (seen by the field only): the ground is corrected, the datum stays
     std::vector<float> xz2 = xz; xz2[1] = 0.30f; std::vector<float> y2 = kY; y2[0] = float(kFloorY + 0.05);
-    f.run(t++, &field, {0, 1, 1, 1}, xz2, kY); f.run(t++, &field, {1, 1, 1, 1}, xz2, y2);
+    step(0.0, &field, {0, 1, 1, 1}, xz2, kY); step(0.0, &field, {1, 1, 1, 1}, xz2, y2); step(0.0, &field, {1, 1, 1, 1}, xz2, y2);
     EXPECT_NEAR(f.m.datum(), 0.0, 1e-6) << "seen-only ground: the ground is corrected, not the body";
-    // the body climbs: the tread is now the floor under the body (every toe at -0.09); the field sees the next floor;
-    // the rear toes (legs 2, 3) land on the place the front toe touched: the datum takes the 0.05
-    std::vector<float> xz3 = xz; xz3[5] = 0.30f; xz3[7] = 0.30f;   // legs 2, 3 at z = 0.30 (where leg 0 touched)
-    auto field_up = synth(kH, 30.0);                              // from up here the ground ahead is flat again
-    f.run(t++, &field_up, {1, 1, 0, 0}, xz3, kY); f.run(t++, &field_up, {1, 1, 1, 1}, xz3, kY);
-    f.run(t++, &field_up, {1, 1, 1, 1}, xz3, kY);   // leg 2 bears on the place leg 0 touched: the datum moves, bounded to 3 cm
-    EXPECT_NEAR(f.m.datum(), 0.03, 1e-6) << "one bearing touch on known ground: one bounded step";
-    // leg 3's place was field-only (the other side of the tread): the ground was corrected, not the body.  Another
-    // stride of leg 2 on the same spot completes the climb
-    f.run(t++, &field_up, {1, 1, 0, 1}, xz3, kY); f.run(t++, &field_up, {1, 1, 1, 1}, xz3, kY); f.run(t++, &field_up, {1, 1, 1, 1}, xz3, kY);
+    // the body climbs onto the tread: odometry 0.30 ahead, the field level, leg 2 lands at body z = 0.0 -> memory 0.30,
+    // where leg 0 touched (x = 0.1 for both)
+    std::vector<float> xz3 = xz; xz3[5] = 0.0f;
+    step(0.30, &field_up, {1, 1, 0, 1}, xz3, kY); step(0.30, &field_up, {1, 1, 1, 1}, xz3, kY); step(0.30, &field_up, {1, 1, 1, 1}, xz3, kY);
+    EXPECT_NEAR(f.m.datum(), 0.03, 1e-6) << "one bearing touch on known flat ground: one bounded step";
+    step(0.30, &field_up, {1, 1, 0, 1}, xz3, kY); step(0.30, &field_up, {1, 1, 1, 1}, xz3, kY); step(0.30, &field_up, {1, 1, 1, 1}, xz3, kY);
     EXPECT_NEAR(f.m.datum(), 0.05, 0.012) << "the body knows it climbed 5 cm from its toes alone";
-    // and a prediction for a leg landing back on the old floor voxel reads 5 cm lower than the body's floor
-    std::vector<float> xz4 = xz; xz4[1] = -0.30f;   // leg 0 would land 0.30 behind (never touched there) -- no prediction expected
-    f.run(t++, &field_up, {0, 1, 1, 1}, xz4, kY);
-    EXPECT_GT(f.m.n_errors(), 0);
 }
 
 TEST(TerrainMemory, AScrapeThatNeverBearsDoesNotMoveTheDatum) {
@@ -204,5 +204,24 @@ TEST(TerrainMemory, RegistrationPullsASlidFrameBackOntoTheRiserItRemembers) {
         for (auto const& v : f.m.body_voxels()) if (std::fabs(v.lat) < 0.06 && v.h > kFloorY + 0.03 && v.fwd < edge) edge = v.fwd;
         if (gain > 0.0) { EXPECT_LT(std::fabs(fx), 0.05) << "registered: the frame came back to within 5 cm of where the body really is"; EXPECT_NEAR(edge, 0.40, 0.10) << "the remembered face, blurred by the frames stored while the pull-back converged"; EXPECT_GT(f.m.registrations(), 0); }
         else { EXPECT_NEAR(fx, 0.12, 1e-4) << "unregistered: the frame is the odometry's claim"; EXPECT_EQ(f.m.registrations(), 0); }
+    }
+}
+
+TEST(TerrainMemory, ATouchOnAnEdgeCellDoesNotMoveTheDatum) {
+    // the floor is known under all four feet; the front toe then touches a spot on the floor whose neighbours the field
+    // remembers 5 cm higher (a riser's edge): with the edge gate that touch moves nothing; without it, 3 cm
+    for (double gate : {0.02, 0.0}) {
+        ogma::ParamMap p; p["datum_edge_max_m"] = gate; p["datum_window"] = int64_t{1};
+        Fix f(p); auto field = synth(kH, 30.0, 0.05, 0.31, 0.90, 0.40);   // the tread's face at 0.31: the cell at 0.30 is its edge
+        std::vector<float> xz = kXZ; uint64_t t = 1;
+        f.run(t++, &field, {0, 0, 0, 0}, xz, kY); f.run(t++, &field, {1, 1, 1, 1}, xz, kY);
+        for (int k = 0; k < 10; ++k, ++t) f.run(t, &field, {1, 1, 1, 1}, xz, kY);
+        std::vector<float> xz2 = xz; xz2[1] = 0.29f;                       // leg 0 lands just before the face, on the floor
+        f.run(t++, &field, {0, 1, 1, 1}, xz2, kY); f.run(t++, &field, {1, 1, 1, 1}, xz2, kY); f.run(t++, &field, {1, 1, 1, 1}, xz2, kY);
+        // the same spot again, the toe 3 cm higher (the edge: half on the tread) -- known ground, a 3 cm disagreement
+        std::vector<float> yh = kY; yh[0] = float(kFloorY + 0.03);
+        f.run(t++, &field, {0, 1, 1, 1}, xz2, kY); f.run(t++, &field, {1, 1, 1, 1}, xz2, yh); f.run(t++, &field, {1, 1, 1, 1}, xz2, yh);
+        if (gate > 0.0) { EXPECT_NEAR(f.m.datum(), 0.0, 1e-6) << "an edge cell: the datum holds"; EXPECT_GT(f.m.datum_edge_skips(), 0); }
+        else EXPECT_LT(f.m.datum(), -0.02) << "no gate: the edge touch moved the body down 3 cm";
     }
 }

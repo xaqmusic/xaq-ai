@@ -10359,3 +10359,38 @@ plane fit's half-centimetre, independent of the toes; fused with the touch estim
 jitter out, which the table says is most of what remains. Then the registration's shift fed back to the stall
 sense as the legs' measured overclaim. Files: `TerrainMemory.*` (`register_*`, `datum_window`; 8 tests),
 `_sim60_stairs` (gain 0.5, window 3), the session's `stairs_table*.py`.
+
+### 2026-11-07 — THE DATUM'S SECOND SOURCE: the field CANNOT be one (`NULL` by geometry), and a flat-ground gate on the touch source takes the worst re-contacts out without reaching the bar (`PARTIAL`; fixed flights, 4 paired seeds per height)
+
+**The field as a datum source, built and withdrawn.** The idea: every frame re-observes ground the memory stored
+from an earlier, lower vantage, and the remembered height minus that ground's height in the body's frame now is the
+climb since. Built with an age guard and a median; the trace through the test scenario showed the two reasons it
+cannot work on this body. The only ground the field re-sees at any moment is ground it stored itself within the
+last second, at the current datum, which votes zero and outnumbers everything older; and the ground the toes
+measured — the one independent height — falls behind the body before the field, which looks 17 cm and more ahead,
+could ever see it. The climb is measurable only through the toes, as the bearing-touch rule already does; the code
+is removed and the reasoning kept here so the next person does not rebuild it.
+
+**The flat-ground gate** (`datum_edge_max_m` 0.02, default on): a touch on known ground moves the datum only where
+the remembered heights in the surrounding 3 × 3 cells spread under 2 cm — a cell on a riser's edge is touched at two
+levels and disagrees by the riser. Nine tests, including one in which an edge touch 3 cm high moves nothing with
+the gate and 3 cm without it.
+
+| arm (3 cm voxels) | 50 mm first contact | 50 mm re-contact | 25 mm re-contact | datum − truth at 50 mm |
+|---|---|---|---|---|
+| no registration (the morning) | 2.6 cm RMS, 24 % beyond 3 cm | 2.5 cm, 22 % | 2.1 cm, 14 % | −0.2 ± 2.9 cm |
+| registration + 3-touch datum | 2.4 cm, 20 % | 2.3 cm, 20 % | 1.8 cm, 10 % | −4.8 ± 4.1 cm |
+| + the flat-ground gate | 2.2 cm, 16 % | 2.1 cm, 16 % | 1.8 cm, 9 % | −6.3 ± 3.6 cm |
+
+**Reading.** Each lever that makes the datum more careful also makes it later: the touches it declines are the
+first touches on a new tread, near its edge, which carry the climb, so the body's height estimate lags the truth by
+6–8 cm with the gate on and the error beyond 3 cm falls from 22 % to 16 % at 50 mm. The RMS stays near 2 cm in
+every arm, which is where two floors meet: the field's own precision at first contact, and at re-contact the
+ambiguity of a 3 cm cell on an edge that the gate removes from the datum but not from the prediction. The 1 cm bar
+is not reached by any datum lever. **What this says about step 2:** the prediction should carry its local spread
+(the 3 × 3 heights' range at the predicted landing point) beside its height and precision, so the stepper knows a
+landing is on an edge and treats it as what it is — uncertain by the riser — rather than the memory being asked to
+decide the edge's height to a centimetre. That is the carefulness the operator asked for, placed where the
+information is. The datum's lag is accepted as a known defect of the instrument for now (the predictions it feeds
+are consistent with each other; the lag biases only the comparison with the truth). Files: `TerrainMemory.*`
+(`datum_edge_max_m`, the field source removed), 9 tests, `_sim60_stairs`.

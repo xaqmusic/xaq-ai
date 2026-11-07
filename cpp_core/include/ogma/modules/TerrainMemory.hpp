@@ -50,7 +50,7 @@ public:
     void on_param_change(std::string_view key, ParamValue const& value) override;
     nlohmann::json diag_snapshot() const override;
 
-    struct Voxel { double h = 0.0, var = 1.0; int n_field = 0, n_touch = 0; uint64_t last_t = 0; int cls = 0; };
+    struct Voxel { double h = 0.0, var = 1.0; int n_field = 0, n_touch = 0; uint64_t first_t = 0, last_t = 0; int cls = 0; };
     struct BodyVoxel { double fwd, lat, h, var; int n_field, n_touch, cls; uint64_t age; };
     struct Prediction { double h = 0.0, prec = 0.0, fwd = 0.0, lat = 0.0; bool has = false; };
     // ---- for tests ----
@@ -60,6 +60,7 @@ public:
     bool   last_error_valid(int leg) const { return err_valid_[size_t(leg)]; }
     double rms_error(int leg) const { return std::sqrt(err_ms_[size_t(leg)]); }
     double datum() const { return datum_; }
+    int    datum_edge_skips() const { return datum_edge_skips_; }
     double registration_applied() const { return reg_applied_; }
     int    registrations() const { return reg_count_; }
     void   frame(double& x, double& y, double& yaw) const { x = ox_; y = oy_; yaw = oyaw_; }
@@ -98,6 +99,11 @@ private:
     // the frame.  Only when a step is in view (the frame's heights spread) and enough of the frame lands on remembered
     // ground.  0 = off (byte-identical).
     double register_gain_ = 0.0, register_range_m_ = 0.15, register_min_spread_m_ = 0.015; int register_min_points_ = 16;
+    // A datum move is allowed only on known ground that is locally FLAT: a voxel on a riser's edge is touched at two levels
+    // and disagrees by the riser (2026-11-07 pm: the datum's jitter against the truth was 3-4 cm, most of the re-contact
+    // error).  The field was tried as the datum's second source and cannot be one: the only ground it re-sees is ground it
+    // stored itself at the current datum, and ground the toes measured falls behind the body before the field looks there.
+    double datum_edge_max_m_ = 0.02;
     double reg_last_shift_ = 0.0, reg_applied_ = 0.0; int reg_count_ = 0, reg_last_matched_ = 0; double reg_last_gain_ratio_ = 1.0;
     double stall_gate_ = 1.0;   // the memory's frame advances by the odometry's increment x (1 - stall_gate x stall): a body that is
                                 // held does not move, whatever its legs claim (the admitted stall sense, 2026-11-07)
@@ -110,7 +116,7 @@ private:
     double ox_ = 0, oy_ = 0, oyaw_ = 0;          // the memory's own frame: the odometry's yaw, its translation gated by the stall
     double raw_ox_ = 0, raw_oy_ = 0; bool have_raw_odom_ = false; double stall_ = 0.0;
     std::array<double, 3> up_{0.0, 1.0, 0.0}; bool have_up_ = false;
-    double datum_ = 0.0; int datum_updates_ = 0;   // b: the body's height above the datum
+    double datum_ = 0.0; int datum_updates_ = 0, datum_edge_skips_ = 0;   // b: the body's height above the datum
     std::deque<double> datum_innov_;               // the last datum_window bearing innovations: the datum moves toward their MEDIAN
     int datum_window_ = 5;                         // (a toe on a voxel straddling a riser's edge disagrees by the riser; one such touch must not move the body)
     // the floor
