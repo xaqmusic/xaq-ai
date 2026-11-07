@@ -600,7 +600,7 @@ func _process(_delta: float) -> void:
 	var hint_run: String = "%s%s%s%s%s   [3] hump%s%s%s%s" % [
 		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint, trim_hint,
 		jb_hint + ts_hint, seed_hint]
-	var hint_view: String = "%s%s%s%s%s%s%s%s%s%s   [,/.] time  [/] 1x   [`] graph   [F1/F2] clip   [F5] save   [F9] load   [ESC] quit" % [
+	var hint_view: String = "%s%s%s%s%s%s%s%s%s%s%s   [,/.] time  [/] 1x   [`] graph   [F1/F2] clip   [F5] save   [F9] load   [ESC] quit" % [
 		panels_hint, mpanel_hint, abl_hint, cc_hint, imu_hint, hud_hint, path_hint, plan_hint,
 		clouds_hint, tof8_hint, vis_hint]
 	var hint_line: String = hint_run + "\n" + hint_view

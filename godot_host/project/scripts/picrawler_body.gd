@@ -7303,7 +7303,14 @@ func _step_one() -> void:
 		# _chassis_top_local + (max_height - REF), rounds to 0.030000000000000002.
 		var inverted_ground_h: float = auto_reset_max_height \
 			+ (_chassis_top_local - _LEGACY_INVERTED_REST_H)
-		if chassis_tilt > auto_reset_tilt_threshold and chassis_y < inverted_ground_h:
+		# 2026-11-07 (operator: the body flips on the stairs and is never reset): "on the floor" is measured from the
+		# SURFACE under the chassis, not from y = 0 -- a chassis belly-up on a tread sits at the tread's height.  The
+		# surface query runs only while the body is past the tilt threshold (a few rays, not every tick).
+		var chassis_h_over_ground: float = chassis_y
+		if chassis_tilt > auto_reset_tilt_threshold and _gym_mode_active in ["stairs", "terrain"]:
+			var cpos: Vector3 = _chassis.global_transform.origin
+			chassis_h_over_ground = chassis_y - _world_surface_max(cpos.x, cpos.z, 0.08)
+		if chassis_tilt > auto_reset_tilt_threshold and chassis_h_over_ground < inverted_ground_h:
 			_auto_reset_dwell_counter += 1
 			if _auto_reset_dwell_counter >= auto_reset_dwell_ticks:
 				# If the chassis is OUTSIDE the central ring zone (i.e.
@@ -7315,7 +7322,13 @@ func _step_one() -> void:
 				var chassis_pos: Vector3 = _chassis.global_transform.origin
 				var chassis_xz: Vector2 = Vector2(chassis_pos.x, chassis_pos.z)
 				var in_place: bool = false
-				if _gym_mode_active == "terrain" and chassis_xz.length() > RING_OUTERMOST_RADIUS:
+				if _gym_mode_active == "stairs":
+					# The staircase: reset where it fell, set down ON the tread under it, so the flight's progress and the
+					# memory's frame are kept and the count says how often the body went over (log: auto_reset_count).
+					_pending_reset_offset = Vector3(chassis_xz.x, _world_surface_max(chassis_xz.x, chassis_xz.y, 0.18), chassis_xz.y) \
+						- Vector3(_chassis_rest_xform.origin.x, 0.0, _chassis_rest_xform.origin.z)
+					in_place = true
+				elif _gym_mode_active == "terrain" and chassis_xz.length() > RING_OUTERMOST_RADIUS:
 					# Terrain arena: reset where it fell, set down ON the local surface (a
 					# plateau or pyramid under the spawn would otherwise start the legs inside it).
 					var tr: float = minf(chassis_xz.length(), _TerrainGym.FLOOR_HALF - 1.0)
