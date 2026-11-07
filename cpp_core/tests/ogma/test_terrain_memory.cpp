@@ -180,3 +180,29 @@ TEST(TerrainMemory, AHeldBodysMemoryDoesNotSlideUnderIt) {
         else EXPECT_GT(std::fabs(f.pred[0] - (kFloorY + 0.05)) + (f.pred[2] < 0.5f ? 1.0 : 0.0), 0.012) << "ungated: the memory slid 0.30 m and the landing spot reads something else";
     }
 }
+
+TEST(TerrainMemory, RegistrationPullsASlidFrameBackOntoTheRiserItRemembers) {
+    // the field sees a 5 cm tread from 0.40 m; the memory holds it; then the odometry claims 0.12 m forward while the
+    // body (and the field's view) stays put.  Registered, the frame is pulled back and the tread stays 0.40 ahead; the
+    // same without registration leaves the memory believing the tread is 0.28 ahead
+    for (double gain : {0.5, 0.0}) {
+        ogma::ParamMap p; p["register_gain"] = gain;
+        Fix f(p); auto field = synth(kH, 30.0, 0.05, 0.40, 0.90, 0.40);
+        uint64_t t = 1; double ox = 0.0;
+        auto step = [&](double o, bool with_field) {
+            f.bus.begin_tick(t); f.bus.publish("reality.proprio.odom", pv({float(o), 0, 0}, t)); f.bus.publish("reality.proprio.up_body", pv({0, 1, 0}, t));
+            if (with_field) f.bus.publish("sense.tof8", pv(field, t));
+            f.bus.publish("reality.proprio.foot_contact", pv({1, 1, 1, 1}, t)); f.bus.publish("reality.proprio.feet_xz", pv(kXZ, t)); f.bus.publish("reality.proprio.toe_y", pv(kY, t));
+            f.bus.publish("reality.proprio.foot_load", pv({0.3f, 0.3f, 0.3f, 0.3f}, t)); f.m.tick(t); f.bus.end_tick(); ++t;
+        };
+        for (int k = 0; k < 5; ++k) step(0.0, true);
+        for (int k = 1; k <= 12; ++k) { ox = 0.01 * k; step(ox, k % 3 == 0); }   // the legs claim 12 cm; the field keeps seeing the same tread
+        for (int k = 0; k < 10; ++k) step(ox, true);
+        double fx, fy, fyaw; f.m.frame(fx, fy, fyaw);
+        // where does the memory put the tread's face now, in the body frame?  the nearest voxel ahead with h > floor + 3 cm
+        double edge = 9.0;
+        for (auto const& v : f.m.body_voxels()) if (std::fabs(v.lat) < 0.06 && v.h > kFloorY + 0.03 && v.fwd < edge) edge = v.fwd;
+        if (gain > 0.0) { EXPECT_LT(std::fabs(fx), 0.05) << "registered: the frame came back to within 5 cm of where the body really is"; EXPECT_NEAR(edge, 0.40, 0.10) << "the remembered face, blurred by the frames stored while the pull-back converged"; EXPECT_GT(f.m.registrations(), 0); }
+        else { EXPECT_NEAR(fx, 0.12, 1e-4) << "unregistered: the frame is the odometry's claim"; EXPECT_EQ(f.m.registrations(), 0); }
+    }
+}

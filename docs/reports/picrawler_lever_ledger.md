@@ -10328,3 +10328,29 @@ against 18 %) — the frame slides exactly where the stepper is needed. The bar 
 this table: re-contact under 1 cm at 50 mm, where the toes land on ground they already measured. Files: `picrawler_body.gd` (`_build_stairs`, `stairs_truth_y`, `_toe_world`, `up_body`, the `tm_*` log keys),
 `experiment_config.gd`, `cpp_core/include/ogma/body/Tof8Geometry.hpp`, `cpp_core/{include,src}/ogma/modules/TerrainMemory.*`
 (7 tests), `pi_host` (`up_body` with `--toe-y`), `configs/..._sim60_stairs.json` (in the launcher), `PROTOCOL.md`.
+
+### 2026-11-07 — THE REGISTRATION LEVER (`TerrainMemory register_gain`: each field frame matched along the body's forward axis to the heights already remembered before it is stored, half the best shift applied to the frame, only with a step in view and 16+ returns on remembered ground; and a datum that moves toward the median of its last 3 bearing innovations), on the fixed flights (25 / 38 / 50 mm × 4 seeds, 3600 ticks, the same seeds as the morning's battery, so paired): FIRST-CONTACT error falls at every height (50 mm: 2.6 → 2.3 cm RMS, 24 % → 18 % beyond 3 cm; 25 mm: 2.3 → 2.0, 18 % → 13 %), RE-CONTACT falls modestly (50 mm: 2.5 → 2.1 cm, 22 % → 16 %), the body's climb estimate acquires a 4–7 cm under-read, and the bar — re-contact under 1 cm at 50 mm — is missed by a factor of two — `PARTIAL` (n = 4 per height)
+
+| arm | 25 mm first / re-contact (RMS, beyond 3 cm) | 38 mm first / re | 50 mm first / re | datum − truth at 50 mm |
+|---|---|---|---|---|
+| no registration (the morning's) | 2.3 cm 18 % / 2.1 cm 14 % | 2.3 21 % / 2.3 18 % | 2.6 24 % / 2.5 22 % | −0.2 ± 2.9 cm |
+| registration, gain 0.5 | 2.2 16 % / 2.1 14 % | 2.0 12 % / 2.0 15 % | 2.3 18 % / 2.1 16 % | −6.7 ± 3.9 cm |
+| registration + the 3-touch datum | 2.0 13 % / 1.8 10 % | 2.1 13 % / 2.1 15 % | 2.4 20 % / 2.3 20 % | −4.8 ± 4.1 cm |
+
+Risers climbed and the stall score are identical across the arms (6.0 / 3.8 / 2.2 of 7; 0.47 / 0.55 / 0.64): the
+memory acts on nothing, so the body's paths repeat and the comparison is of the instrument alone.
+
+**Reading.** Registration does what it was built for — the frame no longer slides as far under a hung body, and
+the field's claims land on the ground they describe, which is why first contact improves everywhere — but it did not
+buy the re-contact the stepper needs, and it costs the datum: with the frame corrected, a toe that lands on a voxel
+touched at the other level of a riser's edge disagrees by the riser, and the datum rule reads that as the body
+moving. The median window (5, then 3) rejects single such touches on the graded flight (re-contact 1.9 cm, 11 %) but
+is a wash at n = 4 on the fixed flights and lags the climb (a 5-window under-read it by 7 cm). The residual that
+remains has a scale: a 3 cm voxel straddling a riser is touched at two levels, and the toes land within 1.5 cm of
+an edge about a tenth of the time on a 30 cm tread — alone that is ~1.6 cm RMS, most of what is left. **The next
+test, running:** 1.5 cm voxels (the field's footprint is 6–10 cm, so its claims pool across cells; a toe's claim
+is point-like and benefits). **Re-use:** the datum needs its own second source — the field's floor plane under the
+body gives the sensor's height over the local ground every frame, an independent height the touches can be
+checked against on a tread; and the registration should feed the odometry's trust back to the stall sense
+(the shift it finds IS the legs' overclaim). Files: `TerrainMemory.*` (`register_*`, `datum_window`; 8 tests),
+`_sim60_stairs` (gain 0.5, window 3), the session's `stairs_table*.py`.

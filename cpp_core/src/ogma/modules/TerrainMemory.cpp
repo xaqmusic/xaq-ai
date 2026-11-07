@@ -46,6 +46,10 @@ ParamSchema TerrainMemory::params_schema() const {
         {"up_topic",      ParamMutability::ConstructionOnly, "ProprioToken [3]: the body's gravity-up in the body frame (reality.proprio.up_body); levels the field's points. \"\" or absent = the body frame as is.", ParamValue{std::string("reality.proprio.up_body")}},
         {"stall_topic",   ParamMutability::ConstructionOnly, "Optional ProprioToken whose value[0] is the stall score (reality.proprio.stuck): the memory's frame advances by the odometry's translation x (1 - stall_gate x stall), so a held body's memory does not slide under it while its legs claim stride. \"\" = the odometry as is.", ParamValue{std::string("")}},
         {"stall_gate",    ParamMutability::HotMutable, "How fully the stall freezes the frame (1 = a full stall stops it).", ParamValue{1.0}},
+        {"register_gain", ParamMutability::HotMutable, "Registration by re-observation: the fraction of the forward shift that best matches a field frame to the remembered heights that moves the memory's frame, each frame (0 = off; 0.3-0.5 converges in a few frames without chasing noise).", ParamValue{0.0}},
+        {"register_range_m", ParamMutability::HotMutable, "The forward shifts searched, +/- (m), in half-voxel steps.", ParamValue{0.15}},
+        {"register_min_points", ParamMutability::HotMutable, "Returns of the frame that must land on remembered ground for a match to count.", ParamValue{int64_t{16}}},
+        {"register_min_spread_m", ParamMutability::HotMutable, "The spread (sd) of the frame's heights needed: a flat floor registers nothing (and drifts harmlessly).", ParamValue{0.015}},
         {"load_topic",    ParamMutability::ConstructionOnly, "ProprioToken [4] foot load as a fraction of body weight: the datum moves only for a toe that comes to BEAR (a scrape on a riser face is not the body climbing). \"\" = every touch counts.", ParamValue{std::string("reality.proprio.foot_load")}},
         {"predict_topic", ParamMutability::ConstructionOnly, "ProprioToken [h_pred, precision, has, fwd, lat] x 4: what each leg's next landing will meet, every tick.", ParamValue{std::string("predict.foothold")}},
         {"error_topic",   ParamMutability::ConstructionOnly, "ProprioToken [e, valid] x 4: at a touch, h_touch - h_pred for that leg (0 otherwise).", ParamValue{std::string("predict.foothold_error")}},
@@ -69,6 +73,7 @@ ParamSchema TerrainMemory::params_schema() const {
         {"datum_gain",  ParamMutability::HotMutable, "The fraction of a touch's disagreement with ALREADY-TOUCHED ground that moves the body's height above the datum (1 = the ground did not move, the body did).", ParamValue{1.0}},
         {"datum_min_load", ParamMutability::HotMutable, "The load (fraction of body weight) a touching toe must reach within 25 ticks for its disagreement to move the datum.", ParamValue{0.15}},
         {"datum_step_max_m", ParamMutability::HotMutable, "The most one touch moves the datum (m): a riser takes a few bearing touches, a single bad one cannot run away with it.", ParamValue{0.03}},
+        {"datum_window", ParamMutability::HotMutable, "The datum moves toward the MEDIAN of this many recent bearing innovations (1 = each touch alone, the 2026-11-07 morning form): a toe on a voxel straddling a riser's edge disagrees by the riser, and one such touch must not move the body.", ParamValue{int64_t{5}}},
         {"diag_max",    ParamMutability::HotMutable, "Voxels listed in the diag, nearest first (0 = all).", ParamValue{int64_t{300}}},
         {"recent_max",  ParamMutability::HotMutable, "Recent prediction errors kept in the diag as rows [tick, leg, h_pred, prec, h_touch, e].", ParamValue{int64_t{32}}},
     };
@@ -84,7 +89,8 @@ ParamMap TerrainMemory::current_params() const {
             {"predict_radius_m", ParamValue{predict_radius_m_}}, {"plane_tau_ticks", ParamValue{plane_tau_ticks_}}, {"err_alpha", ParamValue{err_alpha_}},
             {"diag_max", ParamValue{int64_t(diag_max_)}}, {"recent_max", ParamValue{int64_t(recent_max_)}}, {"up_topic", ParamValue{up_topic_}}, {"datum_gain", ParamValue{datum_gain_}}, {"load_topic", ParamValue{load_topic_}},
             {"datum_min_load", ParamValue{datum_min_load_}}, {"datum_step_max_m", ParamValue{datum_step_max_m_}},
-            {"stall_topic", ParamValue{stall_topic_}}, {"stall_gate", ParamValue{stall_gate_}}};
+            {"stall_topic", ParamValue{stall_topic_}}, {"stall_gate", ParamValue{stall_gate_}}, {"register_gain", ParamValue{register_gain_}}, {"datum_window", ParamValue{int64_t(datum_window_)}},
+            {"register_range_m", ParamValue{register_range_m_}}, {"register_min_points", ParamValue{int64_t(register_min_points_)}}, {"register_min_spread_m", ParamValue{register_min_spread_m_}}};
 }
 
 void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
@@ -96,7 +102,7 @@ void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     for (auto const& k : {"pitch_deg", "sensor_x_m", "sensor_y_m", "sensor_z_m", "max_range_m", "thing_min_m", "fit_rows", "fit_slope_max", "voxel_m",
                           "max_voxels", "max_age_ticks", "sigma_field_m", "sigma_touch_m", "predict_tau_touches", "predict_radius_m", "plane_tau_ticks",
-                          "err_alpha", "diag_max", "recent_max", "datum_gain", "datum_min_load", "datum_step_max_m", "stall_gate"})
+                          "err_alpha", "diag_max", "recent_max", "datum_gain", "datum_min_load", "datum_step_max_m", "stall_gate", "register_gain", "register_range_m", "register_min_points", "register_min_spread_m", "datum_window"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which) {
         if (topic.empty()) return;
@@ -130,6 +136,11 @@ void TerrainMemory::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "datum_min_load") datum_min_load_ = std::max(0.0, get_double(value, k));
     else if (k == "datum_step_max_m") datum_step_max_m_ = std::max(0.001, get_double(value, k));
     else if (k == "stall_gate")    stall_gate_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "register_gain") register_gain_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "datum_window")  datum_window_ = std::max(1, int(get_double(value, k)));
+    else if (k == "register_range_m") register_range_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "register_min_points") register_min_points_ = std::max(1, int(get_double(value, k)));
+    else if (k == "register_min_spread_m") register_min_spread_m_ = std::max(0.0, get_double(value, k));
     else throw std::invalid_argument("TerrainMemory: param '" + k + "' is construction-only / unknown");
 }
 
@@ -201,17 +212,52 @@ void TerrainMemory::ingest_field(uint64_t tick_id) {
     points(field_.data(), pitch_deg_, max_range_m_, P, ok);
     plane_ = fit_floor(P, ok, fit_rows_, thing_min_m_, fit_slope_max_);
     if (!plane_.ok) return;   // nose at a wall or no floor: nothing is placed this frame
-    double px, py, c, s; odom_pose(px, py, c, s);
+    // the frame's points: body-frame place (bx, bz), class from the field's own floor, height in the body's
+    // gravity-levelled frame plus the datum
+    std::array<double, kZones> BX{}, BZ{}, HM{}; std::array<int, kZones> CLS{}; int n_pts = 0; double hsum = 0, hsq = 0;
     for (int z = 0; z < kZones; ++z) {
         if (!ok[size_t(z)]) continue;
-        // the point in the body frame (the sensor's offset); its class from the field's own floor; its HEIGHT in the
-        // body's gravity-levelled frame plus the datum; its place on the ground from the body-frame x, z
         const double bx = P[size_t(z)].x + sensor_x_m_, by = P[size_t(z)].y + sensor_y_m_, bz = P[size_t(z)].z + sensor_z_m_;
         const double over_floor = by - (plane_.y_at(P[size_t(z)].x, P[size_t(z)].z) + sensor_y_m_);
-        const int cls = over_floor > thing_min_m_ ? kThing : (over_floor < -thing_min_m_ ? kDrop : kFloor);
+        CLS[size_t(z)] = over_floor > thing_min_m_ ? kThing : (over_floor < -thing_min_m_ ? kDrop : kFloor);
         const double h_level = have_up_ ? bx * up_[0] + by * up_[1] + bz * up_[2] : by;
-        const double X = px + bz * c - bx * s, Y = py + bz * s + bx * c;
-        observe(X, Y, h_level + datum_, sigma_field_m_, cls, false, tick_id);
+        BX[size_t(z)] = bx; BZ[size_t(z)] = bz; HM[size_t(z)] = h_level + datum_; ++n_pts; hsum += HM[size_t(z)]; hsq += HM[size_t(z)] * HM[size_t(z)];
+    }
+    double px, py, c, s; odom_pose(px, py, c, s);
+    // registration: the forward shift of the frame that best explains the heights already remembered
+    reg_last_shift_ = 0.0; reg_last_matched_ = 0; reg_last_gain_ratio_ = 1.0;
+    const double spread = n_pts > 1 ? std::sqrt(std::max(0.0, hsq / n_pts - (hsum / n_pts) * (hsum / n_pts))) : 0.0;
+    if (register_gain_ > 0.0 && register_range_m_ > 0.0 && spread >= register_min_spread_m_ && !vox_.empty()) {
+        const double step = 0.5 * voxel_m_; const int K = int(std::ceil(register_range_m_ / step));
+        double best_cost = 1e18, cost0 = 1e18; double best_shift = 0.0; int best_n = 0;
+        for (int k = -K; k <= K; ++k) {
+            const double sh = k * step; double cost = 0; int n = 0;
+            for (int z = 0; z < kZones; ++z) {
+                if (!ok[size_t(z)]) continue;
+                const double bz = BZ[size_t(z)] + sh, bx = BX[size_t(z)];
+                const double X = px + bz * c - bx * s, Y = py + bz * s + bx * c;
+                auto it = vox_.find(Key{int64_t(std::floor(X / voxel_m_)), int64_t(std::floor(Y / voxel_m_))});
+                if (it == vox_.end()) continue;
+                const double d = HM[size_t(z)] - it->second.h; cost += d * d; ++n;
+            }
+            if (n < register_min_points_) continue;
+            cost /= n;
+            if (k == 0) cost0 = cost;
+            if (cost < best_cost || (cost == best_cost && std::fabs(sh) < std::fabs(best_shift))) { best_cost = cost; best_shift = sh; best_n = n; }
+        }
+        if (best_n >= register_min_points_ && cost0 < 1e17 && best_shift != 0.0 && best_cost < 0.8 * cost0) {
+            // the frame moved too far forward by best_shift (the remembered ground sits best_shift further along the body's
+            // forward than the frame says): pull the frame back by a fraction of it
+            const double move = register_gain_ * best_shift;
+            ox_ += move * c; oy_ += move * s; reg_applied_ += move; ++reg_count_;
+            reg_last_shift_ = best_shift; reg_last_matched_ = best_n; reg_last_gain_ratio_ = best_cost / cost0;
+            odom_pose(px, py, c, s);
+        }
+    }
+    for (int z = 0; z < kZones; ++z) {
+        if (!ok[size_t(z)]) continue;
+        const double X = px + BZ[size_t(z)] * c - BX[size_t(z)] * s, Y = py + BZ[size_t(z)] * s + BX[size_t(z)] * c;
+        observe(X, Y, HM[size_t(z)], sigma_field_m_, CLS[size_t(z)], false, tick_id);
     }
 }
 
@@ -244,20 +290,30 @@ void TerrainMemory::ingest_touch(int leg, double fwd, double lat, double h, uint
         const double innov = (h + datum_) - it->second.h;     // > 0: the body reads higher than the ground it knew -> it is lower
         it->second.last_t = tick_id; ++it->second.n_touch;
         it->second.var = std::max(sigma_touch_m_ * sigma_touch_m_, it->second.var * 0.5);
-        if (load_topic_.empty() || !have_load_) { datum_ -= datum_gain_ * std::clamp(innov, -datum_step_max_m_, datum_step_max_m_); ++datum_updates_; }
+        if (load_topic_.empty() || !have_load_) datum_move(innov);
         else { pending_datum_[size_t(leg)] = 25; pending_innov_[size_t(leg)] = innov; }   // the toe must come to bear first
         return;
     }
     observe(X, Y, h + datum_, sigma_touch_m_, 0, true, tick_id);
 }
 
+// One bearing innovation (the body reads `innov` higher than the ground it knew): the datum moves toward the median of the
+// recent ones, by datum_gain, bounded; the innovations already explained by earlier moves are discounted as the datum moves.
+void TerrainMemory::datum_move(double innov) {
+    datum_innov_.push_back(innov);
+    while (int(datum_innov_.size()) > datum_window_) datum_innov_.pop_front();
+    std::vector<double> v(datum_innov_.begin(), datum_innov_.end()); std::sort(v.begin(), v.end());
+    const double med = (v.size() % 2) ? v[v.size() / 2] : 0.5 * (v[v.size() / 2 - 1] + v[v.size() / 2]);
+    const double step = datum_gain_ * std::clamp(med, -datum_step_max_m_, datum_step_max_m_);
+    if (step == 0.0) return;
+    datum_ -= step; ++datum_updates_;
+    for (auto& x : datum_innov_) x -= step;   // what the move explained is no longer owed
+}
+
 void TerrainMemory::note_load(int leg, uint64_t) {
     if (pending_datum_[size_t(leg)] <= 0) return;
     if (contact_[size_t(leg)] <= 0.5f) { pending_datum_[size_t(leg)] = 0; return; }   // it left: a scrape, not a step
-    if (load_[size_t(leg)] >= datum_min_load_) {
-        datum_ -= datum_gain_ * std::clamp(pending_innov_[size_t(leg)], -datum_step_max_m_, datum_step_max_m_); ++datum_updates_;
-        pending_datum_[size_t(leg)] = 0; return;
-    }
+    if (load_[size_t(leg)] >= datum_min_load_) { datum_move(pending_innov_[size_t(leg)]); pending_datum_[size_t(leg)] = 0; return; }
     --pending_datum_[size_t(leg)];
 }
 
@@ -347,6 +403,7 @@ nlohmann::json TerrainMemory::diag_snapshot() const {
     for (auto const& r : recent_) { nlohmann::json row = nlohmann::json::array(); for (float x : r) row.push_back(x); rec.push_back(row); }
     return nlohmann::json{{"voxels", vs}, {"count", int(vox_.size())}, {"frames", frames_}, {"touches", touches_}, {"floor_ok", plane_.ok},
                           {"datum", datum_}, {"datum_updates", datum_updates_}, {"have_up", have_up_}, {"frame", {ox_, oy_, oyaw_}}, {"stall", stall_},
+                          {"reg_applied", reg_applied_}, {"reg_count", reg_count_}, {"reg_last_shift", reg_last_shift_}, {"reg_last_matched", reg_last_matched_}, {"reg_last_ratio", reg_last_gain_ratio_},
                           {"plane", {plane_.a, plane_.b, plane_.c}}, {"prediction", pr}, {"err_last", er}, {"err_rms", rms}, {"n_err", n_err_}, {"recent", rec}};
 }
 

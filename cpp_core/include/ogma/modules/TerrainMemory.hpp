@@ -60,6 +60,9 @@ public:
     bool   last_error_valid(int leg) const { return err_valid_[size_t(leg)]; }
     double rms_error(int leg) const { return std::sqrt(err_ms_[size_t(leg)]); }
     double datum() const { return datum_; }
+    double registration_applied() const { return reg_applied_; }
+    int    registrations() const { return reg_count_; }
+    void   frame(double& x, double& y, double& yaw) const { x = ox_; y = oy_; yaw = oyaw_; }
     int    n_errors() const { return n_err_; }
     int    count() const { return int(vox_.size()); }
     bool   floor_ok() const { return plane_.ok; }
@@ -71,6 +74,7 @@ private:
     void ingest_field(uint64_t tick_id);
     void ingest_touch(int leg, double fwd, double lat, double h, uint64_t tick_id);
     void note_load(int leg, uint64_t tick_id);   // the toe's load after its touch, for the datum's gate
+    void datum_move(double innov);
     void observe(double X, double Y, double h, double sigma, int cls, bool touch, uint64_t tick_id);
     void odom_pose(double& px, double& py, double& c, double& s) const;
     Prediction predict_at(double fwd, double lat) const;
@@ -88,6 +92,13 @@ private:
     double predict_tau_touches_ = 20.0, predict_radius_m_ = 0.045, plane_tau_ticks_ = 50.0, err_alpha_ = 0.05;
     double datum_gain_ = 1.0;   // how much of a touched-ground innovation the datum takes
     double datum_min_load_ = 0.15, datum_step_max_m_ = 0.03;   // a datum move needs a BEARING toe, and is bounded per touch
+    // REGISTRATION BY RE-OBSERVATION (2026-11-07): before a field frame is stored, it is matched against what the memory
+    // already holds along the body's forward axis -- the shift that best explains the remembered heights is the
+    // odometry's error since the ground was last seen (a held body's legs claim stride) -- and register_gain of it moves
+    // the frame.  Only when a step is in view (the frame's heights spread) and enough of the frame lands on remembered
+    // ground.  0 = off (byte-identical).
+    double register_gain_ = 0.0, register_range_m_ = 0.15, register_min_spread_m_ = 0.015; int register_min_points_ = 16;
+    double reg_last_shift_ = 0.0, reg_applied_ = 0.0; int reg_count_ = 0, reg_last_matched_ = 0; double reg_last_gain_ratio_ = 1.0;
     double stall_gate_ = 1.0;   // the memory's frame advances by the odometry's increment x (1 - stall_gate x stall): a body that is
                                 // held does not move, whatever its legs claim (the admitted stall sense, 2026-11-07)
     int    diag_max_ = 300, recent_max_ = 32;
@@ -100,6 +111,8 @@ private:
     double raw_ox_ = 0, raw_oy_ = 0; bool have_raw_odom_ = false; double stall_ = 0.0;
     std::array<double, 3> up_{0.0, 1.0, 0.0}; bool have_up_ = false;
     double datum_ = 0.0; int datum_updates_ = 0;   // b: the body's height above the datum
+    std::deque<double> datum_innov_;               // the last datum_window bearing innovations: the datum moves toward their MEDIAN
+    int datum_window_ = 5;                         // (a toe on a voxel straddling a riser's edge disagrees by the riser; one such touch must not move the body)
     // the floor
     body::tof8::Plane plane_; double planted_plane_y_ = 0.0; bool have_planted_plane_ = false;
     // the memory

@@ -1,7 +1,7 @@
 {
  "metadata": {
   "name": "INSTRUMENT · the sim twin on the STAIRCASE with the field, the touch and the terrain memory's foothold prediction live (2026-11-07) — the careful stepper's bench, step 1: does the prediction error fall along a run?",
-  "description": "_sim60_terrain's stack (field, Tof8Range -> StuckSense, encounter chain, TouchMemory) on gym \"stairs\" (graded risers 12-89 mm, tread 0.30 m, walls, a down flight; OGMA_PICRAWLER_STAIRS_* in body_env), plus TerrainMemory: the field's returns and the toes' touches in one memory of heights (odom frame, 3 cm, a Kalman update per voxel floored at a touch's variance, 30 s lifetime) and a per-leg prediction of the height the next landing will meet (predict.foothold) with its error at the touch (predict.foothold_error, tm_* in the log). Nothing acts on it yet.",
+  "description": "_sim60_terrain's stack (field, Tof8Range -> StuckSense, encounter chain, TouchMemory) on gym \"stairs\" (graded risers 12-89 mm, tread 0.30 m, walls, a down flight; OGMA_PICRAWLER_STAIRS_* in body_env), plus TerrainMemory: the field's returns and the toes' touches in one memory of heights (odom frame, 3 cm, a Kalman update per voxel floored at a touch's variance, 30 s lifetime) and a per-leg prediction of the height the next landing will meet (predict.foothold) with its error at the touch (predict.foothold_error, tm_* in the log). Nothing acts on it yet. Registration by re-observation on (register_gain 0.5, 2026-11-07): each field frame is matched along the forward axis to the remembered heights before it is stored.",
   "env_target": "picrawler",
   "gym_mode": "stairs",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -742,7 +742,9 @@
     "max_range_m": 2.0,
     "voxel_m": 0.03,
     "max_voxels": 12000,
-    "max_age_ticks": 1500
+    "max_age_ticks": 1500,
+    "register_gain": 0.5,
+    "datum_window": 3
    }
   }
  ],
