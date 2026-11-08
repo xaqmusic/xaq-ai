@@ -407,6 +407,23 @@ func _process(_delta: float) -> void:
 		swap_pip, swap_total,
 		escape_pip, escape_total,
 	])
+	# THE SEQUENCER (2026-11-08): its phase and leg, the blend, the steps, the landings and their error, and the support
+	# model's margin, so the fundamentals can be checked by eye against the toe-target markers in the view.
+	if brain != null and brain.has_method("get_module_metrics") and brain.has_method("is_brain_ready") and brain.is_brain_ready():
+		var mm3: Dictionary = brain.get_module_metrics()
+		if mm3.has("pose_sequencer"):
+			var ps: Dictionary = mm3["pose_sequencer"]
+			var leg_names: Array = ["FL", "FR", "RL", "RR"]
+			var lg: int = _as_int(ps.get("leg", -1))
+			var st: Array = ps.get("steps", [])
+			var sm_str: String = ""
+			if mm3.has("support_model"):
+				var smd: Dictionary = mm3["support_model"]
+				sm_str = "   margin=%+.3f n=%d" % [_as_float(smd.get("margin", 0.0)), _as_int(smd.get("n_support", 0))]
+			lines.append("seq:        %s %s   engage=%.2f   steps=%s   land=%d miss=%d err=%.3f   blocked=%d passed=%d dead=%d%s" % [
+				String(ps.get("phase", "idle")), (leg_names[lg] if lg >= 0 and lg < 4 else "-"), _as_float(ps.get("engage", 0.0)),
+				str(st), _as_int(ps.get("landings", 0)), _as_int(ps.get("missed", 0)), _as_float(ps.get("land_err", 0.0)),
+				_as_int(ps.get("shift_blocked", 0)), _as_int(ps.get("turns_passed", 0)), _as_int(ps.get("deadlock_ticks", 0)), sm_str])
 
 	# Curriculum stage + last-advance indicator.  Currently CurriculumManager
 	# is an autoload; emit even when no curriculum loaded so column shape is

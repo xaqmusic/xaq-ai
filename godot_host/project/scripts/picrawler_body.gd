@@ -1799,6 +1799,10 @@ const TOUCH_LOCAL_COLOR := Color(0.62, 0.25, 0.95)     # = FOOT_SHOW_PURPLE
 const TOUCH_BRAIN_COLOR := Color(0.80, 0.62, 1.00)
 const TOUCH_DRAW_EVERY: int = 5
 var _touch_cloud = null                         # touch_cloud.gd
+# THE SEQUENCER'S TOE TARGETS (2026-11-08): four small spheres, children of the chassis, at PoseSequencer's toe targets
+# (its diag "toe_tgt", in the chassis rest frame): the stepping leg's in orange, the planted ones in cyan.  Shown only
+# while the sequencer is engaged, so the IK's intent can be checked by eye against where the feet are.
+var _seq_markers: Array = []
 var _touch_view_local = null                    # TouchCloud.View
 var _touch_view_brain = null
 var _touch_show: bool = true
@@ -14379,6 +14383,33 @@ func _touch_odom() -> Array:
 	return [_odom.x(), _odom.y(), _odom.yaw()]
 
 
+func _seq_markers_step() -> void:
+	if _chassis == null or brain == null or not brain.has_method("get_module_metrics") or DisplayServer.get_name() == "headless": return
+	var metrics: Dictionary = brain.get_module_metrics()
+	if not metrics.has("pose_sequencer"):
+		for m in _seq_markers: (m as Node3D).visible = false
+		return
+	var ps: Dictionary = metrics["pose_sequencer"]
+	if _seq_markers.is_empty():
+		for i in range(4):
+			var mi := MeshInstance3D.new()
+			var sm := SphereMesh.new(); sm.radius = 0.008; sm.height = 0.016; mi.mesh = sm
+			var mat := StandardMaterial3D.new(); mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mi.set_surface_override_material(0, mat)
+			_chassis.add_child(mi); _seq_markers.append(mi)
+	var engaged: bool = float(ps.get("engage", 0.0)) > 0.5
+	var tg: Array = ps.get("toe_tgt", [])
+	var active: int = int(ps.get("leg", -1))
+	for i in range(4):
+		var mi: MeshInstance3D = _seq_markers[i]
+		mi.visible = engaged and tg.size() >= 4
+		if not mi.visible: continue
+		var row: Array = tg[i]
+		if row.size() < 3: continue
+		mi.position = Vector3(float(row[0]), float(row[1]), float(row[2]))
+		var mat: StandardMaterial3D = mi.get_surface_override_material(0)
+		mat.albedo_color = Color(1.0, 0.55, 0.1, 1.0) if i == active else Color(0.2, 0.9, 1.0, 1.0)
+
 func _touch_cloud_step(contact: PackedFloat64Array) -> void:
 	# On the BENCH the body is the dashboard's twin: its legs rest on the hidden arena floor, so its
 	# physics contacts are not touches, and the dashboard draws the robot's FSR touches itself.
@@ -14391,6 +14422,7 @@ func _touch_cloud_step(contact: PackedFloat64Array) -> void:
 	_touch_tick += 1
 	if _touch_feet_xz.size() >= 8 and _touch_feet_y.size() >= 4:
 		_touch_cloud.step(_touch_tick, Array(contact), Array(_touch_feet_xz), Array(_touch_feet_y), _touch_odom())
+	if (_touch_tick % TOUCH_DRAW_EVERY) == 0: _seq_markers_step()
 	if not _touch_show or _chassis == null or (_touch_tick % TOUCH_DRAW_EVERY) != 0:
 		return
 	if _touch_view_local == null:

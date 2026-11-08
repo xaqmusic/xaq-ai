@@ -50,6 +50,8 @@ const _CONFIG_DIR := "res://addons/ami_ogma/configs/"
 # dropdown and picrawler-dash's "run config" offer.  Their annotated entries are in git history
 # (launcher.gd before this commit).
 const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
+	# Pruned 2026-11-08 (operator): the measured arms of the terrain plan (G4a/b, step 2, the crawl gate) and the
+	# September reach experiment left; the instruments and the sequencer under test stay.  Everything still loads by path.
 	# Pruned 2026-10-31 (operator): promoted configs and baselines only.  Every intermediate lever's config stays on
 	# disk and in the lever ledger; add one here only while it is under test on the robot.
 	# ---- BASELINES ----
@@ -62,15 +64,10 @@ const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
 	# ---- SIM-IDEAL PROMOTED (6.0 rad/s servos, period 30) ----
 	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__sim_s60_p30.json",  # the promoted robot stack with ideal servos
 	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0_sim60.json",  # the robot base _cs_pf_sl0 with ideal servos (6.0 rad/s, period 30): the sim twin for gating levers on the new base
-	# ---- THE TERRAIN PLAN (2026-11-02, under test): the encounter chain, then its consumer ----
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0_sim60_terrain.json",  # step 2, INSTRUMENT: _sim60 on the terrain arena with EncounterFeatures -> EPM -> BeliefFilter live and logged (enc_events); nothing acts on it yet
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0_sim60_terrain_g4a.json",  # step 3 control: + LiftDescent with ONE swing-lift operating point (G4a at 6 rad/s)
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0_sim60_terrain_g4b.json",  # step 3 LEVER: + LiftDescent PER encounter node (G4b) — the touch vocabulary's first consumer
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0_sim60_stairs.json",  # the careful stepper's bench (2026-11-07): the STAIRCASE gym with the field, the touches and TerrainMemory's foothold prediction logged (tm_*); nothing acts on it yet
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0_sim60_stairs_step2.json",  # step 2 LEVER: + FootholdShaper -> MotorEPMv2 swing_target_topic (per-leg lift from the predicted rise, an edge landing moved onto the tread)
-	"sim60_stairs_crawl.json",  # the crawl question (2026-11-08): LoadPhaseGait's margin gate over SupportModel — no lift while the centre of mass would leave the toes that stay down; the trot relaxes halfway (ledger)
-	"sim60_stairs_seq.json",  # the SEQUENCER (2026-11-08): PoseSequencer owns the legs through MotorEPMv2's pose socket — a statically supported crawl, one pose at a time from SupportModel and TerrainMemory
-	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__exp_reach_servo6_p30_tuck0_conf_noise_shaped_ko.json",  # PROMOTED (sim, 2026-10-23): LPG at 6.0 rad/s, period 30, femur level, shaped-noise handover, self-collision keep-out
+	# ---- THE TERRAIN PLAN (2026-11-02 ..): the instruments and the current lever only ----
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0_sim60_terrain.json",  # the terrain INSTRUMENT (the 8x8 field, Tof8Range -> StuckSense, the encounter chain); the dose-response and G4 arms left the list 2026-11-08 (ledger)
+	"the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo__room_senses__s3a_stuckinst__hip2p030__lpgn_r05_e0d0_ref300__robot_p1_presskin_lz_sgk_hk0_cs_pf_sl0_sim60_stairs.json",  # the STAIRCASE instrument (graded risers, TerrainMemory's foothold prediction, SupportModel's margins: tm_* / sm_* in the log); step 2 and the crawl gate left the list 2026-11-08 (ledger: REGRESSION / PARTIAL)
+	"sim60_stairs_seq.json",  # the SEQUENCER, second form (2026-11-08): PoseSequencer owns the legs through MotorEPMv2's pose socket — a statically supported crawl (SHIFT / LIFT / SWING / LOWER, a fixed wave order gated by SupportModel's margin, the FSR filtered); watch the HUD's "seq:" line and the toe-target markers
 ]
 
 
