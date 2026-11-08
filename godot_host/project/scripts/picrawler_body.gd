@@ -1698,6 +1698,11 @@ var publish_feet_xz: bool = false
 # centre minus half a shank) the gait reads, which sits below the toe by up to L3/2 depending on the pose.  ogma_host
 # --toe-y publishes the same, with the robot's per-leg floor calibration applied; the sim needs none.
 var publish_toe_y: bool = false
+# THE LEG MODEL (2026-11-08, the pose sequencer's input): the construction-time anchors the shared forward kinematics
+# needs (hip1 / hip2 / knee, the three rest origins, the two axes, the toe offset, per leg, in the chassis REST frame) and
+# the action-to-angle mapping, 116 floats on reality.proprio.leg_model every tick (OGMA_PICRAWLER_LEG_MODEL=1).  The body's
+# own geometry is a fact the robot knows about itself; nothing about the world is in it.
+var publish_leg_model: bool = false
 # THE FORWARD 8x8 TIME-OF-FLIGHT FIELD (OGMA_PICRAWLER_TOF8=1; 2026-11-04, scripts/tof8.gd): 64 slant ranges on
 # sense.tof8 at 15 Hz from a mount on the front face whose height (OGMA_PICRAWLER_TOF8_HEIGHT_MM above the chassis
 # bottom) and downward pitch (OGMA_PICRAWLER_TOF8_PITCH_DEG) are live: [7]/[8] pitch -/+ 5 deg, [9]/[0] height -/+ 10 mm,
@@ -3396,6 +3401,9 @@ func _ready() -> void:
 	brain.register_source("FeetYGravityCmdImu", "reality.proprio.feet_y_gravity_cmd_imu",
 		"float32[4]: commanded-FK foot height on a GYRO-FUSED gravity estimate (complementary " +
 		"filter) — fully hardware-realizable, no exact attitude anywhere.", true)
+	if publish_leg_model:
+		brain.register_source("LegModel", "reality.proprio.leg_model",
+			"float32[116]: per leg [hip1, hip2, knee anchors, coxa / upper / lower rest origins, hip2 axis, knee axis, toe offset] (27, chassis rest frame) x 4, then [hip1_rest, hip1_range, hip2_rest, hip2_range, knee_rest, knee_fold, knee_hyperext, knee_widening] — the shared FK's inputs and the action-to-angle map (PoseSequencer, 2026-11-08).", true)
 	if publish_feet_xz:
 		brain.register_source("FeetXz", "reality.proprio.feet_xz",
 			"float32[8]: per leg [x, z] (m) of the toe in the chassis rest frame at the commanded pose — the support polygon LoadPhaseGait's lift-off gate reads.", true)
@@ -3838,7 +3846,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_HONEST_IMU",
 			  "OGMA_PICRAWLER_POWER_MODEL", "OGMA_PICRAWLER_POWER_LOG",
 			  "OGMA_PICRAWLER_HONEST_TORQUE_CAP", "OGMA_PICRAWLER_HONEST_HOLD_CAP",
-			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_STAIRS_H_MM", "OGMA_PICRAWLER_STAIRS_N", "OGMA_PICRAWLER_STAIRS_TREAD_M", "OGMA_PICRAWLER_STAIRS_START_M", "OGMA_PICRAWLER_STAIRS_WIDTH_M", "OGMA_PICRAWLER_STAIRS_WALLS", "OGMA_PICRAWLER_STAIRS_DOWN", "OGMA_PICRAWLER_TOF8", "OGMA_PICRAWLER_TOF8_PITCH_DEG", "OGMA_PICRAWLER_TOF8_HEIGHT_MM", "OGMA_PICRAWLER_TOF8_FWD_MM", "OGMA_PICRAWLER_TOF8_LAT_MM", "OGMA_PICRAWLER_TOF8_SELF", "OGMA_PICRAWLER_TOF8_CLOUD_M", "OGMA_PICRAWLER_ROOM_SIZE",
+			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_LEG_MODEL", "OGMA_PICRAWLER_STAIRS_H_MM", "OGMA_PICRAWLER_STAIRS_N", "OGMA_PICRAWLER_STAIRS_TREAD_M", "OGMA_PICRAWLER_STAIRS_START_M", "OGMA_PICRAWLER_STAIRS_WIDTH_M", "OGMA_PICRAWLER_STAIRS_WALLS", "OGMA_PICRAWLER_STAIRS_DOWN", "OGMA_PICRAWLER_TOF8", "OGMA_PICRAWLER_TOF8_PITCH_DEG", "OGMA_PICRAWLER_TOF8_HEIGHT_MM", "OGMA_PICRAWLER_TOF8_FWD_MM", "OGMA_PICRAWLER_TOF8_LAT_MM", "OGMA_PICRAWLER_TOF8_SELF", "OGMA_PICRAWLER_TOF8_CLOUD_M", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
 			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
@@ -3890,6 +3898,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_FEET_JAC":          publish_feet_jac  = (v != "0" and v != "")
 			"OGMA_PICRAWLER_FEET_XZ":           publish_feet_xz   = (v != "0" and v != "")
 			"OGMA_PICRAWLER_TOE_Y":             publish_toe_y     = (v != "0" and v != "")
+			"OGMA_PICRAWLER_LEG_MODEL":         publish_leg_model = (v != "0" and v != "")
 			"OGMA_PICRAWLER_TOF8":              tof8_model        = (v != "0" and v != "")
 			"OGMA_PICRAWLER_TOF8_PITCH_DEG":    _tof8_pitch_env   = v.to_float()
 			"OGMA_PICRAWLER_TOF8_HEIGHT_MM":    _tof8_height_env  = v.to_float() / 1000.0
@@ -8026,6 +8035,18 @@ func _step_one() -> void:
 				jac.append((dh - d0) / eps)
 				jac.append((dk - d0) / eps)
 			brain.publish_proprio(jac, "feet_jac")
+		if publish_leg_model and _hip1_world_c.size() >= 4 and _toe_off_c.size() >= 4:
+			var lm := PackedFloat64Array()
+			for i in range(4):
+				for p in [_hip1_world_c[i], _hip2_world_c[i], _knee_world_c[i], _coxa_rest_xform[i].origin, _upper_rest_xform[i].origin, _lower_rest_xform[i].origin]:
+					var q: Vector3 = rest_inv * (p as Vector3)
+					lm.append(q.x); lm.append(q.y); lm.append(q.z)
+				for a in [_hip2_axes[i], _knee_axes[i], _toe_off_c[i]]:
+					var w: Vector3 = rest_inv.basis * (a as Vector3)
+					lm.append(w.x); lm.append(w.y); lm.append(w.z)
+			lm.append(HIP1_REST); lm.append(HIP1_TARGET_RANGE); lm.append(HIP2_REST); lm.append(HIP_TARGET_RANGE)
+			lm.append(KNEE_REST); lm.append(KNEE_RANGE_FOLD); lm.append(KNEE_RANGE_HYPEREXT); lm.append(1.0 if knee_widening_enabled else 0.0)
+			brain.publish_proprio(lm, "leg_model")
 		if publish_feet_xz:
 			var xz := PackedFloat64Array()
 			for i in range(4):
@@ -13087,6 +13108,23 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		for key in ["gap_on", "gap_off"]:
 			var g: Array = sm.get(key, [])
 			if g.size() >= 3: line["sm_" + key] = [snappedf(float(g[0]), 0.001), snappedf(float(g[1]), 0.001), int(g[2])]
+	if metrics.has("pose_sequencer"):
+		# the sequencer (2026-11-08): its phase and leg, the blend, steps per leg, exhausted shifts, the IK and FK errors
+		var ps: Dictionary = metrics["pose_sequencer"]
+		line["ps_phase"] = int(ps.get("phase_id", 0)); line["ps_leg"] = int(ps.get("leg", -1)); line["ps_eng"] = snappedf(float(ps.get("engage", 0.0)), 0.01)
+		var stp: Array = ps.get("steps", [])
+		if stp.size() >= 4: line["ps_steps"] = [int(stp[0]), int(stp[1]), int(stp[2]), int(stp[3])]
+		line["ps_cycles"] = int(ps.get("cycles", 0)); line["ps_exh"] = int(ps.get("shift_exhausted", 0)); line["ps_sunk"] = int(ps.get("lower_sunk", 0))
+		line["ps_tilt_off"] = int(ps.get("disengaged_tilt", 0)); line["ps_ik"] = snappedf(float(ps.get("ik_err", 0.0)), 0.0001); line["ps_fk"] = snappedf(float(ps.get("fk_err", 0.0)), 0.0001)
+		line["ps_shift"] = int(ps.get("shift_ticks", 0)); line["ps_tmo"] = int(ps.get("phase_timeouts", 0)); line["ps_at"] = int(ps.get("engaged_at", -1))
+		line["ps_blk"] = int(ps.get("shift_blocked", 0)); line["ps_ret"] = int(ps.get("retreats", 0)); line["ps_dead"] = int(ps.get("deadlock_ticks", 0)); line["ps_noadv"] = int(ps.get("steps_no_advance", 0))
+		line["ps_land"] = int(ps.get("landings", 0)); line["ps_miss"] = int(ps.get("missed", 0)); line["ps_lerr"] = snappedf(float(ps.get("land_err", 0.0)), 0.001); line["ps_lrms"] = snappedf(float(ps.get("land_rms", 0.0)), 0.001)
+		var ev: Array = ps.get("elev", [])
+		if ev.size() >= 4: line["ps_elev"] = [snappedf(float(ev[0]), 0.001), snappedf(float(ev[1]), 0.001), snappedf(float(ev[2]), 0.001), snappedf(float(ev[3]), 0.001)]
+		var tt: Array = ps.get("toe_tgt", [])
+		if tt.size() >= 4 and int(ps.get("leg", -1)) >= 0:
+			var a: Array = tt[int(ps.get("leg", -1))]
+			if a.size() >= 3: line["ps_tgt"] = [snappedf(float(a[0]), 0.001), snappedf(float(a[1]), 0.001), snappedf(float(a[2]), 0.001)]
 	if metrics.has("tof8_range"):
 		# the field reduced to the nearest feature ahead (2026-11-05): what StuckSense's closing channel reads
 		var tr: Dictionary = metrics["tof8_range"]

@@ -10574,3 +10574,43 @@ predicts the tread, repeat), hand the rhythm back when the terrain is flat. **Re
 crawl's safety (a sequencer's own lift goes through the same margin test), and on the flat it is a cheap 2× in static
 support for a 10–20 % speed cost if a slow careful walk is wanted there too (not promoted; the robot's stack is the
 geometric gate at 30 mm).
+
+### 2026-11-08 — THE SEQUENCER, FIRST FORM (`PoseSequencer` → `MotorEPMv2 pose_topic`: a pose-level motor controller beside the rhythm that owns the four legs while engaged and walks a statically supported crawl one pose at a time — SHIFT the body over the planted toes until the next leg's lift margin is positive, LIFT the toe over the ground the memory predicts, SWING it to its place, LOWER it until the FSR says ground — with damped-least-squares inverse kinematics on the body's own forward kinematics, read from a new `reality.proprio.leg_model` topic; `engage` 0 = the gait, byte-identical): the CONTROLLER WORKS and the PLANNER DOES NOT YET WALK — on the flat (2 seeds × 3000 ticks, two builds) the body stands at its commanded height with tilt ≤ 0.09 rad, static support in 89–98 % of rows (the trot: 28–34 %), 35–58 landings per run at 2–6 mm from the predicted ground, no fall; on the graded flight (2 seeds × 12 000) support in 91–97 % of rows, no flip in eight runs; but the crawl advances 0.08–0.12 m in 55 s on the flat and 0.39–0.41 m in 235 s on the stairs (the trot: 5.4 m and 2.0 m), reaches the first riser and climbs it once (level 0.012, seed 3, first build) and otherwise not, because the FRONT legs are chosen four to seven times as often as the rear (137 / 65 / 19 / 18) and 80 % of steps carry no advance — `IN_FLIGHT` (the controller admitted; the planner's leg choice is the defect)
+
+**What is built** (`cpp_core/.../PoseSequencer.*`, 3 tests; `sim60_stairs_seq` in the launcher, `_seq0` the FK check): the
+body publishes its leg model (the construction anchors the shared FK needs and the action-to-angle map, 116 floats,
+`OGMA_PICRAWLER_LEG_MODEL=1`) and the module's forward kinematics then match the body's own published toes to 1.2 mm
+at rest; MotorEPMv2 blends its per-leg command with the sequencer's by `engage` just before publishing, so the gait's
+learner sees what was executed and the hand-back is a ramp; the sequencer engages only from a standing body (tick ≥
+200, three toes down, belly ≥ 4.5 cm — engaged at tick 1 it froze the gait's lying start pose and never recovered).
+The stance is the sequencer's own: planted toes held `stand_h_m` (8.5 cm) below the body in the body frame, each with
+the elevation the terrain patch gives its ground against the others' (deadband 3 cm — the memory's heights scatter 2
+cm on the flat and a touch-measured elevation rolled the body 0.5 rad), a load-seeking creep (a planted toe without
+contact creeps down 2 cm/s until it bears — a four-legged stance always has one short leg), and a workspace sector per
+leg (±0.6 rad about the heading, 7–14 cm from the hip; the gait stands at 12–13 cm, at the edge, so the neutral place is
+10 cm and the legs step toward it). The shift's direction is the inward normal of the edge of the remaining toes'
+triangle nearest the weight, by the margin still missing (the model's own margin when all four bear), plus the toes'
+centroid and a forward advance that yields whenever it would take the margin below its floor — a front leg's lift
+needs the weight BEHIND the diagonal, so the body advances with the rear legs' steps and sways for the fronts.
+
+**The eleven things the flat runs taught**, each one a run: (1) engage from a standing body; (2) the "sunk" rule
+compares the commanded toe, not the target; (3) every target inside the leg's reach, or a toe hangs and is declared
+landed; (4) the FSR flag, not the memory's gap, says what bears; (5) a shift needs a direction; (6) a placed toe
+hovers a few millimetres and reads airborne — the creep; (7) a toe that lands a stride ahead is not "furthest from
+neutral" — only behind counts; (8) the advance and the margin's pull cancel exactly for a front leg — stagnation must
+end the shift; (9) a blocked shift may lift the blocking toe only with a margin, never without (one fall); (10) the
+elevation from the touch rolls the body, the patch's with a 3 cm deadband does not; (11) a stance at the edge of
+reach blocks every shift at once — the sequencer must own its stance. The controller after these: landing error 2–6
+mm on the flat, IK error 2 mm, body follows a commanded 12 mm toe shift by 13 mm.
+
+**Reading.** The sequencer is the pose controller the operator asked for and it is already the safest walker this
+body has had — statically supported almost always, never flipped — but the greedy leg choice ("the toe furthest
+behind its place, else the safest that needs a step") starves the rear legs: lifting a rear toe needs the body
+forward over the fronts, the body advances only during rear steps, and the fallback finds a front leg that is safe
+to lift in place. Real crawls do not choose greedily; they keep a FIXED order (left-rear, left-front, right-rear,
+right-front, or the diagonal LF–RR–RF–LR) and SWAY the body for each. **Next:** the fixed order with the model as
+the gate (sway until the margin allows, then step), the advance taken during the rear steps; then the stairs, where
+the landing error rises to 1.6–2.7 cm (the memory's) and the lift over a riser is untested. The depth handle is the
+sequencer's posture control (the crouch to clear a riser) when it gets there. **Re-use context:** the sequencer is a
+general pose-level controller — any application that wants a body put somewhere deliberately (the operator's
+"alternative motor controller for all kinds of applications") starts from its IK, stance and socket.

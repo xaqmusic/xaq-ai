@@ -555,6 +555,12 @@ private:
     // leg's kinematic lift direction (press_lift_dir, metres of depth per action unit; needs jac_topic), bounded by
     // stance_depth_max_u.  A pose planner's weight shift is a depth change on one pair; nothing else in the gait can
     // make one.  Empty topic = no subscription, byte-identical; gain 0 = the press route only.
+    // THE POSE SOCKET (2026-11-08, the sequencer's): a ProprioToken [engage, u x (n_legs x motor_dim), leg-major] on
+    // pose_topic.  Just before the per-leg command is published, y = (1 - engage) y + engage u: a pose planner beside the
+    // rhythm takes the joints over by the fraction it asks, and the gait's learner sees what was EXECUTED (prev_y), so
+    // handing the rhythm back is a ramp, not a jump.  Empty = no subscription, byte-identical; engage 0 = the gait.
+    std::string pose_topic_;
+    std::vector<float> pose_u_; float pose_engage_ = 0.0f; bool pose_seen_ = false;
     std::string stance_depth_topic_;
     double stance_depth_gain_ = 0.0, stance_depth_max_u_ = 0.3;
     std::vector<float> stance_depth_m_, stance_depth_w_, stance_depth_u_;

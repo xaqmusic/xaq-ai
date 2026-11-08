@@ -1259,6 +1259,11 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"swing_reach_rad_per_m", ParamMutability::HotMutable,
          "Hip1 radians per metre of requested reach (the toe's lever about hip1 along the body's forward, ~0.2 m x cos 45 deg -> 7).",
          ParamValue{7.0}, std::nullopt, std::nullopt},
+        {"pose_topic", ParamMutability::ConstructionOnly,
+         "THE POSE SOCKET (2026-11-08): a ProprioToken [engage, u x (n_legs x motor_dim), leg-major]; each leg's command becomes "
+         "(1 - engage) x the gait's + engage x u just before it is published (PoseSequencer).  Feedback.  Empty = no subscription, "
+         "byte-identical.",
+         ParamValue{std::string("")}, std::nullopt, std::nullopt},
         {"stance_depth_topic", ParamMutability::ConstructionOnly,
          "THE STANCE DEPTH HANDLE (2026-11-08): a ProprioToken [delta_m, weight] x 4 asking each PLANTED leg to stand delta_m "
          "deeper (+ = that corner up) or shallower (-); added to the learned press's deficit for the leg (the learner agrees) and, "
@@ -1616,7 +1621,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["leg_phase_lift_rear_mult"] = leg_phase_lift_rear_mult_;
     m["lift_handle_topic"] = lift_handle_topic_;
     m["swing_target_topic"] = swing_target_topic_; m["swing_reach_rad_per_m"] = swing_reach_rad_per_m_;
-    m["stance_depth_topic"] = stance_depth_topic_; m["stance_depth_gain"] = stance_depth_gain_; m["stance_depth_max_u"] = stance_depth_max_u_;
+    m["pose_topic"] = pose_topic_; m["stance_depth_topic"] = stance_depth_topic_; m["stance_depth_gain"] = stance_depth_gain_; m["stance_depth_max_u"] = stance_depth_max_u_;
     m["jac_topic"] = jac_topic_; m["press_kin"] = press_kin_; m["press_kin_min"] = press_kin_min_;
     m["press_hip2_range"] = press_hip2_range_; m["press_knee_fold"] = press_knee_fold_; m["press_knee_hyperext"] = press_knee_hyperext_;
     m["leg_phase_lift_lead"] = leg_phase_lift_lead_;
@@ -1899,6 +1904,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "lift_handle_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) lift_handle_topic_ = *p; });
     apply_param(params, "swing_target_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) swing_target_topic_ = *p; });
     apply_param(params, "swing_reach_rad_per_m", [&](auto const& v){ swing_reach_rad_per_m_ = get_double(v, "swing_reach_rad_per_m"); });
+    apply_param(params, "pose_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) pose_topic_ = *p; });
     apply_param(params, "stance_depth_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) stance_depth_topic_ = *p; });
     apply_param(params, "stance_depth_gain", [&](auto const& v){ stance_depth_gain_ = get_double(v, "stance_depth_gain"); });
     apply_param(params, "stance_depth_max_u", [&](auto const& v){ stance_depth_max_u_ = get_double(v, "stance_depth_max_u"); });
@@ -2288,6 +2294,19 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
                 if (int(swing_lift_mult_.size()) != n_legs_) { swing_lift_mult_.assign(size_t(n_legs_), 1.0f); swing_reach_m_.assign(size_t(n_legs_), 0.0f); swing_reach_held_.assign(size_t(n_legs_), 0.0f); }
                 for (int i = 0; i < n_legs_; ++i) { swing_lift_mult_[size_t(i)] = pt->values[2 * i]; swing_reach_m_[size_t(i)] = pt->values[2 * i + 1]; }
                 swing_target_seen_ = true;
+            }));
+    }
+    // The pose socket (2026-11-08): Feedback, empty = no subscription -> byte-identical.
+    if (!pose_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            pose_topic_, SubscriptionKind::Feedback,
+            [this](std::string_view /*topic*/, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+                if (!pt || pt->values.size() < 1 + n_legs_ * motor_dim_) return;
+                pose_engage_ = std::clamp(pt->values[0], 0.0f, 1.0f);
+                pose_u_.assign(pt->values.data() + 1, pt->values.data() + 1 + n_legs_ * motor_dim_);
+                pose_seen_ = true;
             }));
     }
     // The stance depth handle (2026-11-08): Feedback, empty = no subscription -> byte-identical.
@@ -7196,6 +7215,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             }
         }
 
+        if (pose_seen_ && pose_engage_ > 0.0f && int(pose_u_.size()) >= (leg + 1) * m)   // the pose socket: the planner's share of the command
+            for (int j = 0; j < m; ++j) y[j] = (1.0f - pose_engage_) * y[j] + pose_engage_ * std::clamp(pose_u_[size_t(leg * m + j)], -1.0f, 1.0f);
         for (int j = 0; j < m; ++j) {
             auto out = std::make_shared<ActionOut>();
             out->tick_id     = tick_id;
@@ -8248,7 +8269,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["press_b"] = press_b_;
     j["press_c"] = press_c_;
     j["press_def"] = press_def_;
-    j["stance_depth_u"] = stance_depth_u_;
+    j["stance_depth_u"] = stance_depth_u_; j["pose_engage"] = pose_engage_;
     j["press_cap"] = press_cap_;
     j["track_ratio"]         = trk_ratio_;
     j["swing_touch_frac"]    = swing_mid_n_ > 0.0 ? float(swing_touch_n_ / swing_mid_n_) : 0.0f;

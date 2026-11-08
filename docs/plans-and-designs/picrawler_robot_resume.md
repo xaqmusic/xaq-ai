@@ -162,12 +162,14 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   `sim60_stairs_crawl` / `_cap`) was measured: the trot relaxes HALFWAY — static support doubles on the flat at a 10–20 %
   speed cost, no deadlock there; on the stairs support rises a third, tilt falls, the climb is unchanged (every arm stops
   at the 64 mm riser) and 20–29 % of the run is spent with every bearing leg held, because the held legs sit at the end
-  of their stroke and nothing translates the body — a gate cannot CREATE support. **Next: the separate sequencer** — a
-  module that owns the planted legs' hip1 (the body's translation over the toes) and one leg's lift at a time, chooses
-  the next pose from the support model (translate until the next leg's lift margin is positive, lift it, place it on
-  the predicted tread, repeat), goes through the same margin gate, and hands the rhythm back on the flat; judged on the
-  graded flight by risers climbed, flips, the margin and the FSR shares (12 000 ticks, 2+ seeds), gain-0. The depth
-  handle stays as its posture control (the crouch to clear a riser). Then the robot: the
+  of their stroke and nothing translates the body — a gate cannot CREATE support. **The sequencer** (`PoseSequencer` → `MotorEPMv2 pose_topic`, ledger 2026-11-08; `sim60_stairs_seq` in the
+  launcher; the body publishes its leg model under `OGMA_PICRAWLER_LEG_MODEL`) is built: a pose-level controller
+  with IK on the body's own FK, a load-seeking stance, and a crawl of SHIFT / LIFT / SWING / LOWER gated by the support
+  model. The controller works (static support 89–98 % of rows, never flipped in eight runs, landings 2–6 mm from the
+  predicted ground on the flat) and the planner does not yet walk (0.1 m per minute; the rear legs starved by the
+  greedy leg choice; the stairs reached, one 12 mm riser climbed once). **Next: a fixed crawl order with the model as
+  the gate** (sway until the margin allows, advance during the rear steps), then the riser (lift over the predicted
+  tread, the depth handle as the crouch). IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through
