@@ -755,7 +755,8 @@
       "id": "support_model",
       "params": {
         "patch_topic": "terrain.patch",
-        "output_topic": "support.state"
+        "output_topic": "support.state",
+        "contact_off_ticks": 8
       }
     },
     {

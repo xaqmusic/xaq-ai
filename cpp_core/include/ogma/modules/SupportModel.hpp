@@ -87,6 +87,10 @@ private:
     // tolerance caught 86 % of the bearing toes and 36 % of the airborne); "gap" -- the memory's prediction, as a
     // candidate pose would have to be judged.  The gap prediction is graded against the flag either way.
     std::string support_source_ = "flag";
+    // THE FLAG'S OFF-DEBOUNCE (operator, 2026-11-08: lifting one leg unloads the others for a few ticks and the raw flag
+    // drops; a bearing set read from it collapses to two toes and every margin to the floor for the duration): a toe
+    // that bore stays in the bearing set for contact_off_ticks after its flag drops. 0 = the raw flag (byte-identical).
+    int contact_off_ticks_ = 0; std::array<int, 4> off_count_{}; std::array<bool, 4> bearing_{};
     double unsafe_margin_m_ = -0.02;   // a toe that LEAVES while its lift margin is below this is an unsafe lift
 
     // inputs

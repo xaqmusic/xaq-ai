@@ -63,6 +63,11 @@ ParamSchema PoseSequencer::params_schema() const {
         {"stand_h_m",     ParamMutability::HotMutable, "The body's height above the planted toes' mean ground (m): planted toes are held there in the body frame.", ParamValue{0.085}},
         {"elev_max_m",    ParamMutability::HotMutable, "The most a planted toe may be held above the others' mean (a riser higher than this pitches the body).", ParamValue{0.08}},
         {"reach_max_m",   ParamMutability::HotMutable, "A toe target is kept within this horizontal distance of the leg's hip (the full leg reaches ~0.143 at the standing height).", ParamValue{0.14}},
+        {"bear_tau_ticks", ParamMutability::HotMutable, "The leaky estimate of each toe's bearing from the contact flag (ticks); the lift-off transient on the other legs does not reach the sequence.", ParamValue{8.0}},
+        {"bear_on",       ParamMutability::HotMutable, "The estimate above which a toe bears ...", ParamValue{0.6}},
+        {"bear_off",      ParamMutability::HotMutable, "... and below which it no longer does (hysteresis).", ParamValue{0.3}},
+        {"touch_ticks",   ParamMutability::HotMutable, "A landing needs the raw flag on this many ticks in a row.", ParamValue{int64_t{3}}},
+        {"touch_load",    ParamMutability::HotMutable, "... and, with a load topic, at least this fraction of the body's weight (0 = the flag alone; 0.05 missed landings whose toe had touched but not yet taken weight).", ParamValue{0.0}},
         {"creep_v_mps",   ParamMutability::HotMutable, "A planted toe without contact creeps down at this rate until it bears.", ParamValue{0.02}},
         {"creep_max_m",   ParamMutability::HotMutable, "... by at most this (m).", ParamValue{0.02}},
         {"creep_relax_v_mps", ParamMutability::HotMutable, "... and relaxes back at this rate while it bears.", ParamValue{0.005}},
@@ -102,7 +107,7 @@ ParamMap PoseSequencer::current_params() const {
             {"feet_xz_topic", ParamValue{feet_xz_topic_}}, {"feet_y_topic", ParamValue{feet_y_topic_}}, {"up_topic", ParamValue{up_topic_}},
             {"contact_topic", ParamValue{contact_topic_}}, {"load_topic", ParamValue{load_topic_}}, {"gait_action_topics", ParamValue{gait_action_topics_}}, {"output_topic", ParamValue{output_topic_}},
             {"engage", ParamValue{engage_}}, {"engage_ramp_ticks", ParamValue{int64_t(engage_ramp_ticks_)}}, {"belly_topic", ParamValue{belly_topic_}},
-            {"stand_h_m", ParamValue{stand_h_m_}}, {"sector_half_rad", ParamValue{sector_half_rad_}}, {"neutral_r_m", ParamValue{neutral_r_m_}}, {"centre_gain", ParamValue{centre_gain_}}, {"advance_m", ParamValue{advance_m_}}, {"margin_extra_m", ParamValue{margin_extra_m_}}, {"creep_v_mps", ParamValue{creep_v_}}, {"creep_max_m", ParamValue{creep_max_m_}}, {"creep_relax_v_mps", ParamValue{creep_relax_v_}}, {"elev_deadband_m", ParamValue{elev_deadband_m_}}, {"elev_tau_ticks", ParamValue{elev_tau_ticks_}}, {"air_ticks_min", ParamValue{int64_t(air_ticks_min_)}}, {"reach_min_m", ParamValue{reach_min_m_}}, {"retreat_m", ParamValue{retreat_m_}}, {"elev_max_m", ParamValue{elev_max_m_}}, {"reach_max_m", ParamValue{reach_max_m_}}, {"unreach_tol_m", ParamValue{unreach_tol_m_}},
+            {"stand_h_m", ParamValue{stand_h_m_}}, {"sector_half_rad", ParamValue{sector_half_rad_}}, {"neutral_r_m", ParamValue{neutral_r_m_}}, {"centre_gain", ParamValue{centre_gain_}}, {"advance_m", ParamValue{advance_m_}}, {"margin_extra_m", ParamValue{margin_extra_m_}}, {"creep_v_mps", ParamValue{creep_v_}}, {"bear_tau_ticks", ParamValue{bear_tau_ticks_}}, {"bear_on", ParamValue{bear_on_}}, {"bear_off", ParamValue{bear_off_}}, {"touch_ticks", ParamValue{int64_t(touch_ticks_)}}, {"touch_load", ParamValue{touch_load_}}, {"creep_max_m", ParamValue{creep_max_m_}}, {"creep_relax_v_mps", ParamValue{creep_relax_v_}}, {"elev_deadband_m", ParamValue{elev_deadband_m_}}, {"elev_tau_ticks", ParamValue{elev_tau_ticks_}}, {"air_ticks_min", ParamValue{int64_t(air_ticks_min_)}}, {"reach_min_m", ParamValue{reach_min_m_}}, {"retreat_m", ParamValue{retreat_m_}}, {"elev_max_m", ParamValue{elev_max_m_}}, {"reach_max_m", ParamValue{reach_max_m_}}, {"unreach_tol_m", ParamValue{unreach_tol_m_}},
             {"engage_min_belly_m", ParamValue{engage_min_belly_m_}}, {"engage_min_tick", ParamValue{int64_t(engage_min_tick_)}}, {"engage_min_contacts", ParamValue{int64_t(engage_min_contacts_)}}, {"phase_max_ticks", ParamValue{int64_t(phase_max_ticks_)}}, {"shift_v_mps", ParamValue{shift_v_}}, {"shift_max_m", ParamValue{shift_max_m_}},
             {"margin_min_m", ParamValue{margin_min_m_}}, {"lift_clear_m", ParamValue{lift_clear_m_}}, {"lift_v_mps", ParamValue{lift_v_}}, {"swing_v_mps", ParamValue{swing_v_}},
             {"lower_v_mps", ParamValue{lower_v_}}, {"stride_m", ParamValue{stride_m_}}, {"sink_max_m", ParamValue{sink_max_m_}}, {"tilt_disengage", ParamValue{tilt_disengage_}},
@@ -117,7 +122,7 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
             {"feet_y_topic", &feet_y_topic_}, {"up_topic", &up_topic_}, {"contact_topic", &contact_topic_}, {"load_topic", &load_topic_}, {"output_topic", &output_topic_}, {"belly_topic", &belly_topic_}})
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     apply_param(params, "gait_action_topics", [&](auto const& v){ if (auto p = std::get_if<std::vector<std::string>>(&v)) gait_action_topics_ = *p; });
-    for (auto const& k : {"engage", "engage_ramp_ticks", "stand_h_m", "sector_half_rad", "neutral_r_m", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "creep_v_mps", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps",
+    for (auto const& k : {"engage", "engage_ramp_ticks", "stand_h_m", "sector_half_rad", "neutral_r_m", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps",
                           "stride_m", "sink_max_m", "tilt_disengage", "dt_s", "ik_iters", "ik_damping_m", "ik_step_max_rad", "ik_tol_m"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which, int idx) {
@@ -138,6 +143,11 @@ void PoseSequencer::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "neutral_r_m")      neutral_r_m_ = std::max(0.03, get_double(value, k));
     else if (k == "centre_gain")      centre_gain_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "advance_m")        advance_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "bear_tau_ticks")   bear_tau_ticks_ = std::max(1.0, get_double(value, k));
+    else if (k == "bear_on")          bear_on_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "bear_off")         bear_off_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "touch_ticks")      touch_ticks_ = std::max(1, int(get_double(value, k)));
+    else if (k == "touch_load")       touch_load_ = std::max(0.0, get_double(value, k));
     else if (k == "creep_v_mps")      creep_v_ = std::max(0.0, get_double(value, k));
     else if (k == "creep_max_m")      creep_max_m_ = std::max(0.0, get_double(value, k));
     else if (k == "creep_relax_v_mps") creep_relax_v_ = std::max(0.0, get_double(value, k));
@@ -355,7 +365,7 @@ void PoseSequencer::hold_stance() {
         if (i == leg_ && phase_ != Phase::Shift) { creep_[size_t(i)] = 0.0; air_ticks_[size_t(i)] = 0; continue; }   // the stepping toe is the machine's
         // the load-seeking creep: down while the flag is off, back while it bears
         if (have_contact_) {
-            if (contact_[size_t(i)] <= 0.5f) { creep_[size_t(i)] = std::min(creep_max_m_, creep_[size_t(i)] + creep_v_ * dt_); ++air_ticks_[size_t(i)]; }
+            if (!bearing(i)) { creep_[size_t(i)] = std::min(creep_max_m_, creep_[size_t(i)] + creep_v_ * dt_); ++air_ticks_[size_t(i)]; }
             else { creep_[size_t(i)] = std::max(0.0, creep_[size_t(i)] - creep_relax_v_ * dt_); air_ticks_[size_t(i)] = 0; }
         }
         toe_tgt_[size_t(i)].y = float(-stand_h_m_ + std::clamp(elev_[size_t(i)] - mean, -elev_max_m_, elev_max_m_) - creep_[size_t(i)]);
@@ -365,7 +375,7 @@ void PoseSequencer::hold_stance() {
 // the leg whose toe is furthest behind its neutral place steps next (the crawl's order emerges); among equals, the model's
 // safest
 int PoseSequencer::choose_leg() const {
-    if (have_contact_) for (int i = 0; i < 4; ++i) if (contact_[size_t(i)] <= 0.5f && air_ticks_[size_t(i)] >= air_ticks_min_) return i;   // a toe the creep could not bring to ground is placed first
+    if (have_contact_) for (int i = 0; i < 4; ++i) if (!bearing(i) && air_ticks_[size_t(i)] >= air_ticks_min_) return i;   // a toe the creep could not bring to ground is placed first
     // the toe furthest from its neutral place steps next -- behind it (the body has advanced), or tucked in or out
     // (the body has swayed); the crawl's order emerges from the geometry, and the model's margin breaks ties
     int best = -1; double best_score = -1e9;
@@ -470,8 +480,8 @@ void PoseSequencer::step_machine() {
         const Vec3f goal = at_gravity_h(land_.x, land_.z, lift_h_);
         const Vec3f d = sub(goal, tg); const double dn = len(d), step = swing_v_ * dt_;
         if (dn <= step) tg = goal; else tg = add(tg, Vec3f(float(d.x / dn * step), float(d.y / dn * step), float(d.z / dn * step)));
-        if (dn <= step && len(sub(toe_of(leg_, angles_[size_t(leg_)]), tg)) < 2.0 * ik_tol_m_) { phase_ = Phase::Lower; phase_ticks_ = 0; }
-        else if (phase_ticks_ > phase_max_ticks_) { ++phase_timeouts_; tg = goal; phase_ = Phase::Lower; phase_ticks_ = 0; }
+        if (dn <= step && len(sub(toe_of(leg_, angles_[size_t(leg_)]), tg)) < 2.0 * ik_tol_m_) { phase_ = Phase::Lower; phase_ticks_ = 0; touch_run_ = 0; }
+        else if (phase_ticks_ > phase_max_ticks_) { ++phase_timeouts_; tg = goal; phase_ = Phase::Lower; phase_ticks_ = 0; touch_run_ = 0; }
         break; }
     case Phase::Lower: {
         Vec3f& tg = toe_tgt_[size_t(leg_)];
@@ -483,7 +493,9 @@ void PoseSequencer::step_machine() {
             if (dn > reach_min_m_ + retreat_m_) { tg.x += float(dx / dn * retreat_m_); tg.z += float(dz / dn * retreat_m_); ++retreats_; }
         }
         const double h_cmd = gravity_h(cmd);
-        const bool touched = have_contact_ && contact_[size_t(leg_)] > 0.5f && phase_ticks_ > 3;
+        const bool raw_touch = have_contact_ && contact_[size_t(leg_)] > 0.5f && (!have_load_ || load_[size_t(leg_)] >= float(touch_load_));
+        touch_run_ = raw_touch ? touch_run_ + 1 : 0;
+        const bool touched = touch_run_ >= touch_ticks_ && phase_ticks_ > 3;
         const bool sunk = h_cmd < land_h_ - sink_max_m_ || phase_ticks_ > 4 * phase_max_ticks_;
         if (touched || sunk) {
             if (sunk) ++lower_sunk_;
@@ -512,6 +524,13 @@ void PoseSequencer::publish(uint64_t tick_id) {
 
 void PoseSequencer::tick(uint64_t tick_id) {
     tick_now_ = tick_id;
+    if (have_contact_) {   // the leaky bearing estimate, with hysteresis
+        const double a = 1.0 / bear_tau_ticks_;
+        for (int i = 0; i < 4; ++i) {
+            bear_[size_t(i)] += a * ((contact_[size_t(i)] > 0.5f ? 1.0 : 0.0) - bear_[size_t(i)]);
+            if (bear_[size_t(i)] > bear_on_) bearing_[size_t(i)] = true; else if (bear_[size_t(i)] < bear_off_) bearing_[size_t(i)] = false;
+        }
+    }
     // the FK check against the body's own toes (the model is the body's; this is the wiring's check), from the gait's command
     if (have_model_ && have_gait_ && have_xz_ && have_y_ && phase_ == Phase::Idle) {
         double e = 0.0;
@@ -525,7 +544,7 @@ void PoseSequencer::tick(uint64_t tick_id) {
     const bool want = engage_ > 0.0 && have_model_ && upright;
     if (!upright && phase_ != Phase::Idle) ++disengaged_tilt_;
     if (want && phase_ == Phase::Idle) {   // from a standing body only
-        int n_contact = 0; if (have_contact_) for (int i = 0; i < 4; ++i) n_contact += contact_[size_t(i)] > 0.5f;
+        int n_contact = 0; if (have_contact_) for (int i = 0; i < 4; ++i) n_contact += bearing(i);
         const bool standing = int64_t(tick_id) >= engage_min_tick_ && (!have_contact_ || n_contact >= engage_min_contacts_)
                               && (belly_topic_.empty() || (have_belly_ && belly_ >= float(engage_min_belly_m_)));
         if (standing) engage_now(tick_id);
@@ -560,7 +579,7 @@ nlohmann::json PoseSequencer::diag_snapshot() const {
     return nlohmann::json{{"phase", phase_name(phase_)}, {"phase_id", int(phase_)}, {"leg", leg_}, {"engage", engage_level_}, {"model", have_model_}, {"support", have_support_},
                           {"patch", have_patch_}, {"steps", st}, {"cycles", cycles_}, {"shift_exhausted", shift_exhausted_}, {"shift_ticks", shift_ticks_},
                           {"disengaged_tilt", disengaged_tilt_}, {"lower_sunk", lower_sunk_}, {"phase_timeouts", phase_timeouts_}, {"engaged_at", engaged_at_},
-                          {"landings", landings_}, {"missed", missed_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
+                          {"landings", landings_}, {"missed", missed_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
                           {"toe_tgt", tg}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {air_ticks_[0], air_ticks_[1], air_ticks_[2], air_ticks_[3]}}, {"lift_h", lift_h_}, {"land_h", land_h_}, {"shift_acc", shift_acc_}, {"phase_ticks", phase_ticks_}};
 }
 

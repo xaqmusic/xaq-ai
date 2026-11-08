@@ -75,6 +75,7 @@ ParamSchema SupportModel::params_schema() const {
         {"hip_fwd_m",     ParamMutability::HotMutable, "The hip rectangle's half length (m): the front hips at +.", ParamValue{0.033}},
         {"gap_tol_m",     ParamMutability::HotMutable, "A toe within this of the remembered ground is predicted to bear (the gap prediction; graded against the flag).", ParamValue{0.015}},
         {"support_source", ParamMutability::HotMutable, "Which toes bear in the evaluated (current) pose: \"flag\" = the contact flag (default: the FSR is the sensor of bearing); \"gap\" = the memory's prediction, as a candidate pose would be judged.", ParamValue{std::string("flag")}},
+        {"contact_off_ticks", ParamMutability::HotMutable, "A toe that bore stays in the bearing set this many ticks after its flag drops (the lift-off transient on the other legs); 0 = the raw flag.", ParamValue{int64_t{0}}},
         {"unsafe_margin_m", ParamMutability::HotMutable, "A toe that leaves (its flag falls) while its lift margin is below this counts as an UNSAFE LIFT (m).", ParamValue{-0.02}},
         {"margin_floor",  ParamMutability::HotMutable, "The margin reported with no support at all (m).", ParamValue{-0.10}},
         {"err_alpha",     ParamMutability::HotMutable, "EMA rate of the squared load error per leg.", ParamValue{0.02}},
@@ -89,7 +90,7 @@ ParamMap SupportModel::current_params() const {
             {"com_x_m", ParamValue{com_offset_[0]}}, {"com_y_m", ParamValue{com_offset_[1]}}, {"com_z_m", ParamValue{com_offset_[2]}},
             {"hip_lat_m", ParamValue{hip_lat_m_}}, {"hip_fwd_m", ParamValue{hip_fwd_m_}}, {"gap_tol_m", ParamValue{gap_tol_m_}},
             {"margin_floor", ParamValue{margin_floor_}}, {"err_alpha", ParamValue{err_alpha_}}, {"up_min", ParamValue{up_min_}}, {"share_min", ParamValue{share_min_}},
-            {"support_source", ParamValue{support_source_}}, {"unsafe_margin_m", ParamValue{unsafe_margin_m_}}};
+            {"support_source", ParamValue{support_source_}}, {"unsafe_margin_m", ParamValue{unsafe_margin_m_}}, {"contact_off_ticks", ParamValue{int64_t(contact_off_ticks_)}}};
 }
 
 void SupportModel::on_setup(Bus* bus, ParamMap const& params) {
@@ -99,7 +100,7 @@ void SupportModel::on_setup(Bus* bus, ParamMap const& params) {
             {"feet_xz_topic", &feet_xz_topic_}, {"feet_y_topic", &feet_y_topic_}, {"up_topic", &up_topic_}, {"contact_topic", &contact_topic_},
             {"load_topic", &load_topic_}, {"patch_topic", &patch_topic_}, {"output_topic", &output_topic_}})
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
-    for (auto const& k : {"mass_chassis_kg", "mass_leg_kg", "leg_com_frac", "com_x_m", "com_y_m", "com_z_m", "hip_lat_m", "hip_fwd_m", "gap_tol_m", "margin_floor", "err_alpha", "up_min", "share_min", "unsafe_margin_m", "support_source"})
+    for (auto const& k : {"mass_chassis_kg", "mass_leg_kg", "leg_com_frac", "com_x_m", "com_y_m", "com_z_m", "hip_lat_m", "hip_fwd_m", "gap_tol_m", "margin_floor", "err_alpha", "up_min", "share_min", "unsafe_margin_m", "support_source", "contact_off_ticks"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which) {
         if (topic.empty()) return;
@@ -124,6 +125,7 @@ void SupportModel::on_param_change(std::string_view key, ParamValue const& value
     else if (k == "up_min")          up_min_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "share_min")       share_min_ = std::max(0.0, get_double(value, k));
     else if (k == "unsafe_margin_m") unsafe_margin_m_ = get_double(value, k);
+    else if (k == "contact_off_ticks") contact_off_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "support_source")  { const std::string v = get_string(value, k); if (v != "flag" && v != "gap") throw std::invalid_argument("SupportModel: support_source must be \"flag\" or \"gap\""); support_source_ = v; }
 }
 
@@ -233,6 +235,12 @@ double SupportModel::margin_of(std::vector<Point> const& pts_in, Point c) {
 
 void SupportModel::evaluate() {
     Eval e;
+    // the debounced flag: on at once, off only after contact_off_ticks without contact
+    for (int i = 0; i < 4; ++i) {
+        const bool raw = have_contact_ && contact_[size_t(i)] > 0.5f;
+        if (raw) { off_count_[size_t(i)] = 0; bearing_[size_t(i)] = true; }
+        else if (bearing_[size_t(i)] && ++off_count_[size_t(i)] > contact_off_ticks_) bearing_[size_t(i)] = false;
+    }
     const double ux = up_[0], uy = up_[1], uz = up_[2];
     if (uy < up_min_) { e.margin = margin_floor_; eval_ = e; have_eval_ = true; return; }   // on its side: nothing bears
     // the levelled frame: f forward-horizontal, l left-horizontal
@@ -249,7 +257,7 @@ void SupportModel::evaluate() {
         e.has[size_t(i)] = patch_at(toe[size_t(i)].fwd, toe[size_t(i)].lat, h, prec, spread);
         e.gap[size_t(i)] = e.has[size_t(i)] ? ty - h : 0.0;
         e.gap_contact[size_t(i)] = e.has[size_t(i)] ? e.gap[size_t(i)] <= gap_tol_m_ : (have_contact_ && contact_[size_t(i)] > 0.5f);
-        e.contact[size_t(i)] = (support_source_ == "flag" && have_contact_) ? contact_[size_t(i)] > 0.5f : e.gap_contact[size_t(i)];
+        e.contact[size_t(i)] = (support_source_ == "flag" && have_contact_) ? bearing_[size_t(i)] : e.gap_contact[size_t(i)];
         if (!e.has[size_t(i)]) ++no_ground_;
     }
     // the centre of mass: the chassis plus each leg at leg_com_frac of hip -> toe

@@ -115,6 +115,13 @@ private:
     // off creeps down at creep_v until it bears (at most creep_max_m), and relaxes back while it bears; a measured
     // elevation smaller than elev_deadband_m is noise, not a step; and "airborne" for the leg choice means the flag has
     // been off for air_ticks_min ticks despite the creep.
+    // THE FSR, FILTERED (operator, 2026-11-08: "during the first step the weight is lifted from other legs briefly and
+    // that resets the sequence"): a leaky estimate of each toe's bearing from the raw flag (bear_tau_ticks), read with
+    // hysteresis (on above bear_on, off below bear_off) for everything but the landing; the landing itself needs the raw
+    // flag on for touch_ticks in a row and, when a load is published, at least touch_load of the body's weight.
+    double bear_tau_ticks_ = 8.0, bear_on_ = 0.6, bear_off_ = 0.3, touch_load_ = 0.0; int touch_ticks_ = 3;
+    std::array<double, 4> bear_{}; std::array<bool, 4> bearing_{}; int touch_run_ = 0;
+    bool bearing(int i) const { return bearing_[size_t(i)]; }
     double creep_v_ = 0.02, creep_max_m_ = 0.02, creep_relax_v_ = 0.005, elev_deadband_m_ = 0.03; int air_ticks_min_ = 100;
     // the elevation of each toe's ground comes from the TERRAIN MEMORY's patch (the ground under the toe against the mean
     // under the others), smoothed; the touch grades the memory (land_err), it does not set the stance (a touch that stops
