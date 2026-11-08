@@ -10654,3 +10654,15 @@ stance tightened to 2 cm (a drifted frame had put landings 4 cm deep and out of 
 corridor (0.35 / 0.36 m in 60 s), true lifts 2.7–4.6 cm, no missed landing, two timeouts in 127 steps, mean tilt
 0.01–0.08 rad — `WORKING` (n = 4 traces). One stairs run still gains 2.5 cm of height over 80 s (the creep on a toe
 that reads unloaded relaxes slowly); the first riser is the next thing the crawl meets.
+
+**At a wall, and after a reset** (operator, 2026-11-08: "when the robot collides with one of the walls it freezes; the
+leg that collides seems to get stuck; resetting the robot leaves the expected foot markers out of sync with the actual
+foot locations"): a swinging toe that met the wall was treated as empty air — the target went on, the leg pressed into
+the wall and the phase sat out its 3 s timeout, which read as a freeze; and a reset teleported the body under a
+sequencer that kept its targets and joint state. Now the OBSTACLE REFLEX ends a lift or swing when the toe's contact
+flag returns for five ticks after it left the ground, with the toe asked at least 2 cm up (a brush of the floor by a
+low-flying toe is briefer and lower), and puts the toe down where it is; the body's `events.reset` / `events.miss`
+(the teleport, the inversion auto-reset, a fall) drop the sequencer to idle at once, and it re-engages from the standing
+conditions with a fresh settle; the phase timeouts are 1.2 s. On open ground the four traces are unchanged (every leg
+in turn, 0–3 reflex firings per run on brushes). The lateral drift that walks the body into a wall in the first place
+— 10–13 cm over 0.45 m in two of four runs, none in the others — is the crawl having no heading hold yet.

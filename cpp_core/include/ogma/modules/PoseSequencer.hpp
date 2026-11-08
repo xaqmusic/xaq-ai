@@ -85,7 +85,13 @@ private:
     // lying start pose, legs straight out, and the swing target was out of reach for the whole run): a minimum tick,
     // three toes in contact, and the belly clear of the ground when a belly topic is given.
     std::string belly_topic_ = "reality.proprio.belly_m"; double engage_min_belly_m_ = 0.045; int engage_min_tick_ = 200, engage_min_contacts_ = 3;
-    int phase_max_ticks_ = 150;   // a LIFT or SWING that has not arrived by then goes on (an unreachable target must not stop the walk)
+    int phase_max_ticks_ = 60;    // a LIFT or SWING that has not arrived by then goes on (an unreachable target must not stop the walk; 150 looked like a freeze at a wall)
+    // THE OBSTACLE REFLEX and THE RESET (operator, 2026-11-08: "when the robot collides with one of the walls it freezes;
+    // the leg that collides seems to get stuck; resetting the robot leaves the markers out of sync"): a swinging toe whose
+    // contact flag comes back on after it left the ground has met something -- the swing ends and the toe is put down
+    // where it is; and the body's reset event (events.reset / events.miss: a teleport, the inversion auto-reset, a fall)
+    // drops the sequencer to idle at once, so it re-engages from the standing conditions with fresh targets.
+    bool left_ground_ = false; int obstacle_run_ = 0; int64_t obstacle_hits_ = 0, resets_seen_ = 0;
     // THE STANCE: every planted toe is held at stand_h_m below the body origin in the BODY frame (equal legs: a level body on
     // flat ground), levelled by level_gain of the IMU's tilt (the low side's toes deeper), plus its own relative
     // elevation (measured at its touchdown against the toes already down, recentred so the body sits stand_h_m above

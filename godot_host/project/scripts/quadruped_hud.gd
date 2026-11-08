@@ -420,10 +420,10 @@ func _process(_delta: float) -> void:
 			if mm3.has("support_model"):
 				var smd: Dictionary = mm3["support_model"]
 				sm_str = "   margin=%+.3f n=%d" % [_as_float(smd.get("margin", 0.0)), _as_int(smd.get("n_support", 0))]
-			lines.append("seq:        %s %s   engage=%.2f   steps=%s   land=%d miss=%d err=%.3f   blocked=%d passed=%d dead=%d%s" % [
+			lines.append("seq:        %s %s   engage=%.2f   steps=%s   land=%d miss=%d err=%.3f   blocked=%d passed=%d obstacle=%d resets=%d%s" % [
 				String(ps.get("phase", "idle")), (leg_names[lg] if lg >= 0 and lg < 4 else "-"), _as_float(ps.get("engage", 0.0)),
 				str(st), _as_int(ps.get("landings", 0)), _as_int(ps.get("missed", 0)), _as_float(ps.get("land_err", 0.0)),
-				_as_int(ps.get("shift_blocked", 0)), _as_int(ps.get("turns_passed", 0)), _as_int(ps.get("deadlock_ticks", 0)), sm_str])
+				_as_int(ps.get("shift_blocked", 0)), _as_int(ps.get("turns_passed", 0)), _as_int(ps.get("obstacle_hits", 0)), _as_int(ps.get("resets_seen", 0)), sm_str])
 
 	# Curriculum stage + last-advance indicator.  Currently CurriculumManager
 	# is an autoload; emit even when no curriculum loaded so column shape is

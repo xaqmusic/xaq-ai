@@ -117,3 +117,32 @@ TEST(PoseSequencer, EngagedOnFlatGroundItCrawls_EveryLegStepsAndTheIkTracks) {
     ASSERT_EQ(f.out.size(), 13u); EXPECT_FLOAT_EQ(f.out[0], 1.0f);
     for (int k = 1; k < 13; ++k) { EXPECT_LE(f.out[size_t(k)], 1.0f); EXPECT_GE(f.out[size_t(k)], -1.0f); }
 }
+
+TEST(PoseSequencer, AToeThatMeetsSomethingMidSwingIsPutDownWhereItIs_AndAResetDropsToIdle) {
+    Fix f({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}}});
+    std::vector<float> contact = {1, 1, 1, 1};
+    // run until the first LIFT has the toe off the ground, then pretend it hits a wall: the flag comes back on in the air
+    uint64_t t = 0; bool hit = false; int obstacle_before = 0;
+    for (; t < 3000; ++t) {
+        const int leg = f.m.active_leg(); const auto ph = f.m.phase();
+        for (int i = 0; i < 4; ++i) contact[size_t(i)] = 1.0f;
+        if (leg >= 0 && (ph == PoseSequencer::Phase::Lift || ph == PoseSequencer::Phase::Swing)) {
+            auto d = f.m.diag_snapshot(); const double y = d["toe_tgt"][leg][1].get<double>();
+            contact[size_t(leg)] = (y > -0.06) ? 1.0f : 0.0f;   // once the toe is 2.5 cm up it "touches the wall": the flag returns
+            if (ph == PoseSequencer::Phase::Swing) { hit = true; obstacle_before = d["obstacle_hits"].get<int>(); }
+        }
+        if (leg >= 0 && ph == PoseSequencer::Phase::Lower) { auto d = f.m.diag_snapshot(); contact[size_t(leg)] = d["toe_tgt"][leg][1].get<double>() <= -0.09 ? 1.0f : 0.0f; }
+        f.run(t, contact);
+        if (f.m.diag_snapshot()["obstacle_hits"].get<int>() > 0) break;
+    }
+    auto d = f.m.diag_snapshot();
+    EXPECT_GE(d["obstacle_hits"].get<int>(), 1) << "the swing must end on a contact in the air";
+    EXPECT_EQ(f.m.phase(), PoseSequencer::Phase::Lower) << "and the toe is lowered where it is";
+    // a reset event: the sequencer drops to idle with the blend at 0, then re-engages from the standing conditions
+    f.bus.begin_tick(t + 1); auto ev = std::make_shared<ogma::EnvEvent>(); ev->name = "reset"; f.bus.publish("events.reset", ev); f.m.tick(t + 1); f.bus.end_tick();
+    EXPECT_EQ(f.m.diag_snapshot()["resets_seen"].get<int>(), 1);
+    EXPECT_LE(f.m.engage_level(), 0.1f) << "the blend dropped to zero on the reset (one ramp step may follow in the same tick)";
+    EXPECT_TRUE(f.m.phase() == PoseSequencer::Phase::Idle || f.m.phase() == PoseSequencer::Phase::Settle) << "back to the start: idle, or already settling again from the standing conditions";
+    for (uint64_t k = t + 2; k < t + 40; ++k) f.run(k, {1, 1, 1, 1});
+    EXPECT_NE(f.m.phase(), PoseSequencer::Phase::Idle) << "re-engaged";
+}
