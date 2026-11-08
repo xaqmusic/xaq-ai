@@ -29,7 +29,7 @@
       "height_homeostat",
       "panic"
     ],
-    "note": "2026-10-31. Same relation to _cs_pf_sl0 as sim_s60_p30 has to robot_p1: MAX_SERVO_SPEED 4.22 -> 6.0, period_ticks 50 -> 30, no US_DEADZONE. | 2026-11-01: + TouchMemory (touch_memory), an INSTRUMENT: the cloud of touches from the toes' commanded FK at each contact onset, carried by the odometry; publishes nothing, so the gait is byte-identical (checked seed 1 x 1500, corridor). 2026-11-02 encounter EPM: TouchMemory reads the toe TIP (reality.proprio.toe_y, ogma_host --toe-y with the floor calibration; the sim publishes it under OGMA_PICRAWLER_TOE_Y) instead of the gait's parity foot; EncounterFeatures -> EPM (touch/encounter) -> BeliefFilter added, nothing consumes them yet (instrument). Gain-0: the gait is unchanged. | 2026-11-08: + SupportModel (support_model), the pose EVALUATOR: TerrainMemory publishes its patch (terrain.patch) and the model predicts which toes bear, their load shares and the support / lift margins, graded against the FSRs and the contact flags (sm_*). Nothing reads support.state: the gait is byte-identical. | 2026-11-08: the sequencer arm (engage 0); the body publishes its leg model (OGMA_PICRAWLER_LEG_MODEL).",
+    "note": "2026-10-31. Same relation to _cs_pf_sl0 as sim_s60_p30 has to robot_p1: MAX_SERVO_SPEED 4.22 -> 6.0, period_ticks 50 -> 30, no US_DEADZONE. | 2026-11-01: + TouchMemory (touch_memory), an INSTRUMENT: the cloud of touches from the toes' commanded FK at each contact onset, carried by the odometry; publishes nothing, so the gait is byte-identical (checked seed 1 x 1500, corridor). 2026-11-02 encounter EPM: TouchMemory reads the toe TIP (reality.proprio.toe_y, ogma_host --toe-y with the floor calibration; the sim publishes it under OGMA_PICRAWLER_TOE_Y) instead of the gait's parity foot; EncounterFeatures -> EPM (touch/encounter) -> BeliefFilter added, nothing consumes them yet (instrument). Gain-0: the gait is unchanged. | 2026-11-08: + SupportModel (support_model), the pose EVALUATOR: TerrainMemory publishes its patch (terrain.patch) and the model predicts which toes bear, their load shares and the support / lift margins, graded against the FSRs and the contact flags (sm_*). Nothing reads support.state: the gait is byte-identical. | 2026-11-08: the sequencer arm (engage 0); the body publishes its leg model (OGMA_PICRAWLER_LEG_MODEL). | 2026-11-08: TerrainMemory and TouchMemory read the sequencer's odometry (reality.proprio.odom_seq: the commanded body motion while engaged, the stride odometry passed through otherwise); the heading hold.",
     "body": "measured_fsr",
     "gym_difficulty": 0.3,
     "body_env": {
@@ -664,7 +664,7 @@
         "contact_topic": "reality.proprio.foot_contact",
         "feet_xz_topic": "reality.proprio.feet_xz",
         "feet_y_topic": "reality.proprio.toe_y",
-        "odom_topic": "reality.proprio.odom",
+        "odom_topic": "reality.proprio.odom_seq",
         "load_topic": "reality.proprio.foot_load",
         "voxel_m": 0.02,
         "max_voxels": 4000,
@@ -747,7 +747,8 @@
         "max_age_ticks": 1500,
         "register_gain": 0.5,
         "datum_window": 3,
-        "patch_topic": "terrain.patch"
+        "patch_topic": "terrain.patch",
+        "odom_topic": "reality.proprio.odom_seq"
       }
     },
     {

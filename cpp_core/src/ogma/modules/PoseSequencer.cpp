@@ -36,12 +36,16 @@ std::string_view PoseSequencer::type_name() const { return "PoseSequencer"; }
 
 std::vector<TopicSpec> PoseSequencer::input_topics() const {
     std::vector<TopicSpec> v;
-    for (auto const& t : {model_topic_, support_topic_, patch_topic_, feet_xz_topic_, feet_y_topic_, up_topic_, contact_topic_, load_topic_})
+    for (auto const& t : {model_topic_, support_topic_, patch_topic_, feet_xz_topic_, feet_y_topic_, up_topic_, contact_topic_, load_topic_, odom_in_topic_})
         if (!t.empty()) v.push_back(TopicSpec{t, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     for (auto const& t : gait_action_topics_) if (!t.empty()) v.push_back(TopicSpec{t, std::type_index(typeid(ActionOut)), SubscriptionKind::Direct, false});
     return v;
 }
-std::vector<TopicSpec> PoseSequencer::output_topics() const { return { TopicSpec{output_topic_, std::type_index(typeid(ProprioToken))} }; }
+std::vector<TopicSpec> PoseSequencer::output_topics() const {
+    std::vector<TopicSpec> v{ TopicSpec{output_topic_, std::type_index(typeid(ProprioToken))} };
+    if (!odom_out_topic_.empty()) v.push_back(TopicSpec{odom_out_topic_, std::type_index(typeid(ProprioToken))});
+    return v;
+}
 
 ParamSchema PoseSequencer::params_schema() const {
     return {
@@ -80,6 +84,12 @@ ParamSchema PoseSequencer::params_schema() const {
         {"centre_gain",   ParamMutability::HotMutable, "During SHIFT the body also moves this fraction of its offset from the four toes' centroid per tick's bound.", ParamValue{0.5}},
         {"margin_extra_m", ParamMutability::HotMutable, "The shift aims for margin_min_m plus this (m).", ParamValue{0.005}},
         {"order",         ParamMutability::HotMutable, "The crawl's leg order (leg indices 0 FL, 1 FR, 2 RL, 3 RR); the default is the wave gait RL, FL, RR, FR. Empty = the greedy choice (the toe furthest behind its place).", ParamValue{std::vector<double>{2, 0, 3, 1}}},
+        {"odom_in_topic", ParamMutability::ConstructionOnly, "ProprioToken [x, y, yaw]: the body's dead-reckoned odometry; its yaw is the heading the hold keeps, and it is passed through while disengaged.", ParamValue{std::string("reality.proprio.odom")}},
+        {"odom_out_topic", ParamMutability::ConstructionOnly, "ProprioToken [x, y, yaw]: the sequencer's own odometry (the body's commanded motion over the planted toes, the body's yaw) for the terrain memory's frame. \"\" = not published.", ParamValue{std::string("reality.proprio.odom_seq")}},
+        {"heading_hold",  ParamMutability::HotMutable, "1 = hold the heading the body had at engage (the planted toes rotated during SHIFT); 0 = off.", ParamValue{1.0}},
+        {"heading_ref",   ParamMutability::HotMutable, "\"zero\" = hold the dead-reckoning frame's own heading (the body's facing at its anchor, the corridor's axis); \"engage\" = the heading the body had at engage.", ParamValue{std::string("zero")}},
+        {"heading_gain",  ParamMutability::HotMutable, "Yaw rate commanded per radian of heading error (1/s).", ParamValue{0.6}},
+        {"yaw_rate_max",  ParamMutability::HotMutable, "The most the body is turned per second (rad/s).", ParamValue{0.3}},
         {"settle_v_mps",  ParamMutability::HotMutable, "On engage the planted toes slide to their neutral places at this rate before the first step.", ParamValue{0.05}},
         {"neutral_r_m",   ParamMutability::HotMutable, "The stance: each toe's neutral place is this far from its hip along the leg's heading (m); the legs step toward it from wherever the gait left them.", ParamValue{0.10}},
         {"land_band_lo_m", ParamMutability::HotMutable, "The memory's height at a landing point is believed down to this far below the stance (a drifted frame put landings 4 cm deep and out of reach, 2026-11-08) ...", ParamValue{0.02}},
@@ -114,7 +124,7 @@ ParamMap PoseSequencer::current_params() const {
             {"feet_xz_topic", ParamValue{feet_xz_topic_}}, {"feet_y_topic", ParamValue{feet_y_topic_}}, {"up_topic", ParamValue{up_topic_}},
             {"contact_topic", ParamValue{contact_topic_}}, {"load_topic", ParamValue{load_topic_}}, {"gait_action_topics", ParamValue{gait_action_topics_}}, {"output_topic", ParamValue{output_topic_}},
             {"engage", ParamValue{engage_}}, {"engage_ramp_ticks", ParamValue{int64_t(engage_ramp_ticks_)}}, {"belly_topic", ParamValue{belly_topic_}},
-            {"stand_h_m", ParamValue{stand_h_m_}}, {"level_gain", ParamValue{level_gain_}}, {"level_max_m", ParamValue{level_max_m_}}, {"sector_half_rad", ParamValue{sector_half_rad_}}, {"land_sector_rad", ParamValue{land_sector_rad_}}, {"land_band_lo_m", ParamValue{land_band_lo_m_}}, {"land_band_hi_m", ParamValue{land_band_hi_m_}}, {"neutral_r_m", ParamValue{neutral_r_m_}}, {"settle_v_mps", ParamValue{settle_v_}}, {"order", ParamValue{order_}}, {"centre_gain", ParamValue{centre_gain_}}, {"advance_m", ParamValue{advance_m_}}, {"margin_extra_m", ParamValue{margin_extra_m_}}, {"creep_v_mps", ParamValue{creep_v_}}, {"bear_tau_ticks", ParamValue{bear_tau_ticks_}}, {"bear_on", ParamValue{bear_on_}}, {"bear_off", ParamValue{bear_off_}}, {"touch_ticks", ParamValue{int64_t(touch_ticks_)}}, {"touch_load", ParamValue{touch_load_}}, {"creep_max_m", ParamValue{creep_max_m_}}, {"creep_relax_v_mps", ParamValue{creep_relax_v_}}, {"elev_deadband_m", ParamValue{elev_deadband_m_}}, {"elev_tau_ticks", ParamValue{elev_tau_ticks_}}, {"air_ticks_min", ParamValue{int64_t(air_ticks_min_)}}, {"reach_min_m", ParamValue{reach_min_m_}}, {"retreat_m", ParamValue{retreat_m_}}, {"elev_max_m", ParamValue{elev_max_m_}}, {"reach_max_m", ParamValue{reach_max_m_}}, {"unreach_tol_m", ParamValue{unreach_tol_m_}},
+            {"stand_h_m", ParamValue{stand_h_m_}}, {"level_gain", ParamValue{level_gain_}}, {"level_max_m", ParamValue{level_max_m_}}, {"sector_half_rad", ParamValue{sector_half_rad_}}, {"land_sector_rad", ParamValue{land_sector_rad_}}, {"land_band_lo_m", ParamValue{land_band_lo_m_}}, {"land_band_hi_m", ParamValue{land_band_hi_m_}}, {"neutral_r_m", ParamValue{neutral_r_m_}}, {"settle_v_mps", ParamValue{settle_v_}}, {"odom_in_topic", ParamValue{odom_in_topic_}}, {"odom_out_topic", ParamValue{odom_out_topic_}}, {"heading_hold", ParamValue{heading_hold_}}, {"heading_ref", ParamValue{heading_ref_}}, {"heading_gain", ParamValue{heading_gain_}}, {"yaw_rate_max", ParamValue{yaw_rate_max_}}, {"order", ParamValue{order_}}, {"centre_gain", ParamValue{centre_gain_}}, {"advance_m", ParamValue{advance_m_}}, {"margin_extra_m", ParamValue{margin_extra_m_}}, {"creep_v_mps", ParamValue{creep_v_}}, {"bear_tau_ticks", ParamValue{bear_tau_ticks_}}, {"bear_on", ParamValue{bear_on_}}, {"bear_off", ParamValue{bear_off_}}, {"touch_ticks", ParamValue{int64_t(touch_ticks_)}}, {"touch_load", ParamValue{touch_load_}}, {"creep_max_m", ParamValue{creep_max_m_}}, {"creep_relax_v_mps", ParamValue{creep_relax_v_}}, {"elev_deadband_m", ParamValue{elev_deadband_m_}}, {"elev_tau_ticks", ParamValue{elev_tau_ticks_}}, {"air_ticks_min", ParamValue{int64_t(air_ticks_min_)}}, {"reach_min_m", ParamValue{reach_min_m_}}, {"retreat_m", ParamValue{retreat_m_}}, {"elev_max_m", ParamValue{elev_max_m_}}, {"reach_max_m", ParamValue{reach_max_m_}}, {"unreach_tol_m", ParamValue{unreach_tol_m_}},
             {"engage_min_belly_m", ParamValue{engage_min_belly_m_}}, {"engage_min_tick", ParamValue{int64_t(engage_min_tick_)}}, {"engage_min_contacts", ParamValue{int64_t(engage_min_contacts_)}}, {"phase_max_ticks", ParamValue{int64_t(phase_max_ticks_)}}, {"shift_v_mps", ParamValue{shift_v_}}, {"shift_max_m", ParamValue{shift_max_m_}},
             {"margin_min_m", ParamValue{margin_min_m_}}, {"lift_clear_m", ParamValue{lift_clear_m_}}, {"lift_v_mps", ParamValue{lift_v_}}, {"swing_v_mps", ParamValue{swing_v_}},
             {"lower_v_mps", ParamValue{lower_v_}}, {"stride_m", ParamValue{stride_m_}}, {"sink_max_m", ParamValue{sink_max_m_}}, {"tilt_disengage", ParamValue{tilt_disengage_}},
@@ -126,11 +136,11 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
     if (!bus_) throw std::invalid_argument("PoseSequencer requires a non-null Bus");
     for (auto pr : std::initializer_list<std::pair<const char*, std::string*>>{
             {"model_topic", &model_topic_}, {"support_topic", &support_topic_}, {"patch_topic", &patch_topic_}, {"feet_xz_topic", &feet_xz_topic_},
-            {"feet_y_topic", &feet_y_topic_}, {"up_topic", &up_topic_}, {"contact_topic", &contact_topic_}, {"load_topic", &load_topic_}, {"output_topic", &output_topic_}, {"belly_topic", &belly_topic_}})
+            {"feet_y_topic", &feet_y_topic_}, {"up_topic", &up_topic_}, {"contact_topic", &contact_topic_}, {"load_topic", &load_topic_}, {"output_topic", &output_topic_}, {"belly_topic", &belly_topic_}, {"odom_in_topic", &odom_in_topic_}, {"odom_out_topic", &odom_out_topic_}})
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     apply_param(params, "gait_action_topics", [&](auto const& v){ if (auto p = std::get_if<std::vector<std::string>>(&v)) gait_action_topics_ = *p; });
     apply_param(params, "order", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) order_ = *p; });
-    for (auto const& k : {"engage", "engage_ramp_ticks", "stand_h_m", "level_gain", "level_max_m", "sector_half_rad", "land_sector_rad", "land_band_lo_m", "land_band_hi_m", "neutral_r_m", "settle_v_mps", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps",
+    for (auto const& k : {"engage", "engage_ramp_ticks", "stand_h_m", "level_gain", "level_max_m", "sector_half_rad", "land_sector_rad", "land_band_lo_m", "land_band_hi_m", "neutral_r_m", "settle_v_mps", "heading_hold", "heading_ref", "heading_gain", "yaw_rate_max", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps",
                           "stride_m", "sink_max_m", "tilt_disengage", "dt_s", "ik_iters", "ik_damping_m", "ik_step_max_rad", "ik_tol_m"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which, int idx) {
@@ -138,7 +148,7 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(topic, SubscriptionKind::Direct, [this, which, idx](std::string_view, MessagePtr p){ handle(which, idx, p); }));
     };
     sub(model_topic_, "model", 0); sub(support_topic_, "support", 0); sub(patch_topic_, "patch", 0); sub(feet_xz_topic_, "xz", 0); sub(feet_y_topic_, "y", 0);
-    sub(up_topic_, "up", 0); sub(contact_topic_, "contact", 0); sub(load_topic_, "load", 0); sub(belly_topic_, "belly", 0);
+    sub(up_topic_, "up", 0); sub(contact_topic_, "contact", 0); sub(load_topic_, "load", 0); sub(belly_topic_, "belly", 0); sub(odom_in_topic_, "odom", 0);
     for (int i = 0; i < int(gait_action_topics_.size()) && i < 12; ++i) sub(gait_action_topics_[size_t(i)], "gait", i);
     sub_ids_.push_back(bus_->subscribe(topics::kEventsPrefix, SubscriptionKind::Direct, [this](std::string_view topic, MessagePtr p){
         if (!input_allowed(p->producer_id)) return;
@@ -161,6 +171,10 @@ void PoseSequencer::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "land_band_hi_m")   land_band_hi_m_ = std::max(0.0, get_double(value, k));
     else if (k == "neutral_r_m")      neutral_r_m_ = std::max(0.03, get_double(value, k));
     else if (k == "settle_v_mps")     settle_v_ = std::max(1e-3, get_double(value, k));
+    else if (k == "heading_hold")     heading_hold_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "heading_ref")      { const std::string v = get_string(value, k); if (v != "zero" && v != "engage") throw std::invalid_argument("PoseSequencer: heading_ref must be \"zero\" or \"engage\""); heading_ref_ = v; }
+    else if (k == "heading_gain")     heading_gain_ = std::max(0.0, get_double(value, k));
+    else if (k == "yaw_rate_max")     yaw_rate_max_ = std::max(0.0, get_double(value, k));
     else if (k == "order")            { if (auto p = std::get_if<std::vector<double>>(&value)) order_ = *p; }
     else if (k == "centre_gain")      centre_gain_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "advance_m")        advance_m_ = std::max(0.0, get_double(value, k));
@@ -236,6 +250,7 @@ void PoseSequencer::handle(std::string const& which, int idx, MessagePtr p) {
     else if (which == "contact" && v.size() >= 4) { for (int i = 0; i < 4; ++i) contact_[size_t(i)] = v[i]; have_contact_ = true; }
     else if (which == "load" && v.size() >= 4) { for (int i = 0; i < 4; ++i) load_[size_t(i)] = v[i]; have_load_ = true; }
     else if (which == "belly" && v.size() >= 1) { belly_ = v[0]; have_belly_ = true; }
+    else if (which == "odom" && v.size() >= 3) { odom_in_ = {v[0], v[1], v[2]}; have_odom_in_ = true; }
     else if (which == "up" && v.size() >= 3) { const double n = std::sqrt(double(v[0]) * v[0] + double(v[1]) * v[1] + double(v[2]) * v[2]); if (n > 0.5) { up_ = {v[0] / n, v[1] / n, v[2] / n}; have_up_ = true; } }
 }
 
@@ -361,6 +376,7 @@ void PoseSequencer::engage_now(uint64_t tick_id) {
         elev_[size_t(i)] = 0.0; ground_h_[size_t(i)] = -stand_h_m_; creep_[size_t(i)] = 0.0; air_ticks_[size_t(i)] = 0;
     }
     shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ticks_ = 0; leg_ = -1; phase_ = Phase::Settle; engaged_at_ = int64_t(tick_id);
+    yaw_ref_ = (heading_ref_ == "engage" && have_odom_in_) ? odom_in_[2] : 0.0; yaw_err_ = 0.0;
 }
 
 // the planted toes' heights: stand_h below the body plus each toe's relative elevation, recentred on their mean
@@ -468,6 +484,17 @@ void PoseSequencer::step_machine() {
         const double dn = std::hypot(dx, dz);
         if (dn > adv) { dx *= adv / dn; dz *= adv / dn; }
         shift_dx_ = dx; shift_dz_ = dz; fwd_acc_ += std::max(0.0, dz);
+        {   // the sequencer's odometry: the body moved (dx, dz) in its own frame; forward along the dead-reckoning frame's heading
+            const double yaw = have_odom_in_ ? odom_in_[2] : 0.0, c = std::cos(yaw), sn = std::sin(yaw);
+            px_ += dz * c - dx * sn; py_ += dz * sn + dx * c;
+        }
+        if (heading_hold_ > 0.0 && have_odom_in_) {   // the heading hold: turn the body back by rotating the planted toes the other way
+            double e = odom_in_[2] - yaw_ref_; while (e > M_PI) e -= 2 * M_PI; while (e < -M_PI) e += 2 * M_PI;
+            yaw_err_ = e;
+            const double a = std::clamp(heading_hold_ * heading_gain_ * e, -yaw_rate_max_, yaw_rate_max_) * dt_;
+            const double ca = std::cos(a), sa = std::sin(a);
+            for (int i = 0; i < 4; ++i) { Vec3f& q = toe_tgt_[size_t(i)]; const double x = q.x, z = q.z; q.x = float(x * ca + z * sa); q.z = float(-x * sa + z * ca); }
+        }
         // a shift that has stopped moving (the margin's pull cancels the advance) has no advance to give this leg
         if (std::hypot(dx, dz) < 0.1 * adv) { if (++still_ticks_ >= 10) fwd_blocked_ = true; } else still_ticks_ = 0;
         bool blocked = false; blocked_leg_ = -1;
@@ -636,6 +663,13 @@ void PoseSequencer::tick(uint64_t tick_id) {
         }
         ik_err_ema_ += 0.05 * (err - ik_err_ema_);
     }
+    if (!odom_out_topic_.empty()) {   // the odometry: the sequencer's own while engaged, the body's passed through otherwise
+        if (phase_ == Phase::Idle || !odom_anchored_) { if (have_odom_in_) { px_ = odom_in_[0]; py_ = odom_in_[1]; } odom_anchored_ = have_odom_in_; }
+        auto od = std::make_shared<ProprioToken>();
+        od->tick_id = tick_id; od->producer_id = id().empty() ? std::string("pose_sequencer") : std::string(id()); od->sensor = "odom_seq";
+        od->values = Eigen::VectorXf(3); od->values[0] = float(px_); od->values[1] = float(py_); od->values[2] = float(have_odom_in_ ? odom_in_[2] : 0.0);
+        bus_->publish(odom_out_topic_, od);
+    }
     if (engage_level_ > 0.0f || phase_ != Phase::Idle || engage_ > 0.0) publish(tick_id);
     else if (!output_topic_.empty()) {   // engage 0: the socket sees 0 and the gait is untouched
         auto out = std::make_shared<ProprioToken>();
@@ -652,7 +686,7 @@ nlohmann::json PoseSequencer::diag_snapshot() const {
     return nlohmann::json{{"phase", phase_name(phase_)}, {"phase_id", int(phase_)}, {"leg", leg_}, {"engage", engage_level_}, {"model", have_model_}, {"support", have_support_},
                           {"patch", have_patch_}, {"steps", st}, {"cycles", cycles_}, {"shift_exhausted", shift_exhausted_}, {"shift_ticks", shift_ticks_},
                           {"disengaged_tilt", disengaged_tilt_}, {"lower_sunk", lower_sunk_}, {"phase_timeouts", phase_timeouts_}, {"engaged_at", engaged_at_},
-                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
+                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
                           {"toe_tgt", tg}, {"u", uu}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {air_ticks_[0], air_ticks_[1], air_ticks_[2], air_ticks_[3]}}, {"lift_h", lift_h_}, {"land_h", land_h_}, {"shift_acc", shift_acc_}, {"phase_ticks", phase_ticks_}};
 }
 

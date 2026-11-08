@@ -45,6 +45,7 @@ public:
     std::string_view             type_name()      const override;
     std::vector<TopicSpec>       input_topics()   const override;
     std::vector<TopicSpec>       output_topics()  const override;
+    double odom_x() const { return px_; } double odom_y() const { return py_; } double yaw_err() const { return yaw_err_; }
     ParamSchema                  params_schema()  const override;
     ParamMap                     current_params() const override;
     void on_setup(Bus* bus, ParamMap const& params) override;
@@ -92,6 +93,19 @@ private:
     // where it is; and the body's reset event (events.reset / events.miss: a teleport, the inversion auto-reset, a fall)
     // drops the sequencer to idle at once, so it re-engages from the standing conditions with fresh targets.
     bool left_ground_ = false; int obstacle_run_ = 0; int64_t obstacle_hits_ = 0, resets_seen_ = 0;
+    // THE HEADING HOLD and THE SEQUENCER'S ODOMETRY (operator, 2026-11-08).  The crawl drifted into walls because it had no
+    // heading: two of four traces yawed 0.1-0.15 rad over 0.45 m and drifted 7-8 cm sideways with it.  During SHIFT the
+    // planted toes are rotated about the body's vertical by heading_gain x the yaw error (the gyro-integrated heading from
+    // the body's odometry against its value at engage), bounded by yaw_rate_max, so the body turns back.  And the terrain
+    // memory's frame rode a STRIDE odometry the crawl does not drive: the sequencer knows the body's motion exactly (it
+    // commands it over the planted toes), so it integrates its own pose -- forward and lateral in the dead-reckoning
+    // frame (x forward at the anchor, y along the body's +X), yaw passed through from the body's -- and publishes it on
+    // odom_out_topic, passing the body's odometry through while disengaged so the frame is continuous.
+    std::string odom_in_topic_ = "reality.proprio.odom", odom_out_topic_ = "reality.proprio.odom_seq";
+    double heading_gain_ = 0.6, yaw_rate_max_ = 0.3, heading_hold_ = 1.0;
+    std::string heading_ref_ = "zero";   // "zero": the dead-reckoning frame's own heading (the body's facing at its anchor); "engage": the heading at engage (the trot's last stride left the body yawed 0.26 rad there, and the hold kept it -- 2026-11-08)
+    std::array<double, 3> odom_in_{0.0, 0.0, 0.0}; bool have_odom_in_ = false;
+    double px_ = 0.0, py_ = 0.0, yaw_ref_ = 0.0, yaw_err_ = 0.0; bool odom_anchored_ = false;
     // THE STANCE: every planted toe is held at stand_h_m below the body origin in the BODY frame (equal legs: a level body on
     // flat ground), levelled by level_gain of the IMU's tilt (the low side's toes deeper), plus its own relative
     // elevation (measured at its touchdown against the toes already down, recentred so the body sits stand_h_m above

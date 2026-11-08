@@ -10666,3 +10666,20 @@ low-flying toe is briefer and lower), and puts the toe down where it is; the bod
 conditions with a fresh settle; the phase timeouts are 1.2 s. On open ground the four traces are unchanged (every leg
 in turn, 0–3 reflex firings per run on brushes). The lateral drift that walks the body into a wall in the first place
 — 10–13 cm over 0.45 m in two of four runs, none in the others — is the crawl having no heading hold yet.
+
+**The heading hold and the sequencer's odometry** (operator, 2026-11-08): the sideways drift that walked the body into
+the walls was a HEADING drift — the two traces that yawed 0.1–0.15 rad over 0.45 m drifted 7–8 cm, the two that held
+heading did not. During SHIFT the planted toes are now rotated about the body's vertical by `heading_gain` × the yaw
+error (the gyro-integrated heading from the body's odometry), bounded by `yaw_rate_max`; the first form held the
+heading the body had AT ENGAGE, which the trot's last stride had left at 0.26 rad, and the hold kept it faithfully —
+the reference is the dead-reckoning frame's own zero (`heading_ref`), and the yaw now ends within ±0.02 rad on all
+four traces (from −0.03 / +0.02 at engage). The lateral drift halves (3–5 cm over 0.35 m in two runs, none in the
+others): what remains is a sideways slide, not a turn. The sequencer also publishes its own odometry
+(`reality.proprio.odom_seq`: the commanded body motion integrated along the body's heading while engaged, the stride
+odometry passed through otherwise) and `TerrainMemory` / `TouchMemory` in the sequencer configs read it. Two honest
+readings: (1) the commanded motion OVER-READS the body's real travel by about a third (0.39 m commanded for 0.27 m
+walked), the same ratio the stride odometry showed under the trot — the planted toes slip during the shift, the body
+realises two thirds of what it is asked; (2) the landing error on the staircase's approach did not fall (2.3–2.5 cm RMS
+against 1.1 cm on the corridor) and the memory's datum still wanders 3 cm on flat ground, so the memory's errors on the
+approach are not only its frame. Both are the next measurements, not this one's. The crawl itself is unchanged by
+either addition (7–11 steps per leg, no missed landing, no timeout, mean tilt 0.02–0.05 rad).

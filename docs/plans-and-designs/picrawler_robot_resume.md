@@ -173,9 +173,12 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   because the terrain memory's frame rides the STRIDE odometry, which the crawl does not drive. Third form (same day, the operator's
   observation that the rear legs never lifted): a SETTLE phase on engage, body-frame lift heights, the blocked-toe rule
   tightened, the levelling extend-only, the patch's elevation off — with zero-mean levelling, on all 4 traces every leg lifts
-  2.7–4.6 cm in turn, no missed landing, tilt 0.01–0.08, 0.35–0.45 m per run; the first riser reached. **Next: the sequencer publishes
-  its own odometry for the memory** (it commands the body's motion over the planted toes), checked by the landing
-  error; then the riser (the lift over the predicted tread, the depth handle as the crouch). IN_FLIGHT. Then the robot: the
+  2.7–4.6 cm in turn, no missed landing, tilt 0.01–0.08, 0.35–0.45 m per run; the first riser reached. A heading hold (the toes rotated during
+  SHIFT against the odometry's yaw, referenced to the frame's zero) ends the yaw drift (±0.02 rad); the sequencer
+  publishes its own odometry (`odom_seq`) for the memories, which over-reads the real travel by a third as the stride
+  odometry did (the toes slip in the shift). **Next: the slip** (the odometry against the body's travel), the memory's
+  datum wandering 3 cm on flat ground, a lateral hold, then the riser (the lift over the predicted tread, the depth
+  handle as the crouch). IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through

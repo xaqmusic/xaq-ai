@@ -146,3 +146,28 @@ TEST(PoseSequencer, AToeThatMeetsSomethingMidSwingIsPutDownWhereItIs_AndAResetDr
     for (uint64_t k = t + 2; k < t + 40; ++k) f.run(k, {1, 1, 1, 1});
     EXPECT_NE(f.m.phase(), PoseSequencer::Phase::Idle) << "re-engaged";
 }
+
+TEST(PoseSequencer, TheHeadingHoldTurnsThePlantedToesAgainstAYawError_AndTheOdometryIntegratesTheShift) {
+    // a strong hold so the rotation dominates the shift's own motion within a few ticks
+    Fix f({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}},
+           {"heading_gain", ogma::ParamValue{5.0}}, {"yaw_rate_max", ogma::ParamValue{1.0}}});
+    std::vector<float> contact = {1, 1, 1, 1}; std::vector<float> odom = {0.5f, 0.1f, 0.0f};
+    // engage and settle with the body's yaw at 0; the odometry out passes the body's through until engaged
+    std::vector<float> od_out;
+    f.bus.subscribe("reality.proprio.odom_seq", ogma::SubscriptionKind::Direct, [&](std::string_view, ogma::MessagePtr msg){ auto t = std::dynamic_pointer_cast<const ogma::ProprioToken>(msg); od_out.assign(t->values.data(), t->values.data() + 3); });
+    uint64_t t = 0;
+    for (; t < 400 && f.m.phase() != PoseSequencer::Phase::Shift; ++t) { f.bus.begin_tick(t); f.bus.publish("reality.proprio.odom", pv(odom)); f.bus.end_tick(); f.run(t, contact); }
+    ASSERT_EQ(f.m.phase(), PoseSequencer::Phase::Shift);
+    EXPECT_NEAR(od_out[0], 0.5f, 1e-5); EXPECT_NEAR(od_out[1], 0.1f, 1e-5);
+    // now the body reads a yaw of +0.2 (turned toward +x): during the shift a forward toe must move toward +x in the body frame
+    auto d0 = f.m.diag_snapshot(); const double x_fl0 = d0["toe_tgt"][0][0].get<double>(), z_fl0 = d0["toe_tgt"][0][2].get<double>();
+    odom[2] = 0.2f;
+    for (int k = 0; k < 20 && f.m.phase() == PoseSequencer::Phase::Shift; ++k, ++t) { f.bus.begin_tick(t); f.bus.publish("reality.proprio.odom", pv(odom)); f.bus.end_tick(); f.run(t, contact); }
+    auto d1 = f.m.diag_snapshot(); const double x_fl1 = d1["toe_tgt"][0][0].get<double>(), z_fl1 = d1["toe_tgt"][0][2].get<double>();
+    EXPECT_NEAR(f.m.yaw_err(), 0.2, 1e-6);
+    // the toe's bearing about the body's vertical swings toward +x: the body turns back toward -x
+    const double b0 = std::atan2(x_fl0, z_fl0), b1 = std::atan2(x_fl1, z_fl1);
+    EXPECT_GT(b1 - b0, 0.05) << "the front-left toe (at -x, +z) rotates toward +x so the body turns back toward -x";
+    // the odometry advanced with the shift along the heading, not merely passing the body's through
+    EXPECT_GT(f.m.odom_x(), 0.5) << "the body advanced over the toes";
+}
