@@ -28,7 +28,7 @@ std::string_view TerrainMemory::type_name() const { return "TerrainMemory"; }
 
 std::vector<TopicSpec> TerrainMemory::input_topics() const {
     std::vector<TopicSpec> v;
-    for (auto const& t : {field_topic_, contact_topic_, feet_xz_topic_, feet_y_topic_, odom_topic_})
+    for (auto const& t : {field_topic_, contact_topic_, feet_xz_topic_, feet_y_topic_, odom_topic_, belly_topic_})
         if (!t.empty()) v.push_back(TopicSpec{t, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     return v;
 }
@@ -73,6 +73,17 @@ ParamSchema TerrainMemory::params_schema() const {
         {"predict_radius_m", ParamMutability::HotMutable, "Voxels within this of the predicted landing point are pooled, precision-weighted.", ParamValue{0.045}},
         {"plane_tau_ticks", ParamMutability::HotMutable, "EMA of the planted feet's plane (the touch height's fallback floor).", ParamValue{50.0}},
         {"err_alpha",   ParamMutability::HotMutable, "EMA rate of the squared prediction error per leg (the running RMS).", ParamValue{0.05}},
+        {"datum_source", ParamMutability::HotMutable, "\"touch\" (the 2026-11-07 rule: a toe meeting ground it already measured moves the datum), \"belly\" (the belly rangefinder's change plus the remembered ground's change under the body; the toes' touches then only refresh voxels) or \"planted\" (the body's height change read each tick from the toes that stand: minus the median change of their gravity heights, with datum_planted_min_toes planted for datum_planted_min_ticks; touches then only refresh voxels) or \"fused\" (the belly's change carries the body's height tick by tick, the touch rule's innovations carry a slow offset; datum = both).", ParamValue{std::string("touch")}},
+        {"belly_topic",  ParamMutability::ConstructionOnly, "ProprioToken [m]: the belly rangefinder's clearance, for datum_source belly. \"\" = none.", ParamValue{std::string("reality.proprio.belly_m")}},
+        {"belly_max_m",  ParamMutability::HotMutable, "A belly reading above this (an edge, the sky) does not move the datum.", ParamValue{0.20}},
+        {"belly_z_m",    ParamMutability::HotMutable, "The belly sensor's place along the body (m; the aft boom -0.07), for levelling its range by the up vector.", ParamValue{-0.07}},
+        {"belly_tilt_comp", ParamMutability::HotMutable, "1 = level the belly's range by the body's up vector (height = range x up_y - belly_z x up_z); 0 = the raw range.", ParamValue{1.0}},
+        {"belly_step_max_m", ParamMutability::HotMutable, "The most the belly datum moves in one tick (m).", ParamValue{0.01}},
+        {"belly_ground_radius_m", ParamMutability::HotMutable, "(unused since the elevation form) Touched voxels within this of the belly sensor's point.", ParamValue{0.12}},
+        {"belly_tau_ticks", ParamMutability::HotMutable, "EMA of the levelled belly height.", ParamValue{5.0}},
+        {"ground_tau_ticks", ParamMutability::HotMutable, "EMA of the ground height under the sensor.", ParamValue{25.0}},
+        {"datum_planted_min_ticks", ParamMutability::HotMutable, "A toe counts as planted after this many ticks of contact.", ParamValue{int64_t{3}}},
+        {"datum_planted_min_toes", ParamMutability::HotMutable, "Planted toes needed for the datum to move (3: one pressing leg is outvoted).", ParamValue{int64_t{3}}},
         {"datum_gain",  ParamMutability::HotMutable, "The fraction of a touch's disagreement with ALREADY-TOUCHED ground that moves the body's height above the datum (1 = the ground did not move, the body did).", ParamValue{1.0}},
         {"datum_min_load", ParamMutability::HotMutable, "The load (fraction of body weight) a touching toe must reach within 25 ticks for its disagreement to move the datum.", ParamValue{0.15}},
         {"datum_step_max_m", ParamMutability::HotMutable, "The most one touch moves the datum (m): a riser takes a few bearing touches, a single bad one cannot run away with it.", ParamValue{0.03}},
@@ -97,7 +108,7 @@ ParamMap TerrainMemory::current_params() const {
             {"datum_min_load", ParamValue{datum_min_load_}}, {"datum_step_max_m", ParamValue{datum_step_max_m_}},
             {"stall_topic", ParamValue{stall_topic_}}, {"stall_gate", ParamValue{stall_gate_}}, {"register_gain", ParamValue{register_gain_}}, {"datum_window", ParamValue{int64_t(datum_window_)}},
             {"register_range_m", ParamValue{register_range_m_}}, {"register_min_points", ParamValue{int64_t(register_min_points_)}}, {"register_min_spread_m", ParamValue{register_min_spread_m_}},
-            {"datum_edge_max_m", ParamValue{datum_edge_max_m_}}, {"patch_topic", ParamValue{patch_topic_}}, {"patch_cells", ParamValue{int64_t(patch_cells_)}}, {"patch_cell_m", ParamValue{patch_cell_m_}}};
+            {"datum_edge_max_m", ParamValue{datum_edge_max_m_}}, {"datum_source", ParamValue{datum_source_}}, {"belly_topic", ParamValue{belly_topic_}}, {"belly_max_m", ParamValue{belly_max_m_}}, {"belly_z_m", ParamValue{belly_z_m_}}, {"belly_ground_radius_m", ParamValue{belly_ground_radius_m_}}, {"belly_tau_ticks", ParamValue{belly_tau_ticks_}}, {"ground_tau_ticks", ParamValue{ground_tau_ticks_}}, {"belly_tilt_comp", ParamValue{belly_tilt_comp_ ? 1.0 : 0.0}}, {"belly_step_max_m", ParamValue{belly_step_max_m_}}, {"datum_planted_min_ticks", ParamValue{int64_t(datum_planted_min_ticks_)}}, {"datum_planted_min_toes", ParamValue{int64_t(datum_planted_min_toes_)}}, {"patch_topic", ParamValue{patch_topic_}}, {"patch_cells", ParamValue{int64_t(patch_cells_)}}, {"patch_cell_m", ParamValue{patch_cell_m_}}};
 }
 
 void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
@@ -105,19 +116,20 @@ void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
     if (!bus_) throw std::invalid_argument("TerrainMemory requires a non-null Bus");
     for (auto pr : std::initializer_list<std::pair<const char*, std::string*>>{
             {"field_topic", &field_topic_}, {"contact_topic", &contact_topic_}, {"feet_xz_topic", &feet_xz_topic_}, {"feet_y_topic", &feet_y_topic_},
-            {"odom_topic", &odom_topic_}, {"predict_topic", &predict_topic_}, {"error_topic", &error_topic_}, {"up_topic", &up_topic_}, {"load_topic", &load_topic_}, {"stall_topic", &stall_topic_}, {"patch_topic", &patch_topic_}})
+            {"odom_topic", &odom_topic_}, {"predict_topic", &predict_topic_}, {"error_topic", &error_topic_}, {"up_topic", &up_topic_}, {"load_topic", &load_topic_}, {"stall_topic", &stall_topic_}, {"patch_topic", &patch_topic_}, {"belly_topic", &belly_topic_}})
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     for (auto const& k : {"pitch_deg", "sensor_x_m", "sensor_y_m", "sensor_z_m", "max_range_m", "thing_min_m", "fit_rows", "fit_slope_max", "voxel_m",
                           "max_voxels", "max_age_ticks", "sigma_field_m", "sigma_touch_m", "predict_tau_touches", "predict_radius_m", "plane_tau_ticks",
-                          "err_alpha", "diag_max", "recent_max", "datum_gain", "datum_min_load", "datum_step_max_m", "stall_gate", "register_gain", "register_range_m", "register_min_points", "register_min_spread_m", "datum_window", "datum_edge_max_m"})
+                          "err_alpha", "diag_max", "recent_max", "datum_gain", "datum_min_load", "datum_step_max_m", "stall_gate", "register_gain", "register_range_m", "register_min_points", "register_min_spread_m", "datum_window", "datum_edge_max_m", "datum_planted_min_ticks", "datum_planted_min_toes", "belly_max_m", "belly_step_max_m", "belly_z_m", "belly_tilt_comp", "belly_ground_radius_m", "belly_tau_ticks", "ground_tau_ticks"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
+    apply_param(params, "datum_source", [&](auto const& v){ const std::string x = get_string(v, "datum_source"); if (x != "touch" && x != "planted" && x != "belly" && x != "fused") throw std::invalid_argument("TerrainMemory: datum_source must be \"touch\", \"planted\", \"belly\" or \"fused\""); datum_source_ = x; });
     apply_param(params, "patch_cells", [&](auto const& v){ patch_cells_ = std::clamp(int(get_double(v, "patch_cells")), 2, 64); });
     apply_param(params, "patch_cell_m", [&](auto const& v){ patch_cell_m_ = std::max(0.0, get_double(v, "patch_cell_m")); });
     auto sub = [&](std::string const& topic, std::string which) {
         if (topic.empty()) return;
         sub_ids_.push_back(bus_->subscribe(topic, SubscriptionKind::Direct, [this, which](std::string_view, MessagePtr p){ handle(which, p); }));
     };
-    sub(field_topic_, "field"); sub(contact_topic_, "contact"); sub(feet_xz_topic_, "xz"); sub(feet_y_topic_, "y"); sub(odom_topic_, "odom"); sub(up_topic_, "up"); sub(load_topic_, "load"); sub(stall_topic_, "stall");
+    sub(field_topic_, "field"); sub(contact_topic_, "contact"); sub(feet_xz_topic_, "xz"); sub(feet_y_topic_, "y"); sub(odom_topic_, "odom"); sub(up_topic_, "up"); sub(load_topic_, "load"); sub(stall_topic_, "stall"); sub(belly_topic_, "belly");
 }
 
 void TerrainMemory::on_param_change(std::string_view key, ParamValue const& value) {
@@ -145,6 +157,16 @@ void TerrainMemory::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "datum_min_load") datum_min_load_ = std::max(0.0, get_double(value, k));
     else if (k == "datum_step_max_m") datum_step_max_m_ = std::max(0.001, get_double(value, k));
     else if (k == "stall_gate")    stall_gate_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "datum_planted_min_ticks") datum_planted_min_ticks_ = std::max(1, int(get_double(value, k)));
+    else if (k == "datum_planted_min_toes")  datum_planted_min_toes_ = std::clamp(int(get_double(value, k)), 1, 4);
+    else if (k == "datum_source")  { const std::string x = get_string(value, k); if (x == "touch" || x == "planted" || x == "belly" || x == "fused") datum_source_ = x; }
+    else if (k == "belly_max_m")   belly_max_m_ = std::max(0.01, get_double(value, k));
+    else if (k == "belly_z_m")     belly_z_m_ = get_double(value, k);
+    else if (k == "belly_ground_radius_m") belly_ground_radius_m_ = std::max(0.01, get_double(value, k));
+    else if (k == "belly_tau_ticks") belly_tau_ticks_ = std::max(1.0, get_double(value, k));
+    else if (k == "ground_tau_ticks") ground_tau_ticks_ = std::max(1.0, get_double(value, k));
+    else if (k == "belly_tilt_comp") belly_tilt_comp_ = get_double(value, k) > 0.5;
+    else if (k == "belly_step_max_m") belly_step_max_m_ = std::max(1e-4, get_double(value, k));
     else if (k == "register_gain") register_gain_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "datum_window")  datum_window_ = std::max(1, int(get_double(value, k)));
     else if (k == "datum_edge_max_m") datum_edge_max_m_ = std::max(0.0, get_double(value, k));
@@ -174,6 +196,7 @@ void TerrainMemory::handle(std::string const& which, MessagePtr p) {
     }
     else if (which == "stall"   && v.size() >= 1) { stall_ = std::clamp(double(v[0]), 0.0, 1.0); }
     else if (which == "load"    && v.size() >= 4) { for (int i = 0; i < 4; ++i) load_[size_t(i)] = v[i]; have_load_ = true; }
+    else if (which == "belly"   && v.size() >= 1) { belly_ = v[0]; have_belly_ = true; }
     else if (which == "up"      && v.size() >= 3) { const double n = std::sqrt(double(v[0]) * v[0] + double(v[1]) * v[1] + double(v[2]) * v[2]); if (n > 0.5) { up_ = {v[0] / n, v[1] / n, v[2] / n}; have_up_ = true; } }
 }
 
@@ -308,6 +331,7 @@ void TerrainMemory::ingest_touch(int leg, double fwd, double lat, double h, uint
             }
             if (hi - lo > datum_edge_max_m_) { ++datum_edge_skips_; return; }
         }
+        if (datum_source_ != "touch" && datum_source_ != "fused") return;   // the planted toes or the belly carry the datum; the touch has refreshed the voxel
         if (load_topic_.empty() || !have_load_) datum_move(innov);
         else { pending_datum_[size_t(leg)] = 25; pending_innov_[size_t(leg)] = innov; }   // the toe must come to bear first
         return;
@@ -324,7 +348,8 @@ void TerrainMemory::datum_move(double innov) {
     const double med = (v.size() % 2) ? v[v.size() / 2] : 0.5 * (v[v.size() / 2 - 1] + v[v.size() / 2]);
     const double step = datum_gain_ * std::clamp(med, -datum_step_max_m_, datum_step_max_m_);
     if (step == 0.0) return;
-    datum_ -= step; ++datum_updates_;
+    if (datum_source_ == "fused") ground_ -= step; else datum_ -= step;   // fused: the touch moves the slow offset; the belly block sums it in
+    ++datum_updates_;
     for (auto& x : datum_innov_) x -= step;   // what the move explained is no longer owed
 }
 
@@ -360,6 +385,40 @@ void TerrainMemory::tick(uint64_t tick_id) {
         for (auto it = vox_.begin(); it != vox_.end();)
             it = (tick_id > it->second.last_t && tick_id - it->second.last_t > uint64_t(max_age_ticks_)) ? vox_.erase(it) : std::next(it);
     if (have_field_ && field_tick_ != field_done_) { ingest_field(tick_id); field_done_ = field_tick_; }
+    // the datum from the planted toes (datum_source planted): the median height change of the toes that stand
+    if (datum_source_ == "planted" && have_contact_ && have_y_) {
+        std::vector<double> dh;
+        for (int i = 0; i < 4; ++i) {
+            if (contact_[size_t(i)] > 0.5f) ++planted_ticks_[size_t(i)]; else planted_ticks_[size_t(i)] = 0;
+            if (have_prev_y_ && planted_ticks_[size_t(i)] > datum_planted_min_ticks_) dh.push_back(-(double(feet_y_[size_t(i)]) - double(prev_feet_y_[size_t(i)])));
+        }
+        if (int(dh.size()) >= datum_planted_min_toes_) {
+            std::sort(dh.begin(), dh.end());
+            const double med = (dh.size() % 2) ? dh[dh.size() / 2] : 0.5 * (dh[dh.size() / 2 - 1] + dh[dh.size() / 2]);
+            const double step = std::clamp(med, -datum_step_max_m_, datum_step_max_m_);
+            if (step != 0.0) { datum_ += step; ++datum_updates_; ++datum_planted_moves_; }
+        }
+        prev_feet_y_ = feet_y_; have_prev_y_ = true;
+    }
+    // the datum from the belly (datum_source belly): an absolute -- the levelled belly height plus the touched ground under the
+    // sensor, each against its value when first seen
+    if ((datum_source_ == "belly" || datum_source_ == "fused") && have_belly_) {
+        const bool valid = belly_ > 0.0f && belly_ < float(belly_max_m_);
+        if (valid) {
+            const double h_belly = (belly_tilt_comp_ && have_up_) ? double(belly_) * up_[1] - belly_z_m_ * up_[2] : double(belly_);
+            h_belly_ema_ = belly_latched_ ? h_belly_ema_ + (h_belly - h_belly_ema_) / belly_tau_ticks_ : h_belly;
+            if (!belly_latched_) { h_belly0_ = h_belly; belly_latched_ = true; }
+            double gterm = ground_;   // fused: the touches' slow offset
+            if (datum_source_ == "belly") {   // the remembered ground under the sensor (measured 2026-11-08: feeds the datum back to itself)
+                bool has_g; const double g = touched_ground_near(belly_z_m_, 0.0, belly_ground_radius_m_, has_g);
+                if (has_g) { g_ema_ = g_latched_ ? g_ema_ + (g - g_ema_) / ground_tau_ticks_ : g; if (!g_latched_) { g0_ = g; g_latched_ = true; } }
+                gterm = g_latched_ ? g_ema_ - g0_ : 0.0;
+            }
+            const double target = (h_belly_ema_ - h_belly0_) + gterm;
+            const double step = std::clamp(target - datum_, -belly_step_max_m_, belly_step_max_m_);
+            if (step != 0.0) { datum_ += step; ++datum_updates_; ++datum_belly_moves_; }
+        }
+    }
     // the touches
     std::array<float, 8> err_out{};
     if (have_contact_) {
@@ -423,6 +482,20 @@ double TerrainMemory::height_at(double fwd, double lat, bool& has) const {
     return has ? it->second.h - datum_ : 0.0;
 }
 
+double TerrainMemory::touched_ground_near(double fwd, double lat, double radius, bool& has) const {
+    double px, py, c, s; odom_pose(px, py, c, s);
+    const double X = px + fwd * c - lat * s, Y = py + fwd * s + lat * c;
+    const int64_t ix = int64_t(std::floor(X / voxel_m_)), iy = int64_t(std::floor(Y / voxel_m_)); const int reach = int(std::ceil(radius / voxel_m_));
+    double sw = 0.0, swh = 0.0;
+    for (int64_t dx = -reach; dx <= reach; ++dx) for (int64_t dy = -reach; dy <= reach; ++dy) {
+        auto it = vox_.find(Key{ix + dx, iy + dy}); if (it == vox_.end() || it->second.n_touch == 0) continue;
+        const double cx = (double(ix + dx) + 0.5) * voxel_m_, cy = (double(iy + dy) + 0.5) * voxel_m_;
+        if (std::hypot(cx - X, cy - Y) > radius) continue;
+        const double w = 1.0 / std::max(1e-9, it->second.var); sw += w; swh += w * it->second.h;
+    }
+    has = sw > 0.0; return has ? swh / sw : 0.0;
+}
+
 std::vector<TerrainMemory::BodyVoxel> TerrainMemory::body_voxels(int n) const {
     double px, py, c, s; odom_pose(px, py, c, s);
     std::vector<BodyVoxel> out; out.reserve(vox_.size());
@@ -445,7 +518,7 @@ nlohmann::json TerrainMemory::diag_snapshot() const {
                                   er.push_back(err_valid_[size_t(i)] ? err_last_[size_t(i)] : 0.0); rms.push_back(std::sqrt(err_ms_[size_t(i)])); }
     for (auto const& r : recent_) { nlohmann::json row = nlohmann::json::array(); for (float x : r) row.push_back(x); rec.push_back(row); }
     return nlohmann::json{{"voxels", vs}, {"count", int(vox_.size())}, {"frames", frames_}, {"touches", touches_}, {"floor_ok", plane_.ok},
-                          {"datum", datum_}, {"datum_updates", datum_updates_}, {"have_up", have_up_}, {"frame", {ox_, oy_, oyaw_}}, {"stall", stall_},
+                          {"datum", datum_}, {"datum_updates", datum_updates_}, {"datum_planted_moves", datum_planted_moves_}, {"datum_belly_moves", datum_belly_moves_}, {"have_belly", have_belly_}, {"ground", ground_}, {"have_up", have_up_}, {"frame", {ox_, oy_, oyaw_}}, {"stall", stall_},
                           {"datum_edge_skips", datum_edge_skips_},
                           {"reg_applied", reg_applied_}, {"reg_count", reg_count_}, {"reg_last_shift", reg_last_shift_}, {"reg_last_matched", reg_last_matched_}, {"reg_last_ratio", reg_last_gain_ratio_},
                           {"plane", {plane_.a, plane_.b, plane_.c}}, {"prediction", pr}, {"err_last", er}, {"err_rms", rms}, {"n_err", n_err_}, {"recent", rec}};

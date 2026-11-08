@@ -244,3 +244,64 @@ TEST(TerrainMemory, ThePredictionCarriesItsSpread_AnEdgeReadsAsTheRiser) {
     ASSERT_FLOAT_EQ(g.pred[2], 1.0f);
     EXPECT_GT(g.pred[5], 0.03) << "the edge: the pooled heights span the riser";
 }
+
+TEST(TerrainMemory, ThePlantedToesCarryTheDatum_ByTheMedianOfTheirHeightChanges) {
+    Fix f({{"datum_source", ogma::ParamValue{std::string("planted")}}, {"field_topic", ogma::ParamValue{std::string("")}}});
+    const std::vector<float> xz = {-0.1f, 0.1f, 0.1f, 0.1f, -0.1f, -0.1f, 0.1f, -0.1f};
+    std::vector<float> y = {-0.09f, -0.09f, -0.09f, -0.09f};
+    for (uint64_t t = 1; t <= 6; ++t) f.run(t, nullptr, {1, 1, 1, 1}, xz, y);
+    EXPECT_NEAR(f.m.datum(), 0.0, 1e-9);
+    // the body rises 1 cm over the next 5 ticks: every planted toe reads 2 mm deeper a tick
+    for (uint64_t t = 7; t <= 11; ++t) { for (auto& v : y) v -= 0.002f; f.run(t, nullptr, {1, 1, 1, 1}, xz, y); }
+    EXPECT_NEAR(f.m.datum(), 0.01, 1e-4) << "the datum follows the body up by what the standing toes say";
+    // one leg presses into the floor (its commanded toe sinks 3 cm while the others hold): outvoted, the datum stays
+    for (uint64_t t = 12; t <= 16; ++t) { y[3] -= 0.006f; f.run(t, nullptr, {1, 1, 1, 1}, xz, y); }
+    EXPECT_NEAR(f.m.datum(), 0.01, 1e-4) << "a single pressing leg does not move the datum";
+    // a toe in the air does not count: with two planted only, nothing moves
+    for (uint64_t t = 17; t <= 21; ++t) { y[0] -= 0.002f; y[1] -= 0.002f; f.run(t, nullptr, {1, 1, 0, 0}, xz, y); }
+    EXPECT_NEAR(f.m.datum(), 0.01, 1e-4) << "fewer than three planted toes move nothing";
+}
+
+TEST(TerrainMemory, TheBellyCarriesTheDatum_WithTheRememberedGroundUnderTheBody) {
+    Fix f({{"datum_source", ogma::ParamValue{std::string("belly")}}, {"field_topic", ogma::ParamValue{std::string("")}}, {"belly_tau_ticks", ogma::ParamValue{1.0}}});
+    const std::vector<float> xz = {-0.1f, 0.1f, 0.1f, 0.1f, -0.1f, -0.1f, 0.1f, -0.1f};
+    const std::vector<float> y = {-0.09f, -0.09f, -0.09f, -0.09f};
+    auto run = [&](uint64_t t, float belly, std::vector<float> contact) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.proprio.odom", pv({0, 0, 0}, t)); f.bus.publish("reality.proprio.up_body", pv({0, 1, 0}, t));
+        f.bus.publish("reality.proprio.belly_m", pv({belly}, t));
+        f.bus.publish("reality.proprio.foot_contact", pv(contact, t)); f.bus.publish("reality.proprio.feet_xz", pv(xz, t)); f.bus.publish("reality.proprio.toe_y", pv(y, t));
+        f.m.tick(t); f.bus.end_tick();
+    };
+    for (uint64_t t = 1; t <= 5; ++t) run(t, 0.06f, {1, 1, 1, 1});
+    EXPECT_NEAR(f.m.datum(), 0.0, 1e-9);
+    for (uint64_t t = 6; t <= 10; ++t) run(t, 0.06f + 0.002f * float(t - 5), {1, 1, 1, 1});   // the body rises 1 cm by the belly
+    EXPECT_NEAR(f.m.datum(), 0.01, 1e-4) << "the datum follows the belly up";
+    run(11, 0.30f, {1, 1, 1, 1});   // the belly looks over an edge: no move
+    EXPECT_NEAR(f.m.datum(), 0.01, 1e-4);
+    run(12, 0.07f, {1, 1, 1, 1});   // back to a valid reading: the step from the last valid one, bounded
+    EXPECT_NEAR(f.m.datum(), 0.01, 1e-4);
+}
+
+TEST(TerrainMemory, TheFusedDatum_TheBellyCarriesTheHeightAndTheTouchesTheOffset) {
+    Fix f({{"datum_source", ogma::ParamValue{std::string("fused")}}, {"field_topic", ogma::ParamValue{std::string("")}}, {"belly_tau_ticks", ogma::ParamValue{1.0}}, {"datum_window", ogma::ParamValue{int64_t{1}}}});
+    const std::vector<float> xz = {-0.1f, 0.1f, 0.1f, 0.1f, -0.1f, -0.1f, 0.1f, -0.1f};
+    std::vector<float> y = {-0.09f, -0.09f, -0.09f, -0.09f};
+    auto run = [&](uint64_t t, float belly, std::vector<float> contact) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.proprio.odom", pv({0, 0, 0}, t)); f.bus.publish("reality.proprio.up_body", pv({0, 1, 0}, t));
+        f.bus.publish("reality.proprio.belly_m", pv({belly}, t));
+        f.bus.publish("reality.proprio.foot_contact", pv(contact, t)); f.bus.publish("reality.proprio.feet_xz", pv(xz, t)); f.bus.publish("reality.proprio.toe_y", pv(y, t));
+        f.m.tick(t); f.bus.end_tick();
+    };
+    for (uint64_t t = 1; t <= 5; ++t) run(t, 0.06f, {1, 1, 1, 1});   // the four toes touch their ground
+    for (uint64_t t = 6; t <= 10; ++t) run(t, 0.06f + 0.002f * float(t - 5), {1, 1, 1, 1});   // the body rises 1 cm by the belly
+    EXPECT_NEAR(f.m.datum(), 0.01, 1e-4) << "between touches the belly carries the datum";
+    // toe 0 lifts and lands on the ground it touched before, reading 1 cm deeper than the belly and the memory agree on
+    run(11, 0.07f, {0, 1, 1, 1});
+    y[0] = -0.11f; run(12, 0.07f, {1, 1, 1, 1});
+    for (uint64_t t = 13; t <= 18; ++t) run(t, 0.07f, {1, 1, 1, 1});
+    EXPECT_NEAR(f.m.datum(), 0.02, 1e-4) << "the touch's disagreement moves the slow offset, which the belly's term is summed with";
+    run(19, 0.30f, {1, 1, 1, 1});   // the belly looks over an edge: nothing moves
+    EXPECT_NEAR(f.m.datum(), 0.02, 1e-4);
+}

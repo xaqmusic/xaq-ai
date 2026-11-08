@@ -176,9 +176,15 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   2.7–4.6 cm in turn, no missed landing, tilt 0.01–0.08, 0.35–0.45 m per run; the first riser reached. A heading hold (the toes rotated during
   SHIFT against the odometry's yaw, referenced to the frame's zero) ends the yaw drift (±0.02 rad); the sequencer
   publishes its own odometry (`odom_seq`) for the memories, which over-reads the real travel by a third as the stride
-  odometry did (the toes slip in the shift). **Next: the slip** (the odometry against the body's travel), the memory's
-  datum wandering 3 cm on flat ground, a lateral hold, then the riser (the lift over the predicted tread, the depth
-  handle as the crouch). IN_FLIGHT. Then the robot: the
+  odometry did (the toes slip in the shift). The slip measured (ledger 2026-11-08): the body realises 82 % of the
+  commanded shift, `shift_realised` 0.82 puts `odom_seq` within 3–7 % of the true travel. The memory's datum tried
+  four ways and measured; the sequencer configs carry `datum_source fused` (the belly's levelled change tick by tick,
+  the touch rule's innovations as a slow offset at gain 0.3): the 3–9 cm drifts are gone, a positive bias near 1 cm
+  remains in every source (the toe lands a centimetre below the ground it recorded — the toe height at the contact
+  edge is the next measurement). The UI starts with the field's rays and the touch clouds hidden ([Y] / [X] show
+  them). **Next:** the toe-height bias at touchdown, a lateral hold (3–5 cm of sideways slide remains), then the
+  riser (the lift over the predicted tread, the depth handle as the crouch), and the patch's elevation back on once
+  the memory's frame is trusted. IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through

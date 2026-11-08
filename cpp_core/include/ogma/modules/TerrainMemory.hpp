@@ -68,6 +68,7 @@ public:
     int    count() const { return int(vox_.size()); }
     bool   floor_ok() const { return plane_.ok; }
     double height_at(double fwd, double lat, bool& has) const;   // the remembered height (body gravity frame) under a body-frame point, nearest voxel
+    double touched_ground_near(double fwd, double lat, double radius, bool& has) const;   // the precision-pooled ABSOLUTE height of touched voxels within radius
 
 private:
     struct Key { int64_t ix, iy; bool operator==(Key const& o) const { return ix == o.ix && iy == o.iy; } };
@@ -93,6 +94,29 @@ private:
     double sigma_field_m_ = 0.02, sigma_touch_m_ = 0.005;
     double predict_tau_touches_ = 20.0, predict_radius_m_ = 0.045, plane_tau_ticks_ = 50.0, err_alpha_ = 0.05;
     double datum_gain_ = 1.0;   // how much of a touched-ground innovation the datum takes
+    // THE DATUM FROM THE PLANTED TOES (2026-11-08, the sequencer's crawl): a toe that stands on the ground stands on
+    // ground that does not move, so the body's height change between two ticks is minus the change of that toe's gravity
+    // height; with three or more toes planted (contact held datum_planted_min_ticks) the datum moves by the MEDIAN of their
+    // changes each tick -- one leg pressing into the floor, whose commanded toe sinks though the real one cannot, is outvoted.
+    // The touch rule (a toe meeting ground it already measured) then only refreshes voxels.  "touch" = the 2026-11-07 rule.
+    // ... and FROM THE BELLY (2026-11-08, after the planted toes drifted 2-4 cm: a toe's published height is its COMMANDED
+    // height, and the servos sag under load by up to a centimetre that moves as the weight shifts): the body's height above
+    // the ground under it is what the belly rangefinder measures directly, so the datum follows the belly's change plus the
+    // change of the remembered ground under the body (0 on the flat; the riser when the body moves onto a tread).  "belly".
+    std::string datum_source_ = "touch"; int datum_planted_min_ticks_ = 3, datum_planted_min_toes_ = 3;
+    std::string belly_topic_ = "reality.proprio.belly_m"; double belly_max_m_ = 0.20, belly_step_max_m_ = 0.01;
+    // the belly's range, levelled: the sensor sits at belly_z_m along the body (the aft boom, -0.07) and looks down the body's
+    // -y; the body origin's height above the ground it sees is range x up_y - belly_z x up_z (a nose-up body lowers the boom)
+    double belly_z_m_ = -0.07; bool belly_tilt_comp_ = true;
+    // the datum is an ABSOLUTE from these, not an integral (differencing the ground under the sensor added a 2 cm step at every
+    // voxel boundary and walked 8 cm in 180 s): datum = (h_belly - h_belly0) + (G - G0), G the pooled height of TOUCHED ground
+    // within belly_ground_radius_m of the sensor's point (the toes stand either side of the body's centre line), each smoothed
+    float belly_ = 0.0f; bool have_belly_ = false; double belly_ground_radius_m_ = 0.12, belly_tau_ticks_ = 5.0, ground_tau_ticks_ = 25.0;
+    double h_belly_ema_ = 0.0, g_ema_ = 0.0, h_belly0_ = 0.0, g0_ = 0.0; bool belly_latched_ = false, g_latched_ = false; int64_t datum_belly_moves_ = 0;
+    // "fused": the belly carries the body's height change tick by tick (clean, no feedback), the touches on known ground carry the
+    // slow offset ground_ (the touch rule's innovations move ground_ instead of the datum); datum = belly change + ground_.
+    double ground_ = 0.0;
+    std::array<int, 4> planted_ticks_{}; std::array<float, 4> prev_feet_y_{}; bool have_prev_y_ = false; int64_t datum_planted_moves_ = 0;
     double datum_min_load_ = 0.15, datum_step_max_m_ = 0.03;   // a datum move needs a BEARING toe, and is bounded per touch
     // REGISTRATION BY RE-OBSERVATION (2026-11-07): before a field frame is stored, it is matched against what the memory
     // already holds along the body's forward axis -- the shift that best explains the remembered heights is the

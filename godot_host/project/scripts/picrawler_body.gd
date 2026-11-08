@@ -1711,7 +1711,7 @@ var publish_leg_model: bool = false
 var tof8_model: bool = false
 var _tof8 = null
 var _tof8_view = null
-var _tof8_show: bool = true
+var _tof8_show: bool = false                    # the field's rays start hidden (operator, 2026-11-08); [Y] shows them
 var _tof8_last_slot: int = -1
 var _tof8_hud: Label = null
 var _tof8_pitch_env: float = 30.0
@@ -1805,7 +1805,7 @@ var _touch_cloud = null                         # touch_cloud.gd
 var _seq_markers: Array = []
 var _touch_view_local = null                    # TouchCloud.View
 var _touch_view_brain = null
-var _touch_show: bool = true
+var _touch_show: bool = false                   # the clouds start hidden (operator, 2026-11-08); [X] shows them
 var _touch_tick: int = 0
 var _touch_feet_xz: PackedFloat64Array = PackedFloat64Array()
 var _touch_feet_y: PackedFloat64Array = PackedFloat64Array()
@@ -13063,6 +13063,8 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["tm_n_err"] = int(tm.get("n_err", 0))
 		line["tm_floor"] = 1 if bool(tm.get("floor_ok", false)) else 0
 		line["tm_datum"] = snappedf(float(tm.get("datum", 0.0)), 0.001)   # the body's climb since the memory began, from its touches
+		line["tm_dmoves"] = int(tm.get("datum_planted_moves", 0)) + int(tm.get("datum_belly_moves", 0)); line["tm_ground"] = snappedf(float(tm.get("ground", 0.0)), 0.001)
+		if _touch_feet_y.size() >= 4: line["toe_y"] = [snappedf(float(_touch_feet_y[0]), 0.0001), snappedf(float(_touch_feet_y[1]), 0.0001), snappedf(float(_touch_feet_y[2]), 0.0001), snappedf(float(_touch_feet_y[3]), 0.0001)]   # the toe tips' gravity heights the brain reads
 		var pr: Array = tm.get("prediction", [])
 		if pr.size() >= 4:
 			var hp: Array = []; var pc: Array = []; var hs: Array = []

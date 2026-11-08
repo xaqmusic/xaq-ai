@@ -748,7 +748,9 @@
         "register_gain": 0.5,
         "datum_window": 3,
         "patch_topic": "terrain.patch",
-        "odom_topic": "reality.proprio.odom_seq"
+        "odom_topic": "reality.proprio.odom_seq",
+        "datum_source": "fused",
+        "datum_gain": 0.3
       }
     },
     {

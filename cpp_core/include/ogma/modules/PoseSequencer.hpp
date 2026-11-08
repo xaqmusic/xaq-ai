@@ -103,6 +103,10 @@ private:
     // odom_out_topic, passing the body's odometry through while disengaged so the frame is continuous.
     std::string odom_in_topic_ = "reality.proprio.odom", odom_out_topic_ = "reality.proprio.odom_seq";
     double heading_gain_ = 0.6, yaw_rate_max_ = 0.3, heading_hold_ = 1.0;
+    // the odometry's realisation: the body makes shift_realised of the travel its planted toes are commanded (measured 0.82
+    // over four traces: the toes slip in the shift; the surge when a leg lifts and the rock back during its swing cancel to
+    // a few centimetres).  A measured constant for now; TerrainMemory's registration by re-observation is the adaptive path.
+    double shift_realised_ = 0.82;
     std::string heading_ref_ = "zero";   // "zero": the dead-reckoning frame's own heading (the body's facing at its anchor); "engage": the heading at engage (the trot's last stride left the body yawed 0.26 rad there, and the hold kept it -- 2026-11-08)
     std::array<double, 3> odom_in_{0.0, 0.0, 0.0}; bool have_odom_in_ = false;
     double px_ = 0.0, py_ = 0.0, yaw_ref_ = 0.0, yaw_err_ = 0.0; bool odom_anchored_ = false;
