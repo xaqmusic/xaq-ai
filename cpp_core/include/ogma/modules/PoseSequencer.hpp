@@ -91,7 +91,7 @@ private:
     // elevation (measured at its touchdown against the toes already down, recentred so the body sits stand_h_m above
     // their mean) -- a level body at a constant height on flat ground, and on a riser the raised toe keeps the body level
     // as far as elev_max_m allows.  A landing point is kept within reach_max_m of the leg's hip1 (horizontally).
-    double stand_h_m_ = 0.085, level_gain_ = 0.5, elev_max_m_ = 0.0, reach_max_m_ = 0.14, unreach_tol_m_ = 0.015;
+    double stand_h_m_ = 0.085, level_gain_ = 0.5, level_max_m_ = 0.02, elev_max_m_ = 0.0, reach_max_m_ = 0.14, unreach_tol_m_ = 0.015;
     // THE WORKSPACE (the second flat run, 2026-11-08: planted toes slid back without bound until the joints hit their
     // limits, and a landing outside the leg's reach left that toe hanging): every toe target is kept in a sector about
     // the leg's neutral heading from its hip -- within +/- sector_half_rad and a radius in [reach_min_m, reach_max_m].  A
@@ -103,7 +103,7 @@ private:
     // stance, out of reach, from a patch behind the body that only touches feed and whose frame drifts under the crawl):
     // the ground under the toe NOW is where the toe stands (its own gravity height, truth), and the memory's height at
     // the landing point is believed only within [-land_band_lo_m, +land_band_hi_m] of the stance; outside it, the stance.
-    double land_band_lo_m_ = 0.04, land_band_hi_m_ = 0.09; int64_t land_h_rejected_ = 0;   // a LANDING point stays within this angle of the heading (the standing sector may be wider: a planted toe at 0.9 rad is fine, a swing to 0.9 rad times out)
+    double land_band_lo_m_ = 0.02, land_band_hi_m_ = 0.09; int64_t land_h_rejected_ = 0;   // a LANDING point stays within this angle of the heading (the standing sector may be wider: a planted toe at 0.9 rad is fine, a swing to 0.9 rad times out)
     double neutral_r_m_ = 0.10;
     // SETTLE (2026-11-08, the engage trace: the stance inherited the trot's mid-swing toe, one leg swept 50 deg under
     // the tail, and the first lift from there rolled the body): on engage the four toes slide on the floor to their
