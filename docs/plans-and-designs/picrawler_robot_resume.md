@@ -167,9 +167,12 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   with IK on the body's own FK, a load-seeking stance, and a crawl of SHIFT / LIFT / SWING / LOWER gated by the support
   model. The controller works (static support 89–98 % of rows, never flipped in eight runs, landings 2–6 mm from the
   predicted ground on the flat) and the planner does not yet walk (0.1 m per minute; the rear legs starved by the
-  greedy leg choice; the stairs reached, one 12 mm riser climbed once). **Next: a fixed crawl order with the model as
-  the gate** (sway until the margin allows, advance during the rear steps), then the riser (lift over the predicted
-  tread, the depth handle as the crouch). IN_FLIGHT. Then the robot: the
+  greedy leg choice; the stairs reached, one 12 mm riser climbed once). Second form (same day): the FSR filtered
+  (operator), the fixed wave order, the standing sector ±0.9 rad — a balanced four-legged crawl on the corridor at
+  0.2 m/min, statically supported 96–98 % of rows; on the staircase's approach it misses landings and times out swings
+  because the terrain memory's frame rides the STRIDE odometry, which the crawl does not drive. **Next: the sequencer
+  publishes its own odometry for the memory** (it commands the body's motion over the planted toes), checked by the
+  landing error; then the riser (the lift over the predicted tread, the depth handle as the crouch). IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through

@@ -10614,3 +10614,30 @@ the landing error rises to 1.6–2.7 cm (the memory's) and the lift over a riser
 sequencer's posture control (the crouch to clear a riser) when it gets there. **Re-use context:** the sequencer is a
 general pose-level controller — any application that wants a body put somewhere deliberately (the operator's
 "alternative motor controller for all kinds of applications") starts from its IK, stance and socket.
+
+### 2026-11-08 — THE SEQUENCER, SECOND FORM (the FSR filtered — operator: "during the first step the weight is lifted from other legs briefly and that resets the sequence"; a FIXED crawl order with the model as the gate; the standing workspace widened to ±0.9 rad): on the flat (2 seeds × 3000 ticks) the crawl is now a four-legged crawl — steps [6, 5, 6, 6] and [7, 8, 6, 7] against the greedy form's [17, 12, 4, 4] — at 0.17–0.21 m in 55 s (twice the first form, a thirtieth of the trot), static support 96–98 % of rows, no fall; on the graded flight's flat approach it degrades (0.06–0.18 m, 11–26 missed landings, 15–29 swing timeouts) where the corridor does not, which points at the terrain memory's content under a gait whose stride odometry is not the trot's — `IN_FLIGHT`
+
+The filter (`bear_tau_ticks` 8, hysteresis 0.6 / 0.3, the landing debounced over 3 ticks; SupportModel `contact_off_ticks` 8 in
+the sequencer configs, 0 = raw elsewhere): the lift-off transient no longer reaches the stance, the leg choice or the
+margins. A landing-load requirement (5 % of the body's weight at touchdown) was tried with it and dropped: it missed
+landings whose toe had touched but not yet taken weight (62 misses in one run). The greedy leg choice was replaced by
+the wave order RL, FL, RR, FR (`order`; empty = greedy) with the turn passing when the shift is spent — alone it did not
+help (turns passed 37–144, the shifts still blocked within ticks); widening the standing sector from ±0.6 to ±0.9 rad
+and the inner radius to 6 cm did: the shifts stopped blocking at once and the four legs took their turns.
+
+| build | flat s3 / s5: metres in 55 s | steps per leg | supported | stairs approach s3 / s5: metres in 235 s | missed | timeouts |
+|---|---|---|---|---|---|---|
+| greedy (first form) | 0.10 / 0.03 | [16, 16, 4, 3] / [11, 28, 2, 3] | 0.96–0.98 | 0.30 / 0.05 | 5 / 30 | 10 / 31 |
+| + fixed order | 0.11 / 0.12 | [4, 14, 1, 4] / [5, 6, 4, 3] | 0.93–0.95 | 0.14 / 0.10 | 1 / 25 | 1 / 32 |
+| + sector ±0.9 rad | 0.17 / 0.21 | [6, 5, 6, 6] / [7, 8, 6, 7] | 0.96–0.98 | 0.06 / 0.18 | 26 / 22 | 29 / 27 |
+| + FSR ends the lowering, landing sector ±0.5 | 0.17 / 0.21 (identical) | identical | identical | 0.06 / 0.18 | 12 / 11 | 16 / 15 |
+
+**Reading.** On the corridor the sequencer is the crawl the design asked for — slow, balanced, statically supported,
+never falling. On the staircase's flat approach the same code misses landings and times out swings, and the one input
+that differs is the terrain patch: the risers are in the field's view and the memory's frame is carried by the STRIDE
+odometry, which under the sequencer's crawl is not measuring the body's motion — so the ground the memory predicts at
+a landing point can sit above the real floor (the toe stops 3 cm under the prediction, in the air: the misses, since
+fixed by letting the FSR end the lowering) and the lift over it can be set out of reach (the timeouts). The sequencer
+knows the body's motion exactly (it commands it over planted toes): **next**, it publishes its own odometry increment
+for the memory's frame, and the landing error (2 cm RMS on the approach against 4 mm on the corridor) is the check.
+Then the riser.

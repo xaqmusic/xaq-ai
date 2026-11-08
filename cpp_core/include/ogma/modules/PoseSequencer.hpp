@@ -71,7 +71,7 @@ private:
     double gravity_h(const body::Vec3f& p) const { return p.x * up_[0] + p.y * up_[1] + p.z * up_[2]; }
     body::Vec3f at_gravity_h(double x, double z, double h) const { return body::Vec3f(float(x), float((h - x * up_[0] - z * up_[2]) / std::max(0.2, up_[1])), float(z)); }
     void engage_now(uint64_t tick_id);
-    int  choose_leg() const;
+    int  choose_leg();
     void step_machine();
     void publish(uint64_t tick_id);
 
@@ -96,8 +96,15 @@ private:
     // the leg's neutral heading from its hip -- within +/- sector_half_rad and a radius in [reach_min_m, reach_max_m].  A
     // planted toe that reaches the sector's edge during SHIFT blocks the shift (the body cannot advance further over its
     // feet without a step); a lowering toe out of reach retreats toward its hip by retreat_m before trying again.
-    double sector_half_rad_ = 0.6, reach_min_m_ = 0.07, retreat_m_ = 0.01;
-    double neutral_r_m_ = 0.10;   // the sequencer's own stance: each toe's neutral place is this far from its hip along the leg's heading (the gait stands at 12-13 cm, at the edge of the reach, and left the shift no room -- 2026-11-08)
+    double sector_half_rad_ = 0.9, reach_min_m_ = 0.06, retreat_m_ = 0.01;
+    double land_sector_rad_ = 0.5;   // a LANDING point stays within this angle of the heading (the standing sector may be wider: a planted toe at 0.9 rad is fine, a swing to 0.9 rad times out)
+    double neutral_r_m_ = 0.10;
+    // THE ORDER (2026-11-08, after six batteries of the greedy choice starving the rear legs 5:1): a FIXED crawl order,
+    // rear-left, front-left, rear-right, front-right (a wave gait: each side's rear then its front), with the model as
+    // the gate -- the body sways / advances until the leg whose turn it is has its margin, and if the shift is spent
+    // without one the turn passes (counted).  A toe the creep could not bring to ground is still placed first.
+    // order empty = the greedy choice (the first form).
+    std::vector<double> order_ = {2, 0, 3, 1}; int order_pos_ = -1; int64_t turns_passed_ = 0;   // the sequencer's own stance: each toe's neutral place is this far from its hip along the leg's heading (the gait stands at 12-13 cm, at the edge of the reach, and left the shift no room -- 2026-11-08)
     int64_t shift_blocked_ = 0, retreats_ = 0; int blocked_leg_ = -1;
     bool sector_clamp(int leg, body::Vec3f& p) const;   // true when clamped
     // THE SHIFT'S DIRECTION (the third flat run, 2026-11-08: a shift straight back hit a workspace edge at once and the
@@ -134,7 +141,7 @@ private:
     double land_err_last_ = 0.0, land_err_ms_ = 0.0; int64_t landings_ = 0, missed_ = 0;
     float belly_ = 0.0f; bool have_belly_ = false;
     double shift_v_ = 0.03, shift_max_m_ = 0.05, margin_min_m_ = 0.005, lift_clear_m_ = 0.03, lift_v_ = 0.10, swing_v_ = 0.12, lower_v_ = 0.06;
-    double stride_m_ = 0.06, sink_max_m_ = 0.03, tilt_disengage_ = 0.75, dt_ = 0.02;
+    double stride_m_ = 0.06, sink_max_m_ = 0.06, tilt_disengage_ = 0.75, dt_ = 0.02;
     int    ik_iters_ = 4; double ik_damping_m_ = 0.01, ik_step_max_rad_ = 0.12, ik_tol_m_ = 0.004;
 
     // the leg model
