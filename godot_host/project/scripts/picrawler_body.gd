@@ -13121,11 +13121,21 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["ps_cycles"] = int(ps.get("cycles", 0)); line["ps_exh"] = int(ps.get("shift_exhausted", 0)); line["ps_sunk"] = int(ps.get("lower_sunk", 0))
 		line["ps_tilt_off"] = int(ps.get("disengaged_tilt", 0)); line["ps_ik"] = snappedf(float(ps.get("ik_err", 0.0)), 0.0001); line["ps_fk"] = snappedf(float(ps.get("fk_err", 0.0)), 0.0001)
 		line["ps_shift"] = int(ps.get("shift_ticks", 0)); line["ps_tmo"] = int(ps.get("phase_timeouts", 0)); line["ps_at"] = int(ps.get("engaged_at", -1))
+		line["ps_lift_h"] = snappedf(float(ps.get("lift_h", 0.0)), 0.001); line["ps_land_h"] = snappedf(float(ps.get("land_h", 0.0)), 0.001); line["ps_ph_t"] = int(ps.get("phase_ticks", 0)); line["ps_hrej"] = int(ps.get("land_h_rejected", 0))
 		line["ps_blk"] = int(ps.get("shift_blocked", 0)); line["ps_ret"] = int(ps.get("retreats", 0)); line["ps_dead"] = int(ps.get("deadlock_ticks", 0)); line["ps_noadv"] = int(ps.get("steps_no_advance", 0)); line["ps_pass"] = int(ps.get("turns_passed", 0))
 		line["ps_land"] = int(ps.get("landings", 0)); line["ps_miss"] = int(ps.get("missed", 0)); line["ps_lerr"] = snappedf(float(ps.get("land_err", 0.0)), 0.001); line["ps_lrms"] = snappedf(float(ps.get("land_rms", 0.0)), 0.001)
 		var ev: Array = ps.get("elev", [])
 		if ev.size() >= 4: line["ps_elev"] = [snappedf(float(ev[0]), 0.001), snappedf(float(ev[1]), 0.001), snappedf(float(ev[2]), 0.001), snappedf(float(ev[3]), 0.001)]
 		var tt: Array = ps.get("toe_tgt", [])
+		if tt.size() >= 4:
+			var all_t: Array = []
+			for a4 in tt: all_t.append([snappedf(float(a4[0]), 0.001), snappedf(float(a4[1]), 0.001), snappedf(float(a4[2]), 0.001)])
+			line["ps_tgts"] = all_t
+		var uu: Array = ps.get("u", [])
+		if uu.size() >= 4:
+			var all_u: Array = []
+			for a4 in uu: all_u.append([snappedf(float(a4[0]), 0.01), snappedf(float(a4[1]), 0.01), snappedf(float(a4[2]), 0.01)])
+			line["ps_u"] = all_u
 		if tt.size() >= 4 and int(ps.get("leg", -1)) >= 0:
 			var a: Array = tt[int(ps.get("leg", -1))]
 			if a.size() >= 3: line["ps_tgt"] = [snappedf(float(a[0]), 0.001), snappedf(float(a[1]), 0.001), snappedf(float(a[2]), 0.001)]

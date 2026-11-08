@@ -52,7 +52,7 @@ public:
     void on_param_change(std::string_view key, ParamValue const& value) override;
     nlohmann::json diag_snapshot() const override;
 
-    enum class Phase { Idle = 0, Shift, Lift, Swing, Lower };
+    enum class Phase { Idle = 0, Shift, Lift, Swing, Lower, Settle };
     static constexpr int kModelFloats = 4 * 27 + 8;
     // ---- the kinematics, exposed for tests ----
     body::Vec3f toe_of(int leg, const std::array<double, 3>& t) const;          // body-frame toe for joint angles
@@ -86,19 +86,29 @@ private:
     // three toes in contact, and the belly clear of the ground when a belly topic is given.
     std::string belly_topic_ = "reality.proprio.belly_m"; double engage_min_belly_m_ = 0.045; int engage_min_tick_ = 200, engage_min_contacts_ = 3;
     int phase_max_ticks_ = 150;   // a LIFT or SWING that has not arrived by then goes on (an unreachable target must not stop the walk)
-    // THE STANCE: every planted toe is held at stand_h_m below the body origin in the BODY frame, plus its own relative
+    // THE STANCE: every planted toe is held at stand_h_m below the body origin in the BODY frame (equal legs: a level body on
+    // flat ground), levelled by level_gain of the IMU's tilt (the low side's toes deeper), plus its own relative
     // elevation (measured at its touchdown against the toes already down, recentred so the body sits stand_h_m above
     // their mean) -- a level body at a constant height on flat ground, and on a riser the raised toe keeps the body level
     // as far as elev_max_m allows.  A landing point is kept within reach_max_m of the leg's hip1 (horizontally).
-    double stand_h_m_ = 0.085, elev_max_m_ = 0.08, reach_max_m_ = 0.14, unreach_tol_m_ = 0.015;
+    double stand_h_m_ = 0.085, level_gain_ = 0.5, elev_max_m_ = 0.0, reach_max_m_ = 0.14, unreach_tol_m_ = 0.015;
     // THE WORKSPACE (the second flat run, 2026-11-08: planted toes slid back without bound until the joints hit their
     // limits, and a landing outside the leg's reach left that toe hanging): every toe target is kept in a sector about
     // the leg's neutral heading from its hip -- within +/- sector_half_rad and a radius in [reach_min_m, reach_max_m].  A
     // planted toe that reaches the sector's edge during SHIFT blocks the shift (the body cannot advance further over its
     // feet without a step); a lowering toe out of reach retreats toward its hip by retreat_m before trying again.
     double sector_half_rad_ = 0.9, reach_min_m_ = 0.06, retreat_m_ = 0.01;
-    double land_sector_rad_ = 0.5;   // a LANDING point stays within this angle of the heading (the standing sector may be wider: a planted toe at 0.9 rad is fine, a swing to 0.9 rad times out)
+    double land_sector_rad_ = 0.5;
+    // THE LIFT'S GROUND (operator, 2026-11-08: "the rear legs never lift"; the trace: their lift targets 10 cm above the
+    // stance, out of reach, from a patch behind the body that only touches feed and whose frame drifts under the crawl):
+    // the ground under the toe NOW is where the toe stands (its own gravity height, truth), and the memory's height at
+    // the landing point is believed only within [-land_band_lo_m, +land_band_hi_m] of the stance; outside it, the stance.
+    double land_band_lo_m_ = 0.04, land_band_hi_m_ = 0.09; int64_t land_h_rejected_ = 0;   // a LANDING point stays within this angle of the heading (the standing sector may be wider: a planted toe at 0.9 rad is fine, a swing to 0.9 rad times out)
     double neutral_r_m_ = 0.10;
+    // SETTLE (2026-11-08, the engage trace: the stance inherited the trot's mid-swing toe, one leg swept 50 deg under
+    // the tail, and the first lift from there rolled the body): on engage the four toes slide on the floor to their
+    // neutral places at settle_v before the first step.
+    double settle_v_ = 0.05; int64_t settle_ticks_ = 0;
     // THE ORDER (2026-11-08, after six batteries of the greedy choice starving the rear legs 5:1): a FIXED crawl order,
     // rear-left, front-left, rear-right, front-right (a wave gait: each side's rear then its front), with the model as
     // the gate -- the body sways / advances until the leg whose turn it is has its margin, and if the shift is spent
@@ -162,7 +172,7 @@ private:
     std::array<double, 4> ground_h_{};                           // the gravity height of the ground under each planted toe (at its touchdown)
     body::Vec3f hip1_of(int leg) const { return anchors_[size_t(leg)].hip1_world; }
     void hold_stance();
-    double shift_acc_ = 0.0, lift_h_ = 0.0, land_h_ = 0.0; body::Vec3f land_{};
+    double shift_acc_ = 0.0, lift_h_ = 0.0, land_h_ = 0.0, lift_dy_ = 0.0; body::Vec3f land_{};
     int phase_ticks_ = 0;
     // instruments
     std::array<int, 4> steps_{}; int64_t cycles_ = 0, shift_exhausted_ = 0, shift_ticks_ = 0, disengaged_tilt_ = 0, lower_sunk_ = 0, phase_timeouts_ = 0, engaged_at_ = -1;
