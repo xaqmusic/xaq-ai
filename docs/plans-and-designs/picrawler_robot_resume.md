@@ -182,9 +182,16 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   the touch rule's innovations as a slow offset at gain 0.3): the 3–9 cm drifts are gone, a positive bias near 1 cm
   remains in every source (the toe lands a centimetre below the ground it recorded — the toe height at the contact
   edge is the next measurement). The UI starts with the field's rays and the touch clouds hidden ([Y] / [X] show
-  them). **Next:** the toe-height bias at touchdown, a lateral hold (3–5 cm of sideways slide remains), then the
-  riser (the lift over the predicted tread, the depth handle as the crouch), and the patch's elevation back on once
-  the memory's frame is trusted. IN_FLIGHT. Then the robot: the
+  them). **Lever 1 of the memory-as-prior series shipped** (ledger 2026-11-08): the lowering descends fast to a standoff
+  above the predicted ground (5 mm + the larger of the memory's sigma and the running landing error) and a landing on a
+  riser's edge is moved to flat remembered ground — the step 1.90 → 1.72 s on the corridor, −4 % on the stairs, no new
+  misses, the field lesion still lands every toe. **The bottleneck is a STALL on the flat approach** (ledger, same day):
+  2 of 8 seeds (11, 17) stop before the first riser, one leg stepping in place while a rear toe at its reach limit blocks
+  every shift that would make its own lift safe (a symmetric stance has both rear legs at zero static margin); three
+  local rules (creep on load, advance yield, relief step) refuted, kept as knobs at 0. **Next: lever 2 as a POSE SEARCH**
+  — the body's position over the toes and the next landing chosen together against the predicted margins, with the
+  body's height and pitch from the patch for the risers; then lever 3, the rear lift's margin on a slope; the
+  toe-height bias at touchdown and the lateral slide remain measurements. IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through

@@ -143,6 +143,12 @@ private:
     std::vector<double> order_ = {2, 0, 3, 1}; int order_pos_ = -1; int64_t turns_passed_ = 0;   // the sequencer's own stance: each toe's neutral place is this far from its hip along the leg's heading (the gait stands at 12-13 cm, at the edge of the reach, and left the shift no room -- 2026-11-08)
     int64_t shift_blocked_ = 0, retreats_ = 0; int blocked_leg_ = -1;
     bool sector_clamp(int leg, body::Vec3f& p) const;   // true when clamped
+    // THE RELIEF STEP (2026-11-08; relief 0 = off, byte-identical): the leg whose turn it is stands at its reach limit and
+    // blocks the very shift that would make its lift safe (seed 11: the rear-right toe put down short by a brush, the body
+    // advancing past it until every shift front-left was clamped by it; 84 steps of the front-left leg in place) -- another
+    // leg, safe to lift now, steps along its heading to the place that gives the stuck leg its margin WITHOUT a shift (the
+    // rear mate stepping back rotates the support diagonal); the stuck leg's turn is retried when it lands.
+    bool plan_relief(int stuck, double cx, double cz, int bearing, int& leg_out, body::Vec3f& land_out, double& margin_out) const;
     // THE SHIFT'S DIRECTION (the third flat run, 2026-11-08: a shift straight back hit a workspace edge at once and the
     // body never advanced): the body moves toward the INTERIOR of the triangle the other three toes make (the inward
     // normal of the edge nearest the weight, by the margin still missing) and toward the four toes' centroid
@@ -184,6 +190,17 @@ private:
     // land_edge_m or more (a riser's edge) is moved along the heading, a cell at a time within reach, to flat remembered ground.
     double lower_fast_v_ = 0.0, lower_standoff_m_ = 0.01, lower_standoff_k_ = 2.0, land_edge_m_ = 0.0, land_edge_max_m_ = 0.04; int land_edge_cells_ = 3;
     double land_sigma_ = 0.0; int64_t fast_ticks_ = 0, slow_ticks_ = 0, edge_moves_ = 0, edge_stuck_ = 0;
+    // THE CREEP ON LOAD (2026-11-08; default 0 = the contact flag, byte-identical): a planted toe whose FSR share is below
+    // creep_load_min creeps down (the body stood on one diagonal with the fourth toe touching but unloaded, its flag flickering,
+    // and the creep relaxed on each flicker: the diagonal's leg could never lift and the unloaded toe was re-stepped 42 times);
+    // it relaxes only while its share is above creep_load_relax.
+    double creep_load_min_ = 0.0, creep_load_relax_ = 0.2; int64_t creep_load_ticks_ = 0;
+    // THE ADVANCE YIELDS TO A STRETCHED LEG (2026-11-08; 0 = off, byte-identical): the body does not advance while a planted toe is
+    // within advance_reach_m of its reach limit (seed 11: the body walked away from the rear-right toe until it stood at the
+    // reach limit, where it blocked every shift that would have made its own lift safe -- 84 steps of the front-left leg in place).
+    double advance_reach_m_ = 0.0; int64_t advance_yields_ = 0;
+    double relief_ = 0.0, relief_step_m_ = 0.01; int relief_cells_ = 4; int relief_for_ = -1; bool relief_pending_ = false; body::Vec3f relief_land_{}; int64_t relief_steps_ = 0, relief_none_ = 0;
+    std::array<bool, 4> blocked_toe_{};
     int    ik_iters_ = 4; double ik_damping_m_ = 0.01, ik_step_max_rad_ = 0.12, ik_tol_m_ = 0.004;
 
     // the leg model
