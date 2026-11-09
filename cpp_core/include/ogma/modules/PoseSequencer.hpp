@@ -69,6 +69,8 @@ public:
 private:
     void handle(std::string const& which, int idx, MessagePtr p);
     bool patch_h(double fwd, double lat, double& h) const;      // remembered ground height (gravity frame) under a body-frame point
+    bool patch_h(double fwd, double lat, double& h, double& sigma) const;   // ... with its uncertainty (m) from the cells' precisions
+    bool patch_edge(double fwd, double lat, double& relief) const;          // the height relief (max - min) of the remembered cells around a point: a riser's edge
     double gravity_h(const body::Vec3f& p) const { return p.x * up_[0] + p.y * up_[1] + p.z * up_[2]; }
     body::Vec3f at_gravity_h(double x, double z, double h) const { return body::Vec3f(float(x), float((h - x * up_[0] - z * up_[2]) / std::max(0.2, up_[1])), float(z)); }
     void engage_now(uint64_t tick_id);
@@ -176,6 +178,12 @@ private:
     float belly_ = 0.0f; bool have_belly_ = false;
     double shift_v_ = 0.03, shift_max_m_ = 0.05, margin_min_m_ = 0.005, lift_clear_m_ = 0.03, lift_v_ = 0.10, swing_v_ = 0.12, lower_v_ = 0.06;
     double stride_m_ = 0.06, sink_max_m_ = 0.06, tilt_disengage_ = 0.75, dt_ = 0.02;
+    // THE PREDICTED GROUND USED AS A PRIOR (lever 1, 2026-11-08; both default off = byte-identical): the lowering descends at
+    // lower_fast_v to a standoff above the memory's height at the landing (standoff = lower_standoff_m + lower_standoff_k x the
+    // memory's sigma there), then at lower_v until the FSR; and a landing point whose remembered neighbourhood has a relief of
+    // land_edge_m or more (a riser's edge) is moved along the heading, a cell at a time within reach, to flat remembered ground.
+    double lower_fast_v_ = 0.0, lower_standoff_m_ = 0.01, lower_standoff_k_ = 2.0, land_edge_m_ = 0.0, land_edge_max_m_ = 0.04; int land_edge_cells_ = 3;
+    double land_sigma_ = 0.0; int64_t fast_ticks_ = 0, slow_ticks_ = 0, edge_moves_ = 0, edge_stuck_ = 0;
     int    ik_iters_ = 4; double ik_damping_m_ = 0.01, ik_step_max_rad_ = 0.12, ik_tol_m_ = 0.004;
 
     // the leg model

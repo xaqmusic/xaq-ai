@@ -108,7 +108,12 @@ ParamSchema PoseSequencer::params_schema() const {
         {"lift_clear_m",  ParamMutability::HotMutable, "Clearance above the higher of the ground under the toe and at its landing point.", ParamValue{0.03}},
         {"lift_v_mps",    ParamMutability::HotMutable, "The toe's rise rate.", ParamValue{0.10}},
         {"swing_v_mps",   ParamMutability::HotMutable, "The toe's forward rate in the air.", ParamValue{0.12}},
-        {"lower_v_mps",   ParamMutability::HotMutable, "The toe's descent rate.", ParamValue{0.06}},
+        {"lower_v_mps",   ParamMutability::HotMutable, "The toe's descent rate (within the standoff above the predicted ground, or everywhere when lower_fast_v_mps is 0).", ParamValue{0.06}},
+        {"lower_fast_v_mps", ParamMutability::HotMutable, "The descent rate down to the standoff above the memory's predicted ground at the landing; 0 = off (lower_v_mps throughout, byte-identical).", ParamValue{0.0}},
+        {"lower_standoff_m", ParamMutability::HotMutable, "The fast descent stops this far above the predicted ground ...", ParamValue{0.01}},
+        {"lower_standoff_k", ParamMutability::HotMutable, "... plus this many times the larger of the memory's uncertainty there and the running RMS landing error (m): confident ground is approached quickly, uncertain ground carefully.", ParamValue{2.0}},
+        {"land_edge_m",   ParamMutability::HotMutable, "A landing point whose remembered neighbourhood (3 x 3 cells) spans this much height is a riser's edge and is moved along the heading to flat ground; 0 = off.", ParamValue{0.0}},
+        {"land_edge_max_m", ParamMutability::HotMutable, "The most a landing is moved off an edge (m), within reach.", ParamValue{0.04}},
         {"stride_m",      ParamMutability::HotMutable, "A toe lands this far ahead of the place it stood at engage... per step: the landing is neutral + stride/2.", ParamValue{0.06}},
         {"sink_max_m",    ParamMutability::HotMutable, "A lowering toe this far below the predicted ground without contact is taken as landed; the FSR ends a lowering, the prediction only bounds it (0.03 missed landings on the stairs' approach, where the memory's ground sat high).", ParamValue{0.06}},
         {"tilt_disengage", ParamMutability::HotMutable, "Below this vertical component of the body's up the legs go back to the rhythm.", ParamValue{0.75}},
@@ -128,7 +133,7 @@ ParamMap PoseSequencer::current_params() const {
             {"stand_h_m", ParamValue{stand_h_m_}}, {"level_gain", ParamValue{level_gain_}}, {"level_max_m", ParamValue{level_max_m_}}, {"sector_half_rad", ParamValue{sector_half_rad_}}, {"land_sector_rad", ParamValue{land_sector_rad_}}, {"land_band_lo_m", ParamValue{land_band_lo_m_}}, {"land_band_hi_m", ParamValue{land_band_hi_m_}}, {"neutral_r_m", ParamValue{neutral_r_m_}}, {"settle_v_mps", ParamValue{settle_v_}}, {"odom_in_topic", ParamValue{odom_in_topic_}}, {"odom_out_topic", ParamValue{odom_out_topic_}}, {"heading_hold", ParamValue{heading_hold_}}, {"heading_ref", ParamValue{heading_ref_}}, {"heading_gain", ParamValue{heading_gain_}}, {"shift_realised", ParamValue{shift_realised_}}, {"yaw_rate_max", ParamValue{yaw_rate_max_}}, {"order", ParamValue{order_}}, {"centre_gain", ParamValue{centre_gain_}}, {"advance_m", ParamValue{advance_m_}}, {"margin_extra_m", ParamValue{margin_extra_m_}}, {"creep_v_mps", ParamValue{creep_v_}}, {"bear_tau_ticks", ParamValue{bear_tau_ticks_}}, {"bear_on", ParamValue{bear_on_}}, {"bear_off", ParamValue{bear_off_}}, {"touch_ticks", ParamValue{int64_t(touch_ticks_)}}, {"touch_load", ParamValue{touch_load_}}, {"creep_max_m", ParamValue{creep_max_m_}}, {"creep_relax_v_mps", ParamValue{creep_relax_v_}}, {"elev_deadband_m", ParamValue{elev_deadband_m_}}, {"elev_tau_ticks", ParamValue{elev_tau_ticks_}}, {"air_ticks_min", ParamValue{int64_t(air_ticks_min_)}}, {"reach_min_m", ParamValue{reach_min_m_}}, {"retreat_m", ParamValue{retreat_m_}}, {"elev_max_m", ParamValue{elev_max_m_}}, {"reach_max_m", ParamValue{reach_max_m_}}, {"unreach_tol_m", ParamValue{unreach_tol_m_}},
             {"engage_min_belly_m", ParamValue{engage_min_belly_m_}}, {"engage_min_tick", ParamValue{int64_t(engage_min_tick_)}}, {"engage_min_contacts", ParamValue{int64_t(engage_min_contacts_)}}, {"phase_max_ticks", ParamValue{int64_t(phase_max_ticks_)}}, {"shift_v_mps", ParamValue{shift_v_}}, {"shift_max_m", ParamValue{shift_max_m_}},
             {"margin_min_m", ParamValue{margin_min_m_}}, {"lift_clear_m", ParamValue{lift_clear_m_}}, {"lift_v_mps", ParamValue{lift_v_}}, {"swing_v_mps", ParamValue{swing_v_}},
-            {"lower_v_mps", ParamValue{lower_v_}}, {"stride_m", ParamValue{stride_m_}}, {"sink_max_m", ParamValue{sink_max_m_}}, {"tilt_disengage", ParamValue{tilt_disengage_}},
+            {"lower_v_mps", ParamValue{lower_v_}}, {"lower_fast_v_mps", ParamValue{lower_fast_v_}}, {"lower_standoff_m", ParamValue{lower_standoff_m_}}, {"lower_standoff_k", ParamValue{lower_standoff_k_}}, {"land_edge_m", ParamValue{land_edge_m_}}, {"land_edge_max_m", ParamValue{land_edge_max_m_}}, {"stride_m", ParamValue{stride_m_}}, {"sink_max_m", ParamValue{sink_max_m_}}, {"tilt_disengage", ParamValue{tilt_disengage_}},
             {"dt_s", ParamValue{dt_}}, {"ik_iters", ParamValue{int64_t(ik_iters_)}}, {"ik_damping_m", ParamValue{ik_damping_m_}}, {"ik_step_max_rad", ParamValue{ik_step_max_rad_}}, {"ik_tol_m", ParamValue{ik_tol_m_}}};
 }
 
@@ -141,7 +146,7 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     apply_param(params, "gait_action_topics", [&](auto const& v){ if (auto p = std::get_if<std::vector<std::string>>(&v)) gait_action_topics_ = *p; });
     apply_param(params, "order", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) order_ = *p; });
-    for (auto const& k : {"engage", "engage_ramp_ticks", "stand_h_m", "level_gain", "level_max_m", "sector_half_rad", "land_sector_rad", "land_band_lo_m", "land_band_hi_m", "neutral_r_m", "settle_v_mps", "heading_hold", "heading_ref", "heading_gain", "yaw_rate_max", "shift_realised", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps",
+    for (auto const& k : {"engage", "engage_ramp_ticks", "stand_h_m", "level_gain", "level_max_m", "sector_half_rad", "land_sector_rad", "land_band_lo_m", "land_band_hi_m", "neutral_r_m", "settle_v_mps", "heading_hold", "heading_ref", "heading_gain", "yaw_rate_max", "shift_realised", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps", "lower_fast_v_mps", "lower_standoff_m", "lower_standoff_k", "land_edge_m", "land_edge_max_m",
                           "stride_m", "sink_max_m", "tilt_disengage", "dt_s", "ik_iters", "ik_damping_m", "ik_step_max_rad", "ik_tol_m"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which, int idx) {
@@ -208,6 +213,11 @@ void PoseSequencer::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "lift_v_mps")       lift_v_ = std::max(1e-3, get_double(value, k));
     else if (k == "swing_v_mps")      swing_v_ = std::max(1e-3, get_double(value, k));
     else if (k == "lower_v_mps")      lower_v_ = std::max(1e-3, get_double(value, k));
+    else if (k == "lower_fast_v_mps") lower_fast_v_ = std::max(0.0, get_double(value, k));
+    else if (k == "lower_standoff_m") lower_standoff_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "lower_standoff_k") lower_standoff_k_ = std::max(0.0, get_double(value, k));
+    else if (k == "land_edge_m")      land_edge_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "land_edge_max_m")  land_edge_max_m_ = std::max(0.0, get_double(value, k));
     else if (k == "stride_m")         stride_m_ = std::max(0.0, get_double(value, k));
     else if (k == "sink_max_m")       sink_max_m_ = std::max(0.0, get_double(value, k));
     else if (k == "tilt_disengage")   tilt_disengage_ = std::clamp(get_double(value, k), 0.0, 1.0);
@@ -305,8 +315,27 @@ bool PoseSequencer::ik_step(int leg, const Vec3f& target, std::array<double, 3>&
     return false;
 }
 
-bool PoseSequencer::patch_h(double fwd, double lat, double& h) const {
-    h = 0.0;
+bool PoseSequencer::patch_h(double fwd, double lat, double& h) const { double sg; return patch_h(fwd, lat, h, sg); }
+
+// the relief of the remembered 3 x 3 cells around a body-frame point (max - min height); false with fewer than two cells known
+bool PoseSequencer::patch_edge(double fwd, double lat, double& relief) const {
+    relief = 0.0;
+    if (!have_patch_) return false;
+    const int ci = int(std::floor(fwd / cell_)) + N_ / 2, cj = int(std::floor(lat / cell_)) + N_ / 2;
+    double lo = 1e9, hi = -1e9; int n = 0;
+    for (int di = -1; di <= 1; ++di) for (int dj = -1; dj <= 1; ++dj) {
+        const int i = ci + di, j = cj + dj;
+        if (i < 0 || j < 0 || i >= N_ || j >= N_) continue;
+        const float hv = patch_[size_t(4 + i * N_ + j)]; const double w = patch_[size_t(4 + N_ * N_ + i * N_ + j)];
+        if (hv <= -98.0f || w <= 0.0) continue;
+        lo = std::min(lo, double(hv)); hi = std::max(hi, double(hv)); ++n;
+    }
+    if (n < 2) return false;
+    relief = hi - lo; return true;
+}
+
+bool PoseSequencer::patch_h(double fwd, double lat, double& h, double& sigma) const {
+    h = 0.0; sigma = 0.0;
     if (!have_patch_) return false;
     const int ci = int(std::floor(fwd / cell_)) + N_ / 2, cj = int(std::floor(lat / cell_)) + N_ / 2;
     double sw = 0.0, swh = 0.0;
@@ -318,7 +347,7 @@ bool PoseSequencer::patch_h(double fwd, double lat, double& h) const {
         sw += w; swh += w * hv;
     }
     if (sw <= 0.0) return false;
-    h = swh / sw; return true;
+    h = swh / sw; sigma = std::sqrt(1.0 / sw); return true;   // the precision-weighted mean's own uncertainty
 }
 
 // ---- the sequence ----
@@ -548,9 +577,23 @@ void PoseSequencer::step_machine() {
             // the ground: under the toe now and at the landing, from the memory where it has it, else the stance's own height
             const double stance_h = gravity_h(Vec3f(cur.x, float(-stand_h_m_), cur.z));
             const double h_here = gravity_h(cur);                   // the toe stands here: the ground under it is where it is
-            double h_land = stance_h, hp;
-            if (patch_h(land_.z, land_.x, hp)) {                     // the patch's frame: fwd = z, lat = x, as TerrainMemory stores the toes
-                if (hp >= stance_h - land_band_lo_m_ && hp <= stance_h + land_band_hi_m_) h_land = hp; else ++land_h_rejected_;
+            if (land_edge_m_ > 0.0) {   // a riser's edge under the landing: move it along the heading, a cell at a time, to flat remembered ground
+                double relief; const Vec3f hip = hip1_of(leg_); Vec3f best = land_; bool moved = false;
+                if (patch_edge(land_.z, land_.x, relief) && relief >= land_edge_m_) {
+                    for (int dir : {+1, -1}) {   // forward first (onto the tread), then back
+                        for (int k = 1; k * cell_ <= land_edge_max_m_ + 1e-9; ++k) {
+                            Vec3f cand(land_.x, land_.y, float(land_.z + dir * k * cell_));
+                            if (std::hypot(cand.x - hip.x, cand.z - hip.z) > reach_max_m_ - 0.01) break;
+                            double r2; if (patch_edge(cand.z, cand.x, r2) && r2 < land_edge_m_) { best = cand; moved = true; break; }
+                        }
+                        if (moved) break;
+                    }
+                    if (moved) { land_ = best; ++edge_moves_; } else ++edge_stuck_;
+                }
+            }
+            double h_land = stance_h, hp, sg = 0.0; land_sigma_ = 0.0;
+            if (patch_h(land_.z, land_.x, hp, sg)) {                 // the patch's frame: fwd = z, lat = x, as TerrainMemory stores the toes
+                if (hp >= stance_h - land_band_lo_m_ && hp <= stance_h + land_band_hi_m_) { h_land = hp; land_sigma_ = sg; } else ++land_h_rejected_;
             }
             land_h_ = h_land; lift_h_ = std::max(h_here, h_land) + lift_clear_m_;
             lift_dy_ = lift_h_ - stance_h;                           // the lift as a BODY-frame rise over the stance (a gravity conversion on a rolling body ran a target up and the leg into its stops, 2026-11-08)
@@ -588,7 +631,13 @@ void PoseSequencer::step_machine() {
         Vec3f& tg = toe_tgt_[size_t(leg_)];
         const Vec3f cmd = toe_of(leg_, angles_[size_t(leg_)]);
         const bool unreachable = len(sub(cmd, tg)) > unreach_tol_m_;
-        if (!unreachable) tg.y -= float(lower_v_ * dt_);           // keep lowering only while the leg can follow
+        double v = lower_v_;
+        if (lower_fast_v_ > 0.0 && land_sigma_ > 0.0) {            // the memory knows the ground at the landing: fast to a standoff above it, careful beneath
+            const double h_tg = double(tg.y) + stand_h_m_ + gravity_h(Vec3f(tg.x, float(-stand_h_m_), tg.z));
+            const double standoff = lower_standoff_m_ + lower_standoff_k_ * std::max(land_sigma_, std::sqrt(land_err_ms_));   // the memory's own uncertainty, or the sequencer's running landing error where the memory is overconfident (sigma_touch 5 mm against 1-3 cm of landing error)
+            if (h_tg > land_h_ + standoff) { v = lower_fast_v_; ++fast_ticks_; } else ++slow_ticks_;
+        }
+        if (!unreachable) tg.y -= float(v * dt_);                  // keep lowering only while the leg can follow
         else if (phase_ticks_ % 5 == 0) {                            // out of reach: the landing retreats toward the hip and the toe tries again
             const Vec3f hip = hip1_of(leg_); const double dx = hip.x - tg.x, dz = hip.z - tg.z, dn = std::hypot(dx, dz);
             if (dn > reach_min_m_ + retreat_m_) { tg.x += float(dx / dn * retreat_m_); tg.z += float(dz / dn * retreat_m_); ++retreats_; }
@@ -688,7 +737,7 @@ nlohmann::json PoseSequencer::diag_snapshot() const {
     return nlohmann::json{{"phase", phase_name(phase_)}, {"phase_id", int(phase_)}, {"leg", leg_}, {"engage", engage_level_}, {"model", have_model_}, {"support", have_support_},
                           {"patch", have_patch_}, {"steps", st}, {"cycles", cycles_}, {"shift_exhausted", shift_exhausted_}, {"shift_ticks", shift_ticks_},
                           {"disengaged_tilt", disengaged_tilt_}, {"lower_sunk", lower_sunk_}, {"phase_timeouts", phase_timeouts_}, {"engaged_at", engaged_at_},
-                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
+                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"fast_ticks", fast_ticks_}, {"slow_ticks", slow_ticks_}, {"edge_moves", edge_moves_}, {"edge_stuck", edge_stuck_}, {"land_sigma", land_sigma_}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
                           {"toe_tgt", tg}, {"u", uu}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {air_ticks_[0], air_ticks_[1], air_ticks_[2], air_ticks_[3]}}, {"lift_h", lift_h_}, {"land_h", land_h_}, {"shift_acc", shift_acc_}, {"phase_ticks", phase_ticks_}};
 }
 

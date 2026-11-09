@@ -13120,7 +13120,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["ps_phase"] = int(ps.get("phase_id", 0)); line["ps_leg"] = int(ps.get("leg", -1)); line["ps_eng"] = snappedf(float(ps.get("engage", 0.0)), 0.01)
 		var stp: Array = ps.get("steps", [])
 		if stp.size() >= 4: line["ps_steps"] = [int(stp[0]), int(stp[1]), int(stp[2]), int(stp[3])]
-		line["ps_cycles"] = int(ps.get("cycles", 0)); line["ps_exh"] = int(ps.get("shift_exhausted", 0)); line["ps_sunk"] = int(ps.get("lower_sunk", 0))
+		line["ps_cycles"] = int(ps.get("cycles", 0)); line["ps_exh"] = int(ps.get("shift_exhausted", 0)); line["ps_sunk"] = int(ps.get("lower_sunk", 0)); line["ps_fast"] = int(ps.get("fast_ticks", 0)); line["ps_slow"] = int(ps.get("slow_ticks", 0)); line["ps_edge"] = [int(ps.get("edge_moves", 0)), int(ps.get("edge_stuck", 0))]; line["ps_lsig"] = snappedf(float(ps.get("land_sigma", 0.0)), 0.001)
 		line["ps_tilt_off"] = int(ps.get("disengaged_tilt", 0)); line["ps_ik"] = snappedf(float(ps.get("ik_err", 0.0)), 0.0001); line["ps_fk"] = snappedf(float(ps.get("fk_err", 0.0)), 0.0001)
 		line["ps_shift"] = int(ps.get("shift_ticks", 0)); line["ps_tmo"] = int(ps.get("phase_timeouts", 0)); line["ps_at"] = int(ps.get("engaged_at", -1))
 		line["ps_lift_h"] = snappedf(float(ps.get("lift_h", 0.0)), 0.001); line["ps_land_h"] = snappedf(float(ps.get("land_h", 0.0)), 0.001); line["ps_ph_t"] = int(ps.get("phase_ticks", 0)); line["ps_hrej"] = int(ps.get("land_h_rejected", 0)); line["ps_obst"] = int(ps.get("obstacle_hits", 0)); line["ps_rst"] = int(ps.get("resets_seen", 0)); line["ps_yaw_err"] = snappedf(float(ps.get("yaw_err", 0.0)), 0.001)

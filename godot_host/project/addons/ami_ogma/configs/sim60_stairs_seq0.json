@@ -781,6 +781,10 @@
           "action.rr_knee"
         ],
         "output_topic": "pose.targets",
+        "lower_fast_v_mps": 0.15,
+        "lower_standoff_m": 0.005,
+        "lower_standoff_k": 1.0,
+        "land_edge_m": 0.02,
         "engage": 0.0
       }
     }
