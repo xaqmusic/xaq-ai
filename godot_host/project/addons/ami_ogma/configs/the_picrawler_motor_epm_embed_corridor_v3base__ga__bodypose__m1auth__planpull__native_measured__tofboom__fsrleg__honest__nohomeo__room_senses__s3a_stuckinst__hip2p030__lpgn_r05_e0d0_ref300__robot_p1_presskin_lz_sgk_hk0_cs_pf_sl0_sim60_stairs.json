@@ -34,6 +34,7 @@
     "gym_difficulty": 0.3,
     "body_env": {
       "OGMA_PICRAWLER_FEET_XZ": "1",
+      "OGMA_PICRAWLER_CMD_FK_SOURCE": "1",
       "OGMA_PICRAWLER_TOF_BOOM": "1",
       "OGMA_PICRAWLER_TOF_TILT_COMP": "0",
       "OGMA_PICRAWLER_CHASSIS_COLLIDE": "1",

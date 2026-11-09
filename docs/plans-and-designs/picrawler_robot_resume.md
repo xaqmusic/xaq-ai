@@ -191,10 +191,14 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   local rules (creep on load, advance yield, relief step) refuted, kept as knobs at 0. **Lever 2a, the POSE SEARCH, shipped as `plan 1`**
   (ledger 2026-11-09): leg, landing and body shift chosen together one step ahead with the wave's next leg kept
   liftable — no stall in 8 of 8 seeds (the controller 6 of 8), a tie on distance, the step 0.5 s slower, 0–4 sunk
-  landings a run. **Next: lever 2b** — the body's height and pitch from the patch (the stance holds body-frame heights
-  across a tread's edge and the body sits nose-up for seconds on the second tread; the patch's elevation is still off),
-  then lever 3, the rear lift's margin on a slope; the sunk timeout (4.8 s a miss), the toe-height bias at touchdown and
-  the lateral slide remain. IN_FLIGHT. Then the robot: the
+  landings a run. **The sim's toe-height channel was the rest pose** (ledger 2026-11-09): `toe_y` under brain mode
+  read zero servo targets, so every touch height, the datum series and the landing errors of 2026-11-07/08 were a
+  constant tilted by the IMU; fixed by `OGMA_PICRAWLER_CMD_FK_SOURCE=1` in the sequencer and stairs-instrument configs
+  (the robot's host was never affected); on the live channel the sequencer's climb regresses on 4 seeds (0.58–0.73 →
+  0.30–0.65 m) — the memory's consumers were tuned on a lucky flat prior. **Next: re-baseline on the honest channel,
+  then lever 2b** — the stance by each toe's LANDED height (the second tread is where the crawl drops to a third of
+  its speed: a rear toe lands a tread lower and hangs, a front toe hangs out of reach on the nose-up body), the memory's
+  touch taken when the toe bears rather than at the flag's edge, then lever 3. IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through

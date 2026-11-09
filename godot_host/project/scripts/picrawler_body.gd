@@ -13064,6 +13064,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["tm_floor"] = 1 if bool(tm.get("floor_ok", false)) else 0
 		line["tm_datum"] = snappedf(float(tm.get("datum", 0.0)), 0.001)   # the body's climb since the memory began, from its touches
 		line["tm_dmoves"] = int(tm.get("datum_planted_moves", 0)) + int(tm.get("datum_belly_moves", 0)); line["tm_ground"] = snappedf(float(tm.get("ground", 0.0)), 0.001)
+		if _touch_feet_y.size() >= 4:
+			var ca: Array = []
+			for li in range(4):
+				for ji in range(3): ca.append(snappedf(_cmd_angle(li, ji), 0.001))
+			line["cmd_ang"] = ca; line["cmd_fk_src"] = cmd_fk_source
 		if _touch_feet_y.size() >= 4: line["toe_y"] = [snappedf(float(_touch_feet_y[0]), 0.0001), snappedf(float(_touch_feet_y[1]), 0.0001), snappedf(float(_touch_feet_y[2]), 0.0001), snappedf(float(_touch_feet_y[3]), 0.0001)]   # the toe tips' gravity heights the brain reads
 		var pr: Array = tm.get("prediction", [])
 		if pr.size() >= 4:
