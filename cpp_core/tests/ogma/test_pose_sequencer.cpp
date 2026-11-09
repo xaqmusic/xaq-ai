@@ -171,3 +171,38 @@ TEST(PoseSequencer, TheHeadingHoldTurnsThePlantedToesAgainstAYawError_AndTheOdom
     // the odometry advanced with the shift along the heading, not merely passing the body's through
     EXPECT_GT(f.m.odom_x(), 0.5) << "the body advanced over the toes";
 }
+
+TEST(PoseSequencer, ThePoseSearchCrawlsOnFlatGround_EveryLegStepsAndEveryPlanIsFeasible) {
+    Fix f({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}}, {"plan", ogma::ParamValue{1.0}}});
+    std::vector<float> contact = {1, 1, 1, 1};
+    int plans_checked = 0;
+    for (uint64_t t = 0; t < 2500; ++t) {
+        const int leg = f.m.active_leg();
+        for (int i = 0; i < 4; ++i) contact[size_t(i)] = 1.0f;
+        if (leg >= 0 && (f.m.phase() == PoseSequencer::Phase::Lift || f.m.phase() == PoseSequencer::Phase::Swing)) contact[size_t(leg)] = 0.0f;
+        if (leg >= 0 && f.m.phase() == PoseSequencer::Phase::Lower) {
+            auto d = f.m.diag_snapshot(); const double y = d["toe_tgt"][leg][1].get<double>();
+            contact[size_t(leg)] = y <= -0.09 ? 1.0f : 0.0f;
+        }
+        f.run(t, contact);
+        if (f.m.phase() == PoseSequencer::Phase::Shift && (t % 50) == 0) {   // the planner, asked again from the standing geometry: a feasible step within its grid and the leg's reach
+            int l; Vec3f L; double sx, sz, sc;
+            if (f.m.plan_step(l, L, sx, sz, sc)) {
+                ++plans_checked;
+                EXPECT_GE(l, 0); EXPECT_LE(l, 3);
+                EXPECT_LE(std::fabs(sx), 0.03 + 1e-9); EXPECT_GE(sz, -0.03 - 1e-9); EXPECT_LE(sz, 0.04 + 1e-9);
+                const double hx = (l == 1 || l == 3) ? 0.0383 : -0.0383, hz = (l == 0 || l == 1) ? 0.033 : -0.033;
+                const double r = std::hypot(L.x - hx, L.z - hz);
+                EXPECT_GE(r, 0.06); EXPECT_LE(r, 0.14) << "the landing stays within the leg's reach";
+            }
+        }
+    }
+    EXPECT_GT(plans_checked, 3);
+    int total = 0; for (int i = 0; i < 4; ++i) { EXPECT_GE(f.m.steps(i), 1) << "leg " << i << " never stepped"; total += f.m.steps(i); }
+    EXPECT_GE(total, 4);
+    auto d = f.m.diag_snapshot();
+    EXPECT_GT(d["plans"].get<int>(), 0); EXPECT_EQ(d["plan_none"].get<int>(), 0) << "on flat ground the search always has a step";
+    EXPECT_EQ(d["deadlock_ticks"].get<int>(), 0); EXPECT_EQ(d["disengaged_tilt"].get<int>(), 0);
+    EXPECT_LT(d["ik_err"].get<double>(), 0.015);
+}
+

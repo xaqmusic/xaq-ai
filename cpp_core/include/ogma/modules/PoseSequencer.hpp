@@ -60,6 +60,7 @@ public:
     std::array<double, 3> angles_of_u(int leg, const std::array<double, 3>& u) const;
     std::array<double, 3> u_of_angles(int leg, const std::array<double, 3>& t) const;
     bool ik_step(int leg, const body::Vec3f& target, std::array<double, 3>& t) const;   // one damped step; true when within tol
+    bool plan_step(int& leg_out, body::Vec3f& land_out, double& sx_out, double& sz_out, double& score_out);   // the pose search (lever 2a); public for the tests
     Phase phase() const { return phase_; }
     int   active_leg() const { return leg_; }
     float engage_level() const { return engage_level_; }
@@ -148,6 +149,14 @@ private:
     // advancing past it until every shift front-left was clamped by it; 84 steps of the front-left leg in place) -- another
     // leg, safe to lift now, steps along its heading to the place that gives the stuck leg its margin WITHOUT a shift (the
     // rear mate stepping back rotates the support diagonal); the stuck leg's turn is retried when it lands.
+    // THE POSE SEARCH (lever 2a, 2026-11-09; plan 0 = off, byte-identical): at each decision the leg, its landing and the body's
+    // shift are chosen TOGETHER one step ahead -- the shift must keep every planted toe within reach and give the leg its
+    // margin; the landing must leave the NEXT leg of the wave liftable by some feasible shift (the stall of 2026-11-08 was a
+    // toe at its reach limit clamping every shift that would have freed it); among the feasible, the most forward shift and
+    // the landing that leaves the next leg the largest margin, with the wave's order kept where it can be.
+    double best_margin_over_shifts(int leg, const std::array<body::Vec3f, 4>& toes, double cx, double cz, double& sx, double& sz, bool forward_first) const;
+    bool shift_feasible(int lifting, const std::array<body::Vec3f, 4>& toes, double sx, double sz) const;
+    void decide_next(uint64_t tick_id);
     bool plan_relief(int stuck, double cx, double cz, int bearing, int& leg_out, body::Vec3f& land_out, double& margin_out) const;
     // THE SHIFT'S DIRECTION (the third flat run, 2026-11-08: a shift straight back hit a workspace edge at once and the
     // body never advanced): the body moves toward the INTERIOR of the triangle the other three toes make (the inward
@@ -201,6 +210,9 @@ private:
     double advance_reach_m_ = 0.0; int64_t advance_yields_ = 0;
     double relief_ = 0.0, relief_step_m_ = 0.01; int relief_cells_ = 4; int relief_for_ = -1; bool relief_pending_ = false; body::Vec3f relief_land_{}; int64_t relief_steps_ = 0, relief_none_ = 0;
     std::array<bool, 4> blocked_toe_{};
+    double plan_ = 0.0, plan_shift_m_ = 0.03, plan_shift_fwd_m_ = 0.04, plan_land_m_ = 0.04, plan_cell_m_ = 0.01, plan_adv_w_ = 0.3;
+    bool plan_active_ = false, plan_pending_ = false; body::Vec3f plan_land_{}; double plan_sx_ = 0.0, plan_sz_ = 0.0, plan_done_x_ = 0.0, plan_done_z_ = 0.0, plan_score_ = 0.0;
+    int64_t plans_ = 0, plan_skips_ = 0, plan_none_ = 0, plan_reached_ = 0;
     int    ik_iters_ = 4; double ik_damping_m_ = 0.01, ik_step_max_rad_ = 0.12, ik_tol_m_ = 0.004;
 
     // the leg model

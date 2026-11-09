@@ -188,10 +188,13 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   misses, the field lesion still lands every toe. **The bottleneck is a STALL on the flat approach** (ledger, same day):
   2 of 8 seeds (11, 17) stop before the first riser, one leg stepping in place while a rear toe at its reach limit blocks
   every shift that would make its own lift safe (a symmetric stance has both rear legs at zero static margin); three
-  local rules (creep on load, advance yield, relief step) refuted, kept as knobs at 0. **Next: lever 2 as a POSE SEARCH**
-  — the body's position over the toes and the next landing chosen together against the predicted margins, with the
-  body's height and pitch from the patch for the risers; then lever 3, the rear lift's margin on a slope; the
-  toe-height bias at touchdown and the lateral slide remain measurements. IN_FLIGHT. Then the robot: the
+  local rules (creep on load, advance yield, relief step) refuted, kept as knobs at 0. **Lever 2a, the POSE SEARCH, shipped as `plan 1`**
+  (ledger 2026-11-09): leg, landing and body shift chosen together one step ahead with the wave's next leg kept
+  liftable — no stall in 8 of 8 seeds (the controller 6 of 8), a tie on distance, the step 0.5 s slower, 0–4 sunk
+  landings a run. **Next: lever 2b** — the body's height and pitch from the patch (the stance holds body-frame heights
+  across a tread's edge and the body sits nose-up for seconds on the second tread; the patch's elevation is still off),
+  then lever 3, the rear lift's margin on a slope; the sunk timeout (4.8 s a miss), the toe-height bias at touchdown and
+  the lateral slide remain. IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through
