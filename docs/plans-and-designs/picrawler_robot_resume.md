@@ -199,9 +199,12 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   2026-11-09): the stepping leg's IK pinned at both joint stops in the folded-up branch for a target below, the real leg
   wedged against the chassis; fixed by the IK RE-SEED (`ik_reseed_ticks` 25, shipped): no freeze in 8 of 8, misses 0–1,
   two graded seeds climb three risers from 0.3 m. The landed-height stance and the crouch measured REGRESSION / NULL,
-  kept at 0. **Next:** the one fall in eight (50 mm bench, seed 7), the rear toe landing a tread lower (the planner's
-  landings up to 4 cm behind neutral), the memory's touch taken when the toe bears, then lever 3 (the rear lift's
-  margin on a slope: the rock-back the operator sees). IN_FLIGHT. Then the robot: the
+  kept at 0. **The hung toe** (operator; ledger 2026-11-09): a toe asked up whose contact flag never clears is caught on
+  the riser's face; it is dragged 2 cm along the ground toward the hip, then lifted 2 cm higher (`hang_ticks` 20,
+  shipped): no fall in 8 of 8, 4 of 4 graded seeds climb; the operator's weight-shift-back form fell 8 times and walked
+  backward; the IMU-integrated backward-surge sign is noise at the centimetre (refuted as a detector). **Next:** the
+  rear toe landing a tread lower (the planner's landings up to 4 cm behind neutral), the 50 mm bench's seed 3 (6
+  misses), the memory's touch taken when the toe bears, then lever 3 (the rear lift's margin on a slope). IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through

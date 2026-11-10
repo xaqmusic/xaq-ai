@@ -36,7 +36,7 @@ std::string_view PoseSequencer::type_name() const { return "PoseSequencer"; }
 
 std::vector<TopicSpec> PoseSequencer::input_topics() const {
     std::vector<TopicSpec> v;
-    for (auto const& t : {model_topic_, support_topic_, patch_topic_, feet_xz_topic_, feet_y_topic_, up_topic_, contact_topic_, load_topic_, odom_in_topic_})
+    for (auto const& t : {model_topic_, support_topic_, patch_topic_, feet_xz_topic_, feet_y_topic_, up_topic_, imu_topic_, contact_topic_, load_topic_, odom_in_topic_})
         if (!t.empty()) v.push_back(TopicSpec{t, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     for (auto const& t : gait_action_topics_) if (!t.empty()) v.push_back(TopicSpec{t, std::type_index(typeid(ActionOut)), SubscriptionKind::Direct, false});
     return v;
@@ -67,6 +67,12 @@ ParamSchema PoseSequencer::params_schema() const {
         {"level_max_m",   ParamMutability::HotMutable, "The most the levelling moves any toe (m).", ParamValue{0.02}},
         {"level_gain",    ParamMutability::HotMutable, "The stance's levelling: the fraction of the geometric correction (the toe's height offset implied by the body's tilt) applied to each planted toe, low side deeper; 1 = the whole correction at once.", ParamValue{0.5}},
         {"stand_h_m",     ParamMutability::HotMutable, "The body's height above the planted toes' mean ground (m): planted toes are held there in the body frame.", ParamValue{0.085}},
+        {"imu_topic",     ParamMutability::ConstructionOnly, "ProprioToken [ax, ay, az, gx, gy, gz] in the body frame (the body's imu6), for the backward surge of a hung toe. \"\" = none.", ParamValue{std::string("reality.proprio.imu6")}},
+        {"hang_ticks",    ParamMutability::HotMutable, "A toe asked 2 cm up whose contact flag stays on this many ticks is caught (a riser's face): the body shifts back and lifts it again, higher and toward the hip; 0 = off.", ParamValue{int64_t{0}}},
+        {"drag_back_m",   ParamMutability::HotMutable, "... or whose lift and swing move the body backward by this much, by the IMU's forward acceleration integrated (m); 0 = off (measured 2026-11-09: the integral's noise is 4 cm against a true 1 cm, correlation 0.03).", ParamValue{0.0}},
+        {"free_back_m",   ParamMutability::HotMutable, "(unused since the second form; the body's shift back dragged it backward and it fell)", ParamValue{0.02}},
+        {"free_extra_m",  ParamMutability::HotMutable, "... then lifts the toe this much higher ...", ParamValue{0.02}},
+        {"free_retract_m", ParamMutability::HotMutable, "... after dragging the toe this far toward the hip along the ground, away from the face (twice on a second hang of the same leg).", ParamValue{0.02}},
         {"ik_reseed_ticks", ParamMutability::HotMutable, "A leg whose IK sits at a joint stop with its toe more than 2 x unreach_tol_m from its target for this many ticks is walked back to the neutral standing pose and re-solved (the wrong branch: a femur folded up for a target below); 0 = off.", ParamValue{int64_t{0}}},
         {"ik_reseed_rate_rad", ParamMutability::HotMutable, "The re-seed walks the joints toward the neutral pose at this much per tick (rad); the IK's step cap flipped the body when a planted leg snapped.", ParamValue{0.04}},
         {"crouch_max_m",  ParamMutability::HotMutable, "A lowering toe at its downward reach without ground brings the body down: the planted legs fold by up to this (m); 0 = off.", ParamValue{0.0}},
@@ -148,7 +154,7 @@ ParamMap PoseSequencer::current_params() const {
             {"feet_xz_topic", ParamValue{feet_xz_topic_}}, {"feet_y_topic", ParamValue{feet_y_topic_}}, {"up_topic", ParamValue{up_topic_}},
             {"contact_topic", ParamValue{contact_topic_}}, {"load_topic", ParamValue{load_topic_}}, {"gait_action_topics", ParamValue{gait_action_topics_}}, {"output_topic", ParamValue{output_topic_}},
             {"engage", ParamValue{engage_}}, {"engage_ramp_ticks", ParamValue{int64_t(engage_ramp_ticks_)}}, {"belly_topic", ParamValue{belly_topic_}},
-            {"stand_h_m", ParamValue{stand_h_m_}}, {"elev_source", ParamValue{elev_source_}}, {"crouch_max_m", ParamValue{crouch_max_m_}}, {"ik_reseed_ticks", ParamValue{int64_t(ik_reseed_ticks_)}}, {"ik_reseed_rate_rad", ParamValue{ik_reseed_rate_}}, {"crouch_v_mps", ParamValue{crouch_v_}}, {"crouch_relax_v_mps", ParamValue{crouch_relax_v_}}, {"level_gain", ParamValue{level_gain_}}, {"level_max_m", ParamValue{level_max_m_}}, {"sector_half_rad", ParamValue{sector_half_rad_}}, {"land_sector_rad", ParamValue{land_sector_rad_}}, {"land_band_lo_m", ParamValue{land_band_lo_m_}}, {"land_band_hi_m", ParamValue{land_band_hi_m_}}, {"neutral_r_m", ParamValue{neutral_r_m_}}, {"settle_v_mps", ParamValue{settle_v_}}, {"odom_in_topic", ParamValue{odom_in_topic_}}, {"odom_out_topic", ParamValue{odom_out_topic_}}, {"heading_hold", ParamValue{heading_hold_}}, {"heading_ref", ParamValue{heading_ref_}}, {"heading_gain", ParamValue{heading_gain_}}, {"shift_realised", ParamValue{shift_realised_}}, {"yaw_rate_max", ParamValue{yaw_rate_max_}}, {"order", ParamValue{order_}}, {"centre_gain", ParamValue{centre_gain_}}, {"advance_m", ParamValue{advance_m_}}, {"margin_extra_m", ParamValue{margin_extra_m_}}, {"creep_v_mps", ParamValue{creep_v_}}, {"creep_load_min", ParamValue{creep_load_min_}}, {"advance_reach_m", ParamValue{advance_reach_m_}}, {"relief", ParamValue{relief_}}, {"plan", ParamValue{plan_}}, {"plan_shift_m", ParamValue{plan_shift_m_}}, {"plan_shift_fwd_m", ParamValue{plan_shift_fwd_m_}}, {"plan_land_m", ParamValue{plan_land_m_}}, {"plan_cell_m", ParamValue{plan_cell_m_}}, {"plan_adv_w", ParamValue{plan_adv_w_}}, {"relief_step_m", ParamValue{relief_step_m_}}, {"relief_cells", ParamValue{int64_t(relief_cells_)}}, {"creep_load_relax", ParamValue{creep_load_relax_}}, {"bear_tau_ticks", ParamValue{bear_tau_ticks_}}, {"bear_on", ParamValue{bear_on_}}, {"bear_off", ParamValue{bear_off_}}, {"touch_ticks", ParamValue{int64_t(touch_ticks_)}}, {"touch_load", ParamValue{touch_load_}}, {"creep_max_m", ParamValue{creep_max_m_}}, {"creep_relax_v_mps", ParamValue{creep_relax_v_}}, {"elev_deadband_m", ParamValue{elev_deadband_m_}}, {"elev_tau_ticks", ParamValue{elev_tau_ticks_}}, {"air_ticks_min", ParamValue{int64_t(air_ticks_min_)}}, {"reach_min_m", ParamValue{reach_min_m_}}, {"retreat_m", ParamValue{retreat_m_}}, {"elev_max_m", ParamValue{elev_max_m_}}, {"reach_max_m", ParamValue{reach_max_m_}}, {"unreach_tol_m", ParamValue{unreach_tol_m_}},
+            {"stand_h_m", ParamValue{stand_h_m_}}, {"elev_source", ParamValue{elev_source_}}, {"crouch_max_m", ParamValue{crouch_max_m_}}, {"ik_reseed_ticks", ParamValue{int64_t(ik_reseed_ticks_)}}, {"imu_topic", ParamValue{imu_topic_}}, {"hang_ticks", ParamValue{int64_t(hang_ticks_)}}, {"drag_back_m", ParamValue{drag_back_m_}}, {"free_back_m", ParamValue{free_back_m_}}, {"free_extra_m", ParamValue{free_extra_m_}}, {"free_retract_m", ParamValue{free_retract_m_}}, {"ik_reseed_rate_rad", ParamValue{ik_reseed_rate_}}, {"crouch_v_mps", ParamValue{crouch_v_}}, {"crouch_relax_v_mps", ParamValue{crouch_relax_v_}}, {"level_gain", ParamValue{level_gain_}}, {"level_max_m", ParamValue{level_max_m_}}, {"sector_half_rad", ParamValue{sector_half_rad_}}, {"land_sector_rad", ParamValue{land_sector_rad_}}, {"land_band_lo_m", ParamValue{land_band_lo_m_}}, {"land_band_hi_m", ParamValue{land_band_hi_m_}}, {"neutral_r_m", ParamValue{neutral_r_m_}}, {"settle_v_mps", ParamValue{settle_v_}}, {"odom_in_topic", ParamValue{odom_in_topic_}}, {"odom_out_topic", ParamValue{odom_out_topic_}}, {"heading_hold", ParamValue{heading_hold_}}, {"heading_ref", ParamValue{heading_ref_}}, {"heading_gain", ParamValue{heading_gain_}}, {"shift_realised", ParamValue{shift_realised_}}, {"yaw_rate_max", ParamValue{yaw_rate_max_}}, {"order", ParamValue{order_}}, {"centre_gain", ParamValue{centre_gain_}}, {"advance_m", ParamValue{advance_m_}}, {"margin_extra_m", ParamValue{margin_extra_m_}}, {"creep_v_mps", ParamValue{creep_v_}}, {"creep_load_min", ParamValue{creep_load_min_}}, {"advance_reach_m", ParamValue{advance_reach_m_}}, {"relief", ParamValue{relief_}}, {"plan", ParamValue{plan_}}, {"plan_shift_m", ParamValue{plan_shift_m_}}, {"plan_shift_fwd_m", ParamValue{plan_shift_fwd_m_}}, {"plan_land_m", ParamValue{plan_land_m_}}, {"plan_cell_m", ParamValue{plan_cell_m_}}, {"plan_adv_w", ParamValue{plan_adv_w_}}, {"relief_step_m", ParamValue{relief_step_m_}}, {"relief_cells", ParamValue{int64_t(relief_cells_)}}, {"creep_load_relax", ParamValue{creep_load_relax_}}, {"bear_tau_ticks", ParamValue{bear_tau_ticks_}}, {"bear_on", ParamValue{bear_on_}}, {"bear_off", ParamValue{bear_off_}}, {"touch_ticks", ParamValue{int64_t(touch_ticks_)}}, {"touch_load", ParamValue{touch_load_}}, {"creep_max_m", ParamValue{creep_max_m_}}, {"creep_relax_v_mps", ParamValue{creep_relax_v_}}, {"elev_deadband_m", ParamValue{elev_deadband_m_}}, {"elev_tau_ticks", ParamValue{elev_tau_ticks_}}, {"air_ticks_min", ParamValue{int64_t(air_ticks_min_)}}, {"reach_min_m", ParamValue{reach_min_m_}}, {"retreat_m", ParamValue{retreat_m_}}, {"elev_max_m", ParamValue{elev_max_m_}}, {"reach_max_m", ParamValue{reach_max_m_}}, {"unreach_tol_m", ParamValue{unreach_tol_m_}},
             {"engage_min_belly_m", ParamValue{engage_min_belly_m_}}, {"engage_min_tick", ParamValue{int64_t(engage_min_tick_)}}, {"engage_min_contacts", ParamValue{int64_t(engage_min_contacts_)}}, {"phase_max_ticks", ParamValue{int64_t(phase_max_ticks_)}}, {"shift_v_mps", ParamValue{shift_v_}}, {"shift_max_m", ParamValue{shift_max_m_}},
             {"margin_min_m", ParamValue{margin_min_m_}}, {"lift_clear_m", ParamValue{lift_clear_m_}}, {"lift_v_mps", ParamValue{lift_v_}}, {"swing_v_mps", ParamValue{swing_v_}},
             {"lower_v_mps", ParamValue{lower_v_}}, {"lower_fast_v_mps", ParamValue{lower_fast_v_}}, {"lower_standoff_m", ParamValue{lower_standoff_m_}}, {"lower_standoff_k", ParamValue{lower_standoff_k_}}, {"land_edge_m", ParamValue{land_edge_m_}}, {"land_edge_max_m", ParamValue{land_edge_max_m_}}, {"stride_m", ParamValue{stride_m_}}, {"sink_max_m", ParamValue{sink_max_m_}}, {"tilt_disengage", ParamValue{tilt_disengage_}},
@@ -160,11 +166,11 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
     if (!bus_) throw std::invalid_argument("PoseSequencer requires a non-null Bus");
     for (auto pr : std::initializer_list<std::pair<const char*, std::string*>>{
             {"model_topic", &model_topic_}, {"support_topic", &support_topic_}, {"patch_topic", &patch_topic_}, {"feet_xz_topic", &feet_xz_topic_},
-            {"feet_y_topic", &feet_y_topic_}, {"up_topic", &up_topic_}, {"contact_topic", &contact_topic_}, {"load_topic", &load_topic_}, {"output_topic", &output_topic_}, {"belly_topic", &belly_topic_}, {"odom_in_topic", &odom_in_topic_}, {"odom_out_topic", &odom_out_topic_}})
+            {"feet_y_topic", &feet_y_topic_}, {"up_topic", &up_topic_}, {"imu_topic", &imu_topic_}, {"contact_topic", &contact_topic_}, {"load_topic", &load_topic_}, {"output_topic", &output_topic_}, {"belly_topic", &belly_topic_}, {"odom_in_topic", &odom_in_topic_}, {"odom_out_topic", &odom_out_topic_}})
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     apply_param(params, "gait_action_topics", [&](auto const& v){ if (auto p = std::get_if<std::vector<std::string>>(&v)) gait_action_topics_ = *p; });
     apply_param(params, "order", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) order_ = *p; });
-    for (auto const& k : {"engage", "engage_ramp_ticks", "elev_source", "crouch_max_m", "ik_reseed_ticks", "ik_reseed_rate_rad", "crouch_v_mps", "crouch_relax_v_mps", "stand_h_m", "level_gain", "level_max_m", "sector_half_rad", "land_sector_rad", "land_band_lo_m", "land_band_hi_m", "neutral_r_m", "settle_v_mps", "heading_hold", "heading_ref", "heading_gain", "yaw_rate_max", "shift_realised", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_load_min", "advance_reach_m", "relief", "plan", "plan_shift_m", "plan_shift_fwd_m", "plan_land_m", "plan_cell_m", "plan_adv_w", "relief_step_m", "relief_cells", "creep_load_relax", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps", "lower_fast_v_mps", "lower_standoff_m", "lower_standoff_k", "land_edge_m", "land_edge_max_m",
+    for (auto const& k : {"engage", "engage_ramp_ticks", "elev_source", "crouch_max_m", "ik_reseed_ticks", "hang_ticks", "drag_back_m", "free_back_m", "free_extra_m", "free_retract_m", "ik_reseed_rate_rad", "crouch_v_mps", "crouch_relax_v_mps", "stand_h_m", "level_gain", "level_max_m", "sector_half_rad", "land_sector_rad", "land_band_lo_m", "land_band_hi_m", "neutral_r_m", "settle_v_mps", "heading_hold", "heading_ref", "heading_gain", "yaw_rate_max", "shift_realised", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_load_min", "advance_reach_m", "relief", "plan", "plan_shift_m", "plan_shift_fwd_m", "plan_land_m", "plan_cell_m", "plan_adv_w", "relief_step_m", "relief_cells", "creep_load_relax", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps", "lower_fast_v_mps", "lower_standoff_m", "lower_standoff_k", "land_edge_m", "land_edge_max_m",
                           "stride_m", "sink_max_m", "tilt_disengage", "dt_s", "ik_iters", "ik_damping_m", "ik_step_max_rad", "ik_tol_m"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which, int idx) {
@@ -172,7 +178,7 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(topic, SubscriptionKind::Direct, [this, which, idx](std::string_view, MessagePtr p){ handle(which, idx, p); }));
     };
     sub(model_topic_, "model", 0); sub(support_topic_, "support", 0); sub(patch_topic_, "patch", 0); sub(feet_xz_topic_, "xz", 0); sub(feet_y_topic_, "y", 0);
-    sub(up_topic_, "up", 0); sub(contact_topic_, "contact", 0); sub(load_topic_, "load", 0); sub(belly_topic_, "belly", 0); sub(odom_in_topic_, "odom", 0);
+    sub(up_topic_, "up", 0); sub(imu_topic_, "imu", 0); sub(contact_topic_, "contact", 0); sub(load_topic_, "load", 0); sub(belly_topic_, "belly", 0); sub(odom_in_topic_, "odom", 0);
     for (int i = 0; i < int(gait_action_topics_.size()) && i < 12; ++i) sub(gait_action_topics_[size_t(i)], "gait", i);
     sub_ids_.push_back(bus_->subscribe(topics::kEventsPrefix, SubscriptionKind::Direct, [this](std::string_view topic, MessagePtr p){
         if (!input_allowed(p->producer_id)) return;
@@ -230,6 +236,11 @@ void PoseSequencer::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "reach_min_m")      reach_min_m_ = std::max(0.0, get_double(value, k));
     else if (k == "retreat_m")        retreat_m_ = std::max(1e-3, get_double(value, k));
     else if (k == "ik_reseed_rate_rad") ik_reseed_rate_ = std::clamp(get_double(value, k), 1e-3, 0.5);
+    else if (k == "hang_ticks")       hang_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "drag_back_m")      drag_back_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "free_back_m")      free_back_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "free_extra_m")     free_extra_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "free_retract_m")   free_retract_m_ = std::max(0.0, get_double(value, k));
     else if (k == "ik_reseed_ticks")  ik_reseed_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "crouch_max_m")     crouch_max_m_ = std::max(0.0, get_double(value, k));
     else if (k == "crouch_v_mps")     crouch_v_ = std::max(0.0, get_double(value, k));
@@ -299,6 +310,7 @@ void PoseSequencer::handle(std::string const& which, int idx, MessagePtr p) {
     else if (which == "load" && v.size() >= 4) { for (int i = 0; i < 4; ++i) load_[size_t(i)] = v[i]; have_load_ = true; }
     else if (which == "belly" && v.size() >= 1) { belly_ = v[0]; have_belly_ = true; }
     else if (which == "odom" && v.size() >= 3) { odom_in_ = {v[0], v[1], v[2]}; have_odom_in_ = true; }
+    else if (which == "imu" && v.size() >= 6) { for (int i = 0; i < 6; ++i) imu_[size_t(i)] = v[i]; have_imu_ = true; }
     else if (which == "up" && v.size() >= 3) { const double n = std::sqrt(double(v[0]) * v[0] + double(v[1]) * v[1] + double(v[2]) * v[2]); if (n > 0.5) { up_ = {v[0] / n, v[1] / n, v[2] / n}; have_up_ = true; } }
 }
 
@@ -668,11 +680,31 @@ void PoseSequencer::step_machine() {
             }
             land_h_ = h_land; lift_h_ = std::max(h_here, h_land) + lift_clear_m_;
             lift_dy_ = lift_h_ - stance_h;                           // the lift as a BODY-frame rise over the stance (a gravity conversion on a rolling body ran a target up and the leg into its stops, 2026-11-08)
-            phase_ = Phase::Lift; phase_ticks_ = 0; left_ground_ = false; obstacle_run_ = 0;
+            phase_ = Phase::Lift; phase_ticks_ = 0; left_ground_ = false; obstacle_run_ = 0; hang_run_ = 0; swing_v_fwd_ = 0.0; swing_d_fwd_ = 0.0;
         }
         break; }
     case Phase::Lift:
     case Phase::Swing:
+        if (hang_ticks_ > 0 && have_contact_) {   // THE HUNG TOE: asked up but never off the ground, or the body dragged back by it
+            const bool up_asked = phase_ == Phase::Swing || double(toe_tgt_[size_t(leg_)].y) + stand_h_m_ >= 0.02;
+            const bool on = contact_[size_t(leg_)] > 0.5f;
+            if (up_asked && on && !left_ground_) ++hang_run_; else if (!on) hang_run_ = 0;
+            if (have_imu_ && have_up_) {   // the forward linear acceleration (gravity removed by the body's up), integrated over this lift+swing
+                const double a_lin_z = double(imu_[2]) - 9.81 * up_[2]; a_lin_z_ema_ += 0.01 * (a_lin_z - a_lin_z_ema_);
+                swing_v_fwd_ += (a_lin_z - a_lin_z_ema_) * dt_; swing_d_fwd_ += swing_v_fwd_ * dt_;
+            }
+            const bool caught = hang_run_ >= hang_ticks_, dragged = drag_back_m_ > 0.0 && swing_d_fwd_ < -drag_back_m_;
+            if ((caught || dragged) && free_pending_ < 3) {
+                ++hangs_; if (caught) ++hangs_by_contact_; if (dragged) ++hangs_by_drag_; ++hang_count_[size_t(leg_)];
+                free_pending_ = std::min(2, hang_count_[size_t(leg_)]);
+                // the toe is put back on the ground where it is, dragged toward the hip along the ground, then lifted higher
+                Vec3f& tg = toe_tgt_[size_t(leg_)]; tg.y = float(-stand_h_m_); free_retract_left_ = free_retract_m_ * free_pending_;
+                lift_h_ += free_extra_m_; lift_dy_ += free_extra_m_;
+                phase_ = Phase::Lift; phase_ticks_ = 0; hang_run_ = 0; left_ground_ = false; obstacle_run_ = 0; swing_v_fwd_ = 0.0; swing_d_fwd_ = 0.0;
+                if (free_pending_ >= 2) free_pending_ = 3;   // the second attempt on this leg is the last: a third hang lets the timeouts run (no loop)
+                break;
+            }
+        }
         if (have_contact_ && double(toe_tgt_[size_t(leg_)].y) + stand_h_m_ >= 0.02) {   // the obstacle reflex, armed once the toe is asked 2 cm up: it left the ground and something stopped it
             const bool on = contact_[size_t(leg_)] > 0.5f;
             if (!on) { left_ground_ = true; obstacle_run_ = 0; }
@@ -684,6 +716,11 @@ void PoseSequencer::step_machine() {
         }
         if (phase_ == Phase::Lift) {
         Vec3f& tg = toe_tgt_[size_t(leg_)];
+        if (free_retract_left_ > 0.0) {   // freeing: first drag the toe along the ground toward the hip, away from the face
+            const Vec3f hip = hip1_of(leg_); const double dx = hip.x - tg.x, dz = hip.z - tg.z, dn = std::max(1e-6, std::hypot(dx, dz)), st = std::min(free_retract_left_, swing_v_ * dt_);
+            tg.x += float(dx / dn * st); tg.z += float(dz / dn * st); free_retract_left_ -= st;
+            break;
+        }
         const Vec3f top(tg.x, float(-stand_h_m_ + lift_dy_), tg.z);
         const double dy = double(top.y - tg.y), step = lift_v_ * dt_;
         tg.y += float(std::fabs(dy) <= step ? dy : (dy > 0 ? step : -step));
@@ -728,6 +765,8 @@ void PoseSequencer::step_machine() {
             const double h_toe = (touched && have_y_) ? double(y_[size_t(leg_)]) : h_cmd;
             ground_h_[size_t(leg_)] = h_toe;
             elev_landed_[size_t(leg_)] = double(cmd.y) + stand_h_m_;   // the body-frame height the command had at the touch: the toe stands here
+            if (touched) hang_count_[size_t(leg_)] = 0;
+            free_pending_ = 0; free_retract_left_ = 0.0;
             if (touched) { land_err_last_ = h_toe - land_h_; land_err_ms_ += 0.1 * (land_err_last_ * land_err_last_ - land_err_ms_); ++landings_; } else ++missed_;
             tg = cmd;   // the stance takes it from here
             ++steps_[size_t(leg_)]; last_step_tick_[size_t(leg_)] = int64_t(tick_now_);
@@ -946,7 +985,7 @@ nlohmann::json PoseSequencer::diag_snapshot() const {
     return nlohmann::json{{"phase", phase_name(phase_)}, {"phase_id", int(phase_)}, {"leg", leg_}, {"engage", engage_level_}, {"model", have_model_}, {"support", have_support_},
                           {"patch", have_patch_}, {"steps", st}, {"cycles", cycles_}, {"shift_exhausted", shift_exhausted_}, {"shift_ticks", shift_ticks_},
                           {"disengaged_tilt", disengaged_tilt_}, {"lower_sunk", lower_sunk_}, {"phase_timeouts", phase_timeouts_}, {"engaged_at", engaged_at_},
-                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"fast_ticks", fast_ticks_}, {"slow_ticks", slow_ticks_}, {"edge_moves", edge_moves_}, {"edge_stuck", edge_stuck_}, {"land_sigma", land_sigma_}, {"blocked_leg", blocked_leg_}, {"advance_yields", advance_yields_}, {"relief_steps", relief_steps_}, {"plans", plans_}, {"lower_fold_ticks", lower_fold_ticks_}, {"crouch", crouch_}, {"reseeds", reseeds_}, {"crouch_ticks", crouch_ticks_}, {"elev_landed", {elev_landed_[0], elev_landed_[1], elev_landed_[2], elev_landed_[3]}}, {"plan_skips", plan_skips_}, {"plan_none", plan_none_}, {"plan_reached", plan_reached_}, {"plan_shift", {plan_sx_, plan_sz_}}, {"plan_score", plan_score_}, {"relief_none", relief_none_}, {"relief_for", relief_for_}, {"creep_load_ticks", creep_load_ticks_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
+                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"fast_ticks", fast_ticks_}, {"slow_ticks", slow_ticks_}, {"edge_moves", edge_moves_}, {"edge_stuck", edge_stuck_}, {"land_sigma", land_sigma_}, {"blocked_leg", blocked_leg_}, {"advance_yields", advance_yields_}, {"relief_steps", relief_steps_}, {"plans", plans_}, {"lower_fold_ticks", lower_fold_ticks_}, {"crouch", crouch_}, {"reseeds", reseeds_}, {"hangs", hangs_}, {"hangs_by_contact", hangs_by_contact_}, {"hangs_by_drag", hangs_by_drag_}, {"swing_d_fwd", swing_d_fwd_}, {"a_lin_z_ema", a_lin_z_ema_}, {"crouch_ticks", crouch_ticks_}, {"elev_landed", {elev_landed_[0], elev_landed_[1], elev_landed_[2], elev_landed_[3]}}, {"plan_skips", plan_skips_}, {"plan_none", plan_none_}, {"plan_reached", plan_reached_}, {"plan_shift", {plan_sx_, plan_sz_}}, {"plan_score", plan_score_}, {"relief_none", relief_none_}, {"relief_for", relief_for_}, {"creep_load_ticks", creep_load_ticks_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
                           {"toe_tgt", tg}, {"u", uu}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {air_ticks_[0], air_ticks_[1], air_ticks_[2], air_ticks_[3]}}, {"lift_h", lift_h_}, {"land_h", land_h_}, {"shift_acc", shift_acc_}, {"phase_ticks", phase_ticks_}};
 }
 

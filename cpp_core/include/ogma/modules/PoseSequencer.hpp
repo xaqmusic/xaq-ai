@@ -81,7 +81,7 @@ private:
 
     // config
     std::string model_topic_ = "reality.proprio.leg_model", support_topic_ = "support.state", patch_topic_ = "terrain.patch",
-                feet_xz_topic_ = "reality.proprio.feet_xz", feet_y_topic_ = "reality.proprio.toe_y", up_topic_ = "reality.proprio.up_body",
+                feet_xz_topic_ = "reality.proprio.feet_xz", feet_y_topic_ = "reality.proprio.toe_y", up_topic_ = "reality.proprio.up_body", imu_topic_ = "reality.proprio.imu6",
                 contact_topic_ = "reality.proprio.foot_contact", load_topic_ = "reality.proprio.foot_load", output_topic_ = "pose.targets";
     std::vector<std::string> gait_action_topics_;
     double engage_ = 0.0; int engage_ramp_ticks_ = 50;
@@ -223,6 +223,17 @@ private:
     // its target for this many ticks is in the wrong branch (the femur folded UP for a target 15 cm down: the damped step is
     // pinned at the stop and cannot cross to the extended solution; a front leg missed the same landing 19 times, its real
     // joints wedged against the chassis) -- its angles are walked back to the neutral standing pose, from which the IK re-solves.
+    // THE HUNG TOE (operator, 2026-11-09: "the right rear leg gets hung on the step: the robot shifts its weight forward so the
+    // hung leg presses horizontally into the face instead of lifting clear; the lift forward drags the robot backward; the
+    // robot could shift its weight back and free the leg; this state would be known if a swing forward moves the chassis
+    // backward"). Two egocentric signs: the toe's contact flag never clears for hang_ticks after it is asked 2 cm up (it is
+    // caught), and the IMU's forward acceleration integrated over the lift and swing says the body went back by drag_back_m.
+    // The freeing move: the toe is set down, the body shifts back by free_back_m, then the lift is free_extra_m higher and
+    // its top free_retract_m toward the hip (twice that on a second hang of the same leg). hang_ticks 0 = off.
+    int hang_ticks_ = 0; double drag_back_m_ = 0.0, free_back_m_ = 0.02, free_extra_m_ = 0.02, free_retract_m_ = 0.01;
+    // the retract along the ground before the re-lift (the body shift back of the first form dragged the robot backward and it fell 8 times in 8 runs)
+    int hang_run_ = 0, free_pending_ = 0; double free_retract_left_ = 0.0; std::array<int, 4> hang_count_{}; int64_t hangs_ = 0, hangs_by_contact_ = 0, hangs_by_drag_ = 0;
+    std::array<float, 6> imu_{}; bool have_imu_ = false; double swing_v_fwd_ = 0.0, swing_d_fwd_ = 0.0, a_lin_z_ema_ = 0.0;   // the forward surge integrated within a lift+swing
     int ik_reseed_ticks_ = 0; double ik_reseed_rate_ = 0.04; std::array<int, 4> pinned_ticks_{}; int64_t reseeds_ = 0; std::array<bool, 4> reseeding_{};   // the walk back at ik_reseed_rate per tick (the step cap, 6 rad/s, flipped the body once when a planted leg snapped to neutral)
     double crouch_ = 0.0, crouch_max_m_ = 0.0, crouch_v_ = 0.03, crouch_relax_v_ = 0.005; int64_t crouch_ticks_ = 0;
     double plan_ = 0.0, plan_shift_m_ = 0.03, plan_shift_fwd_m_ = 0.04, plan_land_m_ = 0.04, plan_cell_m_ = 0.01, plan_adv_w_ = 0.3;
