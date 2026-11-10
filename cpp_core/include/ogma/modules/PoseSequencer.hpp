@@ -210,6 +210,21 @@ private:
     double advance_reach_m_ = 0.0; int64_t advance_yields_ = 0;
     double relief_ = 0.0, relief_step_m_ = 0.01; int relief_cells_ = 4; int relief_for_ = -1; bool relief_pending_ = false; body::Vec3f relief_land_{}; int64_t relief_steps_ = 0, relief_none_ = 0;
     std::array<bool, 4> blocked_toe_{};
+    // LEVER 2b (2026-11-09): the stance by each toe's LANDED height -- elev_source "landed" holds a planted toe at the body-frame
+    // height its command had when the FSR said ground (recentred zero-mean, so the body stands stand_h above the toes' mean
+    // ground and parallel to their plane), where "patch" reads the memory under the toe (elev_max_m 0 = neither, the default).
+    // At a 50 mm riser the body-frame stance pitched the body 19 deg nose-up and drove a front leg to both its stops.
+    std::string elev_source_ = "patch"; std::array<double, 4> elev_landed_{}; int64_t lower_fold_ticks_ = 0;
+    // THE CROUCH (lever 2b, 2026-11-09; crouch_max_m 0 = off, byte-identical): a lowering toe at its downward reach without
+    // ground brings the BODY down to it -- the planted legs fold by crouch_v while the deficit lasts, up to crouch_max_m, and
+    // relax back at crouch_relax_v while every toe bears (a front leg on a nose-up body missed the same landing 19 times at
+    // the first riser, its target 15 cm under its hip; the error was the toe's reach, the actuator is the body's height).
+    // THE RE-SEED (2026-11-09; ik_reseed_ticks 0 = off, byte-identical): a leg whose IK sits at a joint stop with its toe far from
+    // its target for this many ticks is in the wrong branch (the femur folded UP for a target 15 cm down: the damped step is
+    // pinned at the stop and cannot cross to the extended solution; a front leg missed the same landing 19 times, its real
+    // joints wedged against the chassis) -- its angles are walked back to the neutral standing pose, from which the IK re-solves.
+    int ik_reseed_ticks_ = 0; double ik_reseed_rate_ = 0.04; std::array<int, 4> pinned_ticks_{}; int64_t reseeds_ = 0; std::array<bool, 4> reseeding_{};   // the walk back at ik_reseed_rate per tick (the step cap, 6 rad/s, flipped the body once when a planted leg snapped to neutral)
+    double crouch_ = 0.0, crouch_max_m_ = 0.0, crouch_v_ = 0.03, crouch_relax_v_ = 0.005; int64_t crouch_ticks_ = 0;
     double plan_ = 0.0, plan_shift_m_ = 0.03, plan_shift_fwd_m_ = 0.04, plan_land_m_ = 0.04, plan_cell_m_ = 0.01, plan_adv_w_ = 0.3;
     bool plan_active_ = false, plan_pending_ = false; body::Vec3f plan_land_{}; double plan_sx_ = 0.0, plan_sz_ = 0.0, plan_done_x_ = 0.0, plan_done_z_ = 0.0, plan_score_ = 0.0;
     int64_t plans_ = 0, plan_skips_ = 0, plan_none_ = 0, plan_reached_ = 0;

@@ -782,6 +782,7 @@
           "action.rr_knee"
         ],
         "output_topic": "pose.targets",
+        "ik_reseed_ticks": 25,
         "plan": 1.0,
         "lower_fast_v_mps": 0.15,
         "lower_standoff_m": 0.005,
