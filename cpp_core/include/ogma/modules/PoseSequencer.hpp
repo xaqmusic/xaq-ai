@@ -258,6 +258,18 @@ private:
     // comes down), bounded by front_drop_max_m; and the DEPTH CAP -- no toe is asked more than depth_max_m below the body (the
     // freezes at the 38 and 64 mm risers had a rear toe asked 13-14 cm down on a nose-up body: the leg straightened to its pole,
     // the real knee hyperextended against its stop and the servos could not bring it back; the brain has no joint feedback).
+    // CLIP AND RE-ACQUIRE (operator, 2026-11-12: "why can't we assume the commanded joint angles are the real joint angles and
+    // clip (a partial miss of the target) or attempt re-acquisition of the target?"): clip_ticks -- a lift or swing whose commanded
+    // toe has been more than unreach_tol_m from its target for this many ticks takes the part of the arc it reached and moves on
+    // (the body froze while a leg waited out its timeouts: only SHIFT moves the body); miss_reacquire -- a missed landing walks the
+    // leg to its neutral pose (the re-seed's walk), a lowering gives up after miss_ticks or six retreats instead of 4.8 s, and the
+    // leg's next attempt is DIFFERENT: its landing grid perturbed by up to 2 cm, its lift 1 cm lower per miss, the leg penalised
+    // in the search by 1 cm of margin per miss so the others step first; the count clears at a landing that touched.
+    int clip_ticks_ = 0, clip_run_ = 0; int64_t clips_ = 0; double miss_reacquire_ = 0.0; int miss_ticks_ = 0, lower_retreats_ = 0; std::array<int, 4> miss_count_{};
+    // a NULL STEP -- a landing within null_step_m of the toe's lift-off point (a clipped arc that went nowhere, touched down and
+    // counted as a landing: one leg "landed" 141 times in place at 0.8 s each) -- counts as a miss; a leg with two or more misses
+    // in a row is left out of the search for a wave so the body moves under it (unless no other leg has a step)
+    double null_step_m_ = 0.01; body::Vec3f lift_from_{}; int64_t null_steps_ = 0, miss_skips_ = 0;
     double front_drop_gain_ = 0.0, front_drop_max_m_ = 0.04, front_drop_deadband_ = 0.05, front_drop_ = 0.0, depth_max_m_ = 0.0; int64_t depth_caps_ = 0; int64_t multistarts_ = 0, branch_switches_ = 0;
     int ik_reseed_ticks_ = 0; double ik_reseed_rate_ = 0.04; std::array<int, 4> pinned_ticks_{}; int64_t reseeds_ = 0; std::array<bool, 4> reseeding_{};   // the walk back at ik_reseed_rate per tick (the step cap, 6 rad/s, flipped the body once when a planted leg snapped to neutral)
     double crouch_ = 0.0, crouch_max_m_ = 0.0, crouch_v_ = 0.03, crouch_relax_v_ = 0.005; int64_t crouch_ticks_ = 0;
