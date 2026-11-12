@@ -60,6 +60,13 @@ public:
     std::array<double, 3> angles_of_u(int leg, const std::array<double, 3>& u) const;
     std::array<double, 3> u_of_angles(int leg, const std::array<double, 3>& t) const;
     bool ik_step(int leg, const body::Vec3f& target, std::array<double, 3>& t) const;   // one damped step; true when within tol
+    // THE MULTI-START SOLVE (lever A, 2026-11-12; ik_multistart 0 = off, byte-identical): damped least squares follows the local
+    // gradient and from some poses the nearest solution is the wrong BRANCH -- the femur folded up for a target below, or the
+    // knee hyperextended where it should bend (the operator's observation) -- and it then sits at a joint stop with a residual.
+    // When the single-seed solve is left further than 2 x ik_tol from its target, the solve is restarted from a set of seeds that
+    // cover the branches (the neutral standing pose, femur down / up, knee folded / extended) with the true forward kinematics,
+    // and the best within the joint ranges is taken if it beats the current by ik_switch_m: "the leg tries the other signs".
+    bool ik_solve(int leg, const body::Vec3f& target, std::array<double, 3>& t, bool allow_multistart);
     bool plan_step(int& leg_out, body::Vec3f& land_out, double& sx_out, double& sz_out, double& score_out);   // the pose search (lever 2a); public for the tests
     Phase phase() const { return phase_; }
     int   active_leg() const { return leg_; }
@@ -234,6 +241,7 @@ private:
     // the retract along the ground before the re-lift (the body shift back of the first form dragged the robot backward and it fell 8 times in 8 runs)
     int hang_run_ = 0, free_pending_ = 0; double free_retract_left_ = 0.0; std::array<int, 4> hang_count_{}; int64_t hangs_ = 0, hangs_by_contact_ = 0, hangs_by_drag_ = 0;
     std::array<float, 6> imu_{}; bool have_imu_ = false; double swing_v_fwd_ = 0.0, swing_d_fwd_ = 0.0, a_lin_z_ema_ = 0.0;   // the forward surge integrated within a lift+swing
+    double ik_multistart_ = 0.0, ik_switch_m_ = 0.005; int64_t multistarts_ = 0, branch_switches_ = 0;
     int ik_reseed_ticks_ = 0; double ik_reseed_rate_ = 0.04; std::array<int, 4> pinned_ticks_{}; int64_t reseeds_ = 0; std::array<bool, 4> reseeding_{};   // the walk back at ik_reseed_rate per tick (the step cap, 6 rad/s, flipped the body once when a planted leg snapped to neutral)
     double crouch_ = 0.0, crouch_max_m_ = 0.0, crouch_v_ = 0.03, crouch_relax_v_ = 0.005; int64_t crouch_ticks_ = 0;
     double plan_ = 0.0, plan_shift_m_ = 0.03, plan_shift_fwd_m_ = 0.04, plan_land_m_ = 0.04, plan_cell_m_ = 0.01, plan_adv_w_ = 0.3;

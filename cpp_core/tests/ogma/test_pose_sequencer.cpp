@@ -206,3 +206,24 @@ TEST(PoseSequencer, ThePoseSearchCrawlsOnFlatGround_EveryLegStepsAndEveryPlanIsF
     EXPECT_LT(d["ik_err"].get<double>(), 0.015);
 }
 
+TEST(PoseSequencer, TheMultiStartSolveLeavesTheWrongBranch_WhereTheSingleSeedSitsAtAStop) {
+    Fix f({{"ik_multistart", ogma::ParamValue{1.0}}}); f.run(0, {1, 1, 1, 1});
+    for (int leg = 0; leg < 4; ++leg) {
+        // a reachable target: the toe of a knee-forward, femur-down pose, low under the hip
+        const auto good = f.m.angles_of_u(leg, {0.1, -0.5, 0.1});
+        const Vec3f target = f.m.toe_of(leg, good);
+        // the single-seed solve from the folded-up branch (femur fully up, knee folded) is left far from it
+        auto a_single = f.m.angles_of_u(leg, {0.1, 1.0, -1.0});
+        for (int k = 0; k < 40; ++k) f.m.ik_step(leg, target, a_single);
+        const double e_single = std::hypot(std::hypot(f.m.toe_of(leg, a_single).x - target.x, f.m.toe_of(leg, a_single).y - target.y), f.m.toe_of(leg, a_single).z - target.z);
+        // the multi-start from the same seed reaches it
+        auto a_multi = f.m.angles_of_u(leg, {0.1, 1.0, -1.0});
+        for (int k = 0; k < 10; ++k) f.m.ik_solve(leg, target, a_multi, true);
+        const Vec3f got = f.m.toe_of(leg, a_multi);
+        const double e_multi = std::hypot(std::hypot(got.x - target.x, got.y - target.y), got.z - target.z);
+        EXPECT_LT(e_multi, 0.004) << "leg " << leg << ": the multi-start did not reach the target (single-seed residual " << e_single << ")";
+        EXPECT_LE(e_multi, e_single + 1e-9) << "leg " << leg;
+    }
+    auto d = f.m.diag_snapshot(); EXPECT_GT(d["branch_switches"].get<int>(), 0);
+}
+
