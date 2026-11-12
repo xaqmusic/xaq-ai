@@ -241,7 +241,17 @@ private:
     // the retract along the ground before the re-lift (the body shift back of the first form dragged the robot backward and it fell 8 times in 8 runs)
     int hang_run_ = 0, free_pending_ = 0; double free_retract_left_ = 0.0; std::array<int, 4> hang_count_{}; int64_t hangs_ = 0, hangs_by_contact_ = 0, hangs_by_drag_ = 0;
     std::array<float, 6> imu_{}; bool have_imu_ = false; double swing_v_fwd_ = 0.0, swing_d_fwd_ = 0.0, a_lin_z_ema_ = 0.0;   // the forward surge integrated within a lift+swing
-    double ik_multistart_ = 0.0, ik_switch_m_ = 0.005; int64_t multistarts_ = 0, branch_switches_ = 0;
+    double ik_multistart_ = 0.0, ik_switch_m_ = 0.005;
+    // LEVER B (2026-11-12; free_form 2 = the retract along the ground, the shipped form; 3 = the operator's reading): the caught
+    // toe is UNLOADED by the ordinary margin shift asked for free_margin_m more than a step needs (for the rear-right that is
+    // forward-left, the triangle's inward normal), the lift completes to its full height, free_extra_m higher, before any forward
+    // motion, with its top free_out_m OUTWARD from the body (an arc that clears the step's edge), and a second hang of the same
+    // leg adds a random perturbation of free_noise_m to the arc's height and side -- exploration as the escape from a repeated
+    // identical failure, the controller otherwise deterministic. LEVER C (face_gap_m 0 = off): a planned landing with a rise of
+    // land_edge_m within face_gap_m AHEAD of it is penalised by face_penalty_m -- a rear toe put down just short of a face is
+    // the hang's cause.
+    int free_form_ = 2; double free_margin_m_ = 0.015, free_out_m_ = 0.02, free_noise_m_ = 0.01, free_out_dx_ = 0.0, free_out_dy_ = 0.0; uint32_t rng_ = 12345u;
+    double face_gap_m_ = 0.0, face_penalty_m_ = 0.02; int64_t face_penalties_ = 0; int64_t multistarts_ = 0, branch_switches_ = 0;
     int ik_reseed_ticks_ = 0; double ik_reseed_rate_ = 0.04; std::array<int, 4> pinned_ticks_{}; int64_t reseeds_ = 0; std::array<bool, 4> reseeding_{};   // the walk back at ik_reseed_rate per tick (the step cap, 6 rad/s, flipped the body once when a planted leg snapped to neutral)
     double crouch_ = 0.0, crouch_max_m_ = 0.0, crouch_v_ = 0.03, crouch_relax_v_ = 0.005; int64_t crouch_ticks_ = 0;
     double plan_ = 0.0, plan_shift_m_ = 0.03, plan_shift_fwd_m_ = 0.04, plan_land_m_ = 0.04, plan_cell_m_ = 0.01, plan_adv_w_ = 0.3;
