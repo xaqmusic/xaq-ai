@@ -52,10 +52,10 @@ struct Fix {
         m.set_id("pose_sequencer"); m.on_setup(&bus, p);
         bus.subscribe("pose.targets", ogma::SubscriptionKind::Direct, [this](std::string_view, ogma::MessagePtr msg){ auto t = std::dynamic_pointer_cast<const ogma::ProprioToken>(msg); out.assign(t->values.data(), t->values.data() + t->values.size()); });
     }
-    void run(uint64_t t, std::vector<float> contact, float margin = 0.03f) {
+    void run(uint64_t t, std::vector<float> contact, float margin = 0.03f, std::vector<float> up = {0, 1, 0}) {
         bus.begin_tick(t);
         bus.publish("reality.proprio.leg_model", pv(leg_model())); bus.publish("support.state", pv(support(margin))); bus.publish("terrain.patch", pv(flat_patch(-0.09f)));
-        bus.publish("reality.proprio.up_body", pv({0, 1, 0})); bus.publish("reality.proprio.foot_contact", pv(contact));
+        bus.publish("reality.proprio.up_body", pv(up)); bus.publish("reality.proprio.foot_contact", pv(contact));
         for (int k = 0; k < 12; ++k) { auto a = std::make_shared<ogma::ActionOut>(); a->accel = (k % 3 == 2) ? 0.5f : 0.0f; static const char* nm[12] = {"action.fl_hip1","action.fl_hip2","action.fl_knee","action.fr_hip1","action.fr_hip2","action.fr_knee","action.rl_hip1","action.rl_hip2","action.rl_knee","action.rr_hip1","action.rr_hip2","action.rr_knee"}; bus.publish(nm[k], a); }
         m.tick(t); bus.end_tick();
     }
@@ -225,5 +225,22 @@ TEST(PoseSequencer, TheMultiStartSolveLeavesTheWrongBranch_WhereTheSingleSeedSit
         EXPECT_LE(e_multi, e_single + 1e-9) << "leg " << leg;
     }
     auto d = f.m.diag_snapshot(); EXPECT_GT(d["branch_switches"].get<int>(), 0);
+}
+
+TEST(PoseSequencer, TheFrontDropHoldsTheFrontToesShallowerOnANoseUpBody) {
+    // two sequencers on the same nose-up body (the up vector leaning back by 0.2 rad): with the front drop the FRONT toes' targets
+    // sit higher by gain x (pitch - deadband), the rear toes' where the levelling alone puts them
+    Fix a({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}}});
+    Fix b({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}}, {"front_drop_gain", ogma::ParamValue{0.2}}});
+    const float s = std::sin(0.2f), c = std::cos(0.2f);
+    for (uint64_t t = 0; t < 40; ++t) { a.run(t, {1, 1, 1, 1}, 0.03f, {0, c, s}); b.run(t, {1, 1, 1, 1}, 0.03f, {0, c, s}); }
+    ASSERT_NE(a.m.phase(), PoseSequencer::Phase::Idle); ASSERT_NE(b.m.phase(), PoseSequencer::Phase::Idle);
+    auto da = a.m.diag_snapshot(), db = b.m.diag_snapshot();
+    const double expect = 0.2 * (0.2 - 0.05);
+    EXPECT_NEAR(db["front_drop"].get<double>(), expect, 1e-3);
+    for (int i = 0; i < 4; ++i) {
+        const double ya = da["toe_tgt"][i][1].get<double>(), yb = db["toe_tgt"][i][1].get<double>(), z = da["toe_tgt"][i][2].get<double>();
+        if (z > 0) EXPECT_NEAR(yb - ya, expect, 2e-3) << "front toe " << i; else EXPECT_NEAR(yb - ya, 0.0, 2e-3) << "rear toe " << i;
+    }
 }
 

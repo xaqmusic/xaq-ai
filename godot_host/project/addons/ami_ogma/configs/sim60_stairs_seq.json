@@ -786,6 +786,7 @@
         "ik_multistart": 1.0,
         "hang_ticks": 20,
         "free_form": 3,
+        "front_drop_gain": 0.2,
         "plan": 1.0,
         "lower_fast_v_mps": 0.15,
         "lower_standoff_m": 0.005,

@@ -251,7 +251,14 @@ private:
     // land_edge_m within face_gap_m AHEAD of it is penalised by face_penalty_m -- a rear toe put down just short of a face is
     // the hang's cause.
     int free_form_ = 2; double free_margin_m_ = 0.015, free_out_m_ = 0.02, free_noise_m_ = 0.01, free_out_dx_ = 0.0, free_out_dy_ = 0.0; uint32_t rng_ = 12345u;
-    double face_gap_m_ = 0.0, face_penalty_m_ = 0.02; int64_t face_penalties_ = 0; int64_t multistarts_ = 0, branch_switches_ = 0;
+    double face_gap_m_ = 0.0, face_penalty_m_ = 0.02; int64_t face_penalties_ = 0;
+    // LEVER 3 (operator, 2026-11-12: "on the high steps the chassis tilting backwards moves the centre of gravity back and the rear
+    // legs cannot be lifted; the front planted legs should lower the chassis in the front"): the FRONT DROP -- the front toes are
+    // held front_drop_gain x the nose-up pitch beyond front_drop_deadband shallower (not zero-mean: the front of the chassis
+    // comes down), bounded by front_drop_max_m; and the DEPTH CAP -- no toe is asked more than depth_max_m below the body (the
+    // freezes at the 38 and 64 mm risers had a rear toe asked 13-14 cm down on a nose-up body: the leg straightened to its pole,
+    // the real knee hyperextended against its stop and the servos could not bring it back; the brain has no joint feedback).
+    double front_drop_gain_ = 0.0, front_drop_max_m_ = 0.04, front_drop_deadband_ = 0.05, front_drop_ = 0.0, depth_max_m_ = 0.0; int64_t depth_caps_ = 0; int64_t multistarts_ = 0, branch_switches_ = 0;
     int ik_reseed_ticks_ = 0; double ik_reseed_rate_ = 0.04; std::array<int, 4> pinned_ticks_{}; int64_t reseeds_ = 0; std::array<bool, 4> reseeding_{};   // the walk back at ik_reseed_rate per tick (the step cap, 6 rad/s, flipped the body once when a planted leg snapped to neutral)
     double crouch_ = 0.0, crouch_max_m_ = 0.0, crouch_v_ = 0.03, crouch_relax_v_ = 0.005; int64_t crouch_ticks_ = 0;
     double plan_ = 0.0, plan_shift_m_ = 0.03, plan_shift_fwd_m_ = 0.04, plan_land_m_ = 0.04, plan_cell_m_ = 0.01, plan_adv_w_ = 0.3;

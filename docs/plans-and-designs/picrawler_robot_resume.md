@@ -206,10 +206,13 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   (`ik_multistart 1`, WORKING: the 50 mm bench climbed by 4 of 4, misses and re-seeds to zero, hangs 13–38 → 0–1 —
   most "hangs" were the solver's wrong branch); B, the hung toe form 3 (unload by the margin shift, full lift, outward
   arc, noise on the retry; PARTIAL, shipped); C, landings penalised for a face ahead (NULL at 3 cm / 2 cm, off).
-  **`sim60_stairs_seq2.json` is the OBSERVATION config** (launcher), frozen at this date. **Next:** the memory's touch
-  taken when the toe bears, the rear landing short of a face (lever C's re-use), then lever 3 (the rear lift's margin
-  on a slope); the graded flight from 0.3 m and the 50 mm bench (`OGMA_PICRAWLER_STAIRS_H_MM=50 _N=3 _START_M=0.3`) are
-  the benches. IN_FLIGHT. Then the robot: the
+  **`sim60_stairs_seq2.json` is the OBSERVATION config** (launcher), frozen at this date. **Lever 3, the FRONT DROP, shipped** (`front_drop_gain` 0.2; ledger 2026-11-12): the front toes held
+  shallower by the nose-up pitch so the chassis front comes down and the centre of mass forward — WORKING on the 38 mm
+  bench (no freeze, no miss, 0.47–0.72 m against 0.36–0.41), PARTIAL at 64 mm; the operator's fourth-step freeze is a
+  POLE LOCK (the real knee carried past straight at full extension, invisible without joint or current feedback — the
+  servo rail's current is the sensor to fit); the depth cap measured PARTIAL and kept at 0. **Next:** the 64 mm riser
+  (12 misses on one seed with the drop), the memory's touch taken when the toe bears, the rear landing short of a face;
+  benches: the graded flight from 0.3 m and `OGMA_PICRAWLER_STAIRS_H_MM=38|50|64 _N=3 _START_M=0.3`. IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through
