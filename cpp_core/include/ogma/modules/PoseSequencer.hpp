@@ -265,6 +265,16 @@ private:
     // leg to its neutral pose (the re-seed's walk), a lowering gives up after miss_ticks or six retreats instead of 4.8 s, and the
     // leg's next attempt is DIFFERENT: its landing grid perturbed by up to 2 cm, its lift 1 cm lower per miss, the leg penalised
     // in the search by 1 cm of margin per miss so the others step first; the count clears at a landing that touched.
+    // THE UNLOADED TOE (2026-11-13; unloaded_shift_m 0 = off, byte-identical): a planted toe that touches but has carried less
+    // than unloaded_share of the weight for unloaded_ticks (the body resting on the other diagonal, the front toes tucked at
+    // their inner reach: one leg "landed" 134 times in place at 0.8 s each, the only leg the search found feasible) -- before
+    // any leg lifts, the body shifts unloaded_shift_m toward that toe (a planned shift, then a fresh decision).
+    double unloaded_shift_m_ = 0.0, unloaded_share_ = 0.08; int unloaded_ticks_ = 50; std::array<int, 4> unloaded_run_{}; std::array<int, 4> unload_cool_{};
+    bool unload_shift_only_ = false; int64_t unload_shifts_ = 0; std::array<double, 4> land_max_load_{}; int last_landed_ = -1; std::array<int, 4> unloaded_landings_{}; int unloaded_landings_min_ = 2; int last_plan_skips_ = 0, unloaded_skips_min_ = 2;   // the time rule fires only when the last search had to skip this many legs (the unloaded toe blocking the others; a toe lightly loaded on a free crawl is left alone)   // consecutive landings of a leg that never bore weight; the rule fires at the second (one is common and benign)   // the most weight a toe has carried since its landing; the leg that just landed
+    // THE LANDING RADIUS (2026-11-13; land_r_min_m 0 = off, byte-identical): a planned landing is kept at least this far from its
+    // hip -- the search rewards advance and not base width, and a stance collapsed inward (both right toes at the inner edge of
+    // their reach) left every body shift infeasible and one leg landing 134 times at that edge while the body stood.
+    double land_r_min_m_ = 0.0; int64_t land_r_rejects_ = 0;
     int clip_ticks_ = 0, clip_run_ = 0; int64_t clips_ = 0; double miss_reacquire_ = 0.0; int miss_ticks_ = 0, lower_retreats_ = 0; std::array<int, 4> miss_count_{};
     // a NULL STEP -- a landing within null_step_m of the toe's lift-off point (a clipped arc that went nowhere, touched down and
     // counted as a landing: one leg "landed" 141 times in place at 0.8 s each) -- counts as a miss; a leg with two or more misses
