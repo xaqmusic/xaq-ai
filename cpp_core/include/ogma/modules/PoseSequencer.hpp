@@ -270,7 +270,10 @@ private:
     // counted as a landing: one leg "landed" 141 times in place at 0.8 s each) -- counts as a miss; a leg with two or more misses
     // in a row is left out of the search for a wave so the body moves under it (unless no other leg has a step)
     double null_step_m_ = 0.01; body::Vec3f lift_from_{}; int64_t null_steps_ = 0, miss_skips_ = 0;
-    double front_drop_gain_ = 0.0, front_drop_max_m_ = 0.04, front_drop_deadband_ = 0.05, front_drop_ = 0.0, depth_max_m_ = 0.0; int64_t depth_caps_ = 0; int64_t multistarts_ = 0, branch_switches_ = 0;
+    double front_drop_gain_ = 0.0, front_drop_max_m_ = 0.04, front_drop_deadband_ = 0.05, front_drop_ = 0.0, depth_max_m_ = 0.0; int64_t depth_caps_ = 0;
+    // the drop follows its target through a first-order filter: at 0.2 m/rad unfiltered the loop through the body's pitch
+    // (a toe height over a 20 cm wheelbase) bobbed the planted front legs 2-6x (operator, 2026-11-13)
+    double front_drop_tau_ticks_ = 1.0; int64_t multistarts_ = 0, branch_switches_ = 0;
     int ik_reseed_ticks_ = 0; double ik_reseed_rate_ = 0.04; std::array<int, 4> pinned_ticks_{}; int64_t reseeds_ = 0; std::array<bool, 4> reseeding_{};   // the walk back at ik_reseed_rate per tick (the step cap, 6 rad/s, flipped the body once when a planted leg snapped to neutral)
     double crouch_ = 0.0, crouch_max_m_ = 0.0, crouch_v_ = 0.03, crouch_relax_v_ = 0.005; int64_t crouch_ticks_ = 0;
     double plan_ = 0.0, plan_shift_m_ = 0.03, plan_shift_fwd_m_ = 0.04, plan_land_m_ = 0.04, plan_cell_m_ = 0.01, plan_adv_w_ = 0.3;
