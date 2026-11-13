@@ -212,11 +212,13 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   POLE LOCK (the real knee carried past straight at full extension, invisible without joint or current feedback — the
   servo rail's current is the sensor to fit); the depth cap measured PARTIAL and kept at 0. Clip-and-re-acquire built and measured (PARTIAL / REGRESSION, kept at 0: the clip
   turns the locked leg's slow freeze into a fast loop in place). The lock forms against the STEP, not the chassis
-  (collider-off experiment), the toe in the air with no load: invisible to the FSR. **Next:** a per-servo stall
-  instrument in the sim (a scaffold, named) and the servo rail current on the robot; a body-level escape (a planned shift
-  away from a leg whose steps produce no displacement); the rear landing short of a face (lever C's re-use); the 64 mm
-  riser's misses; the memory's touch taken when the toe bears. Benches: the graded flight from 0.3 m and
-  `OGMA_PICRAWLER_STAIRS_H_MM=38|50|64 _N=3 _START_M=0.3`. IN_FLIGHT. Then the robot: the
+  (collider-off experiment), the toe in the air with no load: invisible to the FSR. **2026-11-13:** the front drop FILTERED (`front_drop_tau_ticks` 50; unfiltered it bobbed the planted front legs),
+  and the LANDING RADIUS (`land_r_min_m` 0.07: a stance collapsed inward looped one leg in place; the search must carry
+  the base's width); clip / re-acquire and the unloaded-toe shift measured and kept at 0. On the launcher's layout (seed
+  42, 13 000 ticks) the stack reaches the fourth tread with no missed landing. **Next:** the 64 mm riser (the pole lock:
+  a per-servo stall instrument, then a body-level escape), the memory's touch taken when the toe bears, the rear landing
+  short of a face; benches: the launcher layout, the graded flight from 0.3 m and `OGMA_PICRAWLER_STAIRS_H_MM=38|50|64
+  _N=3 _START_M=0.3`. To read an operator's UI run, turn on the launcher's verbose log first. IN_FLIGHT. Then the robot: the
   VL53L5CX driver and the staircase from lumber. Configs in the launcher: `_sim60_stairs` (instrument) and `_sim60_stairs_step2` (the policy). On the robot: step 2, the VL53L5CX
   driver and mount (it shares the belly ToF's default I²C address), then the admission run at the box, wall, pillow
   and the 38 mm step; the stride channel's two gates are a bench lever for `_cs_pf_sl0` as they are. The robot's next session: the sonar through
