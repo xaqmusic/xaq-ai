@@ -130,6 +130,9 @@ asserted.
 - The scorer (`ab_score.py`, which now lives in a scratchpad), the blocker and drift readers, and the battery runner
   move into `scripts_tools/` with gzip-on-write (a full `/tmp` truncated a battery on 2026-11-14).
 - **Gate:** the battery reproduces the golden traces byte for byte from the repo's tools.
+- **Built (2026-11-14):** `scripts_tools/stepper_battery.sh <config> <arm>` (the battery, build and seed gates, gzip to
+  `~/xaq_runs/stepper`), `stepper_score.py` (metrics), `seq_instruments.py` (blocker, drift), `stepper_ident.py` (identity;
+  hashes in `scripts_tools/stepper_golden.json`, label `phase0_43811e0d`; golden logs in `~/xaq_runs/stepper/phase0_gold`).
 
 ### Phase 1 — Prune the scaffold
 - Leave-one-out over the scaffold's reflexes and priors (settle, levelling, heading hold, centre pull, edge move,
@@ -224,8 +227,8 @@ asserted.
 
 | Phase | State | Date | Ledger |
 |---|---|---|---|
-| 0 Freeze and baseline | next | | |
-| 1 Prune | — | | |
+| 0 Freeze and baseline | **done** — gate met (15 of 15 runs byte-identical from the repo's tools) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 0" |
+| 1 Prune | next | | |
 | 2 Split | — | | |
 | 3 Stance belief | — | | |
 | 4 Step generator | — | | |

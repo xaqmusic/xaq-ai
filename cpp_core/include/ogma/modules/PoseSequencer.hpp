@@ -1,4 +1,9 @@
 #pragma once
+// FROZEN 2026-11-14 (operator): this module is a SCAFFOLD to be de-scaffolded onto a learned stepper; no new levers.
+// Plan of record: docs/plans-and-designs/learned_stepper_plan.md (phases, gates, stop-and-ask points). Its remaining jobs
+// are experience generator, fallback by precision and baseline; changes here are prunes (Phase 1, operator-approved) and
+// golden-trace-identical splits (Phase 2), checked with scripts_tools/stepper_battery.sh + stepper_ident.py.
+//
 // PoseSequencer -- the careful stepper's SEQUENCER (2026-11-08): a pose-level motor controller beside the rhythmic gait,
 // which owns the four legs while it is engaged and walks a statically supported CRAWL chosen one pose at a time from the
 // support model and the terrain memory.
