@@ -73,6 +73,7 @@ public:
     double ext_slack(int leg, const body::Vec3f& p) const;
     double ext_slack_fk(int leg) const;
     bool shift_feasible(int lifting, const std::array<body::Vec3f, 4>& toes, double sx, double sz) const;
+    int shift_refusal(int lifting, const std::array<body::Vec3f, 4>& toes, double sx, double sz, int& toe) const;
     Phase phase() const { return phase_; }
     int   active_leg() const { return leg_; }
     float engage_level() const { return engage_level_; }
@@ -302,6 +303,13 @@ private:
     double overdue_ = 0.0, ext_urgent_m_ = 0.0; mutable int protect_ = -1; mutable int64_t overdue_rejects_ = 0;
     int64_t overdue_decisions_ = 0, urgent_jumps_ = 0, urgent_fails_ = 0; bool jumped_ = false;   // one jump per wave turn (a jump every decision starved the wave's own leg: 43 steps of one leg, 0 of another)
     std::array<int64_t, 4> skip_nomargin_{}, skip_noland_{}, skip_miss_{};   // why each leg's turn was skipped (an instrument, always on)
+    // THE BLOCKER (2026-11-14, an instrument, always on, decides nothing): when a leg's turn is skipped because no feasible shift gives
+    // it a lift margin, the shift grid is walked again; of the shifts that WOULD give the margin, the smallest one's refusal is
+    // counted -- which toe, which check -- or "grid" when no shift in the grid gives the margin at all.  block_[leg][toe * 7 + reason],
+    // reason 1 outer reach, 2 inner reach, 3 protection, 4 sector, 5 extension margin, 6 the lifting leg's floor (0 = feasible: a bug);
+    // index 28 = grid.  block_d_ sums the smallest margin-giving shift's length, block_short_ the grid case's shortfall of margin.
+    std::array<std::array<int64_t, 29>, 4> block_{}; std::array<double, 4> block_d_{}, block_short_{};
+    void diagnose_block(int leg, double cx, double cz, double need);
     int clip_ticks_ = 0, clip_run_ = 0; int64_t clips_ = 0; double miss_reacquire_ = 0.0; int miss_ticks_ = 0, lower_retreats_ = 0; std::array<int, 4> miss_count_{};
     // a NULL STEP -- a landing within null_step_m of the toe's lift-off point (a clipped arc that went nowhere, touched down and
     // counted as a landing: one leg "landed" 141 times in place at 0.8 s each) -- counts as a miss; a leg with two or more misses

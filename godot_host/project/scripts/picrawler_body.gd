@@ -13161,6 +13161,18 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		for key in [["skip_nomargin", "ps_skm"], ["skip_noland", "ps_skl"], ["skip_miss", "ps_skx"]]:
 			var sk: Array = ps.get(key[0], [])
 			if sk.size() >= 4: line[key[1]] = [int(sk[0]), int(sk[1]), int(sk[2]), int(sk[3])]
+		# the blocker (2026-11-14): per skipped leg, the refusal of the smallest margin-giving shift [toe * 7 + reason] (reason 1 outer, 2 inner, 3 protect, 4 sector, 5 ext, 6 lift floor; 28 = no shift in the grid gives the margin)
+		var bk: Array = ps.get("block", [])
+		if bk.size() >= 4:
+			var all_b: Array = []
+			for row in bk:
+				var rr: Array = []
+				for v in row: rr.append(int(v))
+				all_b.append(rr)
+			line["ps_bkr"] = all_b
+		for key in [["block_d", "ps_bkd"], ["block_short", "ps_bksh"]]:
+			var bd: Array = ps.get(key[0], [])
+			if bd.size() >= 4: line[key[1]] = [snappedf(float(bd[0]), 0.001), snappedf(float(bd[1]), 0.001), snappedf(float(bd[2]), 0.001), snappedf(float(bd[3]), 0.001)]
 		if tt.size() >= 4 and int(ps.get("leg", -1)) >= 0:
 			var a: Array = tt[int(ps.get("leg", -1))]
 			if a.size() >= 3: line["ps_tgt"] = [snappedf(float(a[0]), 0.001), snappedf(float(a[1]), 0.001), snappedf(float(a[2]), 0.001)]

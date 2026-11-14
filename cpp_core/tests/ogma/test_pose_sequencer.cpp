@@ -316,3 +316,27 @@ TEST(PoseSequencer, TheOverdueLegCrawlsOnFlatGround_EveryLegStepsAndNoDecisionIs
     ASSERT_TRUE(d.contains("overdue")); ASSERT_EQ(d["overdue"].size(), 4u); ASSERT_EQ(d["skip_nomargin"].size(), 4u);
     EXPECT_GT(d["overdue"][2].get<int>() + d["overdue"][3].get<int>(), 0) << "at 3.5 cm the urgent rule is consulted on flat ground";
 }
+
+TEST(PoseSequencer, TheBlockerMirrorsTheShiftTest_ARefusalExactlyWhereTheTestRefuses) {
+    Fix f; f.run(0, {1, 1, 1, 1});
+    const double hd[4][2] = {{-0.7071, 0.7071}, {0.7071, 0.7071}, {-0.7071, -0.7071}, {0.7071, -0.7071}};
+    auto place = [&](int i, double r, double turn) { const double hx = (hd[i][0] > 0 ? 1 : -1) * 0.0383, hz = (hd[i][1] > 0 ? 1 : -1) * 0.033;
+                                                     const double c = std::cos(turn), s = std::sin(turn), dx = hd[i][0] * c - hd[i][1] * s, dz = hd[i][0] * s + hd[i][1] * c;
+                                                     return Vec3f(float(hx + dx * r), -0.085f, float(hz + dz * r)); };
+    int n = 0, refused = 0; std::array<int, 7> by{};
+    for (double margin : {0.0, 0.02}) {
+        f.m.on_param_change("ext_margin_m", ogma::ParamValue{margin});
+        for (int k = 0; k < 6; ++k) {   // stances from compact to stretched, some toes turned toward their sector's edge
+            std::array<Vec3f, 4> toes{place(0, 0.065 + 0.012 * k, 0.3), place(1, 0.09, -0.2 * k / 5.0), place(2, 0.07 + 0.012 * k, 0.0), place(3, 0.13 - 0.01 * k, 0.6)};
+            for (int lifting = 0; lifting < 4; ++lifting)
+                for (int ix = -3; ix <= 3; ++ix) for (int iz = -3; iz <= 4; ++iz) {
+                    int toe; const int r = f.m.shift_refusal(lifting, toes, ix * 0.01, iz * 0.01, toe);
+                    EXPECT_EQ(r == 0, f.m.shift_feasible(lifting, toes, ix * 0.01, iz * 0.01)) << "stance " << k << " lifting " << lifting << " shift " << ix << "," << iz;
+                    if (r != 0) { EXPECT_GE(toe, 0); EXPECT_LE(toe, 3); ++refused; ++by[size_t(r)]; }
+                    ++n;
+                }
+        }
+    }
+    EXPECT_GT(refused, 0); EXPECT_LT(refused, n);
+    EXPECT_GT(by[1] + by[2], 0) << "reach refusals exercised"; EXPECT_GT(by[4], 0) << "sector refusals exercised"; EXPECT_GT(by[5], 0) << "extension refusals exercised";
+}

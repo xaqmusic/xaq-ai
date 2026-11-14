@@ -931,6 +931,44 @@ bool PoseSequencer::shift_feasible(int lifting, const std::array<Vec3f, 4>& toes
     return true;
 }
 
+// the shift test's first refusal, in shift_feasible's own order and without its counters (the blocker instrument): 0 = feasible
+int PoseSequencer::shift_refusal(int lifting, const std::array<Vec3f, 4>& toes, double sx, double sz, int& toe) const {
+    for (int i = 0; i < 4; ++i) {
+        toe = i;
+        const Vec3f q(float(toes[size_t(i)].x - sx), toes[size_t(i)].y, float(toes[size_t(i)].z - sz));
+        if (i == lifting) {
+            if (ext_lifting_ > 0.0 && ext_margin_m_ > 0.0) { const double sa = ext_slack(i, q); if (sa < ext_lifting_ * ext_margin_m_ && sa < ext_slack(i, toes[size_t(i)]) - 1e-9) return 6; }
+            continue;
+        }
+        const Vec3f hip = hip1_of(i); const double r = std::hypot(q.x - hip.x, q.z - hip.z);
+        if (r > reach_max_m_) return 1;
+        if (r < reach_min_m_) return 2;
+        if (i == protect_ && ext_slack(i, q) < ext_slack(i, toes[size_t(i)]) - 1e-4) return 3;
+        Vec3f probe = q; if (sector_clamp(i, probe)) return 4;
+        if (ext_margin_m_ > 0.0) { const double sa = ext_slack(i, q); if (sa < ext_margin_m_ && sa < ext_slack(i, toes[size_t(i)]) - 1e-9) return 5; }
+    }
+    toe = -1; return 0;
+}
+
+// the blocker instrument: of the shifts that would give `leg` its lift margin, the smallest one's refusal (or "grid")
+void PoseSequencer::diagnose_block(int leg, double cx, double cz, double need) {
+    const int nl = int(std::floor(plan_shift_m_ / plan_cell_m_ + 1e-9)), nf = int(std::floor(plan_shift_fwd_m_ / plan_cell_m_ + 1e-9));
+    double best_d = 1e9, mmax = -1e9; int best_toe = -1, best_r = 0;
+    for (int ix = -nl; ix <= nl; ++ix) for (int iz = -nl; iz <= nf; ++iz) {
+        const double tx = ix * plan_cell_m_, tz = iz * plan_cell_m_;
+        std::array<std::array<double, 2>, 3> t3{}; int kk = 0;
+        for (int i = 0; i < 4; ++i) if (i != leg && kk < 3) { t3[size_t(kk)] = {double(toe_tgt_[size_t(i)].x) - tx, double(toe_tgt_[size_t(i)].z) - tz}; ++kk; }
+        double a, b; const double m = tri_margin(t3, cx, cz, a, b);
+        mmax = std::max(mmax, m);
+        if (m < need) continue;
+        const double d = std::hypot(tx, tz); if (d >= best_d) continue;
+        int toe; const int r = shift_refusal(leg, toe_tgt_, tx, tz, toe);
+        best_d = d; best_r = r; best_toe = r == 0 ? leg : toe;
+    }
+    if (best_toe < 0) { ++block_[size_t(leg)][28]; block_short_[size_t(leg)] += need - mmax; return; }
+    ++block_[size_t(leg)][size_t(best_toe * 7 + best_r)]; block_d_[size_t(leg)] += best_d;
+}
+
 // the best lift margin `leg` can be given by a feasible shift of the body over `toes` (the centre of mass at (cx, cz) in the
 // body frame moves with the body; the toes move the other way); forward_first prefers, among shifts that give the margin
 // asked, the most forward one, else the largest margin
@@ -975,7 +1013,7 @@ bool PoseSequencer::plan_step(int& leg_out, Vec3f& land_out, double& sx_out, dou
             if (k == 0 && overdue_ > 0.0 && protect_ < 0) protect_ = c;
         };
         double sx, sz; const double m_now = best_margin_over_shifts(c, toe_tgt_, cx, cz, sx, sz, true);
-        if (m_now < need) { ++skip_nomargin_[size_t(c)]; skipped(); continue; }
+        if (m_now < need) { ++skip_nomargin_[size_t(c)]; diagnose_block(c, cx, cz, need); skipped(); continue; }
         if (miss_reacquire_ > 0.0 && miss_count_[size_t(c)] >= 2 && k < n_order - 1) { ++miss_skips_; ++skip_miss_[size_t(c)]; continue; }   // let the others step first; the last candidate is never skipped
         // the leg the landing must leave liftable: the wave's own next leg (the one being skipped when c is a later leg --
         // the first form protected only the leg after c and marched two legs of one side forward while the other side's
@@ -1194,7 +1232,7 @@ nlohmann::json PoseSequencer::diag_snapshot() const {
     return nlohmann::json{{"phase", phase_name(phase_)}, {"phase_id", int(phase_)}, {"leg", leg_}, {"engage", engage_level_}, {"model", have_model_}, {"support", have_support_},
                           {"patch", have_patch_}, {"steps", st}, {"cycles", cycles_}, {"shift_exhausted", shift_exhausted_}, {"shift_ticks", shift_ticks_},
                           {"disengaged_tilt", disengaged_tilt_}, {"lower_sunk", lower_sunk_}, {"phase_timeouts", phase_timeouts_}, {"engaged_at", engaged_at_},
-                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"fast_ticks", fast_ticks_}, {"slow_ticks", slow_ticks_}, {"edge_moves", edge_moves_}, {"edge_stuck", edge_stuck_}, {"land_sigma", land_sigma_}, {"blocked_leg", blocked_leg_}, {"advance_yields", advance_yields_}, {"relief_steps", relief_steps_}, {"plans", plans_}, {"lower_fold_ticks", lower_fold_ticks_}, {"crouch", crouch_}, {"reseeds", reseeds_}, {"multistarts", multistarts_}, {"face_penalties", face_penalties_}, {"front_drop", front_drop_}, {"clips", clips_}, {"unload_shifts", unload_shifts_}, {"land_r_rejects", land_r_rejects_}, {"ext_rejects", ext_rejects_}, {"ext_lift_rejects", ext_lift_rejects_}, {"overdue", {overdue_decisions_, overdue_rejects_, urgent_jumps_, urgent_fails_}}, {"skip_nomargin", skip_nomargin_}, {"skip_noland", skip_noland_}, {"skip_miss", skip_miss_}, {"ext", {ext_slack(0, toe_tgt_[0]), ext_slack(1, toe_tgt_[1]), ext_slack(2, toe_tgt_[2]), ext_slack(3, toe_tgt_[3])}}, {"ext_fk", {ext_slack_fk(0), ext_slack_fk(1), ext_slack_fk(2), ext_slack_fk(3)}}, {"null_steps", null_steps_}, {"miss_skips", miss_skips_}, {"miss_count", {miss_count_[0], miss_count_[1], miss_count_[2], miss_count_[3]}}, {"depth_caps", depth_caps_}, {"free_out", {free_out_dx_, free_out_dy_}}, {"branch_switches", branch_switches_}, {"hangs", hangs_}, {"hangs_by_contact", hangs_by_contact_}, {"hangs_by_drag", hangs_by_drag_}, {"swing_d_fwd", swing_d_fwd_}, {"a_lin_z_ema", a_lin_z_ema_}, {"crouch_ticks", crouch_ticks_}, {"elev_landed", {elev_landed_[0], elev_landed_[1], elev_landed_[2], elev_landed_[3]}}, {"plan_skips", plan_skips_}, {"plan_none", plan_none_}, {"plan_reached", plan_reached_}, {"plan_shift", {plan_sx_, plan_sz_}}, {"plan_score", plan_score_}, {"relief_none", relief_none_}, {"relief_for", relief_for_}, {"creep_load_ticks", creep_load_ticks_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
+                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"fast_ticks", fast_ticks_}, {"slow_ticks", slow_ticks_}, {"edge_moves", edge_moves_}, {"edge_stuck", edge_stuck_}, {"land_sigma", land_sigma_}, {"blocked_leg", blocked_leg_}, {"advance_yields", advance_yields_}, {"relief_steps", relief_steps_}, {"plans", plans_}, {"lower_fold_ticks", lower_fold_ticks_}, {"crouch", crouch_}, {"reseeds", reseeds_}, {"multistarts", multistarts_}, {"face_penalties", face_penalties_}, {"front_drop", front_drop_}, {"clips", clips_}, {"unload_shifts", unload_shifts_}, {"land_r_rejects", land_r_rejects_}, {"ext_rejects", ext_rejects_}, {"ext_lift_rejects", ext_lift_rejects_}, {"overdue", {overdue_decisions_, overdue_rejects_, urgent_jumps_, urgent_fails_}}, {"skip_nomargin", skip_nomargin_}, {"skip_noland", skip_noland_}, {"skip_miss", skip_miss_}, {"block", block_}, {"block_d", block_d_}, {"block_short", block_short_}, {"ext", {ext_slack(0, toe_tgt_[0]), ext_slack(1, toe_tgt_[1]), ext_slack(2, toe_tgt_[2]), ext_slack(3, toe_tgt_[3])}}, {"ext_fk", {ext_slack_fk(0), ext_slack_fk(1), ext_slack_fk(2), ext_slack_fk(3)}}, {"null_steps", null_steps_}, {"miss_skips", miss_skips_}, {"miss_count", {miss_count_[0], miss_count_[1], miss_count_[2], miss_count_[3]}}, {"depth_caps", depth_caps_}, {"free_out", {free_out_dx_, free_out_dy_}}, {"branch_switches", branch_switches_}, {"hangs", hangs_}, {"hangs_by_contact", hangs_by_contact_}, {"hangs_by_drag", hangs_by_drag_}, {"swing_d_fwd", swing_d_fwd_}, {"a_lin_z_ema", a_lin_z_ema_}, {"crouch_ticks", crouch_ticks_}, {"elev_landed", {elev_landed_[0], elev_landed_[1], elev_landed_[2], elev_landed_[3]}}, {"plan_skips", plan_skips_}, {"plan_none", plan_none_}, {"plan_reached", plan_reached_}, {"plan_shift", {plan_sx_, plan_sz_}}, {"plan_score", plan_score_}, {"relief_none", relief_none_}, {"relief_for", relief_for_}, {"creep_load_ticks", creep_load_ticks_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
                           {"toe_tgt", tg}, {"u", uu}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {air_ticks_[0], air_ticks_[1], air_ticks_[2], air_ticks_[3]}}, {"lift_h", lift_h_}, {"land_h", land_h_}, {"shift_acc", shift_acc_}, {"phase_ticks", phase_ticks_}};
 }
 
