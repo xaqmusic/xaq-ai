@@ -275,3 +275,23 @@ TEST(PoseSequencer, TheExtensionMarginRefusesAShiftThatStraightensAPlantedLeg) {
     EXPECT_FALSE(f.m.shift_feasible(1, toes, 0.0, 0.005));
     EXPECT_GT(f.m.diag_snapshot()["ext_rejects"].get<int>(), 0);
 }
+
+TEST(PoseSequencer, TheLiftingLegFormHoldsTheLegAboutToLiftToTheMarginToo) {
+    Fix f({{"ext_margin_m", ogma::ParamValue{0.015}}}); f.run(0, {1, 1, 1, 1});
+    const double hd[4][2] = {{-0.7071, 0.7071}, {0.7071, 0.7071}, {-0.7071, -0.7071}, {0.7071, -0.7071}};
+    auto place = [&](int i, double r) { const double hx = (hd[i][0] > 0 ? 1 : -1) * 0.0383, hz = (hd[i][1] > 0 ? 1 : -1) * 0.033;
+                                        return Vec3f(float(hx + hd[i][0] * r), -0.085f, float(hz + hd[i][1] * r)); };
+    std::array<Vec3f, 4> toes{place(0, 0.08), place(1, 0.08), place(2, 0.08), place(3, 0.08)};
+    double r2 = 0.08; while (r2 < 0.14 && f.m.ext_slack(2, place(2, r2)) > 0.019) r2 += 0.001;
+    toes[2] = place(2, r2);
+    EXPECT_TRUE(f.m.shift_feasible(2, toes, 0.0, 0.02)) << "first form: the lifting toe is exempt";
+    f.m.on_param_change("ext_lifting", ogma::ParamValue{1.0});
+    EXPECT_FALSE(f.m.shift_feasible(2, toes, 0.0, 0.02)) << "held to the full margin, its own forward shift stretches it past";
+    EXPECT_TRUE(f.m.shift_feasible(2, toes, 0.0, -0.01)) << "a backward shift bends it";
+    f.m.on_param_change("ext_lifting", ogma::ParamValue{0.3});   // the floor 4.5 mm: a short forward shift is allowed, a long one is not
+    EXPECT_TRUE(f.m.shift_feasible(2, toes, 0.0, 0.005));
+    EXPECT_FALSE(f.m.shift_feasible(2, toes, 0.0, 0.03));
+    EXPECT_GT(f.m.diag_snapshot()["ext_lift_rejects"].get<int>(), 0);
+    f.m.on_param_change("ext_margin_m", ogma::ParamValue{0.0});
+    EXPECT_TRUE(f.m.shift_feasible(2, toes, 0.0, 0.02)) << "with the margin off the switch does nothing";
+}

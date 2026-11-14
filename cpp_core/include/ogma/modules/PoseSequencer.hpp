@@ -286,6 +286,12 @@ private:
     // a straight knee (commanded knee u < 0.15 on 50 % of rows after six other steps, 0 % on the front legs; operator 2026-11-14:
     // "the rear legs extend backward too far ... it gets caught on steps and makes the kinematics solve harder").
     double ext_margin_m_ = 0.0; mutable int64_t ext_rejects_ = 0; std::array<double, 4> ext_lmax_{}; bool ext_lmax_ok_ = false;
+    // THE LIFTING-LEG FORM (2026-11-14; ext_lifting 0 = off, byte-identical): the leg about to lift keeps ext_lifting x ext_margin_m
+    // of slack -- the shift that buys its lift margin runs while its toe is planted and, for a rear leg, points along that leg's
+    // heading away from it (a symmetric stance gives a rear leg zero static margin), so with the first form the stretched leg still
+    // lifted from near-straight (nearly every crossing into the margin was the lifting leg's own); held to the FULL margin a rear
+    // toe at the margin could never lift, so the planted legs' margin reserves the difference for the leg's own pre-lift shift
+    double ext_lifting_ = 0.0; mutable int64_t ext_lift_rejects_ = 0;
     int clip_ticks_ = 0, clip_run_ = 0; int64_t clips_ = 0; double miss_reacquire_ = 0.0; int miss_ticks_ = 0, lower_retreats_ = 0; std::array<int, 4> miss_count_{};
     // a NULL STEP -- a landing within null_step_m of the toe's lift-off point (a clipped arc that went nowhere, touched down and
     // counted as a landing: one leg "landed" 141 times in place at 0.8 s each) -- counts as a miss; a leg with two or more misses
