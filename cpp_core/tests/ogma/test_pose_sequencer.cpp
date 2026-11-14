@@ -363,3 +363,21 @@ TEST(PoseSequencer, NextLegLiftableFirst_TheSearchStrandsTheNextLegNoMoreOftenAn
     EXPECT_GT(lift_on, 0);
     EXPECT_LE(strand_on, strand_off) << "with the lever the search strands the next leg no more often";
 }
+
+TEST(PoseSequencer, ThePlanDriftChecksEveryPredictionAndItsCountsAddUp) {
+    Fix f({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}}, {"plan", ogma::ParamValue{1.0}}});
+    std::vector<float> contact = {1, 1, 1, 1};
+    for (uint64_t t = 0; t < 2500; ++t) {
+        const int leg = f.m.active_leg();
+        for (int i = 0; i < 4; ++i) contact[size_t(i)] = 1.0f;
+        if (leg >= 0 && (f.m.phase() == PoseSequencer::Phase::Lift || f.m.phase() == PoseSequencer::Phase::Swing)) contact[size_t(leg)] = 0.0f;
+        if (leg >= 0 && f.m.phase() == PoseSequencer::Phase::Lower) { auto d = f.m.diag_snapshot(); contact[size_t(leg)] = d["toe_tgt"][leg][1].get<double>() <= -0.09 ? 1.0f : 0.0f; }
+        f.run(t, contact);
+    }
+    auto d = f.m.diag_snapshot(); auto dr = d["drift"]; auto dc = d["drift_cause"];
+    EXPECT_GT(dr[0].get<int>(), 3) << "the predictions are checked";
+    EXPECT_EQ(dr[1].get<int>() + dr[3].get<int>(), dr[0].get<int>());
+    EXPECT_LE(dr[2].get<int>(), dr[1].get<int>());
+    EXPECT_LE(dc[3].get<int>(), dr[2].get<int>());
+    EXPECT_GE(d["drift_mag_all"][0].get<double>(), 0.0);
+}

@@ -13172,6 +13172,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["ps_bkr"] = all_b
 		var nl2: Array = ps.get("next_lift", [])
 		if nl2.size() >= 2: line["ps_nxl"] = [int(nl2[0]), int(nl2[1])]   # chosen landings that left the next leg liftable / did not (2026-11-14)
+		# the plan drift (2026-11-14): [checked, predicted liftable, found unliftable, predicted unliftable], the single factor that breaks it [landed toe, other toes, centre of mass, only together], magnitudes (m)
+		for key in [["drift", "ps_drf"], ["drift_cause", "ps_drc"]]:
+			var dr: Array = ps.get(key[0], [])
+			if dr.size() >= 4: line[key[1]] = [int(dr[0]), int(dr[1]), int(dr[2]), int(dr[3])]
+		for key in [["drift_mag", "ps_drm"], ["drift_mag_all", "ps_drma"]]:
+			var dm: Array = ps.get(key[0], [])
+			if dm.size() >= 3: line[key[1]] = [snappedf(float(dm[0]), 0.001), snappedf(float(dm[1]), 0.001), snappedf(float(dm[2]), 0.001)]
 		for key in [["block_d", "ps_bkd"], ["block_short", "ps_bksh"]]:
 			var bd: Array = ps.get(key[0], [])
 			if bd.size() >= 4: line[key[1]] = [snappedf(float(bd[0]), 0.001), snappedf(float(bd[1]), 0.001), snappedf(float(bd[2]), 0.001), snappedf(float(bd[3]), 0.001)]

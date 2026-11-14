@@ -519,6 +519,7 @@ void PoseSequencer::engage_now(uint64_t tick_id) {
         neutral_[size_t(i)] = Vec3f(float(hip.x + hx / hn * neutral_r_m_), float(-stand_h_m_), float(hip.z + hz / hn * neutral_r_m_));
         elev_[size_t(i)] = 0.0; elev_landed_[size_t(i)] = 0.0; ground_h_[size_t(i)] = -stand_h_m_; creep_[size_t(i)] = 0.0; air_ticks_[size_t(i)] = 0;
     }
+    pred_leg_ = -1;
     shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ticks_ = 0; leg_ = -1; phase_ = Phase::Settle; engaged_at_ = int64_t(tick_id); crouch_ = 0.0;
     yaw_ref_ = (heading_ref_ == "engage" && have_odom_in_) ? odom_in_[2] : 0.0; yaw_err_ = 0.0;
 }
@@ -991,14 +992,49 @@ double PoseSequencer::best_margin_over_shifts(int leg, const std::array<Vec3f, 4
     return best;
 }
 
+// the plan drift: the last decision's predicted margin for the next leg against the margin found now, and which factor broke it
+void PoseSequencer::check_drift(double cx, double cz, double need) {
+    if (pred_leg_ < 0) return;
+    const int p = pred_leg_, st = pred_step_; pred_leg_ = -1;
+    // the extra searches must not move the shift test's own counters
+    const int64_t c1 = ext_rejects_, c2 = ext_lift_rejects_, c3 = overdue_rejects_;
+    double sx, sz;
+    auto margin = [&](const std::array<Vec3f, 4>& toes, double x, double z) { return best_margin_over_shifts(p, toes, x, z, sx, sz, false); };
+    const double m_act = margin(toe_tgt_, cx, cz);
+    double dl = 0.0, doth = 0.0; int no = 0;
+    for (int i = 0; i < 4; ++i) {
+        const double d = std::hypot(double(toe_tgt_[size_t(i)].x) - pred_toes_[size_t(i)].x, double(toe_tgt_[size_t(i)].z) - pred_toes_[size_t(i)].z);
+        if (i == st) dl = d; else if (i != p) { doth += d; ++no; }
+    }
+    doth /= std::max(1, no); const double dc = std::hypot(cx - pred_cx_, cz - pred_cz_);
+    ++drift_[0]; drift_mag_all_[0] += dl; drift_mag_all_[1] += doth; drift_mag_all_[2] += dc;
+    if (pred_m_ < need) ++drift_[3];
+    else {
+        ++drift_[1];
+        if (m_act < need) {
+            ++drift_[2]; drift_mag_[0] += dl; drift_mag_[1] += doth; drift_mag_[2] += dc;
+            auto swapped = [&](bool land, bool others) { std::array<Vec3f, 4> t = pred_toes_; for (int i = 0; i < 4; ++i) { if (i == p) continue; if ((i == st && land) || (i != st && others)) t[size_t(i)] = toe_tgt_[size_t(i)]; } return t; };
+            const bool by_land = margin(swapped(true, false), pred_cx_, pred_cz_) < need;
+            const bool by_oth = margin(swapped(false, true), pred_cx_, pred_cz_) < need;
+            const bool by_com = margin(pred_toes_, cx, cz) < need;
+            if (by_land) ++drift_cause_[0];
+            if (by_oth) ++drift_cause_[1];
+            if (by_com) ++drift_cause_[2];
+            if (!by_land && !by_oth && !by_com) ++drift_cause_[3];
+        }
+    }
+    ext_rejects_ = c1; ext_lift_rejects_ = c2; overdue_rejects_ = c3;
+}
+
 bool PoseSequencer::plan_step(int& leg_out, Vec3f& land_out, double& sx_out, double& sz_out, double& score_out) {
     const double cx = have_support_ ? double(support_[3]) : 0.0, cz = have_support_ ? double(support_[2]) : 0.0;
     const double need = margin_min_m_ + margin_extra_m_;
     const int n_order = order_.empty() ? 4 : int(order_.size());
-    double best_score = -1e9, best_mnext = -1e9; leg_out = -1;
+    double best_score = -1e9, best_mnext = -1e9; int best_nleg = -1; std::array<Vec3f, 4> best_landed{}; leg_out = -1;
     const int64_t skips0 = plan_skips_;
     const int nland = int(std::floor(plan_land_m_ / plan_cell_m_ + 1e-9));
     protect_ = -1;
+    check_drift(cx, cz, need);
     const int wleg0 = order_.empty() ? 0 : std::clamp(int(order_[size_t((order_pos_ + 1) % n_order)]), 0, 3);
     int urgent = -1;   // the overdue leg's queue jump: the planted leg with the least slack below ext_urgent_m
     if (ext_urgent_m_ > 0.0 && ext_lmax_ok_) { double lo = ext_urgent_m_; for (int i = 0; i < 4; ++i) { const double sl = ext_slack(i, toe_tgt_[size_t(i)]); if (sl < lo) { lo = sl; urgent = i; } } }
@@ -1030,7 +1066,7 @@ bool PoseSequencer::plan_step(int& leg_out, Vec3f& land_out, double& sx_out, dou
         const Vec3f hip = hip1_of(c), h2 = anchors_[size_t(c)].hip2_world;
         double hx = h2.x - hip.x, hz = h2.z - hip.z; const double hn = std::max(1e-6, std::hypot(hx, hz)); hx /= hn; hz /= hn;
         const double lx = -hz, lz = hx;   // the heading's lateral
-        double leg_best = -1e9, leg_mnext = -1e9; Vec3f leg_land{};
+        double leg_best = -1e9, leg_mnext = -1e9; Vec3f leg_land{}; std::array<Vec3f, 4> leg_landed{};
         double jx = 0.0, jz = 0.0;   // re-acquisition: a leg that missed searches a grid shifted by up to 2 cm, and is penalised by 1 cm of margin per miss
         if (miss_reacquire_ > 0.0 && miss_count_[size_t(c)] > 0) { auto nz = [&]{ rng_ = rng_ * 1664525u + 1013904223u; return (double(rng_ >> 8) / 16777216.0 - 0.5) * 0.04; }; jx = nz(); jz = nz(); }
         const double miss_pen = miss_reacquire_ > 0.0 ? 0.01 * miss_count_[size_t(c)] : 0.0;
@@ -1054,15 +1090,16 @@ bool PoseSequencer::plan_step(int& leg_out, Vec3f& land_out, double& sx_out, dou
             if (face_gap_m_ > 0.0) {   // lever C: a face just ahead of the landing (a riser the next lift must clear from too close)
                 double h0, h1; if (patch_h(L.z, L.x, h0) && patch_h(L.z + face_gap_m_, L.x, h1) && h1 - h0 >= land_edge_m_) { score -= face_penalty_m_; ++face_penalties_; }
             }
-            if (score > leg_best) { leg_best = score; leg_land = L; leg_mnext = m_next; }
+            if (score > leg_best) { leg_best = score; leg_land = L; leg_mnext = m_next; leg_landed = landed; }
         }
         if (leg_best <= -1e8) { ++skip_noland_[size_t(c)]; skipped(); continue; }
-        if (jump) { best_score = leg_best; leg_out = c; land_out = leg_land; sx_out = sx; sz_out = sz; best_mnext = leg_mnext; ++urgent_jumps_; jumped_ = true; break; }   // the urgent leg steps; the wave's turn is not consumed
-        if (leg_best > best_score) { best_score = leg_best; leg_out = c; land_out = leg_land; sx_out = sx; sz_out = sz; best_mnext = leg_mnext; if (k == 0) { order_pos_ = pos; jumped_ = false; } }   // a later leg's step does not consume the wave's turn
+        if (jump) { best_score = leg_best; leg_out = c; land_out = leg_land; sx_out = sx; sz_out = sz; best_mnext = leg_mnext; best_nleg = nleg; best_landed = leg_landed; ++urgent_jumps_; jumped_ = true; break; }   // the urgent leg steps; the wave's turn is not consumed
+        if (leg_best > best_score) { best_score = leg_best; leg_out = c; land_out = leg_land; sx_out = sx; sz_out = sz; best_mnext = leg_mnext; best_nleg = nleg; best_landed = leg_landed; if (k == 0) { order_pos_ = pos; jumped_ = false; } }   // a later leg's step does not consume the wave's turn
         if (k == 0) break;   // the wave's own next leg is feasible: take it (the search ranks its landing and shift, not its turn)
     }
     if (protect_ >= 0) ++overdue_decisions_;
     if (leg_out >= 0) ++next_lift_[best_mnext >= need ? 0 : 1];
+    if (leg_out >= 0) { pred_leg_ = best_nleg; pred_step_ = leg_out; pred_m_ = best_mnext; pred_toes_ = best_landed; pred_cx_ = cx; pred_cz_ = cz; } else pred_leg_ = -1;
     protect_ = -1;
     score_out = best_score; last_plan_skips_ = int(plan_skips_ - skips0);
     return leg_out >= 0;
@@ -1236,7 +1273,7 @@ nlohmann::json PoseSequencer::diag_snapshot() const {
     return nlohmann::json{{"phase", phase_name(phase_)}, {"phase_id", int(phase_)}, {"leg", leg_}, {"engage", engage_level_}, {"model", have_model_}, {"support", have_support_},
                           {"patch", have_patch_}, {"steps", st}, {"cycles", cycles_}, {"shift_exhausted", shift_exhausted_}, {"shift_ticks", shift_ticks_},
                           {"disengaged_tilt", disengaged_tilt_}, {"lower_sunk", lower_sunk_}, {"phase_timeouts", phase_timeouts_}, {"engaged_at", engaged_at_},
-                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"fast_ticks", fast_ticks_}, {"slow_ticks", slow_ticks_}, {"edge_moves", edge_moves_}, {"edge_stuck", edge_stuck_}, {"land_sigma", land_sigma_}, {"blocked_leg", blocked_leg_}, {"advance_yields", advance_yields_}, {"relief_steps", relief_steps_}, {"plans", plans_}, {"lower_fold_ticks", lower_fold_ticks_}, {"crouch", crouch_}, {"reseeds", reseeds_}, {"multistarts", multistarts_}, {"face_penalties", face_penalties_}, {"front_drop", front_drop_}, {"clips", clips_}, {"unload_shifts", unload_shifts_}, {"land_r_rejects", land_r_rejects_}, {"ext_rejects", ext_rejects_}, {"ext_lift_rejects", ext_lift_rejects_}, {"overdue", {overdue_decisions_, overdue_rejects_, urgent_jumps_, urgent_fails_}}, {"skip_nomargin", skip_nomargin_}, {"skip_noland", skip_noland_}, {"skip_miss", skip_miss_}, {"block", block_}, {"next_lift", next_lift_}, {"block_d", block_d_}, {"block_short", block_short_}, {"ext", {ext_slack(0, toe_tgt_[0]), ext_slack(1, toe_tgt_[1]), ext_slack(2, toe_tgt_[2]), ext_slack(3, toe_tgt_[3])}}, {"ext_fk", {ext_slack_fk(0), ext_slack_fk(1), ext_slack_fk(2), ext_slack_fk(3)}}, {"null_steps", null_steps_}, {"miss_skips", miss_skips_}, {"miss_count", {miss_count_[0], miss_count_[1], miss_count_[2], miss_count_[3]}}, {"depth_caps", depth_caps_}, {"free_out", {free_out_dx_, free_out_dy_}}, {"branch_switches", branch_switches_}, {"hangs", hangs_}, {"hangs_by_contact", hangs_by_contact_}, {"hangs_by_drag", hangs_by_drag_}, {"swing_d_fwd", swing_d_fwd_}, {"a_lin_z_ema", a_lin_z_ema_}, {"crouch_ticks", crouch_ticks_}, {"elev_landed", {elev_landed_[0], elev_landed_[1], elev_landed_[2], elev_landed_[3]}}, {"plan_skips", plan_skips_}, {"plan_none", plan_none_}, {"plan_reached", plan_reached_}, {"plan_shift", {plan_sx_, plan_sz_}}, {"plan_score", plan_score_}, {"relief_none", relief_none_}, {"relief_for", relief_for_}, {"creep_load_ticks", creep_load_ticks_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
+                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"fast_ticks", fast_ticks_}, {"slow_ticks", slow_ticks_}, {"edge_moves", edge_moves_}, {"edge_stuck", edge_stuck_}, {"land_sigma", land_sigma_}, {"blocked_leg", blocked_leg_}, {"advance_yields", advance_yields_}, {"relief_steps", relief_steps_}, {"plans", plans_}, {"lower_fold_ticks", lower_fold_ticks_}, {"crouch", crouch_}, {"reseeds", reseeds_}, {"multistarts", multistarts_}, {"face_penalties", face_penalties_}, {"front_drop", front_drop_}, {"clips", clips_}, {"unload_shifts", unload_shifts_}, {"land_r_rejects", land_r_rejects_}, {"ext_rejects", ext_rejects_}, {"ext_lift_rejects", ext_lift_rejects_}, {"overdue", {overdue_decisions_, overdue_rejects_, urgent_jumps_, urgent_fails_}}, {"skip_nomargin", skip_nomargin_}, {"skip_noland", skip_noland_}, {"skip_miss", skip_miss_}, {"block", block_}, {"next_lift", next_lift_}, {"drift", drift_}, {"drift_cause", drift_cause_}, {"drift_mag", drift_mag_}, {"drift_mag_all", drift_mag_all_}, {"block_d", block_d_}, {"block_short", block_short_}, {"ext", {ext_slack(0, toe_tgt_[0]), ext_slack(1, toe_tgt_[1]), ext_slack(2, toe_tgt_[2]), ext_slack(3, toe_tgt_[3])}}, {"ext_fk", {ext_slack_fk(0), ext_slack_fk(1), ext_slack_fk(2), ext_slack_fk(3)}}, {"null_steps", null_steps_}, {"miss_skips", miss_skips_}, {"miss_count", {miss_count_[0], miss_count_[1], miss_count_[2], miss_count_[3]}}, {"depth_caps", depth_caps_}, {"free_out", {free_out_dx_, free_out_dy_}}, {"branch_switches", branch_switches_}, {"hangs", hangs_}, {"hangs_by_contact", hangs_by_contact_}, {"hangs_by_drag", hangs_by_drag_}, {"swing_d_fwd", swing_d_fwd_}, {"a_lin_z_ema", a_lin_z_ema_}, {"crouch_ticks", crouch_ticks_}, {"elev_landed", {elev_landed_[0], elev_landed_[1], elev_landed_[2], elev_landed_[3]}}, {"plan_skips", plan_skips_}, {"plan_none", plan_none_}, {"plan_reached", plan_reached_}, {"plan_shift", {plan_sx_, plan_sz_}}, {"plan_score", plan_score_}, {"relief_none", relief_none_}, {"relief_for", relief_for_}, {"creep_load_ticks", creep_load_ticks_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
                           {"toe_tgt", tg}, {"u", uu}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {air_ticks_[0], air_ticks_[1], air_ticks_[2], air_ticks_[3]}}, {"lift_h", lift_h_}, {"land_h", land_h_}, {"shift_acc", shift_acc_}, {"phase_ticks", phase_ticks_}};
 }
 

@@ -315,6 +315,16 @@ private:
     // that leaves the next leg liftable ranks above every landing that does not; the advance chooses among those.  next_lift_ counts
     // the chosen landings [left the next leg liftable, did not] (an instrument, always on).
     double plan_next_first_ = 0.0; std::array<int64_t, 2> next_lift_{};
+    // THE PLAN DRIFT (2026-11-14, an instrument, always on, decides nothing): each decision's prediction for the next leg -- its lift
+    // margin over the toes the plan expects (the others moved by the planned shift, the stepping toe at its planned landing) and the
+    // centre of mass -- is checked at the next decision against the margin found.  drift_ = [predictions checked, predicted
+    // liftable, of those found unliftable, predicted unliftable]; for a predicted-liftable leg found unliftable, drift_cause_ =
+    // [the landed toe alone breaks it, the other toes alone, the centre of mass alone, only together] by swapping one factor at a
+    // time from predicted to actual; drift_mag_ = summed [landed-toe offset, mean other-toe offset, centre-of-mass move] (m) over
+    // those cases, drift_mag_all_ the same over every check.
+    int pred_leg_ = -1, pred_step_ = -1; double pred_m_ = 0.0, pred_cx_ = 0.0, pred_cz_ = 0.0; std::array<body::Vec3f, 4> pred_toes_{};
+    std::array<int64_t, 4> drift_{}, drift_cause_{}; std::array<double, 3> drift_mag_{}, drift_mag_all_{};
+    void check_drift(double cx, double cz, double need);
     void diagnose_block(int leg, double cx, double cz, double need);
     int clip_ticks_ = 0, clip_run_ = 0; int64_t clips_ = 0; double miss_reacquire_ = 0.0; int miss_ticks_ = 0, lower_retreats_ = 0; std::array<int, 4> miss_count_{};
     // a NULL STEP -- a landing within null_step_m of the toe's lift-off point (a clipped arc that went nowhere, touched down and
