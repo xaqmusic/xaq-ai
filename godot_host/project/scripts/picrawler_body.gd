@@ -13149,6 +13149,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			var all_u: Array = []
 			for a4 in uu: all_u.append([snappedf(float(a4[0]), 0.01), snappedf(float(a4[1]), 0.01), snappedf(float(a4[2]), 0.01)])
 			line["ps_u"] = all_u
+		# the extension margin (2026-11-14): each toe's slack to its leg's full extension, by the plane estimate from its target and by the true FK at the commanded angles; shifts rejected by ext_margin_m
+		for key in [["ext", "ps_ext"], ["ext_fk", "ps_ext_fk"]]:
+			var ex: Array = ps.get(key[0], [])
+			if ex.size() >= 4: line[key[1]] = [snappedf(float(ex[0]), 0.001), snappedf(float(ex[1]), 0.001), snappedf(float(ex[2]), 0.001), snappedf(float(ex[3]), 0.001)]
+		line["ps_extrej"] = int(ps.get("ext_rejects", 0))
 		if tt.size() >= 4 and int(ps.get("leg", -1)) >= 0:
 			var a: Array = tt[int(ps.get("leg", -1))]
 			if a.size() >= 3: line["ps_tgt"] = [snappedf(float(a[0]), 0.001), snappedf(float(a[1]), 0.001), snappedf(float(a[2]), 0.001)]

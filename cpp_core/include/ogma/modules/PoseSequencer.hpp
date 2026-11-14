@@ -68,6 +68,11 @@ public:
     // and the best within the joint ranges is taken if it beats the current by ik_switch_m: "the leg tries the other signs".
     bool ik_solve(int leg, const body::Vec3f& target, std::array<double, 3>& t, bool allow_multistart);
     bool plan_step(int& leg_out, body::Vec3f& land_out, double& sx_out, double& sz_out, double& score_out);   // the pose search (lever 2a); public for the tests
+    // the extension margin's slack (2026-11-14): full extension minus the hip2-to-toe distance for a toe at p, the leg's plane through
+    // the hip1 axis (m); the same at the commanded angles by the true FK (an instrument); and the shift test that reads it -- public for the tests
+    double ext_slack(int leg, const body::Vec3f& p) const;
+    double ext_slack_fk(int leg) const;
+    bool shift_feasible(int lifting, const std::array<body::Vec3f, 4>& toes, double sx, double sz) const;
     Phase phase() const { return phase_; }
     int   active_leg() const { return leg_; }
     float engage_level() const { return engage_level_; }
@@ -162,7 +167,6 @@ private:
     // toe at its reach limit clamping every shift that would have freed it); among the feasible, the most forward shift and
     // the landing that leaves the next leg the largest margin, with the wave's order kept where it can be.
     double best_margin_over_shifts(int leg, const std::array<body::Vec3f, 4>& toes, double cx, double cz, double& sx, double& sz, bool forward_first) const;
-    bool shift_feasible(int lifting, const std::array<body::Vec3f, 4>& toes, double sx, double sz) const;
     void decide_next(uint64_t tick_id);
     bool plan_relief(int stuck, double cx, double cz, int bearing, int& leg_out, body::Vec3f& land_out, double& margin_out) const;
     // THE SHIFT'S DIRECTION (the third flat run, 2026-11-08: a shift straight back hit a workspace edge at once and the
@@ -275,6 +279,13 @@ private:
     // hip -- the search rewards advance and not base width, and a stance collapsed inward (both right toes at the inner edge of
     // their reach) left every body shift infeasible and one leg landing 134 times at that edge while the body stood.
     double land_r_min_m_ = 0.0; int64_t land_r_rejects_ = 0;
+    // THE EXTENSION MARGIN (2026-11-14; ext_margin_m 0 = off, byte-identical): a body shift is infeasible when it leaves a planted
+    // toe less than ext_margin_m short of its leg's full extension (and further out than it was) -- the distance from hip2 to the
+    // toe in the leg's plane at the toe's own depth, against the longest hip2-to-toe the knee's range allows.  The horizontal
+    // reach_max_m (0.14) IS a straight leg at the stance's depth: a trailing rear leg the wave had not yet reached was walked to
+    // a straight knee (commanded knee u < 0.15 on 50 % of rows after six other steps, 0 % on the front legs; operator 2026-11-14:
+    // "the rear legs extend backward too far ... it gets caught on steps and makes the kinematics solve harder").
+    double ext_margin_m_ = 0.0; mutable int64_t ext_rejects_ = 0; std::array<double, 4> ext_lmax_{}; bool ext_lmax_ok_ = false;
     int clip_ticks_ = 0, clip_run_ = 0; int64_t clips_ = 0; double miss_reacquire_ = 0.0; int miss_ticks_ = 0, lower_retreats_ = 0; std::array<int, 4> miss_count_{};
     // a NULL STEP -- a landing within null_step_m of the toe's lift-off point (a clipped arc that went nowhere, touched down and
     // counted as a landing: one leg "landed" 141 times in place at 0.8 s each) -- counts as a miss; a leg with two or more misses

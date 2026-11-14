@@ -244,3 +244,34 @@ TEST(PoseSequencer, TheFrontDropHoldsTheFrontToesShallowerOnANoseUpBody) {
     }
 }
 
+
+TEST(PoseSequencer, TheExtensionMarginRefusesAShiftThatStraightensAPlantedLeg) {
+    Fix f; f.run(0, {1, 1, 1, 1});
+    // the slack: a straight knee (u 0) has none, a bent one (u 0.5) has centimetres; the plane estimate matches the true FK
+    for (int leg = 0; leg < 4; ++leg) {
+        for (double h2u : {-0.6, -0.3, 0.0}) {
+            const Vec3f straight = f.m.toe_of(leg, f.m.angles_of_u(leg, {0.2, h2u, 0.0}));
+            EXPECT_NEAR(f.m.ext_slack(leg, straight), 0.0, 0.003) << "leg " << leg << " hip2 u " << h2u;
+            EXPECT_GT(f.m.ext_slack(leg, f.m.toe_of(leg, f.m.angles_of_u(leg, {0.2, h2u, 0.5}))), 0.02) << "leg " << leg;
+        }
+    }
+    // a stance with the rear-left toe 1.5-2 cm short of full extension: a forward shift of 2 cm stretches it past a 1.5 cm margin
+    const double hd[4][2] = {{-0.7071, 0.7071}, {0.7071, 0.7071}, {-0.7071, -0.7071}, {0.7071, -0.7071}};
+    auto place = [&](int i, double r) { const double hx = (hd[i][0] > 0 ? 1 : -1) * 0.0383, hz = (hd[i][1] > 0 ? 1 : -1) * 0.033;
+                                        return Vec3f(float(hx + hd[i][0] * r), -0.085f, float(hz + hd[i][1] * r)); };
+    std::array<Vec3f, 4> toes{place(0, 0.08), place(1, 0.08), place(2, 0.08), place(3, 0.08)};
+    double r2 = 0.08; while (r2 < 0.14 && f.m.ext_slack(2, place(2, r2)) > 0.019) r2 += 0.001;
+    toes[2] = place(2, r2);
+    const double s0 = f.m.ext_slack(2, toes[2]);
+    ASSERT_GT(s0, 0.015); ASSERT_LT(s0, 0.02);
+    ASSERT_TRUE(f.m.shift_feasible(1, toes, 0.0, 0.02)) << "with the margin off the forward shift is within the horizontal reach";
+    f.m.on_param_change("ext_margin_m", ogma::ParamValue{0.015});
+    EXPECT_FALSE(f.m.shift_feasible(1, toes, 0.0, 0.02)) << "the forward shift leaves the rear-left toe inside the margin";
+    EXPECT_TRUE(f.m.shift_feasible(1, toes, 0.0, -0.01)) << "a backward shift bends it";
+    EXPECT_TRUE(f.m.shift_feasible(2, toes, 0.0, 0.02)) << "the stretched leg's own lift is not refused by its own toe";
+    toes[2] = place(2, r2 + 0.01);   // already inside the margin: a shift that does not stretch it further stays feasible
+    ASSERT_LT(f.m.ext_slack(2, toes[2]), 0.015);
+    EXPECT_TRUE(f.m.shift_feasible(1, toes, 0.0, -0.005));
+    EXPECT_FALSE(f.m.shift_feasible(1, toes, 0.0, 0.005));
+    EXPECT_GT(f.m.diag_snapshot()["ext_rejects"].get<int>(), 0);
+}

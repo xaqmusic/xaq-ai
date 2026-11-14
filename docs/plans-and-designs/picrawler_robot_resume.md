@@ -215,7 +215,10 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   (collider-off experiment), the toe in the air with no load: invisible to the FSR. **2026-11-13:** the front drop FILTERED (`front_drop_tau_ticks` 50; unfiltered it bobbed the planted front legs),
   and the LANDING RADIUS (`land_r_min_m` 0.07: a stance collapsed inward looped one leg in place; the search must carry
   the base's width); clip / re-acquire and the unloaded-toe shift measured and kept at 0. On the launcher's layout (seed
-  42, 13 000 ticks) the stack reaches the fourth tread with no missed landing. **Next:** the 64 mm riser (the pole lock:
+  42, 13 000 ticks) the stack reaches the fourth tread with no missed landing. **2026-11-14:** the rear legs walked to a
+  STRAIGHT KNEE by the search (`reach_max_m` 0.14 horizontal is a straight leg at the stance depth); the EXTENSION MARGIN
+  (`ext_margin_m`, default 0) measured PARTIAL — the 64 mm bench's rear legs no longer straighten, frozen windows and the step
+  down, the launcher layout a riser further, the 38 mm bench mixed — kept at 0; the lifting leg's own pre-lift shift is the residual. **Next:** the 64 mm riser (the pole lock:
   a per-servo stall instrument, then a body-level escape), the memory's touch taken when the toe bears, the rear landing
   short of a face; benches: the launcher layout, the graded flight from 0.3 m and `OGMA_PICRAWLER_STAIRS_H_MM=38|50|64
   _N=3 _START_M=0.3`. To read an operator's UI run, turn on the launcher's verbose log first. IN_FLIGHT. Then the robot: the
