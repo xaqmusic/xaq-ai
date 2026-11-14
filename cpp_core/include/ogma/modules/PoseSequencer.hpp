@@ -292,6 +292,16 @@ private:
     // lifted from near-straight (nearly every crossing into the margin was the lifting leg's own); held to the FULL margin a rear
     // toe at the margin could never lift, so the planted legs' margin reserves the difference for the leg's own pre-lift shift
     double ext_lifting_ = 0.0; mutable int64_t ext_lift_rejects_ = 0;
+    // THE OVERDUE LEG (2026-11-14; overdue 0 and ext_urgent_m 0 = off, byte-identical; operator: "the leg that is starting to become
+    // too straight, especially in the back, needs to be prioritized in the sequence of new lifts"): a rear leg goes straight almost
+    // only when its turn was SKIPPED (no feasible step when the wave reached it) and later legs stepped in its place with forward
+    // shifts -- near-straight in 5 % of on-schedule stance periods, 54-75 % after six or more other steps.  overdue 1: while the
+    // wave's leg (or an urgent leg) has no feasible step, the substitute steps serve it -- no shift may reduce its slack to full
+    // extension, and a substitute's landing is ranked first by whether it leaves that leg liftable, then as before.  ext_urgent_m:
+    // the planted leg with the least slack below this is tried before the wave's leg (a jump does not consume the wave's turn).
+    double overdue_ = 0.0, ext_urgent_m_ = 0.0; mutable int protect_ = -1; mutable int64_t overdue_rejects_ = 0;
+    int64_t overdue_decisions_ = 0, urgent_jumps_ = 0, urgent_fails_ = 0; bool jumped_ = false;   // one jump per wave turn (a jump every decision starved the wave's own leg: 43 steps of one leg, 0 of another)
+    std::array<int64_t, 4> skip_nomargin_{}, skip_noland_{}, skip_miss_{};   // why each leg's turn was skipped (an instrument, always on)
     int clip_ticks_ = 0, clip_run_ = 0; int64_t clips_ = 0; double miss_reacquire_ = 0.0; int miss_ticks_ = 0, lower_retreats_ = 0; std::array<int, 4> miss_count_{};
     // a NULL STEP -- a landing within null_step_m of the toe's lift-off point (a clipped arc that went nowhere, touched down and
     // counted as a landing: one leg "landed" 141 times in place at 0.8 s each) -- counts as a miss; a leg with two or more misses

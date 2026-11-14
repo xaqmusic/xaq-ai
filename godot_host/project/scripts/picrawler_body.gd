@@ -13155,6 +13155,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			if ex.size() >= 4: line[key[1]] = [snappedf(float(ex[0]), 0.001), snappedf(float(ex[1]), 0.001), snappedf(float(ex[2]), 0.001), snappedf(float(ex[3]), 0.001)]
 		line["ps_extrej"] = int(ps.get("ext_rejects", 0))
 		line["ps_extlrej"] = int(ps.get("ext_lift_rejects", 0))
+		# the overdue leg (2026-11-14): [decisions protecting a leg, shifts refused for it, urgent jumps taken, urgent legs infeasible]; why each leg's turn was skipped
+		var ovd: Array = ps.get("overdue", [])
+		if ovd.size() >= 4: line["ps_ovd"] = [int(ovd[0]), int(ovd[1]), int(ovd[2]), int(ovd[3])]
+		for key in [["skip_nomargin", "ps_skm"], ["skip_noland", "ps_skl"], ["skip_miss", "ps_skx"]]:
+			var sk: Array = ps.get(key[0], [])
+			if sk.size() >= 4: line[key[1]] = [int(sk[0]), int(sk[1]), int(sk[2]), int(sk[3])]
 		if tt.size() >= 4 and int(ps.get("leg", -1)) >= 0:
 			var a: Array = tt[int(ps.get("leg", -1))]
 			if a.size() >= 3: line["ps_tgt"] = [snappedf(float(a[0]), 0.001), snappedf(float(a[1]), 0.001), snappedf(float(a[2]), 0.001)]

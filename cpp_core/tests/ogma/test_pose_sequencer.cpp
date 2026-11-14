@@ -295,3 +295,24 @@ TEST(PoseSequencer, TheLiftingLegFormHoldsTheLegAboutToLiftToTheMarginToo) {
     f.m.on_param_change("ext_margin_m", ogma::ParamValue{0.0});
     EXPECT_TRUE(f.m.shift_feasible(2, toes, 0.0, 0.02)) << "with the margin off the switch does nothing";
 }
+
+TEST(PoseSequencer, TheOverdueLegCrawlsOnFlatGround_EveryLegStepsAndNoDecisionIsEmpty) {
+    // the pose search with the overdue protection and the urgent jump (at a slack threshold that fires on flat ground): it still
+    // crawls with every leg stepping, never runs out of a step, and publishes its counters and the skip reasons
+    Fix f({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}},
+           {"plan", ogma::ParamValue{1.0}}, {"overdue", ogma::ParamValue{1.0}}, {"ext_urgent_m", ogma::ParamValue{0.035}}});
+    std::vector<float> contact = {1, 1, 1, 1};
+    for (uint64_t t = 0; t < 2500; ++t) {
+        const int leg = f.m.active_leg();
+        for (int i = 0; i < 4; ++i) contact[size_t(i)] = 1.0f;
+        if (leg >= 0 && (f.m.phase() == PoseSequencer::Phase::Lift || f.m.phase() == PoseSequencer::Phase::Swing)) contact[size_t(leg)] = 0.0f;
+        if (leg >= 0 && f.m.phase() == PoseSequencer::Phase::Lower) { auto d = f.m.diag_snapshot(); contact[size_t(leg)] = d["toe_tgt"][leg][1].get<double>() <= -0.09 ? 1.0f : 0.0f; }
+        f.run(t, contact);
+    }
+    int lo = 1 << 30, hi = 0; for (int i = 0; i < 4; ++i) { EXPECT_GE(f.m.steps(i), 1) << "leg " << i << " never stepped"; lo = std::min(lo, f.m.steps(i)); hi = std::max(hi, f.m.steps(i)); }
+    EXPECT_LE(hi, 2 * lo + 2) << "a jump does not starve the wave: one per turn";
+    auto d = f.m.diag_snapshot();
+    EXPECT_EQ(d["plan_none"].get<int>(), 0); EXPECT_EQ(d["deadlock_ticks"].get<int>(), 0);
+    ASSERT_TRUE(d.contains("overdue")); ASSERT_EQ(d["overdue"].size(), 4u); ASSERT_EQ(d["skip_nomargin"].size(), 4u);
+    EXPECT_GT(d["overdue"][2].get<int>() + d["overdue"][3].get<int>(), 0) << "at 3.5 cm the urgent rule is consulted on flat ground";
+}
