@@ -13170,6 +13170,8 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				for v in row: rr.append(int(v))
 				all_b.append(rr)
 			line["ps_bkr"] = all_b
+		var nl2: Array = ps.get("next_lift", [])
+		if nl2.size() >= 2: line["ps_nxl"] = [int(nl2[0]), int(nl2[1])]   # chosen landings that left the next leg liftable / did not (2026-11-14)
 		for key in [["block_d", "ps_bkd"], ["block_short", "ps_bksh"]]:
 			var bd: Array = ps.get(key[0], [])
 			if bd.size() >= 4: line[key[1]] = [snappedf(float(bd[0]), 0.001), snappedf(float(bd[1]), 0.001), snappedf(float(bd[2]), 0.001), snappedf(float(bd[3]), 0.001)]

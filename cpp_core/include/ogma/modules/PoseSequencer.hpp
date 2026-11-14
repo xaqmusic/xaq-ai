@@ -309,6 +309,12 @@ private:
     // reason 1 outer reach, 2 inner reach, 3 protection, 4 sector, 5 extension margin, 6 the lifting leg's floor (0 = feasible: a bug);
     // index 28 = grid.  block_d_ sums the smallest margin-giving shift's length, block_short_ the grid case's shortfall of margin.
     std::array<std::array<int64_t, 29>, 4> block_{}; std::array<double, 4> block_d_{}, block_short_{};
+    // NEXT LEG LIFTABLE FIRST (2026-11-14; plan_next_first 0 = off, byte-identical): the landing lookahead rated the next leg's lift
+    // margin only as a capped term the advance could outweigh, so a landing that left the next leg unliftable won whenever it went
+    // further forward -- and the next leg's turn was then skipped (the blocker: the opposite toe at its inner reach).  On: a landing
+    // that leaves the next leg liftable ranks above every landing that does not; the advance chooses among those.  next_lift_ counts
+    // the chosen landings [left the next leg liftable, did not] (an instrument, always on).
+    double plan_next_first_ = 0.0; std::array<int64_t, 2> next_lift_{};
     void diagnose_block(int leg, double cx, double cz, double need);
     int clip_ticks_ = 0, clip_run_ = 0; int64_t clips_ = 0; double miss_reacquire_ = 0.0; int miss_ticks_ = 0, lower_retreats_ = 0; std::array<int, 4> miss_count_{};
     // a NULL STEP -- a landing within null_step_m of the toe's lift-off point (a clipped arc that went nowhere, touched down and

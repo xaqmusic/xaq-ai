@@ -340,3 +340,26 @@ TEST(PoseSequencer, TheBlockerMirrorsTheShiftTest_ARefusalExactlyWhereTheTestRef
     EXPECT_GT(refused, 0); EXPECT_LT(refused, n);
     EXPECT_GT(by[1] + by[2], 0) << "reach refusals exercised"; EXPECT_GT(by[4], 0) << "sector refusals exercised"; EXPECT_GT(by[5], 0) << "extension refusals exercised";
 }
+
+TEST(PoseSequencer, NextLegLiftableFirst_TheSearchStrandsTheNextLegNoMoreOftenAndStillCrawls) {
+    auto crawl = [](double on) {
+        auto f = std::make_unique<Fix>(ogma::ParamMap{{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}},
+                                                      {"belly_topic", ogma::ParamValue{std::string("")}}, {"plan", ogma::ParamValue{1.0}}, {"plan_next_first", ogma::ParamValue{on}}});
+        std::vector<float> contact = {1, 1, 1, 1};
+        for (uint64_t t = 0; t < 2500; ++t) {
+            const int leg = f->m.active_leg();
+            for (int i = 0; i < 4; ++i) contact[size_t(i)] = 1.0f;
+            if (leg >= 0 && (f->m.phase() == PoseSequencer::Phase::Lift || f->m.phase() == PoseSequencer::Phase::Swing)) contact[size_t(leg)] = 0.0f;
+            if (leg >= 0 && f->m.phase() == PoseSequencer::Phase::Lower) { auto d = f->m.diag_snapshot(); contact[size_t(leg)] = d["toe_tgt"][leg][1].get<double>() <= -0.09 ? 1.0f : 0.0f; }
+            f->run(t, contact);
+        }
+        return f;
+    };
+    auto off = crawl(0.0), on = crawl(1.0);
+    for (int i = 0; i < 4; ++i) EXPECT_GE(on->m.steps(i), 1) << "leg " << i << " never stepped";
+    auto d0 = off->m.diag_snapshot(), d1 = on->m.diag_snapshot();
+    EXPECT_EQ(d1["plan_none"].get<int>(), 0); EXPECT_EQ(d1["deadlock_ticks"].get<int>(), 0);
+    const int lift_on = d1["next_lift"][0].get<int>(), strand_on = d1["next_lift"][1].get<int>(), strand_off = d0["next_lift"][1].get<int>();
+    EXPECT_GT(lift_on, 0);
+    EXPECT_LE(strand_on, strand_off) << "with the lever the search strands the next leg no more often";
+}
