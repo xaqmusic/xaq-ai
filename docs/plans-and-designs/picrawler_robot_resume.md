@@ -218,7 +218,9 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
   42, 13 000 ticks) the stack reaches the fourth tread with no missed landing. **2026-11-14:** the rear legs walked to a
   STRAIGHT KNEE by the search (`reach_max_m` 0.14 horizontal is a straight leg at the stance depth); the EXTENSION MARGIN
   (`ext_margin_m`, default 0) measured PARTIAL — the 64 mm bench's rear legs no longer straighten, frozen windows and the step
-  down, the launcher layout a riser further, the 38 mm bench mixed — kept at 0; the lifting leg's own pre-lift shift is the residual. **Next:** the 64 mm riser (the pole lock:
+  down, the launcher layout a riser further, the 38 mm bench mixed — kept at 0; the lifting leg's own pre-lift shift is the residual. **2026-11-14 (later): the sequencer is FROZEN as a scaffold** — the overdue leg, the blocker, next-leg-liftable
+  and the plan drift (the plan is right, its own reflexes move the landing ~6 cm) are in the ledger; the work now follows
+  [`learned_stepper_plan.md`](learned_stepper_plan.md): de-scaffold onto the generator and belief filter. **Next:** the 64 mm riser (the pole lock:
   a per-servo stall instrument, then a body-level escape), the memory's touch taken when the toe bears, the rear landing
   short of a face; benches: the launcher layout, the graded flight from 0.3 m and `OGMA_PICRAWLER_STAIRS_H_MM=38|50|64
   _N=3 _START_M=0.3`. To read an operator's UI run, turn on the launcher's verbose log first. IN_FLIGHT. Then the robot: the
