@@ -867,7 +867,8 @@ Dictionary OgmaBrain::get_module_metrics() const {
         // without a per-type block each (the keys are the modules' own diag names).
         else if (type == "ProxMemory" || type == "TofAvoidLoop" || type == "BearingToIntent" ||
                  type == "StuckSense" || type == "StuckEscape" || type == "LoadPhaseGait" ||
-                 type == "TouchMemory" || type == "EncounterFeatures" || type == "Tof8Range" || type == "TerrainMemory" || type == "FootholdShaper" || type == "SupportModel" || type == "PoseSequencer") {
+                 type == "TouchMemory" || type == "EncounterFeatures" || type == "Tof8Range" || type == "TerrainMemory" || type == "FootholdShaper" || type == "SupportModel" || type == "PoseSequencer" ||
+                 type == "BeliefFilter" || type == "StanceFeatures") {   // the stance belief (learned stepper Phase 3, 2026-11-15)
             const nlohmann::json dj = m->diag_snapshot();   // a named object: items() of a temporary dangles
             for (auto const& [k, v] : dj.items()) {
                 if (v.is_boolean())     d[String(k.c_str())] = v.get<bool>();

@@ -13320,6 +13320,28 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line[mid + "_n"]     = int(mm.get("node_count", -1))
 			line[mid + "_baked"] = int(mm.get("baked_count", -1))
 			line[mid + "_tle"]   = snappedf(float(mm.get("tle", -1.0)), 0.0001)
+	# the stance belief (2026-11-15, learned stepper Phase 3): the stance EPM's winner and vocabulary, the belief's MAP node, its probability and
+	# entropy, its consistency (NIS against the predicted mixture: this tick and the run's mean), [MAP switches, EPM-winner switches], and the features' state
+	if metrics.has("epm_stance"):
+		var se: Dictionary = metrics["epm_stance"]
+		line["sb_win"] = int(se.get("winner_id", -1))
+		line["sb_n"] = int(se.get("node_count", -1))
+		line["sb_baked"] = int(se.get("baked_count", -1))
+		line["sb_tle"] = snappedf(float(se.get("tle", -1.0)), 0.0001)
+	if metrics.has("belief_stance"):
+		var bst: Dictionary = metrics["belief_stance"]
+		line["sb_map"] = int(bst.get("map_node", -1))
+		line["sb_mapp"] = snappedf(float(bst.get("map_prob", 0.0)), 0.001)
+		line["sb_ent"] = snappedf(float(bst.get("entropy", 0.0)), 0.001)
+		line["sb_nis"] = snappedf(float(bst.get("nis", 0.0)), 0.001)
+		line["sb_nism"] = snappedf(float(bst.get("nis_mean", 0.0)), 0.001)
+		line["sb_sw"] = [int(bst.get("map_switches", 0)), int(bst.get("winner_switches", 0))]
+		line["sb_agree"] = snappedf(float(bst.get("agree_with_epm", 0.0)), 0.001)
+	if metrics.has("stance_features"):
+		var sft: Dictionary = metrics["stance_features"]
+		line["sf_pub"] = int(sft.get("published", 0))
+		line["sf_flips"] = int(sft.get("flips", 0))
+		line["sf_z"] = snappedf(float(sft.get("z_norm", 0.0)), 0.01)
 	line["gc_norm"] = snappedf(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0), 0.001)
 	line["cy_norm"] = snappedf(clamp(chassis_y / target_height, 0.0, 1.0), 0.001)
 	# TRUE swing fraction from the physics foot-contact sensor — the ground truth against

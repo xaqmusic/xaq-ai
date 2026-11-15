@@ -64,3 +64,26 @@ TEST(BeliefFilter, APrunedNodeLeavesAndTheBeliefStaysNormalised) {
     EXPECT_EQ(fx.f.nodes(), 2);
     EXPECT_NEAR(fx.f.belief_of(0) + fx.f.belief_of(1), 1.0, 1e-6);
 }
+
+TEST(BeliefFilter, ItsInnovationIsConsistent_NisNearOneOnAStreamItsModelDescribes) {
+    // two sticky states, Gaussian readings (sigma 0.3), the EPM's label the true state: an honest filter's NIS averages ~1
+    Fix fx; std::mt19937 rng(7); std::normal_distribution<float> n(0.0f, 0.3f);
+    int k = 0;
+    for (uint64_t t = 0; t < 20000; ++t) { if (t % 300 == 0) k = 1 - k; fx.step(t, k, (k ? 1.0f : -1.0f) + n(rng)); }
+    EXPECT_NEAR(fx.f.nis_mean(), 1.0, 0.15);
+    const auto d = fx.f.diag_snapshot();
+    EXPECT_GT(d["nis_n"].get<int64_t>(), 19000); EXPECT_GT(d["winner_switches"].get<int64_t>(), 60);
+    EXPECT_LE(d["map_switches"].get<int64_t>(), d["winner_switches"].get<int64_t>() + 5) << "the belief does not switch more than its evidence";
+}
+
+TEST(BeliefFilter, ASnapshotRestoresTheLearnedModel_TheNextTickIsTheSame) {
+    Fix a; std::mt19937 rng(3); std::normal_distribution<float> n(0.0f, 0.2f);
+    int k = 0;
+    for (uint64_t t = 0; t < 3000; ++t) { if (t % 150 == 0) k = 1 - k; a.step(t, k, (k ? 1.0f : -1.0f) + n(rng)); }
+    const auto snap = a.f.snapshot_state();
+    Fix b; b.f.restore_state(snap);
+    EXPECT_EQ(b.f.nodes(), a.f.nodes());
+    a.step(3000, k, 0.1f); b.step(3000, k, 0.1f);
+    EXPECT_EQ(a.f.map_node(), b.f.map_node()); EXPECT_NEAR(a.f.map_prob(), b.f.map_prob(), 1e-6); EXPECT_NEAR(a.f.estimate()[0], b.f.estimate()[0], 1e-5);
+    EXPECT_THROW(b.f.restore_state(nlohmann::json{{"version", 9}}), std::invalid_argument);
+}

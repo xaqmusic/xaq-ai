@@ -15,6 +15,12 @@
 //
 // Outputs (ProprioToken on output_topic): [filtered estimate E_b[mu] (dim), MAP node probability, belief entropy,
 // predictive surprise -log p(obs | b-) per dimension].  Diag: MAP node, agreement with the EPM's winner, node count.
+// THE CONSISTENCY CHECK (learned stepper Phase 3, 2026-11-15; diag only, the outputs unchanged): the normalised innovation
+// squared of each fresh observation against the PREDICTED belief's moment-matched mixture -- m = sum b-(j) mu_j,
+// S = sum b-(j) (var_j + mu_j^2) - m^2 -- averaged over the dimensions with variance: its expected value is 1 for a filter
+// whose stated spread is honest (>1 overconfident, <1 underconfident).  nis (this tick), nis_ema, nis_mean; and how often
+// the MAP node and the EPM's winner change (a belief that coasts through flicker switches less than the raw winner).
+// snapshot_state / restore_state carry the learned model (transitions, decode heads, belief) across runs.
 // An INSTRUMENT: nothing consumes it.  It owns no partition (CLAUDE.md §0 rule 1).
 // =============================================================================
 #pragma once
@@ -46,6 +52,10 @@ public:
     void tick(uint64_t tick_id) override;
     void on_param_change(std::string_view key, ParamValue const& value) override;
     nlohmann::json diag_snapshot() const override;
+    nlohmann::json snapshot_state() const override;
+    void restore_state(nlohmann::json const& s) override;
+    double  nis()       const { return nis_; }
+    double  nis_mean()  const { return nis_n_ > 0 ? nis_sum_ / double(nis_n_) : 0.0; }
 
     // ---- accessors for tests and the bench ----
     Eigen::VectorXf estimate() const { return est_; }        // E_b[mu], the filtered observation
@@ -89,6 +99,8 @@ private:
     int map_ = -1;
     double map_p_ = 0.0, entropy_ = 0.0, surprise_ = 0.0;
     int64_t ticks_ = 0, corrected_ = 0, agree_ = 0, compared_ = 0;
+    double nis_ = 0.0, nis_ema_ = 0.0, nis_sum_ = 0.0; int64_t nis_n_ = 0;   // the consistency check (diag only)
+    int prev_map_ = -1, prev_winner_ = -1; int64_t map_switches_ = 0, winner_switches_ = 0;
 };
 
 } // namespace ogma

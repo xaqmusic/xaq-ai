@@ -170,6 +170,21 @@ void BeliefFilter::tick(uint64_t tick_id) {
     const bool have_obs = obs_fresh_ && obs_.size() == dim_;
     if (have_obs) {
         const Eigen::VectorXf vfl = (g_var_ * float(var_rel_floor_)).cwiseMax(1e-6f);
+        {   // the consistency check (diag only): the observation against the predicted belief's moment-matched mixture
+            Eigen::VectorXd m = Eigen::VectorXd::Zero(dim_), s2 = Eigen::VectorXd::Zero(dim_); double bs = 0.0;
+            for (int j = 0; j < N; ++j) {
+                const double w = bp[size_t(j)]; if (w <= 0.0) continue;
+                const bool own = n_[size_t(j)] >= double(min_count_);
+                const Eigen::VectorXd mj = (own ? mu_[size_t(j)] : g_mu_).cast<double>(), vj = (own ? var_[size_t(j)] : g_var_).cwiseMax(vfl).cast<double>();
+                m += w * mj; s2 += w * (vj + mj.cwiseProduct(mj)); bs += w;
+            }
+            if (bs > 0.0) {
+                m /= bs; s2 = s2 / bs - m.cwiseProduct(m);
+                double acc = 0.0; int nd = 0;
+                for (int d = 0; d < dim_; ++d) { if (double(g_var_[d]) <= 1e-5 || s2[d] <= 1e-12) continue; const double e = double(obs_[d]) - m[d]; acc += e * e / s2[d]; ++nd; }
+                if (nd > 0) { nis_ = acc / nd; nis_ema_ += 0.01 * (nis_ - nis_ema_); nis_sum_ += nis_; ++nis_n_; }
+            }
+        }
         std::vector<double> ll(static_cast<size_t>(N), 0.0);
         double mx = -1e300;
         for (int j = 0; j < N; ++j) {
@@ -205,6 +220,8 @@ void BeliefFilter::tick(uint64_t tick_id) {
         if (w > 0.0) entropy_ -= w * std::log(w);
     }
     if (winner_fresh_) { ++compared_; if (map_ == winner_) ++agree_; }
+    if (map_ != prev_map_) { if (prev_map_ >= 0) ++map_switches_; prev_map_ = map_; }
+    if (winner_fresh_ && winner_ != prev_winner_) { if (prev_winner_ >= 0) ++winner_switches_; prev_winner_ = winner_; }
 
     // ---- learn from the EPM's label: transitions, and the winner's decode head ----
     if (winner_fresh_) {
@@ -241,7 +258,36 @@ void BeliefFilter::tick(uint64_t tick_id) {
 nlohmann::json BeliefFilter::diag_snapshot() const {
     return nlohmann::json{{"nodes", nodes()}, {"map_node", map_}, {"map_prob", map_p_}, {"entropy", entropy_},
                           {"surprise", surprise_}, {"ticks", ticks_}, {"corrected", corrected_},
-                          {"agree_with_epm", compared_ > 0 ? double(agree_) / compared_ : 0.0}};
+                          {"agree_with_epm", compared_ > 0 ? double(agree_) / compared_ : 0.0},
+                          {"nis", nis_}, {"nis_ema", nis_ema_}, {"nis_mean", nis_mean()}, {"nis_n", nis_n_},
+                          {"map_switches", map_switches_}, {"winner_switches", winner_switches_}};
+}
+
+namespace {
+std::vector<double> vecd(const Eigen::VectorXf& v) { return std::vector<double>(v.data(), v.data() + v.size()); }
+Eigen::VectorXf vecf(const nlohmann::json& j) { const auto d = j.get<std::vector<double>>(); Eigen::VectorXf v(int(d.size())); for (int i = 0; i < int(d.size()); ++i) v[i] = float(d[size_t(i)]); return v; }
+}
+
+// the learned model across runs (learned stepper Phase 3): nodes, decode heads, transition counts, the belief
+nlohmann::json BeliefFilter::snapshot_state() const {
+    nlohmann::json mu = nlohmann::json::array(), var = nlohmann::json::array();
+    for (size_t i = 0; i < ids_.size(); ++i) { mu.push_back(vecd(mu_[i])); var.push_back(vecd(var_[i])); }
+    return nlohmann::json{{"version", 1}, {"dim", dim_}, {"ids", ids_}, {"mu", mu}, {"var", var}, {"n", n_}, {"C", C_}, {"b", b_},
+                          {"last_winner", last_winner_}, {"g_mu", vecd(g_mu_)}, {"g_var", vecd(g_var_)}, {"g_n", g_n_}};
+}
+
+void BeliefFilter::restore_state(nlohmann::json const& s) {
+    if (s.is_null() || s.empty()) return;
+    if (s.value("version", 0) != 1) throw std::invalid_argument("BeliefFilter::restore_state: unknown version");
+    dim_ = s.at("dim").get<int>(); ids_ = s.at("ids").get<std::vector<int>>();
+    mu_.clear(); var_.clear();
+    for (auto const& m : s.at("mu")) mu_.push_back(vecf(m));
+    for (auto const& v : s.at("var")) var_.push_back(vecf(v));
+    n_ = s.at("n").get<std::vector<double>>(); C_ = s.at("C").get<std::vector<std::vector<double>>>(); b_ = s.at("b").get<std::vector<double>>();
+    last_winner_ = s.at("last_winner").get<int>(); g_mu_ = vecf(s.at("g_mu")); g_var_ = vecf(s.at("g_var")); g_n_ = s.at("g_n").get<double>();
+    idx_.clear(); for (int k = 0; k < int(ids_.size()); ++k) idx_[ids_[size_t(k)]] = k;
+    if (mu_.size() != ids_.size() || var_.size() != ids_.size() || n_.size() != ids_.size() || C_.size() != ids_.size() || b_.size() != ids_.size())
+        throw std::invalid_argument("BeliefFilter::restore_state: inconsistent sizes");
 }
 
 } // namespace ogma

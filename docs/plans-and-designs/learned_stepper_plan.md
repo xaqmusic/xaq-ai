@@ -239,7 +239,7 @@ asserted.
 | 0 Freeze and baseline | **done** — gate met (15 of 15 runs byte-identical from the repo's tools) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 0" |
 | 1 Prune | **done** — one rule of 16 redundant (the IK re-seed, covered by multistart); off in the stack configs, its code marked `PRUNE-P1` and kept until the cleanup pass (operator, 2026-11-15) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 1" |
 | 2 Split | **done** — gate met: LegSolver and the planner / executor / floor split byte-identical (15 of 15 runs each), the outcome stream and the room field-identical; unit tests per component | 2026-11-15 | 2026-11-15 "Learned stepper Phase 2" |
-| 3 Stance belief | — | | |
+| 3 Stance belief | **in flight** — built and measured; gate partly met (separation and flicker coasting yes; NIS 0.3–0.6, not ≈ 1; the vocabulary either forgets or keeps growing); two design questions to the operator | 2026-11-15 | 2026-11-15 "Learned stepper Phase 3" |
 | 4 Step generator | — | | |
 | 5 Policy in shadow | — | | |
 | 6 Authority by precision | — | | |

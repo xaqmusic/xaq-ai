@@ -77,6 +77,7 @@
 #include "ogma/modules/LiftDescent.hpp"
 #include "ogma/modules/GaitErrors.hpp"
 #include "ogma/modules/BeliefFilter.hpp"
+#include "ogma/modules/StanceFeatures.hpp"
 #include "ogma/modules/FeatureWindow.hpp"
 #include "ogma/modules/KeyframePeakDetector.hpp"
 #include "ogma/modules/LateralVoter.hpp"
@@ -213,6 +214,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("GaitErrors",          [](){ return std::make_unique<GaitErrors>(); });
         // 2026-10-24 — predict-then-correct over an EPM's nodes (generator_and_belief_filter.md §3.2, G2): instrument.
         reg.register_type("BeliefFilter",        [](){ return std::make_unique<BeliefFilter>(); });
+        reg.register_type("StanceFeatures",      [](){ return std::make_unique<StanceFeatures>(); });   // the careful stepper's stance, conditioned, for a stance EPM (learned stepper Phase 3, 2026-11-15)
         // 2026-10-24 — several topics summarised over a window as one vector (G3 gait-context input).
         reg.register_type("FeatureWindow",       [](){ return std::make_unique<FeatureWindow>(); });
         // 2026-06-05 Phase H1 V7 — peak-deviation companion to KeyframeAverager.
