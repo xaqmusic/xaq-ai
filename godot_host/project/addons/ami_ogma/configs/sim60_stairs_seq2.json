@@ -782,7 +782,8 @@
           "action.rr_knee"
         ],
         "output_topic": "pose.targets",
-        "ik_reseed_ticks": 25,
+        "ik_reseed_ticks": 0,
+        "outcome_topic": "step.outcome",
         "ik_multistart": 1.0,
         "hang_ticks": 20,
         "free_form": 3,

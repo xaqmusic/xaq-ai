@@ -20,9 +20,6 @@ std::string get_string(ParamValue const& v, std::string const& k) {
     throw std::invalid_argument("PoseSequencer: param '" + k + "' must be a string");
 }
 using body::Vec3f;
-Vec3f sub(const Vec3f& a, const Vec3f& b) { return Vec3f(a.x - b.x, a.y - b.y, a.z - b.z); }
-Vec3f add(const Vec3f& a, const Vec3f& b) { return Vec3f(a.x + b.x, a.y + b.y, a.z + b.z); }
-double len(const Vec3f& a) { return std::sqrt(double(a.x) * a.x + double(a.y) * a.y + double(a.z) * a.z); }
 const char* phase_name(PoseSequencer::Phase p) {
     switch (p) { case PoseSequencer::Phase::Idle: return "idle"; case PoseSequencer::Phase::Shift: return "shift"; case PoseSequencer::Phase::Lift: return "lift";
                  case PoseSequencer::Phase::Swing: return "swing"; case PoseSequencer::Phase::Lower: return "lower"; case PoseSequencer::Phase::Settle: return "settle"; }
@@ -30,7 +27,13 @@ const char* phase_name(PoseSequencer::Phase p) {
 }
 } // namespace
 
-PoseSequencer::PoseSequencer()  = default;
+PoseSequencer::PoseSequencer()
+    : executor_(in_, floor_, book_, kin_, rng_), planner_(in_, floor_, book_, kin_, rng_, executor_) {
+    executor_.intent_hook_ = [this] { return planner_.decide(); };
+    executor_.relief_hook_ = [this](int stuck, double cx, double cz, int bearing, int& leg_out, Vec3f& land_out, double& margin_out) {
+        return planner_.plan_relief(stuck, cx, cz, bearing, leg_out, land_out, margin_out); };
+    executor_.order_ref_ = &planner_.order_;
+}
 PoseSequencer::~PoseSequencer() = default;
 std::string_view PoseSequencer::type_name() const { return "PoseSequencer"; }
 
@@ -44,6 +47,7 @@ std::vector<TopicSpec> PoseSequencer::input_topics() const {
 std::vector<TopicSpec> PoseSequencer::output_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{output_topic_, std::type_index(typeid(ProprioToken))} };
     if (!odom_out_topic_.empty()) v.push_back(TopicSpec{odom_out_topic_, std::type_index(typeid(ProprioToken))});
+    if (!outcome_topic_.empty()) v.push_back(TopicSpec{outcome_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
 
@@ -101,6 +105,7 @@ ParamSchema PoseSequencer::params_schema() const {
         {"face_penalty_m", ParamMutability::HotMutable, "... by this much of the landing's score (m of margin).", ParamValue{0.02}},
         {"ik_multistart", ParamMutability::HotMutable, "1 = a leg the single-seed IK leaves more than 2 x ik_tol_m from its target is re-solved from seeds covering the leg's branches (neutral, femur down / up, knee folded / extended) and the best within the joint ranges is taken; 0 = off (byte-identical).", ParamValue{0.0}},
         {"ik_switch_m",   ParamMutability::HotMutable, "A branch from another seed is taken only when it beats the current solution's residual by this (m).", ParamValue{0.005}},
+        // PRUNE-P1 (learned stepper Phase 1, 2026-11-14; operator: keep until the cleanup pass, then delete and check byte identity): the two re-seed params.
         {"ik_reseed_ticks", ParamMutability::HotMutable, "A leg whose IK sits at a joint stop with its toe more than 2 x unreach_tol_m from its target for this many ticks is walked back to the neutral standing pose and re-solved (the wrong branch: a femur folded up for a target below); 0 = off.", ParamValue{int64_t{0}}},
         {"ik_reseed_rate_rad", ParamMutability::HotMutable, "The re-seed walks the joints toward the neutral pose at this much per tick (rad); the IK's step cap flipped the body when a planted leg snapped.", ParamValue{0.04}},
         {"crouch_max_m",  ParamMutability::HotMutable, "A lowering toe at its downward reach without ground brings the body down: the planted legs fold by up to this (m); 0 = off.", ParamValue{0.0}},
@@ -137,6 +142,7 @@ ParamSchema PoseSequencer::params_schema() const {
         {"margin_extra_m", ParamMutability::HotMutable, "The shift aims for margin_min_m plus this (m).", ParamValue{0.005}},
         {"order",         ParamMutability::HotMutable, "The crawl's leg order (leg indices 0 FL, 1 FR, 2 RL, 3 RR); the default is the wave gait RL, FL, RR, FR. Empty = the greedy choice (the toe furthest behind its place).", ParamValue{std::vector<double>{2, 0, 3, 1}}},
         {"odom_in_topic", ParamMutability::ConstructionOnly, "ProprioToken [x, y, yaw]: the body's dead-reckoned odometry; its yaw is the heading the hold keeps, and it is passed through while disengaged.", ParamValue{std::string("reality.proprio.odom")}},
+        {"outcome_topic", ParamMutability::ConstructionOnly, "ProprioToken [26]: each step's outcome at its touch (stepper::StepOutcome: the planned and realised landing, the ground predicted and met, the ticks, the hang, every correction by rule) -- the learned step generator's training signal. \"\" = not published.", ParamValue{std::string("")}},
         {"odom_out_topic", ParamMutability::ConstructionOnly, "ProprioToken [x, y, yaw]: the sequencer's own odometry (the body's commanded motion over the planted toes, the body's yaw) for the terrain memory's frame. \"\" = not published.", ParamValue{std::string("reality.proprio.odom_seq")}},
         {"heading_hold",  ParamMutability::HotMutable, "1 = hold the heading the body had at engage (the planted toes rotated during SHIFT); 0 = off.", ParamValue{1.0}},
         {"heading_ref",   ParamMutability::HotMutable, "\"zero\" = hold the dead-reckoning frame's own heading (the body's facing at its anchor, the corridor's axis); \"engage\" = the heading the body had at engage.", ParamValue{std::string("zero")}},
@@ -185,11 +191,11 @@ ParamMap PoseSequencer::current_params() const {
             {"feet_xz_topic", ParamValue{feet_xz_topic_}}, {"feet_y_topic", ParamValue{feet_y_topic_}}, {"up_topic", ParamValue{up_topic_}},
             {"contact_topic", ParamValue{contact_topic_}}, {"load_topic", ParamValue{load_topic_}}, {"gait_action_topics", ParamValue{gait_action_topics_}}, {"output_topic", ParamValue{output_topic_}},
             {"engage", ParamValue{engage_}}, {"engage_ramp_ticks", ParamValue{int64_t(engage_ramp_ticks_)}}, {"belly_topic", ParamValue{belly_topic_}},
-            {"stand_h_m", ParamValue{stand_h_m_}}, {"elev_source", ParamValue{elev_source_}}, {"crouch_max_m", ParamValue{crouch_max_m_}}, {"ik_reseed_ticks", ParamValue{int64_t(ik_reseed_ticks_)}}, {"ik_multistart", ParamValue{ik_multistart_}}, {"free_form", ParamValue{int64_t(free_form_)}}, {"front_drop_gain", ParamValue{front_drop_gain_}}, {"clip_ticks", ParamValue{int64_t(clip_ticks_)}}, {"unloaded_shift_m", ParamValue{unloaded_shift_m_}}, {"land_r_min_m", ParamValue{land_r_min_m_}}, {"ext_margin_m", ParamValue{ext_margin_m_}}, {"ext_lifting", ParamValue{ext_lifting_}}, {"overdue", ParamValue{overdue_}}, {"plan_next_first", ParamValue{plan_next_first_}}, {"ext_urgent_m", ParamValue{ext_urgent_m_}}, {"unloaded_share", ParamValue{unloaded_share_}}, {"unloaded_ticks", ParamValue{int64_t(unloaded_ticks_)}}, {"unloaded_landings_min", ParamValue{int64_t(unloaded_landings_min_)}}, {"unloaded_skips_min", ParamValue{int64_t(unloaded_skips_min_)}}, {"miss_reacquire", ParamValue{miss_reacquire_}}, {"miss_ticks", ParamValue{int64_t(miss_ticks_)}}, {"null_step_m", ParamValue{null_step_m_}}, {"front_drop_max_m", ParamValue{front_drop_max_m_}}, {"front_drop_deadband", ParamValue{front_drop_deadband_}}, {"front_drop_tau_ticks", ParamValue{front_drop_tau_ticks_}}, {"depth_max_m", ParamValue{depth_max_m_}}, {"free_margin_m", ParamValue{free_margin_m_}}, {"free_out_m", ParamValue{free_out_m_}}, {"free_noise_m", ParamValue{free_noise_m_}}, {"face_gap_m", ParamValue{face_gap_m_}}, {"face_penalty_m", ParamValue{face_penalty_m_}}, {"ik_switch_m", ParamValue{ik_switch_m_}}, {"imu_topic", ParamValue{imu_topic_}}, {"hang_ticks", ParamValue{int64_t(hang_ticks_)}}, {"drag_back_m", ParamValue{drag_back_m_}}, {"free_back_m", ParamValue{free_back_m_}}, {"free_extra_m", ParamValue{free_extra_m_}}, {"free_retract_m", ParamValue{free_retract_m_}}, {"ik_reseed_rate_rad", ParamValue{ik_reseed_rate_}}, {"crouch_v_mps", ParamValue{crouch_v_}}, {"crouch_relax_v_mps", ParamValue{crouch_relax_v_}}, {"level_gain", ParamValue{level_gain_}}, {"level_max_m", ParamValue{level_max_m_}}, {"sector_half_rad", ParamValue{sector_half_rad_}}, {"land_sector_rad", ParamValue{land_sector_rad_}}, {"land_band_lo_m", ParamValue{land_band_lo_m_}}, {"land_band_hi_m", ParamValue{land_band_hi_m_}}, {"neutral_r_m", ParamValue{neutral_r_m_}}, {"settle_v_mps", ParamValue{settle_v_}}, {"settle", ParamValue{settle_}}, {"land_clamp", ParamValue{land_clamp_}}, {"obstacle_ticks", ParamValue{int64_t(obstacle_ticks_)}}, {"odom_in_topic", ParamValue{odom_in_topic_}}, {"odom_out_topic", ParamValue{odom_out_topic_}}, {"heading_hold", ParamValue{heading_hold_}}, {"heading_ref", ParamValue{heading_ref_}}, {"heading_gain", ParamValue{heading_gain_}}, {"shift_realised", ParamValue{shift_realised_}}, {"yaw_rate_max", ParamValue{yaw_rate_max_}}, {"order", ParamValue{order_}}, {"centre_gain", ParamValue{centre_gain_}}, {"advance_m", ParamValue{advance_m_}}, {"margin_extra_m", ParamValue{margin_extra_m_}}, {"creep_v_mps", ParamValue{creep_v_}}, {"creep_load_min", ParamValue{creep_load_min_}}, {"advance_reach_m", ParamValue{advance_reach_m_}}, {"relief", ParamValue{relief_}}, {"plan", ParamValue{plan_}}, {"plan_shift_m", ParamValue{plan_shift_m_}}, {"plan_shift_fwd_m", ParamValue{plan_shift_fwd_m_}}, {"plan_land_m", ParamValue{plan_land_m_}}, {"plan_cell_m", ParamValue{plan_cell_m_}}, {"plan_adv_w", ParamValue{plan_adv_w_}}, {"relief_step_m", ParamValue{relief_step_m_}}, {"relief_cells", ParamValue{int64_t(relief_cells_)}}, {"creep_load_relax", ParamValue{creep_load_relax_}}, {"bear_tau_ticks", ParamValue{bear_tau_ticks_}}, {"bear_on", ParamValue{bear_on_}}, {"bear_off", ParamValue{bear_off_}}, {"touch_ticks", ParamValue{int64_t(touch_ticks_)}}, {"touch_load", ParamValue{touch_load_}}, {"creep_max_m", ParamValue{creep_max_m_}}, {"creep_relax_v_mps", ParamValue{creep_relax_v_}}, {"elev_deadband_m", ParamValue{elev_deadband_m_}}, {"elev_tau_ticks", ParamValue{elev_tau_ticks_}}, {"air_ticks_min", ParamValue{int64_t(air_ticks_min_)}}, {"reach_min_m", ParamValue{reach_min_m_}}, {"retreat_m", ParamValue{retreat_m_}}, {"elev_max_m", ParamValue{elev_max_m_}}, {"reach_max_m", ParamValue{reach_max_m_}}, {"unreach_tol_m", ParamValue{unreach_tol_m_}},
-            {"engage_min_belly_m", ParamValue{engage_min_belly_m_}}, {"engage_min_tick", ParamValue{int64_t(engage_min_tick_)}}, {"engage_min_contacts", ParamValue{int64_t(engage_min_contacts_)}}, {"phase_max_ticks", ParamValue{int64_t(phase_max_ticks_)}}, {"shift_v_mps", ParamValue{shift_v_}}, {"shift_max_m", ParamValue{shift_max_m_}},
-            {"margin_min_m", ParamValue{margin_min_m_}}, {"lift_clear_m", ParamValue{lift_clear_m_}}, {"lift_v_mps", ParamValue{lift_v_}}, {"swing_v_mps", ParamValue{swing_v_}},
-            {"lower_v_mps", ParamValue{lower_v_}}, {"lower_fast_v_mps", ParamValue{lower_fast_v_}}, {"lower_standoff_m", ParamValue{lower_standoff_m_}}, {"lower_standoff_k", ParamValue{lower_standoff_k_}}, {"land_edge_m", ParamValue{land_edge_m_}}, {"land_edge_max_m", ParamValue{land_edge_max_m_}}, {"stride_m", ParamValue{stride_m_}}, {"sink_max_m", ParamValue{sink_max_m_}}, {"tilt_disengage", ParamValue{tilt_disengage_}},
-            {"dt_s", ParamValue{dt_}}, {"ik_iters", ParamValue{int64_t(ik_iters_)}}, {"ik_damping_m", ParamValue{ik_damping_m_}}, {"ik_step_max_rad", ParamValue{ik_step_max_rad_}}, {"ik_tol_m", ParamValue{ik_tol_m_}}};
+            {"stand_h_m", ParamValue{executor_.stand_h_m_}}, {"elev_source", ParamValue{executor_.elev_source_}}, {"crouch_max_m", ParamValue{executor_.crouch_max_m_}}, {"ik_reseed_ticks", ParamValue{int64_t(executor_.ik_reseed_ticks_)}}, {"ik_multistart", ParamValue{executor_.ik_multistart_}}, {"free_form", ParamValue{int64_t(executor_.free_form_)}}, {"front_drop_gain", ParamValue{executor_.front_drop_gain_}}, {"clip_ticks", ParamValue{int64_t(executor_.clip_ticks_)}}, {"unloaded_shift_m", ParamValue{book_.unloaded_shift_m_}}, {"land_r_min_m", ParamValue{planner_.land_r_min_m_}}, {"ext_margin_m", ParamValue{planner_.ext_margin_m_}}, {"ext_lifting", ParamValue{planner_.ext_lifting_}}, {"overdue", ParamValue{planner_.overdue_}}, {"plan_next_first", ParamValue{planner_.plan_next_first_}}, {"ext_urgent_m", ParamValue{planner_.ext_urgent_m_}}, {"unloaded_share", ParamValue{book_.unloaded_share_}}, {"unloaded_ticks", ParamValue{int64_t(book_.unloaded_ticks_)}}, {"unloaded_landings_min", ParamValue{int64_t(book_.unloaded_landings_min_)}}, {"unloaded_skips_min", ParamValue{int64_t(book_.unloaded_skips_min_)}}, {"miss_reacquire", ParamValue{executor_.miss_reacquire_}}, {"miss_ticks", ParamValue{int64_t(executor_.miss_ticks_)}}, {"null_step_m", ParamValue{executor_.null_step_m_}}, {"front_drop_max_m", ParamValue{executor_.front_drop_max_m_}}, {"front_drop_deadband", ParamValue{executor_.front_drop_deadband_}}, {"front_drop_tau_ticks", ParamValue{executor_.front_drop_tau_ticks_}}, {"depth_max_m", ParamValue{executor_.depth_max_m_}}, {"free_margin_m", ParamValue{executor_.free_margin_m_}}, {"free_out_m", ParamValue{executor_.free_out_m_}}, {"free_noise_m", ParamValue{executor_.free_noise_m_}}, {"face_gap_m", ParamValue{planner_.face_gap_m_}}, {"face_penalty_m", ParamValue{planner_.face_penalty_m_}}, {"ik_switch_m", ParamValue{kin_.p.ik_switch_m}}, {"imu_topic", ParamValue{imu_topic_}}, {"hang_ticks", ParamValue{int64_t(executor_.hang_ticks_)}}, {"drag_back_m", ParamValue{executor_.drag_back_m_}}, {"free_back_m", ParamValue{executor_.free_back_m_}}, {"free_extra_m", ParamValue{executor_.free_extra_m_}}, {"free_retract_m", ParamValue{executor_.free_retract_m_}}, {"ik_reseed_rate_rad", ParamValue{executor_.ik_reseed_rate_}}, {"crouch_v_mps", ParamValue{executor_.crouch_v_}}, {"crouch_relax_v_mps", ParamValue{executor_.crouch_relax_v_}}, {"level_gain", ParamValue{executor_.level_gain_}}, {"level_max_m", ParamValue{executor_.level_max_m_}}, {"sector_half_rad", ParamValue{kin_.p.sector_half_rad}}, {"land_sector_rad", ParamValue{executor_.land_sector_rad_}}, {"land_band_lo_m", ParamValue{executor_.land_band_lo_m_}}, {"land_band_hi_m", ParamValue{executor_.land_band_hi_m_}}, {"neutral_r_m", ParamValue{executor_.neutral_r_m_}}, {"settle_v_mps", ParamValue{executor_.settle_v_}}, {"settle", ParamValue{executor_.settle_}}, {"land_clamp", ParamValue{executor_.land_clamp_}}, {"obstacle_ticks", ParamValue{int64_t(executor_.obstacle_ticks_)}}, {"odom_in_topic", ParamValue{odom_in_topic_}}, {"odom_out_topic", ParamValue{odom_out_topic_}}, {"outcome_topic", ParamValue{outcome_topic_}}, {"heading_hold", ParamValue{executor_.heading_hold_}}, {"heading_ref", ParamValue{executor_.heading_ref_}}, {"heading_gain", ParamValue{executor_.heading_gain_}}, {"shift_realised", ParamValue{executor_.shift_realised_}}, {"yaw_rate_max", ParamValue{executor_.yaw_rate_max_}}, {"order", ParamValue{planner_.order_}}, {"centre_gain", ParamValue{executor_.centre_gain_}}, {"advance_m", ParamValue{executor_.advance_m_}}, {"margin_extra_m", ParamValue{floor_.margin_extra_m_}}, {"creep_v_mps", ParamValue{executor_.creep_v_}}, {"creep_load_min", ParamValue{executor_.creep_load_min_}}, {"advance_reach_m", ParamValue{executor_.advance_reach_m_}}, {"relief", ParamValue{executor_.relief_}}, {"plan", ParamValue{planner_.plan_}}, {"plan_shift_m", ParamValue{planner_.plan_shift_m_}}, {"plan_shift_fwd_m", ParamValue{planner_.plan_shift_fwd_m_}}, {"plan_land_m", ParamValue{planner_.plan_land_m_}}, {"plan_cell_m", ParamValue{planner_.plan_cell_m_}}, {"plan_adv_w", ParamValue{planner_.plan_adv_w_}}, {"relief_step_m", ParamValue{planner_.relief_step_m_}}, {"relief_cells", ParamValue{int64_t(planner_.relief_cells_)}}, {"creep_load_relax", ParamValue{executor_.creep_load_relax_}}, {"bear_tau_ticks", ParamValue{executor_.bear_tau_ticks_}}, {"bear_on", ParamValue{executor_.bear_on_}}, {"bear_off", ParamValue{executor_.bear_off_}}, {"touch_ticks", ParamValue{int64_t(executor_.touch_ticks_)}}, {"touch_load", ParamValue{executor_.touch_load_}}, {"creep_max_m", ParamValue{executor_.creep_max_m_}}, {"creep_relax_v_mps", ParamValue{executor_.creep_relax_v_}}, {"elev_deadband_m", ParamValue{executor_.elev_deadband_m_}}, {"elev_tau_ticks", ParamValue{executor_.elev_tau_ticks_}}, {"air_ticks_min", ParamValue{int64_t(executor_.air_ticks_min_)}}, {"reach_min_m", ParamValue{kin_.p.reach_min_m}}, {"retreat_m", ParamValue{executor_.retreat_m_}}, {"elev_max_m", ParamValue{executor_.elev_max_m_}}, {"reach_max_m", ParamValue{kin_.p.reach_max_m}}, {"unreach_tol_m", ParamValue{executor_.unreach_tol_m_}},
+            {"engage_min_belly_m", ParamValue{floor_.engage_min_belly_m_}}, {"engage_min_tick", ParamValue{int64_t(floor_.engage_min_tick_)}}, {"engage_min_contacts", ParamValue{int64_t(floor_.engage_min_contacts_)}}, {"phase_max_ticks", ParamValue{int64_t(executor_.phase_max_ticks_)}}, {"shift_v_mps", ParamValue{executor_.shift_v_}}, {"shift_max_m", ParamValue{executor_.shift_max_m_}},
+            {"margin_min_m", ParamValue{floor_.margin_min_m_}}, {"lift_clear_m", ParamValue{executor_.lift_clear_m_}}, {"lift_v_mps", ParamValue{executor_.lift_v_}}, {"swing_v_mps", ParamValue{executor_.swing_v_}},
+            {"lower_v_mps", ParamValue{executor_.lower_v_}}, {"lower_fast_v_mps", ParamValue{executor_.lower_fast_v_}}, {"lower_standoff_m", ParamValue{executor_.lower_standoff_m_}}, {"lower_standoff_k", ParamValue{executor_.lower_standoff_k_}}, {"land_edge_m", ParamValue{executor_.land_edge_m_}}, {"land_edge_max_m", ParamValue{executor_.land_edge_max_m_}}, {"stride_m", ParamValue{executor_.stride_m_}}, {"sink_max_m", ParamValue{executor_.sink_max_m_}}, {"tilt_disengage", ParamValue{floor_.tilt_disengage_}},
+            {"dt_s", ParamValue{executor_.dt_}}, {"ik_iters", ParamValue{int64_t(kin_.p.ik_iters)}}, {"ik_damping_m", ParamValue{kin_.p.ik_damping_m}}, {"ik_step_max_rad", ParamValue{kin_.p.ik_step_max_rad}}, {"ik_tol_m", ParamValue{kin_.p.ik_tol_m}}};
 }
 
 void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
@@ -197,10 +203,10 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
     if (!bus_) throw std::invalid_argument("PoseSequencer requires a non-null Bus");
     for (auto pr : std::initializer_list<std::pair<const char*, std::string*>>{
             {"model_topic", &model_topic_}, {"support_topic", &support_topic_}, {"patch_topic", &patch_topic_}, {"feet_xz_topic", &feet_xz_topic_},
-            {"feet_y_topic", &feet_y_topic_}, {"up_topic", &up_topic_}, {"imu_topic", &imu_topic_}, {"contact_topic", &contact_topic_}, {"load_topic", &load_topic_}, {"output_topic", &output_topic_}, {"belly_topic", &belly_topic_}, {"odom_in_topic", &odom_in_topic_}, {"odom_out_topic", &odom_out_topic_}})
+            {"feet_y_topic", &feet_y_topic_}, {"up_topic", &up_topic_}, {"imu_topic", &imu_topic_}, {"contact_topic", &contact_topic_}, {"load_topic", &load_topic_}, {"output_topic", &output_topic_}, {"belly_topic", &belly_topic_}, {"odom_in_topic", &odom_in_topic_}, {"odom_out_topic", &odom_out_topic_}, {"outcome_topic", &outcome_topic_}})
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     apply_param(params, "gait_action_topics", [&](auto const& v){ if (auto p = std::get_if<std::vector<std::string>>(&v)) gait_action_topics_ = *p; });
-    apply_param(params, "order", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) order_ = *p; });
+    apply_param(params, "order", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) planner_.order_ = *p; });
     for (auto const& k : {"engage", "engage_ramp_ticks", "elev_source", "crouch_max_m", "ik_reseed_ticks", "ik_multistart", "free_form", "front_drop_gain", "clip_ticks", "unloaded_shift_m", "land_r_min_m", "ext_margin_m", "ext_lifting", "overdue", "plan_next_first", "ext_urgent_m", "unloaded_share", "unloaded_ticks", "unloaded_landings_min", "unloaded_skips_min", "miss_reacquire", "miss_ticks", "null_step_m", "front_drop_max_m", "front_drop_deadband", "front_drop_tau_ticks", "depth_max_m", "free_margin_m", "free_out_m", "free_noise_m", "face_gap_m", "face_penalty_m", "ik_switch_m", "hang_ticks", "drag_back_m", "free_back_m", "free_extra_m", "free_retract_m", "ik_reseed_rate_rad", "crouch_v_mps", "crouch_relax_v_mps", "stand_h_m", "level_gain", "level_max_m", "sector_half_rad", "land_sector_rad", "land_band_lo_m", "land_band_hi_m", "neutral_r_m", "settle_v_mps", "settle", "land_clamp", "obstacle_ticks", "heading_hold", "heading_ref", "heading_gain", "yaw_rate_max", "shift_realised", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_load_min", "advance_reach_m", "relief", "plan", "plan_shift_m", "plan_shift_fwd_m", "plan_land_m", "plan_cell_m", "plan_adv_w", "relief_step_m", "relief_cells", "creep_load_relax", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps", "lower_fast_v_mps", "lower_standoff_m", "lower_standoff_k", "land_edge_m", "land_edge_max_m",
                           "stride_m", "sink_max_m", "tilt_disengage", "dt_s", "ik_iters", "ik_damping_m", "ik_step_max_rad", "ik_tol_m"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
@@ -215,7 +221,7 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
         if (!input_allowed(p->producer_id)) return;
         auto e = std::dynamic_pointer_cast<const EnvEvent>(p); if (!e) return;
         const std::string name(topic.substr(std::string(topics::kEventsPrefix).size()));
-        if (name == "reset" || name == "miss") { ++resets_seen_; if (phase_ != Phase::Idle) { phase_ = Phase::Idle; leg_ = -1; } engage_level_ = 0.0f; }
+        if (name == "reset" || name == "miss") { ++resets_seen_; if (executor_.phase_ != Phase::Idle) { executor_.phase_ = Phase::Idle; executor_.leg_ = -1; } engage_level_ = 0.0f; }
     }));
 }
 
@@ -223,118 +229,120 @@ void PoseSequencer::on_param_change(std::string_view key, ParamValue const& valu
     const std::string k(key);
     if      (k == "engage")           engage_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "engage_ramp_ticks") engage_ramp_ticks_ = std::max(1, int(get_double(value, k)));
-    else if (k == "stand_h_m")        stand_h_m_ = std::max(0.02, get_double(value, k));
-    else if (k == "level_gain")       level_gain_ = std::clamp(get_double(value, k), 0.0, 1.5);
-    else if (k == "level_max_m")      level_max_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "sector_half_rad")  sector_half_rad_ = std::clamp(get_double(value, k), 0.1, 3.0);
-    else if (k == "land_sector_rad")  land_sector_rad_ = std::clamp(get_double(value, k), 0.1, 3.0);
-    else if (k == "land_band_lo_m")   land_band_lo_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "land_band_hi_m")   land_band_hi_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "neutral_r_m")      neutral_r_m_ = std::max(0.03, get_double(value, k));
-    else if (k == "settle_v_mps")     settle_v_ = std::max(1e-3, get_double(value, k));
-    else if (k == "settle")           settle_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "land_clamp")       land_clamp_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "obstacle_ticks")   obstacle_ticks_ = std::max(0, int(get_double(value, k)));
-    else if (k == "heading_hold")     heading_hold_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "heading_ref")      { const std::string v = get_string(value, k); if (v != "zero" && v != "engage") throw std::invalid_argument("PoseSequencer: heading_ref must be \"zero\" or \"engage\""); heading_ref_ = v; }
-    else if (k == "heading_gain")     heading_gain_ = std::max(0.0, get_double(value, k));
-    else if (k == "shift_realised")   shift_realised_ = std::clamp(get_double(value, k), 0.1, 1.5);
-    else if (k == "yaw_rate_max")     yaw_rate_max_ = std::max(0.0, get_double(value, k));
-    else if (k == "order")            { if (auto p = std::get_if<std::vector<double>>(&value)) order_ = *p; }
-    else if (k == "centre_gain")      centre_gain_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "advance_m")        advance_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "bear_tau_ticks")   bear_tau_ticks_ = std::max(1.0, get_double(value, k));
-    else if (k == "bear_on")          bear_on_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "bear_off")         bear_off_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "touch_ticks")      touch_ticks_ = std::max(1, int(get_double(value, k)));
-    else if (k == "touch_load")       touch_load_ = std::max(0.0, get_double(value, k));
-    else if (k == "plan")             plan_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "plan_shift_m")     plan_shift_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "plan_shift_fwd_m") plan_shift_fwd_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "plan_land_m")      plan_land_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "plan_cell_m")      plan_cell_m_ = std::max(2e-3, get_double(value, k));
-    else if (k == "plan_adv_w")       plan_adv_w_ = std::max(0.0, get_double(value, k));
-    else if (k == "relief")           relief_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "relief_step_m")    relief_step_m_ = std::max(1e-3, get_double(value, k));
-    else if (k == "relief_cells")     relief_cells_ = std::clamp(int(get_double(value, k)), 0, 20);
-    else if (k == "advance_reach_m")  advance_reach_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "creep_load_min")   creep_load_min_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "creep_load_relax") creep_load_relax_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "creep_v_mps")      creep_v_ = std::max(0.0, get_double(value, k));
-    else if (k == "creep_max_m")      creep_max_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "creep_relax_v_mps") creep_relax_v_ = std::max(0.0, get_double(value, k));
-    else if (k == "elev_deadband_m")  elev_deadband_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "elev_tau_ticks")   elev_tau_ticks_ = std::max(1.0, get_double(value, k));
-    else if (k == "air_ticks_min")    air_ticks_min_ = std::max(1, int(get_double(value, k)));
-    else if (k == "margin_extra_m")   margin_extra_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "reach_min_m")      reach_min_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "retreat_m")        retreat_m_ = std::max(0.0, get_double(value, k));   // 0 = no retreat (the prune's leave-one-out, 2026-11-14)
-    else if (k == "ik_reseed_rate_rad") ik_reseed_rate_ = std::clamp(get_double(value, k), 1e-3, 0.5);
-    else if (k == "hang_ticks")       hang_ticks_ = std::max(0, int(get_double(value, k)));
-    else if (k == "drag_back_m")      drag_back_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "free_back_m")      free_back_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "free_extra_m")     free_extra_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "free_retract_m")   free_retract_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "land_r_min_m")     land_r_min_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "ext_margin_m")     ext_margin_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "ext_lifting")      ext_lifting_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "overdue")          overdue_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "plan_next_first")  plan_next_first_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "ext_urgent_m")     ext_urgent_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "unloaded_shift_m") unloaded_shift_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "unloaded_share")   unloaded_share_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "unloaded_skips_min") unloaded_skips_min_ = std::max(0, int(get_double(value, k)));
-    else if (k == "unloaded_landings_min") unloaded_landings_min_ = std::max(1, int(get_double(value, k)));
-    else if (k == "unloaded_ticks")   unloaded_ticks_ = std::max(1, int(get_double(value, k)));
-    else if (k == "clip_ticks")       clip_ticks_ = std::max(0, int(get_double(value, k)));
-    else if (k == "miss_reacquire")   miss_reacquire_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "null_step_m")      null_step_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "miss_ticks")       miss_ticks_ = std::max(0, int(get_double(value, k)));
-    else if (k == "front_drop_gain") front_drop_gain_ = std::max(0.0, get_double(value, k));
-    else if (k == "front_drop_max_m") front_drop_max_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "front_drop_tau_ticks") front_drop_tau_ticks_ = std::max(1.0, get_double(value, k));
-    else if (k == "front_drop_deadband") front_drop_deadband_ = std::max(0.0, get_double(value, k));
-    else if (k == "depth_max_m")      depth_max_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "free_form")        free_form_ = std::clamp(int(get_double(value, k)), 2, 3);
-    else if (k == "free_margin_m")    free_margin_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "free_out_m")       free_out_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "free_noise_m")     free_noise_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "face_gap_m")       face_gap_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "face_penalty_m")   face_penalty_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "ik_multistart")    ik_multistart_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "ik_switch_m")      ik_switch_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "ik_reseed_ticks")  ik_reseed_ticks_ = std::max(0, int(get_double(value, k)));
-    else if (k == "crouch_max_m")     crouch_max_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "crouch_v_mps")     crouch_v_ = std::max(0.0, get_double(value, k));
-    else if (k == "crouch_relax_v_mps") crouch_relax_v_ = std::max(0.0, get_double(value, k));
-    else if (k == "elev_source")      { const std::string x = get_string(value, k); if (x == "patch" || x == "landed") elev_source_ = x; }
-    else if (k == "elev_max_m")       elev_max_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "reach_max_m")      reach_max_m_ = std::max(0.03, get_double(value, k));
-    else if (k == "unreach_tol_m")    unreach_tol_m_ = std::max(1e-3, get_double(value, k));
-    else if (k == "engage_min_belly_m") engage_min_belly_m_ = get_double(value, k);
-    else if (k == "engage_min_tick")  engage_min_tick_ = std::max(0, int(get_double(value, k)));
-    else if (k == "engage_min_contacts") engage_min_contacts_ = std::clamp(int(get_double(value, k)), 0, 4);
-    else if (k == "phase_max_ticks")  phase_max_ticks_ = std::max(1, int(get_double(value, k)));
-    else if (k == "shift_v_mps")      shift_v_ = std::max(0.0, get_double(value, k));
-    else if (k == "shift_max_m")      shift_max_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "margin_min_m")     margin_min_m_ = get_double(value, k);
-    else if (k == "lift_clear_m")     lift_clear_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "lift_v_mps")       lift_v_ = std::max(1e-3, get_double(value, k));
-    else if (k == "swing_v_mps")      swing_v_ = std::max(1e-3, get_double(value, k));
-    else if (k == "lower_v_mps")      lower_v_ = std::max(1e-3, get_double(value, k));
-    else if (k == "lower_fast_v_mps") lower_fast_v_ = std::max(0.0, get_double(value, k));
-    else if (k == "lower_standoff_m") lower_standoff_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "lower_standoff_k") lower_standoff_k_ = std::max(0.0, get_double(value, k));
-    else if (k == "land_edge_m")      land_edge_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "land_edge_max_m")  land_edge_max_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "stride_m")         stride_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "sink_max_m")       sink_max_m_ = std::max(0.0, get_double(value, k));
-    else if (k == "tilt_disengage")   tilt_disengage_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "dt_s")             dt_ = std::max(1e-3, get_double(value, k));
-    else if (k == "ik_iters")         ik_iters_ = std::clamp(int(get_double(value, k)), 1, 32);
-    else if (k == "ik_damping_m")     ik_damping_m_ = std::max(1e-4, get_double(value, k));
-    else if (k == "ik_step_max_rad")  ik_step_max_rad_ = std::max(1e-3, get_double(value, k));
-    else if (k == "ik_tol_m")         ik_tol_m_ = std::max(1e-4, get_double(value, k));
+    else if (k == "stand_h_m")        executor_.stand_h_m_ = std::max(0.02, get_double(value, k));
+    else if (k == "level_gain")       executor_.level_gain_ = std::clamp(get_double(value, k), 0.0, 1.5);
+    else if (k == "level_max_m")      executor_.level_max_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "sector_half_rad")  kin_.p.sector_half_rad = std::clamp(get_double(value, k), 0.1, 3.0);
+    else if (k == "land_sector_rad")  executor_.land_sector_rad_ = std::clamp(get_double(value, k), 0.1, 3.0);
+    else if (k == "land_band_lo_m")   executor_.land_band_lo_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "land_band_hi_m")   executor_.land_band_hi_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "neutral_r_m")      executor_.neutral_r_m_ = std::max(0.03, get_double(value, k));
+    else if (k == "settle_v_mps")     executor_.settle_v_ = std::max(1e-3, get_double(value, k));
+    else if (k == "settle")           executor_.settle_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "land_clamp")       executor_.land_clamp_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "obstacle_ticks")   executor_.obstacle_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "heading_hold")     executor_.heading_hold_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "heading_ref")      { const std::string v = get_string(value, k); if (v != "zero" && v != "engage") throw std::invalid_argument("PoseSequencer: heading_ref must be \"zero\" or \"engage\""); executor_.heading_ref_ = v; }
+    else if (k == "heading_gain")     executor_.heading_gain_ = std::max(0.0, get_double(value, k));
+    else if (k == "shift_realised")   executor_.shift_realised_ = std::clamp(get_double(value, k), 0.1, 1.5);
+    else if (k == "yaw_rate_max")     executor_.yaw_rate_max_ = std::max(0.0, get_double(value, k));
+    else if (k == "order")            { if (auto p = std::get_if<std::vector<double>>(&value)) planner_.order_ = *p; }
+    else if (k == "centre_gain")      executor_.centre_gain_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "advance_m")        executor_.advance_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "bear_tau_ticks")   executor_.bear_tau_ticks_ = std::max(1.0, get_double(value, k));
+    else if (k == "bear_on")          executor_.bear_on_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "bear_off")         executor_.bear_off_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "touch_ticks")      executor_.touch_ticks_ = std::max(1, int(get_double(value, k)));
+    else if (k == "touch_load")       executor_.touch_load_ = std::max(0.0, get_double(value, k));
+    else if (k == "plan")             planner_.plan_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "plan_shift_m")     planner_.plan_shift_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "plan_shift_fwd_m") planner_.plan_shift_fwd_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "plan_land_m")      planner_.plan_land_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "plan_cell_m")      planner_.plan_cell_m_ = std::max(2e-3, get_double(value, k));
+    else if (k == "plan_adv_w")       planner_.plan_adv_w_ = std::max(0.0, get_double(value, k));
+    else if (k == "relief")           executor_.relief_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "relief_step_m")    planner_.relief_step_m_ = std::max(1e-3, get_double(value, k));
+    else if (k == "relief_cells")     planner_.relief_cells_ = std::clamp(int(get_double(value, k)), 0, 20);
+    else if (k == "advance_reach_m")  executor_.advance_reach_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "creep_load_min")   executor_.creep_load_min_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "creep_load_relax") executor_.creep_load_relax_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "creep_v_mps")      executor_.creep_v_ = std::max(0.0, get_double(value, k));
+    else if (k == "creep_max_m")      executor_.creep_max_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "creep_relax_v_mps") executor_.creep_relax_v_ = std::max(0.0, get_double(value, k));
+    else if (k == "elev_deadband_m")  executor_.elev_deadband_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "elev_tau_ticks")   executor_.elev_tau_ticks_ = std::max(1.0, get_double(value, k));
+    else if (k == "air_ticks_min")    executor_.air_ticks_min_ = std::max(1, int(get_double(value, k)));
+    else if (k == "margin_extra_m")   floor_.margin_extra_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "reach_min_m")      kin_.p.reach_min_m = std::max(0.0, get_double(value, k));
+    else if (k == "retreat_m")        executor_.retreat_m_ = std::max(0.0, get_double(value, k));   // 0 = no retreat (the prune's leave-one-out, 2026-11-14)
+    // PRUNE-P1 (learned stepper Phase 1, 2026-11-14; operator: keep until the cleanup pass, then delete and check byte identity): (re-seed param)
+    else if (k == "ik_reseed_rate_rad") executor_.ik_reseed_rate_ = std::clamp(get_double(value, k), 1e-3, 0.5);
+    else if (k == "hang_ticks")       executor_.hang_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "drag_back_m")      executor_.drag_back_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "free_back_m")      executor_.free_back_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "free_extra_m")     executor_.free_extra_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "free_retract_m")   executor_.free_retract_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "land_r_min_m")     planner_.land_r_min_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "ext_margin_m")     planner_.ext_margin_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "ext_lifting")      planner_.ext_lifting_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "overdue")          planner_.overdue_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "plan_next_first")  planner_.plan_next_first_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "ext_urgent_m")     planner_.ext_urgent_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "unloaded_shift_m") book_.unloaded_shift_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "unloaded_share")   book_.unloaded_share_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "unloaded_skips_min") book_.unloaded_skips_min_ = std::max(0, int(get_double(value, k)));
+    else if (k == "unloaded_landings_min") book_.unloaded_landings_min_ = std::max(1, int(get_double(value, k)));
+    else if (k == "unloaded_ticks")   book_.unloaded_ticks_ = std::max(1, int(get_double(value, k)));
+    else if (k == "clip_ticks")       executor_.clip_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "miss_reacquire")   executor_.miss_reacquire_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "null_step_m")      executor_.null_step_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "miss_ticks")       executor_.miss_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "front_drop_gain") executor_.front_drop_gain_ = std::max(0.0, get_double(value, k));
+    else if (k == "front_drop_max_m") executor_.front_drop_max_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "front_drop_tau_ticks") executor_.front_drop_tau_ticks_ = std::max(1.0, get_double(value, k));
+    else if (k == "front_drop_deadband") executor_.front_drop_deadband_ = std::max(0.0, get_double(value, k));
+    else if (k == "depth_max_m")      executor_.depth_max_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "free_form")        executor_.free_form_ = std::clamp(int(get_double(value, k)), 2, 3);
+    else if (k == "free_margin_m")    executor_.free_margin_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "free_out_m")       executor_.free_out_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "free_noise_m")     executor_.free_noise_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "face_gap_m")       planner_.face_gap_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "face_penalty_m")   planner_.face_penalty_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "ik_multistart")    executor_.ik_multistart_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "ik_switch_m")      kin_.p.ik_switch_m = std::max(0.0, get_double(value, k));
+    // PRUNE-P1 (learned stepper Phase 1, 2026-11-14; operator: keep until the cleanup pass, then delete and check byte identity): (re-seed param)
+    else if (k == "ik_reseed_ticks")  executor_.ik_reseed_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "crouch_max_m")     executor_.crouch_max_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "crouch_v_mps")     executor_.crouch_v_ = std::max(0.0, get_double(value, k));
+    else if (k == "crouch_relax_v_mps") executor_.crouch_relax_v_ = std::max(0.0, get_double(value, k));
+    else if (k == "elev_source")      { const std::string x = get_string(value, k); if (x == "patch" || x == "landed") executor_.elev_source_ = x; }
+    else if (k == "elev_max_m")       executor_.elev_max_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "reach_max_m")      kin_.p.reach_max_m = std::max(0.03, get_double(value, k));
+    else if (k == "unreach_tol_m")    executor_.unreach_tol_m_ = std::max(1e-3, get_double(value, k));
+    else if (k == "engage_min_belly_m") floor_.engage_min_belly_m_ = get_double(value, k);
+    else if (k == "engage_min_tick")  floor_.engage_min_tick_ = std::max(0, int(get_double(value, k)));
+    else if (k == "engage_min_contacts") floor_.engage_min_contacts_ = std::clamp(int(get_double(value, k)), 0, 4);
+    else if (k == "phase_max_ticks")  executor_.phase_max_ticks_ = std::max(1, int(get_double(value, k)));
+    else if (k == "shift_v_mps")      executor_.shift_v_ = std::max(0.0, get_double(value, k));
+    else if (k == "shift_max_m")      executor_.shift_max_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "margin_min_m")     floor_.margin_min_m_ = get_double(value, k);
+    else if (k == "lift_clear_m")     executor_.lift_clear_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "lift_v_mps")       executor_.lift_v_ = std::max(1e-3, get_double(value, k));
+    else if (k == "swing_v_mps")      executor_.swing_v_ = std::max(1e-3, get_double(value, k));
+    else if (k == "lower_v_mps")      executor_.lower_v_ = std::max(1e-3, get_double(value, k));
+    else if (k == "lower_fast_v_mps") executor_.lower_fast_v_ = std::max(0.0, get_double(value, k));
+    else if (k == "lower_standoff_m") executor_.lower_standoff_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "lower_standoff_k") executor_.lower_standoff_k_ = std::max(0.0, get_double(value, k));
+    else if (k == "land_edge_m")      executor_.land_edge_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "land_edge_max_m")  executor_.land_edge_max_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "stride_m")         executor_.stride_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "sink_max_m")       executor_.sink_max_m_ = std::max(0.0, get_double(value, k));
+    else if (k == "tilt_disengage")   floor_.tilt_disengage_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "dt_s")             executor_.dt_ = std::max(1e-3, get_double(value, k));
+    else if (k == "ik_iters")         kin_.p.ik_iters = std::clamp(int(get_double(value, k)), 1, 32);
+    else if (k == "ik_damping_m")     kin_.p.ik_damping_m = std::max(1e-4, get_double(value, k));
+    else if (k == "ik_step_max_rad")  kin_.p.ik_step_max_rad = std::max(1e-3, get_double(value, k));
+    else if (k == "ik_tol_m")         kin_.p.ik_tol_m = std::max(1e-4, get_double(value, k));
 }
 
 void PoseSequencer::handle(std::string const& which, int idx, MessagePtr p) {
@@ -342,878 +350,25 @@ void PoseSequencer::handle(std::string const& which, int idx, MessagePtr p) {
     if (which == "gait") {
         auto a = std::dynamic_pointer_cast<const ActionOut>(p);
         if (!a || idx < 0 || idx >= 12) return;
-        gait_u_[size_t(idx)] = a->accel; have_gait_ = true; return;
+        in_.gait_u_[size_t(idx)] = a->accel; in_.have_gait_ = true; return;
     }
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
     if (!pt) return;
     auto const& v = pt->values;
-    if (which == "model" && v.size() >= kModelFloats) {
-        auto vec = [&](int k) { return Vec3f(v[k], v[k + 1], v[k + 2]); };
-        for (int i = 0; i < 4; ++i) {
-            const int b = 27 * i;
-            auto& a = anchors_[size_t(i)];
-            a.hip1_world = vec(b); a.hip2_world = vec(b + 3); a.knee_world = vec(b + 6);
-            a.coxa_rest_origin = vec(b + 9); a.upper_rest_origin = vec(b + 12); a.lower_rest_origin = vec(b + 15);
-            a.hip2_axis = vec(b + 18); a.knee_axis = vec(b + 21); toe_off_[size_t(i)] = vec(b + 24);
-        }
-        const int m = 108;
-        hip1_rest_ = v[m]; hip1_range_ = v[m + 1]; hip2_rest_ = v[m + 2]; hip2_range_ = v[m + 3];
-        knee_rest_ = v[m + 4]; knee_fold_ = v[m + 5]; knee_hyper_ = v[m + 6]; knee_widening_ = v[m + 7] > 0.5f;
-        have_model_ = true;
-        if (!ext_lmax_ok_) {   // the extension margin's reference, once: each leg's longest hip2-to-toe over the knee's range (rigid under hip1 and hip2)
-            const double klo = knee_rest_ - (knee_widening_ ? knee_hyper_ : hip2_range_), khi = knee_rest_ + (knee_widening_ ? knee_fold_ : hip2_range_);
-            for (int i = 0; i < 4; ++i) {
-                double best = 0.0;
-                for (int j = 0; j <= 256; ++j) { const double k = klo + (khi - klo) * j / 256.0; best = std::max(best, double(len(sub(toe_of(i, {0.0, 0.0, k}), anchors_[size_t(i)].hip2_world)))); }
-                ext_lmax_[size_t(i)] = best;
-            }
-            ext_lmax_ok_ = true;
-        }
-    }
-    else if (which == "support" && v.size() >= 26) { for (int i = 0; i < 26; ++i) support_[size_t(i)] = v[i]; have_support_ = true; }
+    if (which == "model" && v.size() >= kModelFloats) { kin_.set_model(v.data(), std::size_t(v.size())); }   // the leg model: body::LegSolver
+    else if (which == "support" && v.size() >= 26) { for (int i = 0; i < 26; ++i) in_.support_[size_t(i)] = v[i]; in_.have_support_ = true; }
     else if (which == "patch" && v.size() >= 4) {
         const int N = int(v[0]); if (N < 2 || v.size() < 4 + 2 * N * N) return;
-        N_ = N; cell_ = std::max(1e-3, double(v[1])); patch_.assign(v.data(), v.data() + 4 + 2 * N * N); have_patch_ = true;
+        in_.N_ = N; in_.cell_ = std::max(1e-3, double(v[1])); in_.patch_.assign(v.data(), v.data() + 4 + 2 * N * N); in_.have_patch_ = true;
     }
-    else if (which == "xz" && v.size() >= 8) { for (int i = 0; i < 8; ++i) xz_[size_t(i)] = v[i]; have_xz_ = true; }
-    else if (which == "y" && v.size() >= 4) { for (int i = 0; i < 4; ++i) y_[size_t(i)] = v[i]; have_y_ = true; }
-    else if (which == "contact" && v.size() >= 4) { for (int i = 0; i < 4; ++i) contact_[size_t(i)] = v[i]; have_contact_ = true; }
-    else if (which == "load" && v.size() >= 4) { for (int i = 0; i < 4; ++i) load_[size_t(i)] = v[i]; have_load_ = true; }
-    else if (which == "belly" && v.size() >= 1) { belly_ = v[0]; have_belly_ = true; }
-    else if (which == "odom" && v.size() >= 3) { odom_in_ = {v[0], v[1], v[2]}; have_odom_in_ = true; }
-    else if (which == "imu" && v.size() >= 6) { for (int i = 0; i < 6; ++i) imu_[size_t(i)] = v[i]; have_imu_ = true; }
-    else if (which == "up" && v.size() >= 3) { const double n = std::sqrt(double(v[0]) * v[0] + double(v[1]) * v[1] + double(v[2]) * v[2]); if (n > 0.5) { up_ = {v[0] / n, v[1] / n, v[2] / n}; have_up_ = true; } }
-}
-
-// ---- the kinematics ----
-Vec3f PoseSequencer::toe_of(int leg, const std::array<double, 3>& t) const {
-    const auto pose = body::fk_leg(anchors_[size_t(leg)], t[0], t[1], t[2], 0.0);
-    return pose.lower.xform(toe_off_[size_t(leg)]);
-}
-std::array<double, 3> PoseSequencer::angles_of_u(int leg, const std::array<double, 3>& u) const {
-    (void)leg;
-    const double kr = knee_widening_ ? (u[2] >= 0.0 ? knee_fold_ : knee_hyper_) : hip2_range_;
-    return {u[0] * hip1_range_ + hip1_rest_, u[1] * hip2_range_ + hip2_rest_, u[2] * kr + knee_rest_};
-}
-std::array<double, 3> PoseSequencer::u_of_angles(int leg, const std::array<double, 3>& t) const {
-    (void)leg;
-    const double dk = t[2] - knee_rest_;
-    const double kr = knee_widening_ ? (dk >= 0.0 ? knee_fold_ : knee_hyper_) : hip2_range_;
-    return {std::clamp((t[0] - hip1_rest_) / hip1_range_, -1.0, 1.0), std::clamp((t[1] - hip2_rest_) / hip2_range_, -1.0, 1.0), std::clamp(dk / kr, -1.0, 1.0)};
-}
-// one damped least-squares step toward `target`: dt = J^T (J J^T + lambda^2 I)^-1 e, J by central differences, the step bounded
-bool PoseSequencer::ik_step(int leg, const Vec3f& target, std::array<double, 3>& t) const {
-    const Vec3f cur = toe_of(leg, t);
-    const Vec3f e = sub(target, cur);
-    const double en = len(e);
-    if (en < ik_tol_m_) return true;
-    double J[3][3]; const double h = 1e-3;
-    for (int j = 0; j < 3; ++j) {
-        auto tp = t, tm = t; tp[size_t(j)] += h; tm[size_t(j)] -= h;
-        const Vec3f d = sub(toe_of(leg, tp), toe_of(leg, tm));
-        J[0][j] = d.x / (2 * h); J[1][j] = d.y / (2 * h); J[2][j] = d.z / (2 * h);
-    }
-    // A = J J^T + lambda^2 I (3x3), solve A y = e, dt = J^T y
-    const double l2 = ik_damping_m_ * ik_damping_m_;
-    double A[9];
-    for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) { double s = 0; for (int k = 0; k < 3; ++k) s += J[r][k] * J[c][k]; A[r * 3 + c] = s + (r == c ? l2 : 0.0); }
-    const double det = A[0] * (A[4] * A[8] - A[5] * A[7]) - A[1] * (A[3] * A[8] - A[5] * A[6]) + A[2] * (A[3] * A[7] - A[4] * A[6]);
-    if (std::fabs(det) < 1e-18) return false;
-    const double id = 1.0 / det;
-    const double Ai[9] = { (A[4] * A[8] - A[5] * A[7]) * id, -(A[1] * A[8] - A[2] * A[7]) * id,  (A[1] * A[5] - A[2] * A[4]) * id,
-                          -(A[3] * A[8] - A[5] * A[6]) * id,  (A[0] * A[8] - A[2] * A[6]) * id, -(A[0] * A[5] - A[2] * A[3]) * id,
-                           (A[3] * A[7] - A[4] * A[6]) * id, -(A[0] * A[7] - A[1] * A[6]) * id,  (A[0] * A[4] - A[1] * A[3]) * id };
-    const double ev[3] = {e.x, e.y, e.z};
-    double y[3]; for (int r = 0; r < 3; ++r) y[r] = Ai[r * 3] * ev[0] + Ai[r * 3 + 1] * ev[1] + Ai[r * 3 + 2] * ev[2];
-    double dt[3]; double mx = 0.0;
-    for (int j = 0; j < 3; ++j) { dt[j] = J[0][j] * y[0] + J[1][j] * y[1] + J[2][j] * y[2]; mx = std::max(mx, std::fabs(dt[j])); }
-    const double sc = mx > ik_step_max_rad_ ? ik_step_max_rad_ / mx : 1.0;
-    for (int j = 0; j < 3; ++j) t[size_t(j)] += dt[j] * sc;
-    // joint limits, in action units
-    const auto u = u_of_angles(leg, t); t = angles_of_u(leg, u);
-    return false;
-}
-
-bool PoseSequencer::patch_h(double fwd, double lat, double& h) const { double sg; return patch_h(fwd, lat, h, sg); }
-
-// the relief of the remembered 3 x 3 cells around a body-frame point (max - min height); false with fewer than two cells known
-bool PoseSequencer::patch_edge(double fwd, double lat, double& relief) const {
-    relief = 0.0;
-    if (!have_patch_) return false;
-    const int ci = int(std::floor(fwd / cell_)) + N_ / 2, cj = int(std::floor(lat / cell_)) + N_ / 2;
-    double lo = 1e9, hi = -1e9; int n = 0;
-    for (int di = -1; di <= 1; ++di) for (int dj = -1; dj <= 1; ++dj) {
-        const int i = ci + di, j = cj + dj;
-        if (i < 0 || j < 0 || i >= N_ || j >= N_) continue;
-        const float hv = patch_[size_t(4 + i * N_ + j)]; const double w = patch_[size_t(4 + N_ * N_ + i * N_ + j)];
-        if (hv <= -98.0f || w <= 0.0) continue;
-        lo = std::min(lo, double(hv)); hi = std::max(hi, double(hv)); ++n;
-    }
-    if (n < 2) return false;
-    relief = hi - lo; return true;
-}
-
-bool PoseSequencer::patch_h(double fwd, double lat, double& h, double& sigma) const {
-    h = 0.0; sigma = 0.0;
-    if (!have_patch_) return false;
-    const int ci = int(std::floor(fwd / cell_)) + N_ / 2, cj = int(std::floor(lat / cell_)) + N_ / 2;
-    double sw = 0.0, swh = 0.0;
-    for (int di = -1; di <= 1; ++di) for (int dj = -1; dj <= 1; ++dj) {
-        const int i = ci + di, j = cj + dj;
-        if (i < 0 || j < 0 || i >= N_ || j >= N_) continue;
-        const float hv = patch_[size_t(4 + i * N_ + j)]; const double w = patch_[size_t(4 + N_ * N_ + i * N_ + j)];
-        if (hv <= -98.0f || w <= 0.0) continue;
-        sw += w; swh += w * hv;
-    }
-    if (sw <= 0.0) return false;
-    h = swh / sw; sigma = std::sqrt(1.0 / sw); return true;   // the precision-weighted mean's own uncertainty
-}
-
-// ---- the sequence ----
-// the signed distance of (cx, cz) inside the triangle p (+ inside) and the inward unit normal of the edge nearest it
-double PoseSequencer::tri_margin(const std::array<std::array<double, 2>, 3>& p, double cx, double cz, double& nx, double& nz) {
-    // orient counter-clockwise in the (x, z) plane
-    std::array<std::array<double, 2>, 3> q = p;
-    const double area = (q[1][0] - q[0][0]) * (q[2][1] - q[0][1]) - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0]);
-    if (area < 0) std::swap(q[1], q[2]);
-    double best = 1e9; nx = 0; nz = 0;
-    for (int i = 0; i < 3; ++i) {
-        const auto& a = q[size_t(i)]; const auto& b = q[size_t((i + 1) % 3)];
-        const double ex = b[0] - a[0], ez = b[1] - a[1], L = std::hypot(ex, ez); if (L < 1e-9) continue;
-        const double d = (ex * (cz - a[1]) - ez * (cx - a[0])) / L;   // + on the interior side of a CCW edge
-        if (d < best) { best = d; nx = -ez / L; nz = ex / L; }         // the inward normal of that edge
-    }
-    return best;
-}
-
-// the leg's workspace: a sector about its neutral heading (hip1 -> hip2) from its hip, radius in [reach_min, reach_max]
-bool PoseSequencer::sector_clamp(int leg, Vec3f& p) const {
-    const Vec3f hip = hip1_of(leg); const Vec3f h2 = anchors_[size_t(leg)].hip2_world;
-    const double hx = h2.x - hip.x, hz = h2.z - hip.z, hn = std::hypot(hx, hz);
-    if (hn < 1e-6) return false;
-    const double ux = hx / hn, uz = hz / hn;                      // the neutral heading
-    double dx = p.x - hip.x, dz = p.z - hip.z; const double r = std::hypot(dx, dz);
-    if (r < 1e-9) { p.x = float(hip.x + ux * reach_min_m_); p.z = float(hip.z + uz * reach_min_m_); return true; }
-    const double ang = std::atan2(dx * uz - dz * ux, dx * ux + dz * uz);   // signed angle from the heading
-    const double a = std::clamp(ang, -sector_half_rad_, sector_half_rad_), rr = std::clamp(r, reach_min_m_, reach_max_m_);
-    const bool clamped = std::fabs(a - ang) > 1e-9 || std::fabs(rr - r) > 1e-9;
-    if (!clamped) return false;
-    const double c = std::cos(a), sn = std::sin(a);               // the heading rotated by a, in the x-z plane
-    const double vx = ux * c + uz * sn, vz = uz * c - ux * sn;
-    const double nx_ = hip.x + vx * rr, nz_ = hip.z + vz * rr;
-    const bool moved = std::hypot(nx_ - p.x, nz_ - p.z) > 1e-4;    // blocked means the clamp took more than a tenth of a millimetre back
-    p.x = float(nx_); p.z = float(nz_);
-    return moved;
-}
-
-void PoseSequencer::engage_now(uint64_t tick_id) {
-    for (int i = 0; i < 4; ++i) {
-        std::array<double, 3> u{0.0, 0.0, 0.0};
-        if (have_gait_) u = {gait_u_[size_t(3 * i)], gait_u_[size_t(3 * i + 1)], gait_u_[size_t(3 * i + 2)]};
-        angles_[size_t(i)] = angles_of_u(i, u);
-        const Vec3f toe = toe_of(i, angles_[size_t(i)]);
-        // the stance: this toe's place in the plane, kept within reach of its hip, at the standing height
-        Vec3f t(toe.x, float(-stand_h_m_), toe.z);
-        if (sector_clamp(i, t)) {   // a toe at the edge of its reach gets a centimetre of room, so the first shift is not blocked by it
-            const Vec3f hip = hip1_of(i); const double dx = hip.x - t.x, dz = hip.z - t.z, dn = std::max(1e-6, std::hypot(dx, dz));
-            t.x += float(dx / dn * 0.01); t.z += float(dz / dn * 0.01);
-        }
-        toe_tgt_[size_t(i)] = t;
-        // the neutral place: neutral_r along the leg's heading from its hip, at the standing height
-        const Vec3f hip = hip1_of(i), h2 = anchors_[size_t(i)].hip2_world;
-        const double hx = h2.x - hip.x, hz = h2.z - hip.z, hn = std::max(1e-6, std::hypot(hx, hz));
-        neutral_[size_t(i)] = Vec3f(float(hip.x + hx / hn * neutral_r_m_), float(-stand_h_m_), float(hip.z + hz / hn * neutral_r_m_));
-        elev_[size_t(i)] = 0.0; elev_landed_[size_t(i)] = 0.0; ground_h_[size_t(i)] = -stand_h_m_; creep_[size_t(i)] = 0.0; air_ticks_[size_t(i)] = 0;
-    }
-    pred_leg_ = -1; reloc_active_ = false;
-    shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ticks_ = 0; leg_ = -1; phase_ = Phase::Settle; engaged_at_ = int64_t(tick_id); crouch_ = 0.0;
-    yaw_ref_ = (heading_ref_ == "engage" && have_odom_in_) ? odom_in_[2] : 0.0; yaw_err_ = 0.0;
-}
-
-// the planted toes' heights: stand_h below the body plus each toe's relative elevation, recentred on their mean
-void PoseSequencer::hold_stance() {
-    // each toe's ground elevation: where it landed (elev_source landed), or from the memory under its place
-    if (elev_source_ == "landed") { for (int i = 0; i < 4; ++i) elev_[size_t(i)] = elev_landed_[size_t(i)]; }
-    else if (have_patch_) {
-        double hs[4]; bool ok[4]; int n_ok = 0; double sum = 0.0;
-        for (int i = 0; i < 4; ++i) { ok[i] = patch_h(toe_tgt_[size_t(i)].z, toe_tgt_[size_t(i)].x, hs[i]); if (ok[i]) { sum += hs[i]; ++n_ok; } }
-        if (n_ok >= 2) {
-            const double a = 1.0 / elev_tau_ticks_;
-            for (int i = 0; i < 4; ++i) {
-                if (!ok[i]) continue;
-                const double others = (sum - hs[i]) / std::max(1, n_ok - 1);
-                double e = hs[i] - others; if (std::fabs(e) < elev_deadband_m_) e = 0.0;
-                elev_[size_t(i)] += a * (std::clamp(e, -0.1, 0.15) - elev_[size_t(i)]);
-            }
-        }
-    }
-    double mean = 0.0; int n = 0;
-    for (int i = 0; i < 4; ++i) if (i != leg_ || phase_ == Phase::Shift) { mean += elev_[size_t(i)]; ++n; }
-    if (n > 0) mean /= n;
-    // the levelling corrections, ZERO-MEAN over the planted toes (an extend-only term ratcheted the body up 2 cm a minute
-    // until the legs stood near full extension and a step tipped it, 2026-11-08), each bounded
-    if (front_drop_gain_ > 0.0 && have_up_) {   // lever 3: the nose-up pitch beyond the deadband drops the front, through a first-order filter
-        const double nose_up = std::atan2(double(up_[2]), std::max(0.2, double(up_[1])));
-        const double target = std::clamp(front_drop_gain_ * std::max(0.0, nose_up - front_drop_deadband_), 0.0, front_drop_max_m_);
-        front_drop_ += (target - front_drop_) / front_drop_tau_ticks_;
-    } else front_drop_ = 0.0;
-    std::array<double, 4> lev{}; double lev_mean = 0.0; int n_lev = 0;
-    if (have_up_) {
-        for (int i = 0; i < 4; ++i) {
-            lev[size_t(i)] = std::clamp(level_gain_ * (toe_tgt_[size_t(i)].x * up_[0] + toe_tgt_[size_t(i)].z * up_[2]) / std::max(0.2, up_[1]), -level_max_m_, level_max_m_);
-            if (i != leg_ || phase_ == Phase::Shift) { lev_mean += lev[size_t(i)]; ++n_lev; }
-        }
-        if (n_lev > 0) lev_mean /= n_lev;
-    }
-    if (crouch_ > 0.0 && phase_ != Phase::Lower) {   // the crouch relaxes while every toe bears and nothing is lowering
-        bool all_bear = true; for (int i = 0; i < 4; ++i) if (!bearing(i)) all_bear = false;
-        if (all_bear) crouch_ = std::max(0.0, crouch_ - crouch_relax_v_ * dt_);
-    }
-    for (int i = 0; i < 4; ++i) {
-        if (i == leg_ && phase_ != Phase::Shift) { creep_[size_t(i)] = 0.0; air_ticks_[size_t(i)] = 0; continue; }   // the stepping toe is the machine's
-        // the load-seeking creep: down while the flag is off, back while it bears
-        if (unloaded_shift_m_ > 0.0 && have_contact_ && have_load_) {   // the unloaded toe: touching (the flag on) but carrying nothing
-            if (double(load_[size_t(i)]) < unloaded_share_) ++unloaded_run_[size_t(i)]; else unloaded_run_[size_t(i)] = 0;   // the flag may flicker on an unloaded toe; the load is the fact
-            land_max_load_[size_t(i)] = std::max(land_max_load_[size_t(i)], double(load_[size_t(i)]));
-            if (unload_cool_[size_t(i)] > 0) --unload_cool_[size_t(i)];
-        }
-        if (have_contact_) {
-            if (!bearing(i)) ++air_ticks_[size_t(i)]; else air_ticks_[size_t(i)] = 0;   // airborne by the flag (the re-step's rule)
-            if (creep_load_min_ > 0.0 && have_load_) {   // by the LOAD: down while unloaded, back only while it carries its share
-                if (double(load_[size_t(i)]) < creep_load_min_) { creep_[size_t(i)] = std::min(creep_max_m_, creep_[size_t(i)] + creep_v_ * dt_); ++creep_load_ticks_; }
-                else if (double(load_[size_t(i)]) > creep_load_relax_) creep_[size_t(i)] = std::max(0.0, creep_[size_t(i)] - creep_relax_v_ * dt_);
-            } else {
-                if (!bearing(i)) creep_[size_t(i)] = std::min(creep_max_m_, creep_[size_t(i)] + creep_v_ * dt_);
-                else creep_[size_t(i)] = std::max(0.0, creep_[size_t(i)] - creep_relax_v_ * dt_);
-            }
-        }
-        // BODY-frame heights (equal legs = a level body on flat ground) plus a LEVELLING term from the IMU: the side the
-        // body's up vector leans away from is low, and its toes are sent deeper by level_gain of the geometric correction
-        // (x ux + z uz) / uy.  (Equal GRAVITY heights were tried, 2026-11-08: four toes on a flat floor share one gravity
-        // height at any roll, so that stance held whatever attitude the body had and it rolled to the disengage limit.)
-        toe_tgt_[size_t(i)].y = float(-(stand_h_m_ - crouch_) + std::clamp(elev_[size_t(i)] - mean, -elev_max_m_, elev_max_m_) - creep_[size_t(i)] + (lev[size_t(i)] - lev_mean));
-        if (front_drop_ > 0.0 && toe_tgt_[size_t(i)].z > 0.0f) toe_tgt_[size_t(i)].y += float(front_drop_);   // the front of the chassis comes down
-        if (depth_max_m_ > 0.0 && toe_tgt_[size_t(i)].y < float(-depth_max_m_)) { toe_tgt_[size_t(i)].y = float(-depth_max_m_); ++depth_caps_; }
-    }
-}
-
-// the leg whose toe is furthest behind its neutral place steps next (the crawl's order emerges); among equals, the model's
-// safest
-int PoseSequencer::choose_leg() {
-    if (have_contact_) for (int i = 0; i < 4; ++i) if (!bearing(i) && air_ticks_[size_t(i)] >= air_ticks_min_) return i;   // a toe the creep could not bring to ground is placed first
-    if (!order_.empty()) {   // the fixed order: the next leg whose turn it is
-        order_pos_ = (order_pos_ + 1) % int(order_.size());
-        return std::clamp(int(order_[size_t(order_pos_)]), 0, 3);
-    }
-    // the toe furthest from its neutral place steps next -- behind it (the body has advanced), or tucked in or out
-    // (the body has swayed); the crawl's order emerges from the geometry, and the model's margin breaks ties
-    int best = -1; double best_score = -1e9;
-    for (int i = 0; i < 4; ++i) {
-        const double dx = double(neutral_[size_t(i)].x - toe_tgt_[size_t(i)].x), dz = double(neutral_[size_t(i)].z - toe_tgt_[size_t(i)].z);
-        (void)dx;
-        const double away = std::max(0.0, dz);   // behind its place (a sway moves every toe sideways alike; a toe AHEAD of its place is fine where it is)
-        const double margin = have_support_ ? double(support_[size_t(10 + 5 * i)]) : 0.0;
-        const double age = double(int64_t(tick_now_) - last_step_tick_[size_t(i)]) * 1e-6;   // among equals, the leg that stepped longest ago
-        const double score = away + 0.2 * margin + age;
-        score_[size_t(i)] = score;
-        if (score > best_score) { best_score = score; best = i; }
-    }
-    return best;
-}
-
-void PoseSequencer::step_machine() {
-    ++phase_ticks_;
-    const double adv = shift_v_ * dt_;
-    switch (phase_) {
-    case Phase::Idle: break;
-    case Phase::Settle: {   // the toes slide to their neutral places; then the crawl begins
-        bool all_there = true; const double step = settle_v_ * dt_;
-        for (int i = 0; i < 4 && settle_ > 0.0; ++i) {
-            Vec3f& tg = toe_tgt_[size_t(i)]; const double dx = neutral_[size_t(i)].x - tg.x, dz = neutral_[size_t(i)].z - tg.z, dn = std::hypot(dx, dz);
-            if (dn <= step) { tg.x = neutral_[size_t(i)].x; tg.z = neutral_[size_t(i)].z; } else { tg.x += float(dx / dn * step); tg.z += float(dz / dn * step); all_there = false; }
-        }
-        ++settle_ticks_;
-        if (all_there && phase_ticks_ > 10) { decide_next(tick_now_); shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ = Phase::Shift; phase_ticks_ = 0; }
-        break; }
-    case Phase::Shift: {
-        // the body's move: into the triangle the other toes make, by the margin still missing, and toward the toes' centroid
-        const double cx = have_support_ ? double(support_[3]) : 0.0, cz = have_support_ ? double(support_[2]) : 0.0;   // the model's centre of mass (lat = x, fwd = z)
-        std::array<std::array<double, 2>, 3> tri{}; int k = 0; double mx = 0, mz = 0;
-        for (int i = 0; i < 4; ++i) { mx += toe_tgt_[size_t(i)].x * 0.25; mz += toe_tgt_[size_t(i)].z * 0.25; if (i != leg_ && k < 3) { tri[size_t(k)] = {double(toe_tgt_[size_t(i)].x), double(toe_tgt_[size_t(i)].z)}; ++k; } }
-        double nx = 0, nz = 0; const double m_local = tri_margin(tri, cx, cz, nx, nz);
-        const double model_margin = have_support_ ? double(support_[size_t(10 + 5 * leg_)]) : 1.0;
-        const int bearing = have_support_ ? int(support_[1] + 0.5f) : 4;
-        // the margin still missing, by the local geometry and -- when all four toes bear and the model disagrees -- by the model
-        const double m_req = margin_min_m_ + margin_extra_m_ + (free_form_ == 3 && free_pending_ > 0 ? free_margin_m_ : 0.0);   // a freeing lift asks for more
-        double need = std::max(0.0, m_req - m_local);
-        if (bearing >= 4) need = std::max(need, m_req - model_margin);
-        double fwd_left = std::max(0.0, advance_m_ - fwd_acc_);
-        if (advance_reach_m_ > 0.0) {   // a planted toe near its reach limit: the body does not walk away from it
-            bool stretched = false;
-            for (int i = 0; i < 4; ++i) { if (i == leg_) continue; const Vec3f hip = hip1_of(i); if (std::hypot(toe_tgt_[size_t(i)].x - hip.x, toe_tgt_[size_t(i)].z - hip.z) >= reach_max_m_ - advance_reach_m_) stretched = true; }
-            if (stretched && fwd_left > 0.0) { fwd_left = 0.0; ++advance_yields_; }
-        }
-        const double cg = centre_off_ ? 0.0 : centre_gain_;   // the centroid's pull yields when it has cancelled the margin's (stagnation)
-        double dx = need * nx + cg * (mx - cx), dz = need * nz + cg * (mz - cz) + std::min(adv, fwd_left);
-        bool plan_reached = false;
-        if (plan_active_) {   // the planned shift, walked at the shift's rate; the margin controller's move is replaced, its safety check kept
-            const double lx = plan_sx_ - plan_done_x_, lz = plan_sz_ - plan_done_z_, ln = std::hypot(lx, lz);
-            if (ln <= adv) { dx = lx; dz = lz; plan_reached = true; } else { dx = lx / ln * adv; dz = lz / ln * adv; }
-            plan_done_x_ += dx; plan_done_z_ += dz;
-        }
-        {   // the advance yields to the margin: if the move would leave the weight short of the support that will remain, drop it
-            double dn0 = std::hypot(dx, dz); double sx = dx, sz = dz; if (dn0 > adv) { sx *= adv / dn0; sz *= adv / dn0; }
-            std::array<std::array<double, 2>, 3> tri2 = tri; for (auto& q : tri2) { q[0] -= sx; q[1] -= sz; }
-            double n2x, n2z; const double m_after = tri_margin(tri2, cx, cz, n2x, n2z);
-            if (fwd_left > 0.0 && m_after < m_local && m_after < margin_min_m_ + margin_extra_m_) { dz -= std::min(adv, fwd_left); fwd_blocked_ = true; }
-        }
-        const double dn = std::hypot(dx, dz);
-        if (dn > adv) { dx *= adv / dn; dz *= adv / dn; }
-        shift_dx_ = dx; shift_dz_ = dz; fwd_acc_ += std::max(0.0, dz);
-        {   // the sequencer's odometry: the body moved (dx, dz) in its own frame; forward along the dead-reckoning frame's heading
-            const double yaw = have_odom_in_ ? odom_in_[2] : 0.0, c = std::cos(yaw), sn = std::sin(yaw);
-            px_ += shift_realised_ * (dz * c - dx * sn); py_ += shift_realised_ * (dz * sn + dx * c);
-        }
-        if (heading_hold_ > 0.0 && have_odom_in_) {   // the heading hold: turn the body back by rotating the planted toes the other way
-            double e = odom_in_[2] - yaw_ref_; while (e > M_PI) e -= 2 * M_PI; while (e < -M_PI) e += 2 * M_PI;
-            yaw_err_ = e;
-            const double a = std::clamp(heading_hold_ * heading_gain_ * e, -yaw_rate_max_, yaw_rate_max_) * dt_;
-            const double ca = std::cos(a), sa = std::sin(a);
-            for (int i = 0; i < 4; ++i) { Vec3f& q = toe_tgt_[size_t(i)]; const double x = q.x, z = q.z; q.x = float(x * ca + z * sa); q.z = float(-x * sa + z * ca); }
-        }
-        // a shift that has stopped moving (the margin's pull cancels the advance) has no advance to give this leg
-        if (std::hypot(dx, dz) < 0.1 * adv) { if (++still_ticks_ >= 10) fwd_blocked_ = true; } else still_ticks_ = 0;
-        bool blocked = false; blocked_leg_ = -1; blocked_toe_ = {false, false, false, false};
-        for (int i = 0; i < 4; ++i) {
-            toe_tgt_[size_t(i)].x -= float(dx); toe_tgt_[size_t(i)].z -= float(dz);
-            const bool clamped = sector_clamp(i, toe_tgt_[size_t(i)]);
-            if (clamped && !(plan_active_ && i == leg_)) { blocked = true; blocked_toe_[size_t(i)] = true; if (blocked_leg_ < 0) blocked_leg_ = i; }   // under a plan the lifting toe's own clamp does not block: it is about to leave the ground (it blocked 9 of 10 planned shifts)
-        }   // the toes move the other way, as far as they reach
-        shift_acc_ += std::hypot(dx, dz); ++shift_ticks_;
-        if (blocked) ++shift_blocked_;
-        // may the leg go?  By the geometry the shift is steering on; the model vetoes only when all four toes bear (with
-        // fewer, a flickering flag makes every other leg's margin the floor, and the shift would run to its bound)
-        const bool safe_now = m_local >= margin_min_m_ && (bearing < 4 || model_margin >= margin_min_m_);
-        if (unload_shift_only_ && plan_active_ && (plan_reached || blocked)) {   // the body has gone over the unloaded toe: decide afresh
-            unload_shift_only_ = false; decide_next(tick_now_); shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ticks_ = 0;
-            break;
-        }
-        bool go = safe_now && (fwd_acc_ >= advance_m_ || fwd_blocked_ || blocked || (plan_active_ && plan_reached));
-        if (plan_active_ && plan_reached) { ++plan_reached_; if (!safe_now) fwd_blocked_ = true; }   // arrived without the margin: the spent logic below takes over
-        if (go && fwd_acc_ < advance_m_) ++steps_no_advance_;
-        // a shift standing still without the leg being safe: first let the margin's pull act alone, then treat as spent
-        bool spent = blocked || shift_acc_ >= shift_max_m_;
-        if (!go && !safe_now && still_ticks_ >= 10) { if (!centre_off_) { centre_off_ = true; still_ticks_ = 0; } else spent = true; }
-        if (!go && spent) {
-            // the body can move no further for this leg: take the toe that blocks it if ITS margin allows, else the leg the
-            // model rates safest if that one's does; a leg without a margin is never lifted -- better to stand than to fall
-            auto margin_of_leg = [&](int i) { return have_support_ ? double(support_[size_t(10 + 5 * i)]) : 1.0; };
-            auto local_margin_of_leg = [&](int c) {
-                std::array<std::array<double, 2>, 3> t3{}; int kk = 0;
-                for (int i = 0; i < 4; ++i) if (i != c && kk < 3) { t3[size_t(kk)] = {double(toe_tgt_[size_t(i)].x), double(toe_tgt_[size_t(i)].z)}; ++kk; }
-                double a, b; return tri_margin(t3, cx, cz, a, b);
-            };
-            int cand = (blocked && blocked_leg_ >= 0) ? blocked_leg_ : -1;
-            if (cand >= 0 && local_margin_of_leg(cand) < margin_min_m_) cand = -1;
-            if (cand < 0 || margin_of_leg(cand) < margin_min_m_) {
-                // the safest leg among those that NEED a step (behind their place): a toe already ahead has nothing to gain
-                double bm = -1e9; cand = -1;
-                for (int i = 0; i < 4; ++i) { const bool needs = neutral_[size_t(i)].z - toe_tgt_[size_t(i)].z > 0.0; if (needs && margin_of_leg(i) > bm) { bm = margin_of_leg(i); cand = i; } }
-                if (cand < 0) for (int i = 0; i < 4; ++i) if (margin_of_leg(i) > bm) { bm = margin_of_leg(i); cand = i; }
-                if (cand >= 0 && bm < margin_min_m_) cand = -1;
-            }
-            if (!order_.empty()) {   // under the fixed order the turn passes to the next leg; a toe at its edge takes it if it is safe
-                int rl = -1; Vec3f rland; double rm = 0.0;
-                if (cand >= 0 && cand == blocked_leg_ && cand != leg_) { leg_ = cand; ++shift_exhausted_; go = true; }
-                else if (relief_ > 0.0 && blocked_toe_[size_t(leg_)] && relief_for_ < 0 && plan_relief(leg_, cx, cz, bearing, rl, rland, rm)) {
-                    relief_for_ = leg_; leg_ = rl; relief_land_ = rland; relief_pending_ = true; ++relief_steps_; go = true;   // the stuck leg's turn is retried when the relief leg lands
-                } else {
-                    if (relief_ > 0.0 && blocked_toe_[size_t(leg_)]) ++relief_none_;
-                    ++turns_passed_; decide_next(tick_now_); shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ticks_ = 0;
-                }
-            }
-            else if (cand >= 0) { if (cand != leg_) leg_ = cand; ++shift_exhausted_; go = true; }
-            else ++deadlock_ticks_;
-        }
-        if (go) {
-            const Vec3f cur = toe_tgt_[size_t(leg_)];
-            // the landing point: the neutral place plus half a stride ahead, kept within reach of the hip
-            const bool was_planned = plan_pending_ && !relief_pending_;   // (the tag's: read before the landing consumes it)
-            if (relief_pending_) { land_ = Vec3f(relief_land_.x, cur.y, relief_land_.z); relief_pending_ = false; }
-            else if (plan_pending_) { land_ = Vec3f(plan_land_.x, cur.y, plan_land_.z); plan_pending_ = false; }
-            else land_ = Vec3f(neutral_[size_t(leg_)].x, cur.y, float(neutral_[size_t(leg_)].z + stride_m_ * 0.5));
-            if (!reloc_active_) {   // the tag starts at the landing the step sets out for (a re-go after a hang keeps its track)
-                reloc_active_ = true; reloc_vec_ = {}; reloc_from_ = land_; reloc_hang_ = false;
-                reloc_planned_ = was_planned && leg_ == reloc_plan_leg_; reloc_switched_ = was_planned && leg_ != reloc_plan_leg_;
-            }
-            {   // a centimetre inside the reach, so the swing can finish and the toe can still lower
-                const Vec3f hip = hip1_of(leg_); const double dx = land_.x - hip.x, dz = land_.z - hip.z, r = std::hypot(dx, dz), rm = reach_max_m_ - 0.01;
-                const Vec3f b0 = land_;
-                if (land_clamp_ > 0.0 && r > rm) { land_.x = float(hip.x + dx * rm / r); land_.z = float(hip.z + dz * rm / r); }
-                reloc_add(RelReach, b0, land_); const Vec3f b1 = land_;
-                if (land_clamp_ > 0.0) { const double wide = sector_half_rad_; sector_half_rad_ = std::min(wide, land_sector_rad_); sector_clamp(leg_, land_); sector_half_rad_ = wide; }
-                reloc_add(RelSector, b1, land_);
-            }
-            // the ground: under the toe now and at the landing, from the memory where it has it, else the stance's own height
-            const double stance_h = gravity_h(Vec3f(cur.x, float(-stand_h_m_), cur.z));
-            const double h_here = gravity_h(cur);                   // the toe stands here: the ground under it is where it is
-            if (land_edge_m_ > 0.0) {   // a riser's edge under the landing: move it along the heading, a cell at a time, to flat remembered ground
-                double relief; const Vec3f hip = hip1_of(leg_); Vec3f best = land_; bool moved = false;
-                if (patch_edge(land_.z, land_.x, relief) && relief >= land_edge_m_) {
-                    for (int dir : {+1, -1}) {   // forward first (onto the tread), then back
-                        for (int k = 1; k * cell_ <= land_edge_max_m_ + 1e-9; ++k) {
-                            Vec3f cand(land_.x, land_.y, float(land_.z + dir * k * cell_));
-                            if (std::hypot(cand.x - hip.x, cand.z - hip.z) > reach_max_m_ - 0.01) break;
-                            double r2; if (patch_edge(cand.z, cand.x, r2) && r2 < land_edge_m_) { best = cand; moved = true; break; }
-                        }
-                        if (moved) break;
-                    }
-                    if (moved) { reloc_add(RelEdge, land_, best); land_ = best; ++edge_moves_; } else ++edge_stuck_;
-                }
-            }
-            double h_land = stance_h, hp, sg = 0.0; land_sigma_ = 0.0;
-            if (patch_h(land_.z, land_.x, hp, sg)) {                 // the patch's frame: fwd = z, lat = x, as TerrainMemory stores the toes
-                if (hp >= stance_h - land_band_lo_m_ && hp <= stance_h + land_band_hi_m_) { h_land = hp; land_sigma_ = sg; } else ++land_h_rejected_;
-            }
-            land_h_ = h_land; lift_h_ = std::max(h_here, h_land) + lift_clear_m_ + (free_form_ == 3 && free_pending_ > 0 ? free_extra_m_ + free_out_dy_ : 0.0);
-            lift_dy_ = lift_h_ - stance_h;                           // the lift as a BODY-frame rise over the stance (a gravity conversion on a rolling body ran a target up and the leg into its stops, 2026-11-08)
-            if (miss_reacquire_ > 0.0 && miss_count_[size_t(leg_)] > 0) { const double drop = std::min(0.01 * miss_count_[size_t(leg_)], std::max(0.0, lift_clear_m_ - 0.015)); lift_h_ -= drop; lift_dy_ -= drop; }   // a re-attempt lifts lower
-            phase_ = Phase::Lift; phase_ticks_ = 0; left_ground_ = false; obstacle_run_ = 0; hang_run_ = 0; swing_v_fwd_ = 0.0; swing_d_fwd_ = 0.0; clip_run_ = 0; lower_retreats_ = 0; lift_from_ = cur;
-        }
-        break; }
-    case Phase::Lift:
-    case Phase::Swing:
-        if (hang_ticks_ > 0 && have_contact_) {   // THE HUNG TOE: asked up but never off the ground, or the body dragged back by it
-            const bool up_asked = phase_ == Phase::Swing || double(toe_tgt_[size_t(leg_)].y) + stand_h_m_ >= 0.02;
-            const bool on = contact_[size_t(leg_)] > 0.5f;
-            if (up_asked && on && !left_ground_) ++hang_run_; else if (!on) hang_run_ = 0;
-            if (have_imu_ && have_up_) {   // the forward linear acceleration (gravity removed by the body's up), integrated over this lift+swing
-                const double a_lin_z = double(imu_[2]) - 9.81 * up_[2]; a_lin_z_ema_ += 0.01 * (a_lin_z - a_lin_z_ema_);
-                swing_v_fwd_ += (a_lin_z - a_lin_z_ema_) * dt_; swing_d_fwd_ += swing_v_fwd_ * dt_;
-            }
-            const bool caught = hang_run_ >= hang_ticks_, dragged = drag_back_m_ > 0.0 && swing_d_fwd_ < -drag_back_m_;
-            if ((caught || dragged) && free_pending_ < 3) {
-                ++hangs_; reloc_hang_ = reloc_active_; if (caught) ++hangs_by_contact_; if (dragged) ++hangs_by_drag_; ++hang_count_[size_t(leg_)];
-                free_pending_ = std::min(2, hang_count_[size_t(leg_)]);
-                Vec3f& tg = toe_tgt_[size_t(leg_)]; tg.y = float(-stand_h_m_);
-                if (free_form_ == 3) {
-                    // the toe set down where it is; the body unloads it by the margin shift; then a full lift, higher and outward (noise on the second attempt)
-                    auto noise = [&]{ rng_ = rng_ * 1664525u + 1013904223u; return (double(rng_ >> 8) / 16777216.0 - 0.5) * 2.0 * free_noise_m_; };
-                    const double out_sign = (leg_ == 1 || leg_ == 3) ? 1.0 : -1.0;
-                    free_out_dx_ = out_sign * free_out_m_ * free_pending_ + (free_pending_ >= 2 ? noise() : 0.0);
-                    free_out_dy_ = free_pending_ >= 2 ? noise() : 0.0;
-                    plan_active_ = false; plan_pending_ = true; plan_land_ = land_;   // the landing kept; the margin controller steers the shift
-                    shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ = Phase::Shift; phase_ticks_ = 0; hang_run_ = 0;
-                } else {
-                    // the toe dragged toward the hip along the ground, then lifted higher
-                    free_retract_left_ = free_retract_m_ * free_pending_;
-                    lift_h_ += free_extra_m_; lift_dy_ += free_extra_m_;
-                    phase_ = Phase::Lift; phase_ticks_ = 0; hang_run_ = 0; left_ground_ = false; obstacle_run_ = 0; swing_v_fwd_ = 0.0; swing_d_fwd_ = 0.0;
-                }
-                if (free_pending_ >= 2) free_pending_ = 3;   // the second attempt on this leg is the last: a third hang lets the timeouts run (no loop)
-                break;
-            }
-        }
-        if (have_contact_ && double(toe_tgt_[size_t(leg_)].y) + stand_h_m_ >= 0.02) {   // the obstacle reflex, armed once the toe is asked 2 cm up: it left the ground and something stopped it
-            const bool on = contact_[size_t(leg_)] > 0.5f;
-            if (!on) { left_ground_ = true; obstacle_run_ = 0; }
-            else if (left_ground_ && obstacle_ticks_ > 0 && ++obstacle_run_ >= obstacle_ticks_) {   // sustained a tenth of a second: a brush of the floor is briefer
-                ++obstacle_hits_; reloc_add(RelObstacle, land_, toe_tgt_[size_t(leg_)]); land_ = toe_tgt_[size_t(leg_)]; land_h_ = -stand_h_m_;
-                phase_ = Phase::Lower; phase_ticks_ = 0; touch_run_ = 0; left_ground_ = false; obstacle_run_ = 0;
-                break;
-            }
-        }
-        if (phase_ == Phase::Lift) {
-        Vec3f& tg = toe_tgt_[size_t(leg_)];
-        if (free_retract_left_ > 0.0) {   // freeing: first drag the toe along the ground toward the hip, away from the face
-            const Vec3f hip = hip1_of(leg_); const double dx = hip.x - tg.x, dz = hip.z - tg.z, dn = std::max(1e-6, std::hypot(dx, dz)), st = std::min(free_retract_left_, swing_v_ * dt_);
-            tg.x += float(dx / dn * st); tg.z += float(dz / dn * st); free_retract_left_ -= st;
-            break;
-        }
-        const bool freeing3 = free_form_ == 3 && free_pending_ > 0;
-        Vec3f top(float(tg.x + (freeing3 ? free_out_dx_ : 0.0)), float(-stand_h_m_ + lift_dy_), tg.z);
-        if (freeing3) { Vec3f probe = top; if (sector_clamp(leg_, probe)) top.x = probe.x; }   // outward only as far as the leg's sector allows
-        const double dy = double(top.y - tg.y), dx = double(top.x - tg.x), step = lift_v_ * dt_;
-        tg.y += float(std::fabs(dy) <= step ? dy : (dy > 0 ? step : -step));
-        if (freeing3) tg.x += float(std::fabs(dx) <= step ? dx : (dx > 0 ? step : -step));
-        const bool arrived = std::fabs(dy) <= step && (!freeing3 || std::fabs(dx) <= step);
-        if (clip_ticks_ > 0) {   // the leg cannot follow: take the part of the arc it reached and move on
-            const Vec3f cmd_now = toe_of(leg_, angles_[size_t(leg_)]);
-            if (len(sub(cmd_now, tg)) > unreach_tol_m_) ++clip_run_; else clip_run_ = 0;
-            if (clip_run_ >= clip_ticks_) { tg = cmd_now; lift_dy_ = double(tg.y) + stand_h_m_; ++clips_; clip_run_ = 0; phase_ = Phase::Swing; phase_ticks_ = 0; break; }
-        }
-        if (arrived && len(sub(toe_of(leg_, angles_[size_t(leg_)]), tg)) < 2.0 * ik_tol_m_) { phase_ = Phase::Swing; phase_ticks_ = 0; }
-        else if (phase_ticks_ > phase_max_ticks_ * (freeing3 ? 2 : 1)) { ++phase_timeouts_; phase_ = Phase::Swing; phase_ticks_ = 0; }
-        } else {
-        Vec3f& tg = toe_tgt_[size_t(leg_)];
-        const Vec3f goal(land_.x, float(-stand_h_m_ + lift_dy_), land_.z);
-        const Vec3f d = sub(goal, tg); const double dn = len(d), step = swing_v_ * dt_;
-        if (dn <= step) tg = goal; else tg = add(tg, Vec3f(float(d.x / dn * step), float(d.y / dn * step), float(d.z / dn * step)));
-        if (clip_ticks_ > 0) {
-            const Vec3f cmd_now = toe_of(leg_, angles_[size_t(leg_)]);
-            if (len(sub(cmd_now, tg)) > unreach_tol_m_) ++clip_run_; else clip_run_ = 0;
-            if (clip_run_ >= clip_ticks_) { reloc_add(RelClip, land_, cmd_now); tg = cmd_now; ++clips_; clip_run_ = 0; phase_ = Phase::Lower; phase_ticks_ = 0; touch_run_ = 0; break; }
-        }
-        if (dn <= step && len(sub(toe_of(leg_, angles_[size_t(leg_)]), tg)) < 2.0 * ik_tol_m_) { phase_ = Phase::Lower; phase_ticks_ = 0; touch_run_ = 0; }
-        else if (phase_ticks_ > phase_max_ticks_) { ++phase_timeouts_; tg = goal; phase_ = Phase::Lower; phase_ticks_ = 0; touch_run_ = 0; }
-        }
-        break;
-    case Phase::Lower: {
-        Vec3f& tg = toe_tgt_[size_t(leg_)];
-        const Vec3f cmd = toe_of(leg_, angles_[size_t(leg_)]);
-        const bool unreachable = len(sub(cmd, tg)) > unreach_tol_m_;
-        double v = lower_v_;
-        if (lower_fast_v_ > 0.0 && land_sigma_ > 0.0) {            // the memory knows the ground at the landing: fast to a standoff above it, careful beneath
-            const double h_tg = double(tg.y) + stand_h_m_ + gravity_h(Vec3f(tg.x, float(-stand_h_m_), tg.z));
-            const double standoff = lower_standoff_m_ + lower_standoff_k_ * std::max(land_sigma_, std::sqrt(land_err_ms_));   // the memory's own uncertainty, or the sequencer's running landing error where the memory is overconfident (sigma_touch 5 mm against 1-3 cm of landing error)
-            if (h_tg > land_h_ + standoff) { v = lower_fast_v_; ++fast_ticks_; } else ++slow_ticks_;
-        }
-        const bool cant_reach_down = unreachable && double(cmd.y) > double(tg.y) + 0.005;   // the leg is ABOVE its target and cannot get down
-        if (unreachable && !cant_reach_down) ++lower_fold_ticks_;    // the leg is below a target it cannot fold up to: descending helps (a 50 mm riser left a front leg at both its stops with its target above the tread, 2026-11-09)
-        if (cant_reach_down && crouch_max_m_ > 0.0) { crouch_ = std::min(crouch_max_m_, crouch_ + crouch_v_ * dt_); ++crouch_ticks_; }   // the body comes down to the toe
-        if (!cant_reach_down) tg.y -= float(v * dt_);
-        else if (phase_ticks_ % 5 == 0) {                            // out of reach downward: the landing retreats toward the hip and the toe tries again
-            const Vec3f hip = hip1_of(leg_); const double dx = hip.x - tg.x, dz = hip.z - tg.z, dn = std::hypot(dx, dz);
-            if (dn > reach_min_m_ + retreat_m_) { const Vec3f b = tg; tg.x += float(dx / dn * retreat_m_); tg.z += float(dz / dn * retreat_m_); reloc_add(RelRetreat, b, tg); ++retreats_; ++lower_retreats_; }
-        }
-        if (depth_max_m_ > 0.0 && tg.y < float(-depth_max_m_)) { tg.y = float(-depth_max_m_); ++depth_caps_; }   // never into the pole
-        const double h_cmd = double(cmd.y) + stand_h_m_ + gravity_h(Vec3f(cmd.x, float(-stand_h_m_), cmd.z));   // the commanded toe's height in the stance's terms
-        const bool raw_touch = have_contact_ && contact_[size_t(leg_)] > 0.5f && (!have_load_ || load_[size_t(leg_)] >= float(touch_load_));
-        touch_run_ = raw_touch ? touch_run_ + 1 : 0;
-        const bool touched = touch_run_ >= touch_ticks_ && phase_ticks_ > 3;
-        const bool sunk = h_cmd < land_h_ - sink_max_m_ || phase_ticks_ > (miss_reacquire_ > 0.0 && miss_ticks_ > 0 ? miss_ticks_ : 4 * phase_max_ticks_) || (miss_reacquire_ > 0.0 && lower_retreats_ >= 6);
-        if (touched || sunk) {
-            if (sunk) ++lower_sunk_;
-            // the toe's height where it stopped, against the toes already down: its relative elevation; and the memory's
-            // prediction of the ground here against where the toe met it -- the careful stepper's error
-            const double h_toe = (touched && have_y_) ? double(y_[size_t(leg_)]) : h_cmd;
-            ground_h_[size_t(leg_)] = h_toe;
-            elev_landed_[size_t(leg_)] = double(cmd.y) + stand_h_m_;   // the body-frame height the command had at the touch: the toe stands here
-            if (touched) hang_count_[size_t(leg_)] = 0;
-            free_pending_ = 0; free_retract_left_ = 0.0; free_out_dx_ = free_out_dy_ = 0.0;
-            const bool null_step = miss_reacquire_ > 0.0 && std::hypot(double(cmd.x) - lift_from_.x, double(cmd.z) - lift_from_.z) < null_step_m_;
-            if (touched) { land_err_last_ = h_toe - land_h_; land_err_ms_ += 0.1 * (land_err_last_ * land_err_last_ - land_err_ms_); ++landings_; if (!null_step) miss_count_[size_t(leg_)] = 0; else { ++null_steps_; ++miss_count_[size_t(leg_)]; } }
-            else { ++missed_; if (miss_reacquire_ > 0.0) { ++miss_count_[size_t(leg_)]; reseeding_[size_t(leg_)] = true; } }   // re-acquire: the leg walks to its neutral pose, its next attempt differs
-            last_landed_ = leg_;   // the unloaded-toe rule reads what this leg carries before its next turn
-            reloc_add(RelIk, tg, cmd); reloc_finish(cmd);   // the tag closes at the touch (an instrument)
-            tg = cmd;   // the stance takes it from here
-            ++steps_[size_t(leg_)]; last_step_tick_[size_t(leg_)] = int64_t(tick_now_);
-            cycles_ = *std::min_element(steps_.begin(), steps_.end());   // full crawl cycles: every leg has stepped this many times
-            if (relief_for_ >= 0 && relief_for_ != leg_) { leg_ = relief_for_; relief_for_ = -1; plan_active_ = false; } else { relief_for_ = -1; decide_next(tick_now_); }
-            shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ = Phase::Shift; phase_ticks_ = 0;
-        }
-        break; }
-    }
-}
-
-// the extension margin: the leg's full extension minus the hip2-to-toe distance for a toe at p, the leg's plane taken through the
-// hip1 axis (hip2 sits L1h out from hip1 along the toe's bearing, at its fixed height)
-double PoseSequencer::ext_slack(int leg, const Vec3f& p) const {
-    if (!ext_lmax_ok_) return 1.0;
-    const Vec3f hip = hip1_of(leg), h2 = anchors_[size_t(leg)].hip2_world;
-    const double l1h = std::hypot(double(h2.x) - hip.x, double(h2.z) - hip.z), r = std::hypot(double(p.x) - hip.x, double(p.z) - hip.z);
-    return ext_lmax_[size_t(leg)] - std::hypot(r - l1h, double(p.y) - h2.y);
-}
-// the same at the commanded angles by the true FK (an instrument: checks the plane approximation against the solved leg)
-double PoseSequencer::ext_slack_fk(int leg) const {
-    if (!ext_lmax_ok_) return 1.0;
-    const auto& t = angles_[size_t(leg)];
-    const Vec3f hip = hip1_of(leg), h2 = anchors_[size_t(leg)].hip2_world;
-    const double c = std::cos(t[0]), sn = std::sin(t[0]), dx = double(h2.x) - hip.x, dz = double(h2.z) - hip.z;   // hip2 about the vertical hip1 axis (Godot's rotation about +Y)
-    const Vec3f h2n(float(hip.x + c * dx + sn * dz), h2.y, float(hip.z - sn * dx + c * dz));
-    return ext_lmax_[size_t(leg)] - double(len(sub(toe_of(leg, t), h2n)));
-}
-
-// is the body shift (sx, sz) feasible with `lifting` in the air: every other toe stays within its reach and sector
-bool PoseSequencer::shift_feasible(int lifting, const std::array<Vec3f, 4>& toes, double sx, double sz) const {
-    for (int i = 0; i < 4; ++i) {
-        if (i == lifting) {   // the lifting toe's reach and sector do not block (it is about to leave the ground); under ext_lifting its extension does
-            if (ext_lifting_ > 0.0 && ext_margin_m_ > 0.0) {
-                const Vec3f q(float(toes[size_t(i)].x - sx), toes[size_t(i)].y, float(toes[size_t(i)].z - sz));
-                const double sa = ext_slack(i, q);
-                const double floor_m = ext_lifting_ * ext_margin_m_;
-                if (sa < floor_m && sa < ext_slack(i, toes[size_t(i)]) - 1e-9) { ++ext_lift_rejects_; return false; }
-            }
-            continue;
-        }
-        Vec3f q(float(toes[size_t(i)].x - sx), toes[size_t(i)].y, float(toes[size_t(i)].z - sz));
-        const Vec3f hip = hip1_of(i); const double r = std::hypot(q.x - hip.x, q.z - hip.z);
-        if (r < reach_min_m_ || r > reach_max_m_) return false;
-        if (i == protect_ && ext_slack(i, q) < ext_slack(i, toes[size_t(i)]) - 1e-4) { ++overdue_rejects_; return false; }   // the overdue leg is not stretched further
-        Vec3f probe = q; if (sector_clamp(i, probe)) return false;
-        if (ext_margin_m_ > 0.0) {   // nor closer to its full extension than the margin, unless it was already and the shift does not stretch it further
-            const double sa = ext_slack(i, q);
-            if (sa < ext_margin_m_ && sa < ext_slack(i, toes[size_t(i)]) - 1e-9) { ++ext_rejects_; return false; }
-        }
-    }
-    return true;
-}
-
-// the shift test's first refusal, in shift_feasible's own order and without its counters (the blocker instrument): 0 = feasible
-int PoseSequencer::shift_refusal(int lifting, const std::array<Vec3f, 4>& toes, double sx, double sz, int& toe) const {
-    for (int i = 0; i < 4; ++i) {
-        toe = i;
-        const Vec3f q(float(toes[size_t(i)].x - sx), toes[size_t(i)].y, float(toes[size_t(i)].z - sz));
-        if (i == lifting) {
-            if (ext_lifting_ > 0.0 && ext_margin_m_ > 0.0) { const double sa = ext_slack(i, q); if (sa < ext_lifting_ * ext_margin_m_ && sa < ext_slack(i, toes[size_t(i)]) - 1e-9) return 6; }
-            continue;
-        }
-        const Vec3f hip = hip1_of(i); const double r = std::hypot(q.x - hip.x, q.z - hip.z);
-        if (r > reach_max_m_) return 1;
-        if (r < reach_min_m_) return 2;
-        if (i == protect_ && ext_slack(i, q) < ext_slack(i, toes[size_t(i)]) - 1e-4) return 3;
-        Vec3f probe = q; if (sector_clamp(i, probe)) return 4;
-        if (ext_margin_m_ > 0.0) { const double sa = ext_slack(i, q); if (sa < ext_margin_m_ && sa < ext_slack(i, toes[size_t(i)]) - 1e-9) return 5; }
-    }
-    toe = -1; return 0;
-}
-
-// the blocker instrument: of the shifts that would give `leg` its lift margin, the smallest one's refusal (or "grid")
-void PoseSequencer::diagnose_block(int leg, double cx, double cz, double need) {
-    const int nl = int(std::floor(plan_shift_m_ / plan_cell_m_ + 1e-9)), nf = int(std::floor(plan_shift_fwd_m_ / plan_cell_m_ + 1e-9));
-    double best_d = 1e9, mmax = -1e9; int best_toe = -1, best_r = 0;
-    for (int ix = -nl; ix <= nl; ++ix) for (int iz = -nl; iz <= nf; ++iz) {
-        const double tx = ix * plan_cell_m_, tz = iz * plan_cell_m_;
-        std::array<std::array<double, 2>, 3> t3{}; int kk = 0;
-        for (int i = 0; i < 4; ++i) if (i != leg && kk < 3) { t3[size_t(kk)] = {double(toe_tgt_[size_t(i)].x) - tx, double(toe_tgt_[size_t(i)].z) - tz}; ++kk; }
-        double a, b; const double m = tri_margin(t3, cx, cz, a, b);
-        mmax = std::max(mmax, m);
-        if (m < need) continue;
-        const double d = std::hypot(tx, tz); if (d >= best_d) continue;
-        int toe; const int r = shift_refusal(leg, toe_tgt_, tx, tz, toe);
-        best_d = d; best_r = r; best_toe = r == 0 ? leg : toe;
-    }
-    if (best_toe < 0) { ++block_[size_t(leg)][28]; block_short_[size_t(leg)] += need - mmax; return; }
-    ++block_[size_t(leg)][size_t(best_toe * 7 + best_r)]; block_d_[size_t(leg)] += best_d;
-}
-
-// the best lift margin `leg` can be given by a feasible shift of the body over `toes` (the centre of mass at (cx, cz) in the
-// body frame moves with the body; the toes move the other way); forward_first prefers, among shifts that give the margin
-// asked, the most forward one, else the largest margin
-double PoseSequencer::best_margin_over_shifts(int leg, const std::array<Vec3f, 4>& toes, double cx, double cz, double& sx, double& sz, bool forward_first) const {
-    double best = -1e9, best_key = -1e9; sx = 0.0; sz = 0.0;
-    const double need = margin_min_m_ + margin_extra_m_;
-    const int nl = int(std::floor(plan_shift_m_ / plan_cell_m_ + 1e-9)), nf = int(std::floor(plan_shift_fwd_m_ / plan_cell_m_ + 1e-9));
-    for (int ix = -nl; ix <= nl; ++ix) for (int iz = -nl; iz <= nf; ++iz) {
-        const double tx = ix * plan_cell_m_, tz = iz * plan_cell_m_;
-        if (!shift_feasible(leg, toes, tx, tz)) continue;
-        std::array<std::array<double, 2>, 3> t3{}; int kk = 0;
-        for (int i = 0; i < 4; ++i) if (i != leg && kk < 3) { t3[size_t(kk)] = {double(toes[size_t(i)].x) - tx, double(toes[size_t(i)].z) - tz}; ++kk; }
-        double a, b; const double m = tri_margin(t3, cx, cz, a, b);
-        // the key: with the margin met, forward progress then the shortest shift; without it, the margin itself
-        const double key = forward_first ? (m >= need ? 10.0 + tz - 0.1 * std::hypot(tx, tz) : m) : m;
-        if (key > best_key) { best_key = key; best = m; sx = tx; sz = tz; }
-    }
-    return best;
-}
-
-// the plan drift: the last decision's predicted margin for the next leg against the margin found now, and which factor broke it
-void PoseSequencer::reloc_finish(const Vec3f& landed) {
-    if (!reloc_active_) return;
-    reloc_active_ = false;
-    const double ox = double(landed.x) - reloc_from_.x, oz = double(landed.z) - reloc_from_.z, off = std::hypot(ox, oz);
-    double vx = 0.0, vz = 0.0; for (auto const& v : reloc_vec_) { vx += v[0]; vz += v[1]; }
-    reloc_resid_ = std::max(reloc_resid_, std::hypot(ox - vx, oz - vz));   // the closure: every move of the landing was tagged
-    ++reloc_n_[0];
-    if (!reloc_planned_) { ++reloc_n_[reloc_switched_ ? 3 : 2]; return; }
-    ++reloc_n_[1]; reloc_off_ += off; if (reloc_hang_) ++reloc_n_[5];
-    int top = -1; double tb = 0.0;
-    for (int r = 0; r < RelN; ++r) { const double m = std::hypot(reloc_vec_[size_t(r)][0], reloc_vec_[size_t(r)][1]); reloc_sum_[size_t(r)] += m; if (m > tb) { tb = m; top = r; } }
-    if (off > 0.02) { ++reloc_n_[4]; if (top >= 0) ++reloc_top_[size_t(top)]; }
-}
-
-void PoseSequencer::check_drift(double cx, double cz, double need) {
-    if (pred_leg_ < 0) return;
-    const int p = pred_leg_, st = pred_step_; pred_leg_ = -1;
-    // the extra searches must not move the shift test's own counters
-    const int64_t c1 = ext_rejects_, c2 = ext_lift_rejects_, c3 = overdue_rejects_;
-    double sx, sz;
-    auto margin = [&](const std::array<Vec3f, 4>& toes, double x, double z) { return best_margin_over_shifts(p, toes, x, z, sx, sz, false); };
-    const double m_act = margin(toe_tgt_, cx, cz);
-    double dl = 0.0, doth = 0.0; int no = 0;
-    for (int i = 0; i < 4; ++i) {
-        const double d = std::hypot(double(toe_tgt_[size_t(i)].x) - pred_toes_[size_t(i)].x, double(toe_tgt_[size_t(i)].z) - pred_toes_[size_t(i)].z);
-        if (i == st) dl = d; else if (i != p) { doth += d; ++no; }
-    }
-    doth /= std::max(1, no); const double dc = std::hypot(cx - pred_cx_, cz - pred_cz_);
-    ++drift_[0]; drift_mag_all_[0] += dl; drift_mag_all_[1] += doth; drift_mag_all_[2] += dc;
-    if (pred_m_ < need) ++drift_[3];
-    else {
-        ++drift_[1];
-        if (m_act < need) {
-            ++drift_[2]; drift_mag_[0] += dl; drift_mag_[1] += doth; drift_mag_[2] += dc;
-            auto swapped = [&](bool land, bool others) { std::array<Vec3f, 4> t = pred_toes_; for (int i = 0; i < 4; ++i) { if (i == p) continue; if ((i == st && land) || (i != st && others)) t[size_t(i)] = toe_tgt_[size_t(i)]; } return t; };
-            const bool by_land = margin(swapped(true, false), pred_cx_, pred_cz_) < need;
-            const bool by_oth = margin(swapped(false, true), pred_cx_, pred_cz_) < need;
-            const bool by_com = margin(pred_toes_, cx, cz) < need;
-            if (by_land) ++drift_cause_[0];
-            if (by_oth) ++drift_cause_[1];
-            if (by_com) ++drift_cause_[2];
-            if (!by_land && !by_oth && !by_com) ++drift_cause_[3];
-        }
-    }
-    ext_rejects_ = c1; ext_lift_rejects_ = c2; overdue_rejects_ = c3;
-}
-
-bool PoseSequencer::plan_step(int& leg_out, Vec3f& land_out, double& sx_out, double& sz_out, double& score_out) {
-    const double cx = have_support_ ? double(support_[3]) : 0.0, cz = have_support_ ? double(support_[2]) : 0.0;
-    const double need = margin_min_m_ + margin_extra_m_;
-    const int n_order = order_.empty() ? 4 : int(order_.size());
-    double best_score = -1e9, best_mnext = -1e9; int best_nleg = -1; std::array<Vec3f, 4> best_landed{}; leg_out = -1;
-    const int64_t skips0 = plan_skips_;
-    const int nland = int(std::floor(plan_land_m_ / plan_cell_m_ + 1e-9));
-    protect_ = -1;
-    check_drift(cx, cz, need);
-    const int wleg0 = order_.empty() ? 0 : std::clamp(int(order_[size_t((order_pos_ + 1) % n_order)]), 0, 3);
-    int urgent = -1;   // the overdue leg's queue jump: the planted leg with the least slack below ext_urgent_m
-    if (ext_urgent_m_ > 0.0 && ext_lmax_ok_) { double lo = ext_urgent_m_; for (int i = 0; i < 4; ++i) { const double sl = ext_slack(i, toe_tgt_[size_t(i)]); if (sl < lo) { lo = sl; urgent = i; } } }
-    if (urgent == wleg0 || jumped_) urgent = -1;   // it is the wave's leg already, or a leg has jumped this turn
-    for (int k = (urgent >= 0 ? -1 : 0); k < n_order; ++k) {   // the wave's order first (an urgent leg before it); a later leg only when an earlier one has no feasible step
-        const bool jump = k < 0;
-        const int pos = jump ? -1 : (order_.empty() ? k : (order_pos_ + 1 + k) % n_order);
-        const int c = jump ? urgent : (order_.empty() ? k : std::clamp(int(order_[size_t(pos)]), 0, 3));
-        if (!jump && c == urgent) continue;   // tried first, and infeasible
-        if (have_contact_ && !bearing(c) && air_ticks_[size_t(c)] < air_ticks_min_ && air_ticks_[size_t(c)] > 0) {}   // (a toe in the air is still a candidate: placing it is a step)
-        auto skipped = [&]{   // the leg has no feasible step: under overdue the steps after it serve it
-            if (jump) { ++urgent_fails_; if (overdue_ > 0.0) protect_ = c; return; }
-            ++plan_skips_;
-            if (k == 0 && overdue_ > 0.0 && protect_ < 0) protect_ = c;
-        };
-        double sx, sz; const double m_now = best_margin_over_shifts(c, toe_tgt_, cx, cz, sx, sz, true);
-        if (m_now < need) { ++skip_nomargin_[size_t(c)]; diagnose_block(c, cx, cz, need); skipped(); continue; }
-        if (miss_reacquire_ > 0.0 && miss_count_[size_t(c)] >= 2 && k < n_order - 1) { ++miss_skips_; ++skip_miss_[size_t(c)]; continue; }   // let the others step first; the last candidate is never skipped
-        // the leg the landing must leave liftable: the wave's own next leg (the one being skipped when c is a later leg --
-        // the first form protected only the leg after c and marched two legs of one side forward while the other side's
-        // never became feasible, 89 / 3 / 90 / 2); when c IS the wave's next leg, the one after it
-        const int wpos = order_.empty() ? 0 : (order_pos_ + 1) % n_order;
-        const int wleg = order_.empty() ? 0 : std::clamp(int(order_[size_t(wpos)]), 0, 3);
-        const int npos = order_.empty() ? (c + 1) % 4 : (pos + 1) % n_order;
-        int nleg = (c == wleg) ? (order_.empty() ? npos : std::clamp(int(order_[size_t(npos)]), 0, 3)) : wleg;
-        if (protect_ >= 0 && c != protect_) nleg = protect_;   // under overdue the landing must leave the overdue leg liftable
-        // the toes after the shift, c still to land
-        std::array<Vec3f, 4> after = toe_tgt_; for (int i = 0; i < 4; ++i) { after[size_t(i)].x -= float(sx); after[size_t(i)].z -= float(sz); }
-        const Vec3f hip = hip1_of(c), h2 = anchors_[size_t(c)].hip2_world;
-        double hx = h2.x - hip.x, hz = h2.z - hip.z; const double hn = std::max(1e-6, std::hypot(hx, hz)); hx /= hn; hz /= hn;
-        const double lx = -hz, lz = hx;   // the heading's lateral
-        double leg_best = -1e9, leg_mnext = -1e9; Vec3f leg_land{}; std::array<Vec3f, 4> leg_landed{};
-        double jx = 0.0, jz = 0.0;   // re-acquisition: a leg that missed searches a grid shifted by up to 2 cm, and is penalised by 1 cm of margin per miss
-        if (miss_reacquire_ > 0.0 && miss_count_[size_t(c)] > 0) { auto nz = [&]{ rng_ = rng_ * 1664525u + 1013904223u; return (double(rng_ >> 8) / 16777216.0 - 0.5) * 0.04; }; jx = nz(); jz = nz(); }
-        const double miss_pen = miss_reacquire_ > 0.0 ? 0.01 * miss_count_[size_t(c)] : 0.0;
-        for (int ia = -nland; ia <= nland; ++ia) for (int il = -nland / 2; il <= nland / 2; ++il) {
-            const double da = ia * plan_cell_m_ + jz, dl = il * plan_cell_m_ + jx;
-            Vec3f L(float(neutral_[size_t(c)].x + hx * da + lx * dl), toe_tgt_[size_t(c)].y, float(neutral_[size_t(c)].z + hz * da + lz * dl));
-            const double r = std::hypot(L.x - hip.x, L.z - hip.z); if (r < reach_min_m_ || r > reach_max_m_ - 0.01) continue;
-            if (land_r_min_m_ > 0.0 && r < land_r_min_m_) { ++land_r_rejects_; continue; }   // the base is kept wide enough that a shift stays feasible
-            { const double wide = sector_half_rad_; Vec3f probe = L; const bool clamped = [&]{ auto* self = const_cast<PoseSequencer*>(this); self->sector_half_rad_ = std::min(wide, land_sector_rad_); const bool cl = sector_clamp(c, probe); self->sector_half_rad_ = wide; return cl; }(); if (clamped) continue; }
-            {   // the landing must be reachable at the stance's depth plus the landing band (a toe at the horizontal reach cannot lower: 7 of 8 misses sank at r 0.12-0.13)
-                const Vec3f deep(L.x, float(-stand_h_m_ - land_band_lo_m_), L.z); auto ang = angles_[size_t(c)]; bool ok = false;
-                for (int it = 0; it < 8 && !ok; ++it) ok = ik_step(c, deep, ang);
-                if (!ok && len(sub(toe_of(c, ang), deep)) > 0.008) continue;
-            }
-            std::array<Vec3f, 4> landed = after; landed[size_t(c)] = L;
-            double nsx, nsz; const double m_next = best_margin_over_shifts(nleg, landed, cx, cz, nsx, nsz, false);
-            const double fwd = double(L.z) - double(neutral_[size_t(c)].z);   // progress: the landing ahead of the neutral place
-            double score = std::min(m_next, 0.03) + plan_adv_w_ * fwd - miss_pen;   // a margin beyond 3 cm buys nothing more
-            if (protect_ >= 0 && c != protect_ && m_next >= need) score += 0.1;   // a landing that leaves the overdue leg liftable ranks above any that does not
-            if (plan_next_first_ > 0.0 && m_next >= need) score += 0.1;   // next leg liftable first: the advance chooses only among landings that leave it liftable
-            if (face_gap_m_ > 0.0) {   // lever C: a face just ahead of the landing (a riser the next lift must clear from too close)
-                double h0, h1; if (patch_h(L.z, L.x, h0) && patch_h(L.z + face_gap_m_, L.x, h1) && h1 - h0 >= land_edge_m_) { score -= face_penalty_m_; ++face_penalties_; }
-            }
-            if (score > leg_best) { leg_best = score; leg_land = L; leg_mnext = m_next; leg_landed = landed; }
-        }
-        if (leg_best <= -1e8) { ++skip_noland_[size_t(c)]; skipped(); continue; }
-        if (jump) { best_score = leg_best; leg_out = c; land_out = leg_land; sx_out = sx; sz_out = sz; best_mnext = leg_mnext; best_nleg = nleg; best_landed = leg_landed; ++urgent_jumps_; jumped_ = true; break; }   // the urgent leg steps; the wave's turn is not consumed
-        if (leg_best > best_score) { best_score = leg_best; leg_out = c; land_out = leg_land; sx_out = sx; sz_out = sz; best_mnext = leg_mnext; best_nleg = nleg; best_landed = leg_landed; if (k == 0) { order_pos_ = pos; jumped_ = false; } }   // a later leg's step does not consume the wave's turn
-        if (k == 0) break;   // the wave's own next leg is feasible: take it (the search ranks its landing and shift, not its turn)
-    }
-    if (protect_ >= 0) ++overdue_decisions_;
-    if (leg_out >= 0) ++next_lift_[best_mnext >= need ? 0 : 1];
-    if (leg_out >= 0) { pred_leg_ = best_nleg; pred_step_ = leg_out; pred_m_ = best_mnext; pred_toes_ = best_landed; pred_cx_ = cx; pred_cz_ = cz; } else pred_leg_ = -1;
-    protect_ = -1;
-    score_out = best_score; last_plan_skips_ = int(plan_skips_ - skips0);
-    return leg_out >= 0;
-}
-
-void PoseSequencer::decide_next(uint64_t) {
-    plan_active_ = false; plan_pending_ = false; plan_done_x_ = plan_done_z_ = 0.0; unload_shift_only_ = false; reloc_plan_leg_ = -1;
-    if (reloc_active_) { ++reloc_n_[6]; reloc_active_ = false; }   // the tag: a step that went and never landed (a hang's re-shift passed the turn) is abandoned
-    if (unloaded_shift_m_ > 0.0) {   // a toe that touches but carries nothing: the body goes over it first
-        for (int k = 0; k < 5; ++k) {
-            // first the leg that just landed and never came to bear (the loop's signature: it would be lifted again at once), then any toe unloaded for unloaded_ticks
-            int i; bool fire;
-            if (k == 0) {
-                i = last_landed_; fire = false;
-                if (i >= 0 && have_load_) {
-                    if (land_max_load_[size_t(i)] < unloaded_share_) ++unloaded_landings_[size_t(i)]; else unloaded_landings_[size_t(i)] = 0;
-                    fire = unloaded_landings_[size_t(i)] >= unloaded_landings_min_ && unload_cool_[size_t(i)] <= 0;
-                    land_max_load_[size_t(i)] = 0.0;
-                }
-                last_landed_ = -1;
-            }
-            else { i = k - 1; fire = unloaded_run_[size_t(i)] >= unloaded_ticks_ && unload_cool_[size_t(i)] <= 0 && last_plan_skips_ >= unloaded_skips_min_; }
-            if (!fire) continue;
-            double mx = 0, mz = 0; for (int j = 0; j < 4; ++j) { mx += toe_tgt_[size_t(j)].x * 0.25; mz += toe_tgt_[size_t(j)].z * 0.25; }
-            const double dx = toe_tgt_[size_t(i)].x - mx, dz = toe_tgt_[size_t(i)].z - mz, dn = std::max(1e-6, std::hypot(dx, dz));
-            leg_ = i; plan_active_ = true; plan_pending_ = false; plan_sx_ = dx / dn * unloaded_shift_m_; plan_sz_ = dz / dn * unloaded_shift_m_;
-            unload_shift_only_ = true; unload_cool_[size_t(i)] = 4 * unloaded_ticks_; unloaded_run_[size_t(i)] = 0; ++unload_shifts_;
-            return;
-        }
-    }
-    if (plan_ > 0.0) {
-        int l; Vec3f L; double sx, sz, sc;
-        if (plan_step(l, L, sx, sz, sc)) { leg_ = l; reloc_plan_leg_ = l; plan_land_ = L; plan_sx_ = sx; plan_sz_ = sz; plan_score_ = sc; plan_active_ = true; plan_pending_ = true; ++plans_; return; }
-        ++plan_none_;
-    }
-    leg_ = choose_leg();
-}
-
-bool PoseSequencer::ik_solve(int leg, const Vec3f& target, std::array<double, 3>& t, bool allow_multistart) {
-    bool done = false;
-    for (int k = 0; k < ik_iters_ && !done; ++k) done = ik_step(leg, target, t);
-    if (done || !allow_multistart) return done;
-    const double e_cur = len(sub(toe_of(leg, t), target));
-    if (e_cur <= 2.0 * ik_tol_m_) return false;
-    ++multistarts_;
-    // the seeds: the branches of a three-joint leg, in action units
-    static const std::array<std::array<double, 3>, 6> seeds = {{{0.0, 0.0, 0.3}, {0.0, -0.6, 0.3}, {0.0, 0.6, 0.3}, {0.0, -0.3, -0.6}, {0.0, 0.0, 0.8}, {0.0, -0.6, -0.3}}};
-    std::array<double, 3> best = t; double e_best = e_cur;
-    const auto u_cur = u_of_angles(leg, t);
-    for (auto const& su : seeds) {
-        std::array<double, 3> a = angles_of_u(leg, {u_cur[0], su[1], su[2]});   // the yaw stays: the branches are in the leg's plane
-        bool ok = false; for (int k = 0; k < 12 && !ok; ++k) ok = ik_step(leg, target, a);
-        const double e = len(sub(toe_of(leg, a), target));
-        if (e < e_best - 1e-9) { e_best = e; best = a; }
-    }
-    if (e_best < e_cur - ik_switch_m_) { t = best; ++branch_switches_; return e_best < ik_tol_m_; }
-    return false;
-}
-
-bool PoseSequencer::plan_relief(int stuck, double cx, double cz, int bearing, int& leg_out, Vec3f& land_out, double& margin_out) const {
-    double best = -1e9; leg_out = -1;
-    for (int c = 0; c < 4; ++c) {
-        if (c == stuck) continue;
-        {   // c must be safe to lift now, by the geometry and (with all four bearing) by the model
-            std::array<std::array<double, 2>, 3> t3{}; int kk = 0;
-            for (int i = 0; i < 4; ++i) if (i != c && kk < 3) { t3[size_t(kk)] = {double(toe_tgt_[size_t(i)].x), double(toe_tgt_[size_t(i)].z)}; ++kk; }
-            double a, b; const double ml = tri_margin(t3, cx, cz, a, b);
-            const double mm = have_support_ ? double(support_[size_t(10 + 5 * c)]) : 1.0;
-            if (ml < margin_min_m_ || (bearing >= 4 && mm < margin_min_m_)) continue;
-        }
-        const Vec3f hip = hip1_of(c), h2 = anchors_[size_t(c)].hip2_world;
-        double hx = h2.x - hip.x, hz = h2.z - hip.z; const double hn = std::max(1e-6, std::hypot(hx, hz)); hx /= hn; hz /= hn;
-        for (int k = -relief_cells_; k <= relief_cells_; ++k) {
-            Vec3f cand(float(neutral_[size_t(c)].x + hx * k * relief_step_m_), toe_tgt_[size_t(c)].y, float(neutral_[size_t(c)].z + hz * k * relief_step_m_));
-            const double r = std::hypot(cand.x - hip.x, cand.z - hip.z);
-            if (r < reach_min_m_ || r > reach_max_m_ - 0.01) continue;
-            Vec3f probe = cand; if (sector_clamp(c, probe)) continue;
-            std::array<std::array<double, 2>, 3> t3{}; int kk = 0;   // the stuck leg's support after c has landed there
-            for (int i = 0; i < 4; ++i) if (i != stuck && kk < 3) { const Vec3f& q = (i == c) ? cand : toe_tgt_[size_t(i)]; t3[size_t(kk)] = {double(q.x), double(q.z)}; ++kk; }
-            double a, b; const double m_after = tri_margin(t3, cx, cz, a, b);
-            if (m_after > best) { best = m_after; leg_out = c; land_out = cand; }
-        }
-    }
-    margin_out = best;
-    return leg_out >= 0 && best >= margin_min_m_ + margin_extra_m_;
+    else if (which == "xz" && v.size() >= 8) { for (int i = 0; i < 8; ++i) in_.xz_[size_t(i)] = v[i]; in_.have_xz_ = true; }
+    else if (which == "y" && v.size() >= 4) { for (int i = 0; i < 4; ++i) in_.y_[size_t(i)] = v[i]; in_.have_y_ = true; }
+    else if (which == "contact" && v.size() >= 4) { for (int i = 0; i < 4; ++i) in_.contact_[size_t(i)] = v[i]; in_.have_contact_ = true; }
+    else if (which == "load" && v.size() >= 4) { for (int i = 0; i < 4; ++i) in_.load_[size_t(i)] = v[i]; in_.have_load_ = true; }
+    else if (which == "belly" && v.size() >= 1) { in_.belly_ = v[0]; in_.have_belly_ = true; }
+    else if (which == "odom" && v.size() >= 3) { in_.odom_in_ = {v[0], v[1], v[2]}; in_.have_odom_in_ = true; }
+    else if (which == "imu" && v.size() >= 6) { for (int i = 0; i < 6; ++i) in_.imu_[size_t(i)] = v[i]; in_.have_imu_ = true; }
+    else if (which == "up" && v.size() >= 3) { const double n = std::sqrt(double(v[0]) * v[0] + double(v[1]) * v[1] + double(v[2]) * v[2]); if (n > 0.5) { in_.up_ = {v[0] / n, v[1] / n, v[2] / n}; in_.have_up_ = true; } }
 }
 
 void PoseSequencer::publish(uint64_t tick_id) {
@@ -1221,73 +376,53 @@ void PoseSequencer::publish(uint64_t tick_id) {
     out->tick_id = tick_id; out->producer_id = id().empty() ? std::string("pose_sequencer") : std::string(id()); out->sensor = "pose";
     out->values = Eigen::VectorXf::Zero(13);
     out->values[0] = engage_level_;
-    for (int i = 0; i < 4; ++i) { const auto u = u_of_angles(i, angles_[size_t(i)]); for (int j = 0; j < 3; ++j) out->values[1 + 3 * i + j] = float(u[size_t(j)]); }
+    for (int i = 0; i < 4; ++i) { const auto u = kin_.u_of_angles(i, executor_.angles_[size_t(i)]); for (int j = 0; j < 3; ++j) out->values[1 + 3 * i + j] = float(u[size_t(j)]); }
     bus_->publish(output_topic_, out);
 }
 
 void PoseSequencer::tick(uint64_t tick_id) {
-    tick_now_ = tick_id;
-    if (have_contact_) {   // the leaky bearing estimate, with hysteresis
-        const double a = 1.0 / bear_tau_ticks_;
-        for (int i = 0; i < 4; ++i) {
-            bear_[size_t(i)] += a * ((contact_[size_t(i)] > 0.5f ? 1.0 : 0.0) - bear_[size_t(i)]);
-            if (bear_[size_t(i)] > bear_on_) bearing_[size_t(i)] = true; else if (bear_[size_t(i)] < bear_off_) bearing_[size_t(i)] = false;
-        }
-    }
+    executor_.sense(tick_id);   // the tick and the leaky bearing estimate
     // the FK check against the body's own toes (the model is the body's; this is the wiring's check), from the gait's command
-    if (have_model_ && have_gait_ && have_xz_ && have_y_ && phase_ == Phase::Idle) {
+    if (kin_.ready() && in_.have_gait_ && in_.have_xz_ && in_.have_y_ && executor_.phase_ == Phase::Idle) {
         double e = 0.0;
         for (int i = 0; i < 4; ++i) {
-            const Vec3f toe = toe_of(i, angles_of_u(i, {gait_u_[size_t(3 * i)], gait_u_[size_t(3 * i + 1)], gait_u_[size_t(3 * i + 2)]}));
-            e += std::hypot(double(toe.x) - xz_[size_t(2 * i)], double(toe.z) - xz_[size_t(2 * i + 1)]) / 4.0;
+            const Vec3f toe = kin_.toe_of(i, kin_.angles_of_u(i, {in_.gait_u_[size_t(3 * i)], in_.gait_u_[size_t(3 * i + 1)], in_.gait_u_[size_t(3 * i + 2)]}));
+            e += std::hypot(double(toe.x) - in_.xz_[size_t(2 * i)], double(toe.z) - in_.xz_[size_t(2 * i + 1)]) / 4.0;
         }
         fk_err_ema_ += 0.02 * (e - fk_err_ema_);
     }
-    const bool upright = !have_up_ || up_[1] >= tilt_disengage_;
-    const bool want = engage_ > 0.0 && have_model_ && upright;
-    if (!upright && phase_ != Phase::Idle) ++disengaged_tilt_;
-    if (want && phase_ == Phase::Idle) {   // from a standing body only
-        int n_contact = 0; if (have_contact_) for (int i = 0; i < 4; ++i) n_contact += bearing(i);
-        const bool standing = int64_t(tick_id) >= engage_min_tick_ && (!have_contact_ || n_contact >= engage_min_contacts_)
-                              && (belly_topic_.empty() || (have_belly_ && belly_ >= float(engage_min_belly_m_)));
-        if (standing) engage_now(tick_id);
+    const bool upright = floor_.upright(in_);
+    const bool want = engage_ > 0.0 && kin_.ready() && upright;
+    if (!upright && executor_.phase_ != Phase::Idle) ++disengaged_tilt_;
+    if (want && executor_.phase_ == Phase::Idle) {   // from a standing body only
+        int n_contact = 0; if (in_.have_contact_) for (int i = 0; i < 4; ++i) n_contact += executor_.bearing(i);
+        const bool standing = floor_.standing(int64_t(tick_id), in_, n_contact, !belly_topic_.empty());
+        if (standing) { executor_.engage_now(tick_id); planner_.pred_leg_ = -1; }
     }
-    if (!want && phase_ != Phase::Idle) { phase_ = Phase::Idle; leg_ = -1; }
+    if (!want && executor_.phase_ != Phase::Idle) { executor_.phase_ = Phase::Idle; executor_.leg_ = -1; }
     const float ramp = 1.0f / float(engage_ramp_ticks_);
-    engage_level_ = std::clamp(engage_level_ + (phase_ != Phase::Idle ? ramp : -ramp), 0.0f, 1.0f);
-    if (phase_ != Phase::Idle) {
+    engage_level_ = std::clamp(engage_level_ + (executor_.phase_ != Phase::Idle ? ramp : -ramp), 0.0f, 1.0f);
+    if (executor_.phase_ != Phase::Idle) {
         ++ticks_engaged_;
-        step_machine();
-        hold_stance();
-        double err = 0.0;
-        for (int i = 0; i < 4; ++i) {
-            if (ik_reseed_ticks_ > 0 && reseeding_[size_t(i)]) {   // walking back to the neutral standing pose at the step cap; the IK takes over when it arrives or can reach
-                const auto nt = angles_of_u(i, {0.0, 0.0, 0.3}); bool there = true;
-                for (int j = 0; j < 3; ++j) { const double d = nt[size_t(j)] - angles_[size_t(i)][size_t(j)]; const double st = std::clamp(d, -ik_reseed_rate_, ik_reseed_rate_); angles_[size_t(i)][size_t(j)] += st; if (std::fabs(d) > ik_reseed_rate_) there = false; }
-                if (there || len(sub(toe_of(i, angles_[size_t(i)]), toe_tgt_[size_t(i)])) < 2.0 * unreach_tol_m_) { reseeding_[size_t(i)] = false; pinned_ticks_[size_t(i)] = 0; }
-                err += len(sub(toe_of(i, angles_[size_t(i)]), toe_tgt_[size_t(i)])) / 4.0;
-                continue;
-            }
-            ik_solve(i, toe_tgt_[size_t(i)], angles_[size_t(i)], ik_multistart_ > 0.0);
-            const double e_i = len(sub(toe_of(i, angles_[size_t(i)]), toe_tgt_[size_t(i)]));
-            err += e_i / 4.0;
-            if (ik_reseed_ticks_ > 0) {   // pinned: a joint at its stop with the toe far from its target
-                const auto u = u_of_angles(i, angles_[size_t(i)]); bool at_stop = false;
-                for (int j = 0; j < 3; ++j) if (std::fabs(u[size_t(j)]) >= 0.999) at_stop = true;
-                if (at_stop && e_i > 2.0 * unreach_tol_m_) { if (++pinned_ticks_[size_t(i)] >= ik_reseed_ticks_) { reseeding_[size_t(i)] = true; ++reseeds_; } }
-                else pinned_ticks_[size_t(i)] = 0;
-            }
-        }
-        ik_err_ema_ += 0.05 * (err - ik_err_ema_);
+        executor_.step_machine();
+        executor_.hold_stance();
+        executor_.solve_ik();
     }
     if (!odom_out_topic_.empty()) {   // the odometry: the sequencer's own while engaged, the body's passed through otherwise
-        if (phase_ == Phase::Idle || !odom_anchored_) { if (have_odom_in_) { px_ = odom_in_[0]; py_ = odom_in_[1]; } odom_anchored_ = have_odom_in_; }
+        if (executor_.phase_ == Phase::Idle || !odom_anchored_) { if (in_.have_odom_in_) { executor_.px_ = in_.odom_in_[0]; executor_.py_ = in_.odom_in_[1]; } odom_anchored_ = in_.have_odom_in_; }
         auto od = std::make_shared<ProprioToken>();
         od->tick_id = tick_id; od->producer_id = id().empty() ? std::string("pose_sequencer") : std::string(id()); od->sensor = "odom_seq";
-        od->values = Eigen::VectorXf(3); od->values[0] = float(px_); od->values[1] = float(py_); od->values[2] = float(have_odom_in_ ? odom_in_[2] : 0.0);
+        od->values = Eigen::VectorXf(3); od->values[0] = float(executor_.px_); od->values[1] = float(executor_.py_); od->values[2] = float(in_.have_odom_in_ ? in_.odom_in_[2] : 0.0);
         bus_->publish(odom_out_topic_, od);
     }
-    if (engage_level_ > 0.0f || phase_ != Phase::Idle || engage_ > 0.0) publish(tick_id);
+    if (!outcome_topic_.empty() && executor_.outcome_seq_ != outcome_published_) {   // a step has landed since the last tick: its outcome
+        outcome_published_ = executor_.outcome_seq_;
+        auto oc = std::make_shared<ProprioToken>(); const auto f = executor_.outcome_.floats();
+        oc->tick_id = tick_id; oc->producer_id = id().empty() ? std::string("pose_sequencer") : std::string(id()); oc->sensor = "step_outcome";
+        oc->values = Eigen::VectorXf(int(f.size())); for (int i = 0; i < int(f.size()); ++i) oc->values[i] = f[size_t(i)];
+        bus_->publish(outcome_topic_, oc);
+    }
+    if (engage_level_ > 0.0f || executor_.phase_ != Phase::Idle || engage_ > 0.0) publish(tick_id);
     else if (!output_topic_.empty()) {   // engage 0: the socket sees 0 and the gait is untouched
         auto out = std::make_shared<ProprioToken>();
         out->tick_id = tick_id; out->producer_id = id().empty() ? std::string("pose_sequencer") : std::string(id()); out->sensor = "pose";
@@ -1296,15 +431,17 @@ void PoseSequencer::tick(uint64_t tick_id) {
 }
 
 nlohmann::json PoseSequencer::diag_snapshot() const {
+    nlohmann::json room = nlohmann::json::array();   // Phase 2's room measure: per leg [ext slack (m), knee to straight, knee to fold, hip1 to its stop, hip2 to its stop]
+    for (int i = 0; i < 4; ++i) { const auto r = kin_.room(i, executor_.angles_[size_t(i)]); room.push_back({r.ext_m, r.knee_straight, r.knee_fold, r.hip1, r.hip2}); }
     nlohmann::json tg = nlohmann::json::array(), st = nlohmann::json::array(), gh = nlohmann::json::array(), nt = nlohmann::json::array(), sc = nlohmann::json::array(), uu = nlohmann::json::array();
-    for (int i = 0; i < 4; ++i) { const auto u = u_of_angles(i, angles_[size_t(i)]); uu.push_back({u[0], u[1], u[2]}); }
-    for (int i = 0; i < 4; ++i) { tg.push_back({toe_tgt_[size_t(i)].x, toe_tgt_[size_t(i)].y, toe_tgt_[size_t(i)].z}); st.push_back(steps_[size_t(i)]); gh.push_back(ground_h_[size_t(i)]);
-                                  nt.push_back({neutral_[size_t(i)].x, neutral_[size_t(i)].z}); sc.push_back(score_[size_t(i)]); }
-    return nlohmann::json{{"phase", phase_name(phase_)}, {"phase_id", int(phase_)}, {"leg", leg_}, {"engage", engage_level_}, {"model", have_model_}, {"support", have_support_},
-                          {"patch", have_patch_}, {"steps", st}, {"cycles", cycles_}, {"shift_exhausted", shift_exhausted_}, {"shift_ticks", shift_ticks_},
-                          {"disengaged_tilt", disengaged_tilt_}, {"lower_sunk", lower_sunk_}, {"phase_timeouts", phase_timeouts_}, {"engaged_at", engaged_at_},
-                          {"landings", landings_}, {"missed", missed_}, {"land_h_rejected", land_h_rejected_}, {"fast_ticks", fast_ticks_}, {"slow_ticks", slow_ticks_}, {"edge_moves", edge_moves_}, {"edge_stuck", edge_stuck_}, {"land_sigma", land_sigma_}, {"blocked_leg", blocked_leg_}, {"advance_yields", advance_yields_}, {"relief_steps", relief_steps_}, {"plans", plans_}, {"lower_fold_ticks", lower_fold_ticks_}, {"crouch", crouch_}, {"reseeds", reseeds_}, {"multistarts", multistarts_}, {"face_penalties", face_penalties_}, {"front_drop", front_drop_}, {"clips", clips_}, {"unload_shifts", unload_shifts_}, {"land_r_rejects", land_r_rejects_}, {"ext_rejects", ext_rejects_}, {"ext_lift_rejects", ext_lift_rejects_}, {"overdue", {overdue_decisions_, overdue_rejects_, urgent_jumps_, urgent_fails_}}, {"skip_nomargin", skip_nomargin_}, {"skip_noland", skip_noland_}, {"skip_miss", skip_miss_}, {"block", block_}, {"next_lift", next_lift_}, {"drift", drift_}, {"drift_cause", drift_cause_}, {"drift_mag", drift_mag_}, {"drift_mag_all", drift_mag_all_}, {"reloc_n", reloc_n_}, {"reloc_sum", reloc_sum_}, {"reloc_top", reloc_top_}, {"reloc_off", reloc_off_}, {"reloc_resid", reloc_resid_}, {"block_d", block_d_}, {"block_short", block_short_}, {"ext", {ext_slack(0, toe_tgt_[0]), ext_slack(1, toe_tgt_[1]), ext_slack(2, toe_tgt_[2]), ext_slack(3, toe_tgt_[3])}}, {"ext_fk", {ext_slack_fk(0), ext_slack_fk(1), ext_slack_fk(2), ext_slack_fk(3)}}, {"null_steps", null_steps_}, {"miss_skips", miss_skips_}, {"miss_count", {miss_count_[0], miss_count_[1], miss_count_[2], miss_count_[3]}}, {"depth_caps", depth_caps_}, {"free_out", {free_out_dx_, free_out_dy_}}, {"branch_switches", branch_switches_}, {"hangs", hangs_}, {"hangs_by_contact", hangs_by_contact_}, {"hangs_by_drag", hangs_by_drag_}, {"swing_d_fwd", swing_d_fwd_}, {"a_lin_z_ema", a_lin_z_ema_}, {"crouch_ticks", crouch_ticks_}, {"elev_landed", {elev_landed_[0], elev_landed_[1], elev_landed_[2], elev_landed_[3]}}, {"plan_skips", plan_skips_}, {"plan_none", plan_none_}, {"plan_reached", plan_reached_}, {"plan_shift", {plan_sx_, plan_sz_}}, {"plan_score", plan_score_}, {"relief_none", relief_none_}, {"relief_for", relief_for_}, {"creep_load_ticks", creep_load_ticks_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"settle_ticks", settle_ticks_}, {"obstacle_hits", obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {px_, py_}}, {"yaw_err", yaw_err_}, {"shift_blocked", shift_blocked_}, {"retreats", retreats_}, {"shift_d", {shift_dx_, shift_dz_}}, {"steps_no_advance", steps_no_advance_}, {"deadlock_ticks", deadlock_ticks_}, {"turns_passed", turns_passed_}, {"creep", {creep_[0], creep_[1], creep_[2], creep_[3]}}, {"bear", {bear_[0], bear_[1], bear_[2], bear_[3]}}, {"land_err", land_err_last_}, {"land_rms", std::sqrt(land_err_ms_)}, {"elev", {elev_[0], elev_[1], elev_[2], elev_[3]}}, {"ik_err", ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
-                          {"toe_tgt", tg}, {"u", uu}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {air_ticks_[0], air_ticks_[1], air_ticks_[2], air_ticks_[3]}}, {"lift_h", lift_h_}, {"land_h", land_h_}, {"shift_acc", shift_acc_}, {"phase_ticks", phase_ticks_}};
+    for (int i = 0; i < 4; ++i) { const auto u = kin_.u_of_angles(i, executor_.angles_[size_t(i)]); uu.push_back({u[0], u[1], u[2]}); }
+    for (int i = 0; i < 4; ++i) { tg.push_back({executor_.toe_tgt_[size_t(i)].x, executor_.toe_tgt_[size_t(i)].y, executor_.toe_tgt_[size_t(i)].z}); st.push_back(executor_.steps_[size_t(i)]); gh.push_back(executor_.ground_h_[size_t(i)]);
+                                  nt.push_back({executor_.neutral_[size_t(i)].x, executor_.neutral_[size_t(i)].z}); sc.push_back(planner_.score_[size_t(i)]); }
+    return nlohmann::json{{"phase", phase_name(executor_.phase_)}, {"phase_id", int(executor_.phase_)}, {"leg", executor_.leg_}, {"engage", engage_level_}, {"model", kin_.ready()}, {"support", in_.have_support_},
+                          {"patch", in_.have_patch_}, {"steps", st}, {"cycles", executor_.cycles_}, {"shift_exhausted", executor_.shift_exhausted_}, {"shift_ticks", executor_.shift_ticks_},
+                          {"disengaged_tilt", disengaged_tilt_}, {"lower_sunk", executor_.lower_sunk_}, {"phase_timeouts", executor_.phase_timeouts_}, {"engaged_at", executor_.engaged_at_},
+                          {"landings", executor_.landings_}, {"missed", executor_.missed_}, {"land_h_rejected", executor_.land_h_rejected_}, {"fast_ticks", executor_.fast_ticks_}, {"slow_ticks", executor_.slow_ticks_}, {"edge_moves", executor_.edge_moves_}, {"edge_stuck", executor_.edge_stuck_}, {"land_sigma", executor_.land_sigma_}, {"blocked_leg", executor_.blocked_leg_}, {"advance_yields", executor_.advance_yields_}, {"relief_steps", executor_.relief_steps_}, {"plans", planner_.plans_}, {"lower_fold_ticks", executor_.lower_fold_ticks_}, {"crouch", executor_.crouch_}, {"reseeds", executor_.reseeds_}, {"multistarts", kin_.multistarts}, {"face_penalties", planner_.face_penalties_}, {"front_drop", executor_.front_drop_}, {"clips", executor_.clips_}, {"unload_shifts", planner_.unload_shifts_}, {"land_r_rejects", planner_.land_r_rejects_}, {"ext_rejects", planner_.ext_rejects_}, {"ext_lift_rejects", planner_.ext_lift_rejects_}, {"overdue", {planner_.overdue_decisions_, planner_.overdue_rejects_, planner_.urgent_jumps_, planner_.urgent_fails_}}, {"skip_nomargin", planner_.skip_nomargin_}, {"skip_noland", planner_.skip_noland_}, {"skip_miss", planner_.skip_miss_}, {"block", planner_.block_}, {"next_lift", planner_.next_lift_}, {"drift", planner_.drift_}, {"drift_cause", planner_.drift_cause_}, {"drift_mag", planner_.drift_mag_}, {"drift_mag_all", planner_.drift_mag_all_}, {"reloc_n", executor_.reloc_n_}, {"reloc_sum", executor_.reloc_sum_}, {"reloc_top", executor_.reloc_top_}, {"reloc_off", executor_.reloc_off_}, {"reloc_resid", executor_.reloc_resid_}, {"block_d", planner_.block_d_}, {"block_short", planner_.block_short_}, {"ext", {kin_.ext_slack(0, executor_.toe_tgt_[0]), kin_.ext_slack(1, executor_.toe_tgt_[1]), kin_.ext_slack(2, executor_.toe_tgt_[2]), kin_.ext_slack(3, executor_.toe_tgt_[3])}}, {"ext_fk", {ext_slack_fk(0), ext_slack_fk(1), ext_slack_fk(2), ext_slack_fk(3)}}, {"null_steps", executor_.null_steps_}, {"miss_skips", planner_.miss_skips_}, {"miss_count", {executor_.miss_count_[0], executor_.miss_count_[1], executor_.miss_count_[2], executor_.miss_count_[3]}}, {"depth_caps", executor_.depth_caps_}, {"free_out", {executor_.free_out_dx_, executor_.free_out_dy_}}, {"branch_switches", kin_.branch_switches}, {"hangs", executor_.hangs_}, {"hangs_by_contact", executor_.hangs_by_contact_}, {"hangs_by_drag", executor_.hangs_by_drag_}, {"swing_d_fwd", executor_.swing_d_fwd_}, {"a_lin_z_ema", executor_.a_lin_z_ema_}, {"crouch_ticks", executor_.crouch_ticks_}, {"elev_landed", {executor_.elev_landed_[0], executor_.elev_landed_[1], executor_.elev_landed_[2], executor_.elev_landed_[3]}}, {"plan_skips", planner_.plan_skips_}, {"plan_none", planner_.plan_none_}, {"plan_reached", executor_.plan_reached_}, {"plan_shift", {executor_.plan_sx_, executor_.plan_sz_}}, {"plan_score", executor_.plan_score_}, {"relief_none", executor_.relief_none_}, {"relief_for", executor_.relief_for_}, {"creep_load_ticks", executor_.creep_load_ticks_}, {"creep", {executor_.creep_[0], executor_.creep_[1], executor_.creep_[2], executor_.creep_[3]}}, {"settle_ticks", executor_.settle_ticks_}, {"obstacle_hits", executor_.obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {executor_.px_, executor_.py_}}, {"yaw_err", executor_.yaw_err_}, {"shift_blocked", executor_.shift_blocked_}, {"retreats", executor_.retreats_}, {"shift_d", {executor_.shift_dx_, executor_.shift_dz_}}, {"steps_no_advance", executor_.steps_no_advance_}, {"deadlock_ticks", executor_.deadlock_ticks_}, {"turns_passed", executor_.turns_passed_}, {"creep", {executor_.creep_[0], executor_.creep_[1], executor_.creep_[2], executor_.creep_[3]}}, {"bear", {executor_.bear_[0], executor_.bear_[1], executor_.bear_[2], executor_.bear_[3]}}, {"land_err", executor_.land_err_last_}, {"land_rms", std::sqrt(executor_.land_err_ms_)}, {"elev", {executor_.elev_[0], executor_.elev_[1], executor_.elev_[2], executor_.elev_[3]}}, {"ik_err", executor_.ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
+                          {"toe_tgt", tg}, {"u", uu}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {executor_.air_ticks_[0], executor_.air_ticks_[1], executor_.air_ticks_[2], executor_.air_ticks_[3]}}, {"lift_h", executor_.lift_h_}, {"land_h", executor_.land_h_}, {"shift_acc", executor_.shift_acc_}, {"phase_ticks", executor_.phase_ticks_}, {"room", room}, {"outcome", executor_.outcome_.floats()}};
 }
 
 } // namespace ogma

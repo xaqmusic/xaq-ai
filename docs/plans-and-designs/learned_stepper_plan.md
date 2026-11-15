@@ -113,6 +113,15 @@ traces before anything learned is added.
 | `StepPolicy` | EFE over candidate steps from the belief and the generator; emits `step.intent` | new; the `EFEArbiter`'s scoring form |
 | `StepArbiter` | per stance node, the intent whose predictions are graded better drives | precision arbitration (doctrine §2.3) |
 
+**As built (Phase 2, 2026-11-15).** The split is **in-process**: the components are C++ classes in
+`cpp_core/{include,src}/ogma/modules/stepper/` (`StepExecutor`, `ScaffoldPlanner`, `SupportFloor`, `StepperCommon`: the
+inputs, the unloaded-toe book, `StepIntent`, `StepOutcome`) and `ogma/body/LegSolver`, owned by `PoseSequencer`, which is now
+the shell (topics, params, diag). Identity on the golden traces rules out bus modules here: every topic hop is a tick of
+latency. The executor asks for its next step through `intent_hook_` at exactly the point the monolith decided, so that hook is
+the seam where the `StepArbiter` goes; the bus split comes with Phase 5, when a second intent source exists. `step.outcome` is
+published when `outcome_topic` is set (on in the stack configs) and the diag carries the latest record (`ps_out`) and the room
+(`ps_room`); `scripts_tools/stepper_outcomes.py` reads them back.
+
 Persistence: `snapshot_state` / `restore_state` exist in the module contract and the EPM implements them; the
 `Generator`, `BeliefFilter`, `TerrainMemory` and the new modules must too, and the host gains a save / load of brain
 state between runs, so learning accumulates over many runs and an evaluation can run on a frozen model.
@@ -228,8 +237,8 @@ asserted.
 | Phase | State | Date | Ledger |
 |---|---|---|---|
 | 0 Freeze and baseline | **done** — gate met (15 of 15 runs byte-identical from the repo's tools) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 0" |
-| 1 Prune | **gate met** — one rule of 16 redundant (the IK re-seed, covered by multistart); removal awaits operator review | 2026-11-14 | 2026-11-14 "Learned stepper Phase 1" |
-| 2 Split | — | | |
+| 1 Prune | **done** — one rule of 16 redundant (the IK re-seed, covered by multistart); off in the stack configs, its code marked `PRUNE-P1` and kept until the cleanup pass (operator, 2026-11-15) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 1" |
+| 2 Split | **done** — gate met: LegSolver and the planner / executor / floor split byte-identical (15 of 15 runs each), the outcome stream and the room field-identical; unit tests per component | 2026-11-15 | 2026-11-15 "Learned stepper Phase 2" |
 | 3 Stance belief | — | | |
 | 4 Step generator | — | | |
 | 5 Policy in shadow | — | | |

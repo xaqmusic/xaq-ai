@@ -13193,6 +13193,20 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["ps_rlt"] = rt
 			line["ps_rlo"] = snappedf(float(ps.get("reloc_off", 0.0)), 0.001)
 			line["ps_rlr"] = snappedf(float(ps.get("reloc_resid", 0.0)), 0.0001)
+		# the step outcome (2026-11-15, learned stepper Phase 2): the latest step's record [seq, leg, kind, touched, from x, from z, land x, land z, h_pred, h_touch, ticks, hang, moves x 7 rules (x, z)]; and the room per leg [ext slack m, knee to straight, knee to fold, hip1 to stop, hip2 to stop]
+		var oc: Array = ps.get("outcome", [])
+		if oc.size() >= 26 and int(oc[0]) > 0:
+			var oca: Array = []
+			for k in range(oc.size()): oca.append(int(oc[k]) if k in [0, 1, 2, 3, 10, 11] else snappedf(float(oc[k]), 0.0001))
+			line["ps_out"] = oca
+		var rm: Array = ps.get("room", [])
+		if rm.size() >= 4:
+			var rma: Array = []
+			for leg_r in rm:
+				var rr: Array = []
+				for v in leg_r: rr.append(snappedf(float(v), 0.001))
+				rma.append(rr)
+			line["ps_room"] = rma
 		for key in [["block_d", "ps_bkd"], ["block_short", "ps_bksh"]]:
 			var bd: Array = ps.get(key[0], [])
 			if bd.size() >= 4: line[key[1]] = [snappedf(float(bd[0]), 0.001), snappedf(float(bd[1]), 0.001), snappedf(float(bd[2]), 0.001), snappedf(float(bd[3]), 0.001)]

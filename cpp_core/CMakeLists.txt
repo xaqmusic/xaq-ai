@@ -234,6 +234,10 @@ add_library(ogma_core
     src/ogma/modules/SupportModel.cpp
     src/ogma/modules/ConstantSource.cpp
     src/ogma/modules/PoseSequencer.cpp
+    src/ogma/body/LegSolver.cpp   # the stepper's leg model (learned stepper Phase 2)
+    src/ogma/modules/stepper/StepperCommon.cpp     # the stepper's components (learned stepper Phase 2)
+    src/ogma/modules/stepper/StepExecutor.cpp
+    src/ogma/modules/stepper/ScaffoldPlanner.cpp
     src/ogma/modules/BearingToIntent.cpp
     src/ogma/modules/StuckSense.cpp
     src/ogma/modules/LoadPhaseGait.cpp
@@ -355,6 +359,10 @@ add_executable(test_stance_depth tests/ogma/test_stance_depth.cpp)
 target_link_libraries(test_stance_depth PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_pose_sequencer tests/ogma/test_pose_sequencer.cpp)
 target_link_libraries(test_pose_sequencer PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_leg_solver tests/ogma/test_leg_solver.cpp)
+target_link_libraries(test_leg_solver PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_stepper_components tests/ogma/test_stepper_components.cpp)
+target_link_libraries(test_stepper_components PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_bearing_to_intent tests/ogma/test_bearing_to_intent.cpp)
 target_link_libraries(test_bearing_to_intent PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_load_phase_gait tests/ogma/test_load_phase_gait.cpp)
@@ -643,6 +651,8 @@ gtest_discover_tests(test_foothold_shaper)
 gtest_discover_tests(test_support_model)
 gtest_discover_tests(test_stance_depth)
 gtest_discover_tests(test_pose_sequencer)
+gtest_discover_tests(test_leg_solver)
+gtest_discover_tests(test_stepper_components)
 gtest_discover_tests(test_bearing_to_intent)
 gtest_discover_tests(test_load_phase_gait)
 gtest_discover_tests(test_generator)
