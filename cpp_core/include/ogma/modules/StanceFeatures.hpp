@@ -14,8 +14,11 @@
 // then the body's pitch and roll (rad): 4 x 10 + 2 = 42 values, published only while the stepper is engaged.
 //
 // CONDITIONING (CLAUDE.md §0 rule 2 and §5.5 -- adapt, never tune to a scale): every value is centred and scaled by its own
-// running mean and variance, the rate count-annealed (1 / n down to 1 / n_max, so the statistics settle and then hold); z is
-// clipped to +-clip.  Nothing is published for the first `warmup` samples.  Two topics:
+// running mean and variance, the rate count-annealed (1 / n down to 1 / n_max); z is clipped to +-clip.  A floor of n_max
+// samples is a memory of n_max samples, NOT a settling: across carried runs (about 8 750 samples a run) the default 20 000 kept
+// chasing the rotating bench and slid the input about one quantisation cell a run, so the stance EPM re-grew nodes for stances
+// it already held (ledger, 2026-11-15 "Phase 3, continued").  n_max = 0 removes the floor: a pure 1 / n over the module's
+// lifetime, which settles and holds.  Nothing is published for the first `warmup` samples.  Two topics:
 //   output_topic   z plus one constant component sqrt(dim) -- the EPM input.  The jl_state encoder L2-normalises its input, which
 //                  keeps only a vector's direction; the constant keeps its magnitude as an angle (a typical unit-variance vector
 //                  sits at 45 degrees to it).  A geometric choice from the width, not a tuned scale.

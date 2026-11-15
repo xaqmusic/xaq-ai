@@ -66,3 +66,16 @@ TEST(StanceFeatures, ASnapshotRestoresTheStatistics) {
     a.run(500, 1.0f, 0.4f); b.run(500, 1.0f, 0.4f);
     ASSERT_EQ(a.feat.size(), b.feat.size()); for (size_t i = 0; i < a.feat.size(); ++i) EXPECT_FLOAT_EQ(a.feat[i], b.feat[i]);
 }
+
+TEST(StanceFeatures, WithNoFloorTheStatisticsSettleAndHoldWhereAFloorKeepsChasingTheRegime) {
+    // two regimes in alternating blocks of 400 samples (the carried runs' rotating benches): knee 0.2 or 0.6
+    auto drift = [](int64_t n_max) {
+        Fix f({{"n_max", ogma::ParamValue{n_max}}}); std::vector<double> at_block_end;
+        for (uint64_t t = 0; t < 8000; ++t) { f.run(t, 1.0f, (t / 400) % 2 ? 0.6f : 0.2f); if (t % 400 == 399) at_block_end.push_back(f.m.mean()[1]); }
+        return std::fabs(at_block_end.back() - at_block_end[at_block_end.size() - 2]);   // the mean's move over the last block
+    };
+    const double floored = drift(500), settled = drift(0);
+    EXPECT_GT(floored, 0.1) << "a 500-sample memory follows each block";
+    EXPECT_LT(settled, 0.015) << "1 / n over 8 000 samples moves by about 400 / 8000 of the regimes' gap";
+    EXPECT_LT(settled, floored / 5.0);
+}

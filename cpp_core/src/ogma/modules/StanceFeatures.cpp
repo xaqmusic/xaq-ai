@@ -49,7 +49,7 @@ ParamSchema StanceFeatures::params_schema() const {
         {"output_topic",  ParamMutability::ConstructionOnly, "ProprioToken [43]: the conditioned stance (z, clipped) plus one constant component sqrt(42) -- the stance EPM's input (jl_state).", ParamValue{std::string("reality.proprio.stance_features")}},
         {"obs_topic",     ParamMutability::ConstructionOnly, "ProprioToken [42]: the conditioned stance alone -- the BeliefFilter's observation. \"\" = not published.", ParamValue{std::string("reality.proprio.stance_obs")}},
         {"engage_min",    ParamMutability::HotMutable, "Features are taken only while the stepper's engage is at least this (the stance is the stepper's).", ParamValue{0.99}},
-        {"n_max",         ParamMutability::HotMutable, "The running statistics' rate anneals as 1 / n down to 1 / n_max (samples): they settle and then hold.", ParamValue{int64_t{20000}}},
+        {"n_max",         ParamMutability::HotMutable, "The running statistics' rate anneals as 1 / n down to 1 / n_max (samples). 0 = no floor: a pure 1 / n, the statistics of every sample ever seen, which settle and hold across carried runs (Phase 3 continued, 2026-11-15).", ParamValue{int64_t{20000}}},
         {"warmup",        ParamMutability::HotMutable, "Nothing is published for the first this many samples (the statistics are not yet a scale).", ParamValue{int64_t{200}}},
         {"clip",          ParamMutability::HotMutable, "Each z is clipped to +- this.", ParamValue{4.0}},
         {"flicker_p",     ParamMutability::HotMutable, "THE FLICKER TEST: each contact flag is flipped with this probability per tick before it is featurised; 0 = off (byte-identical).", ParamValue{0.0}},
@@ -86,7 +86,7 @@ void StanceFeatures::on_setup(Bus* bus, ParamMap const& params) {
 void StanceFeatures::on_param_change(std::string_view key, ParamValue const& value) {
     const std::string k(key);
     if      (k == "engage_min") engage_min_ = std::clamp(get_double(value, k), 0.0, 1.0);
-    else if (k == "n_max")      n_max_ = std::max(1, int(get_double(value, k)));
+    else if (k == "n_max")      n_max_ = std::max(0, int(get_double(value, k)));
     else if (k == "warmup")     warmup_ = std::max(0, int(get_double(value, k)));
     else if (k == "clip")       clip_ = std::max(0.5, get_double(value, k));
     else if (k == "flicker_p")  flicker_p_ = std::clamp(get_double(value, k), 0.0, 1.0);
@@ -148,7 +148,7 @@ void StanceFeatures::tick(uint64_t tick_id) {
     if (!have_pose_ || double(pose_[0]) < engage_min_) return;
     Eigen::VectorXd x; if (!raw(x)) return;
     ++n_;
-    const double a = std::max(1.0 / double(n_), 1.0 / double(n_max_));
+    const double a = n_max_ > 0 ? std::max(1.0 / double(n_), 1.0 / double(n_max_)) : 1.0 / double(n_);
     if (n_ == 1) { mean_ = x; var_.setZero(); }
     else {
         const Eigen::VectorXd d = x - mean_;
