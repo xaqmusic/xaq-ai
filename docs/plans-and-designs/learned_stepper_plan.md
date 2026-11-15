@@ -228,7 +228,7 @@ asserted.
 | Phase | State | Date | Ledger |
 |---|---|---|---|
 | 0 Freeze and baseline | **done** — gate met (15 of 15 runs byte-identical from the repo's tools) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 0" |
-| 1 Prune | next | | |
+| 1 Prune | **gate met** — one rule of 16 redundant (the IK re-seed, covered by multistart); removal awaits operator review | 2026-11-14 | 2026-11-14 "Learned stepper Phase 1" |
 | 2 Split | — | | |
 | 3 Stance belief | — | | |
 | 4 Step generator | — | | |

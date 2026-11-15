@@ -13179,6 +13179,20 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		for key in [["drift_mag", "ps_drm"], ["drift_mag_all", "ps_drma"]]:
 			var dm: Array = ps.get(key[0], [])
 			if dm.size() >= 3: line[key[1]] = [snappedf(float(dm[0]), 0.001), snappedf(float(dm[1]), 0.001), snappedf(float(dm[2]), 0.001)]
+		# the landing-relocation tag (2026-11-14, learned stepper Phase 1): [tracked, planned, unplanned, leg switched, planned off > 2 cm, planned with a hang, abandoned]; per rule (reach, sector, edge, obstacle, retreat, ik, clip) the summed move (m) and the >2 cm landings it led; summed planned offset (m); the closure residual (m)
+		var rn: Array = ps.get("reloc_n", [])
+		if rn.size() >= 6:
+			var rni: Array = []
+			for v in rn: rni.append(int(v))
+			line["ps_rln"] = rni
+			var rs2: Array = []
+			for v in ps.get("reloc_sum", []): rs2.append(snappedf(float(v), 0.001))
+			line["ps_rls"] = rs2
+			var rt: Array = []
+			for v in ps.get("reloc_top", []): rt.append(int(v))
+			line["ps_rlt"] = rt
+			line["ps_rlo"] = snappedf(float(ps.get("reloc_off", 0.0)), 0.001)
+			line["ps_rlr"] = snappedf(float(ps.get("reloc_resid", 0.0)), 0.0001)
 		for key in [["block_d", "ps_bkd"], ["block_short", "ps_bksh"]]:
 			var bd: Array = ps.get(key[0], [])
 			if bd.size() >= 4: line[key[1]] = [snappedf(float(bd[0]), 0.001), snappedf(float(bd[1]), 0.001), snappedf(float(bd[2]), 0.001), snappedf(float(bd[3]), 0.001)]

@@ -381,3 +381,50 @@ TEST(PoseSequencer, ThePlanDriftChecksEveryPredictionAndItsCountsAddUp) {
     EXPECT_LE(dc[3].get<int>(), dr[2].get<int>());
     EXPECT_GE(d["drift_mag_all"][0].get<double>(), 0.0);
 }
+
+TEST(PoseSequencer, TheRelocationTagClosesAtEveryTouch_TheRulesSumToTheLandingsOffset) {
+    // an obstacle-free flat crawl with the edge move and a reach that clamps: every landing's offset from where its step set out
+    // is the sum of the tagged moves, and the counts add up
+    Fix f({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}}, {"plan", ogma::ParamValue{1.0}}});
+    std::vector<float> contact = {1, 1, 1, 1};
+    for (uint64_t t = 0; t < 2500; ++t) {
+        const int leg = f.m.active_leg();
+        for (int i = 0; i < 4; ++i) contact[size_t(i)] = 1.0f;
+        if (leg >= 0 && (f.m.phase() == PoseSequencer::Phase::Lift || f.m.phase() == PoseSequencer::Phase::Swing)) contact[size_t(leg)] = 0.0f;
+        if (leg >= 0 && f.m.phase() == PoseSequencer::Phase::Lower) { auto d = f.m.diag_snapshot(); contact[size_t(leg)] = d["toe_tgt"][leg][1].get<double>() <= -0.09 ? 1.0f : 0.0f; }
+        f.run(t, contact);
+    }
+    auto d = f.m.diag_snapshot(); auto n = d["reloc_n"];
+    EXPECT_GT(n[0].get<int>(), 3) << "landings are tracked";
+    EXPECT_EQ(n[1].get<int>() + n[2].get<int>() + n[3].get<int>(), n[0].get<int>());
+    EXPECT_GT(n[1].get<int>(), 0) << "the pose search plans steps";
+    EXPECT_LT(d["reloc_resid"].get<double>(), 1e-5) << "every move of a landing is tagged";
+    int top = 0; for (auto const& v : d["reloc_top"]) top += v.get<int>();
+    EXPECT_LE(top, n[4].get<int>());
+    double sum = 0.0; for (auto const& v : d["reloc_sum"]) sum += v.get<double>();
+    EXPECT_GE(sum + 1e-9, d["reloc_off"].get<double>()) << "the offsets are no larger than the moves that made them";
+    // the drift instrument's landed-toe offset is the same quantity, so they agree on planned landings
+    EXPECT_GE(d["drift_mag_all"][0].get<double>(), 0.0);
+}
+
+TEST(PoseSequencer, ThePrunesOffSwitchesTakeTheirRuleOut_TheObstacleReflexAndTheSettle) {
+    // the obstacle reflex off: a toe stopped in the air is not lowered where it is (the same wall as the reflex's own test)
+    Fix f({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}}, {"obstacle_ticks", ogma::ParamValue{int64_t{0}}}});
+    std::vector<float> contact = {1, 1, 1, 1}; int swings = 0;
+    for (uint64_t t = 0; t < 3000; ++t) {
+        const int leg = f.m.active_leg(); const auto ph = f.m.phase();
+        for (int i = 0; i < 4; ++i) contact[size_t(i)] = 1.0f;
+        if (leg >= 0 && (ph == PoseSequencer::Phase::Lift || ph == PoseSequencer::Phase::Swing)) {
+            auto d = f.m.diag_snapshot(); contact[size_t(leg)] = (d["toe_tgt"][leg][1].get<double>() > -0.06) ? 1.0f : 0.0f; swings += ph == PoseSequencer::Phase::Swing;
+        }
+        if (leg >= 0 && ph == PoseSequencer::Phase::Lower) { auto d = f.m.diag_snapshot(); contact[size_t(leg)] = d["toe_tgt"][leg][1].get<double>() <= -0.09 ? 1.0f : 0.0f; }
+        f.run(t, contact);
+    }
+    EXPECT_GT(swings, 0);
+    EXPECT_EQ(f.m.diag_snapshot()["obstacle_hits"].get<int>(), 0) << "with obstacle_ticks 0 the reflex never fires";
+    // the settle off: the crawl starts without the slide (no settle ticks beyond the ten-tick wait)
+    Fix g({{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}}, {"settle", ogma::ParamValue{0.0}}});
+    for (uint64_t t = 0; t < 200; ++t) g.run(t, {1, 1, 1, 1});
+    EXPECT_LE(g.m.diag_snapshot()["settle_ticks"].get<int>(), 12);
+    EXPECT_NE(g.m.phase(), PoseSequencer::Phase::Settle);
+}

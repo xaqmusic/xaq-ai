@@ -154,6 +154,7 @@ private:
     // the tail, and the first lift from there rolled the body): on engage the four toes slide on the floor to their
     // neutral places at settle_v before the first step.
     double settle_v_ = 0.05; int64_t settle_ticks_ = 0;
+    double settle_ = 1.0, land_clamp_ = 1.0; int obstacle_ticks_ = 5;   // the prune's off switches (2026-11-14): the settle, the go-time landing clamps, the obstacle reflex
     // THE ORDER (2026-11-08, after six batteries of the greedy choice starving the rear legs 5:1): a FIXED crawl order,
     // rear-left, front-left, rear-right, front-right (a wave gait: each side's rear then its front), with the model as
     // the gate -- the body sways / advances until the leg whose turn it is has its margin, and if the shift is spent
@@ -329,6 +330,23 @@ private:
     // those cases, drift_mag_all_ the same over every check.
     int pred_leg_ = -1, pred_step_ = -1; double pred_m_ = 0.0, pred_cx_ = 0.0, pred_cz_ = 0.0; std::array<body::Vec3f, 4> pred_toes_{};
     std::array<int64_t, 4> drift_{}, drift_cause_{}; std::array<double, 3> drift_mag_{}, drift_mag_all_{};
+    // THE LANDING-RELOCATION TAG (2026-11-14, learned stepper plan Phase 1; an instrument, deciding nothing): from the moment a
+    // step goes, every move of the landing the stepping toe is headed for is credited to the rule that made it -- the reach clamp,
+    // the landing sector's clamp, the edge move, the obstacle reflex, the lowering's retreat, the IK's shortfall at the touch, the
+    // clip -- as a vector per rule; at the touch the landing's offset from where the step set out (the plan's landing for a
+    // planned step) is the sum of those vectors (reloc_resid_, the closure, is 0 when every move is tagged).  reloc_n_ = [landings
+    // tracked, planned, unplanned (no plan), unplanned (the leg switched after the plan), planned and off by > 2 cm, planned with a
+    // hang, abandoned (a new decision before the touch: a hang's re-shift passed the turn)]; reloc_sum_[r] = summed |vector| of rule r over planned landings (m); reloc_top_[r] = planned landings off by > 2 cm
+    // whose largest move was rule r; reloc_off_ = summed offset over planned landings (m).
+    enum Reloc { RelReach = 0, RelSector, RelEdge, RelObstacle, RelRetreat, RelIk, RelClip, RelN };
+    bool reloc_active_ = false, reloc_planned_ = false, reloc_switched_ = false, reloc_hang_ = false; int reloc_plan_leg_ = -1; body::Vec3f reloc_from_{};
+    std::array<std::array<double, 2>, RelN> reloc_vec_{}; std::array<int64_t, 7> reloc_n_{}; std::array<double, RelN> reloc_sum_{}; std::array<int64_t, RelN> reloc_top_{};
+    double reloc_off_ = 0.0, reloc_resid_ = 0.0;
+    void reloc_add(int r, const body::Vec3f& before, const body::Vec3f& after) {
+        if (!reloc_active_) return;
+        reloc_vec_[size_t(r)][0] += double(after.x) - double(before.x); reloc_vec_[size_t(r)][1] += double(after.z) - double(before.z);
+    }
+    void reloc_finish(const body::Vec3f& landed);
     void check_drift(double cx, double cz, double need);
     void diagnose_block(int leg, double cx, double cz, double need);
     int clip_ticks_ = 0, clip_run_ = 0; int64_t clips_ = 0; double miss_reacquire_ = 0.0; int miss_ticks_ = 0, lower_retreats_ = 0; std::array<int, 4> miss_count_{};
