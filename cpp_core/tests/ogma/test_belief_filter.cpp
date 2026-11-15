@@ -87,3 +87,21 @@ TEST(BeliefFilter, ASnapshotRestoresTheLearnedModel_TheNextTickIsTheSame) {
     EXPECT_EQ(a.f.map_node(), b.f.map_node()); EXPECT_NEAR(a.f.map_prob(), b.f.map_prob(), 1e-6); EXPECT_NEAR(a.f.estimate()[0], b.f.estimate()[0], 1e-5);
     EXPECT_THROW(b.f.restore_state(nlohmann::json{{"version", 9}}), std::invalid_argument);
 }
+
+TEST(BeliefFilter, WithManyThinlySampledStatesTheOwnHeadsAreConsistentWhereTheLegacyHeadsAreNot) {
+    // 40 states on a line, sticky runs of 10 ticks, readings at the state +- 0.05: each node sees ~50 samples in 2 000 ticks. The decode
+    // heads' own NIS (the winner's head against the reading, before it learns it): the legacy heads keep their global-variance prior and
+    // move at most gain_cap a sample (NIS << 1); heads built from their own samples state an honest spread (NIS ~ 1).
+    auto run = [](const char* mode) {
+        // the variance floor (1 % of the global variance: the states span 0..19.5, a floor spread of 0.57 against a true 0.05) is set
+        // negligible, so the heads themselves are measured
+        Fix fx({{"head_update", ogma::ParamValue{std::string(mode)}}, {"var_rel_floor", ogma::ParamValue{1e-6}}}); std::mt19937 rng(11); std::normal_distribution<float> n(0.0f, 0.05f);
+        std::uniform_int_distribution<int> pick(0, 39); int k = 0;
+        for (uint64_t t = 0; t < 20000; ++t) { if (t % 10 == 0) k = pick(rng); fx.step(t, k, float(k) * 0.5f + n(rng)); }
+        return fx.f.head_nis_mean();
+    };
+    const double legacy = run("legacy"), own = run("own");
+    EXPECT_LT(legacy, 0.5) << "the legacy heads are underconfident on thinly sampled states";
+    EXPECT_NEAR(own, 1.0, 0.2) << "heads from their own samples state an honest spread";
+    EXPECT_THROW(Fix({{"head_update", ogma::ParamValue{std::string("bogus")}}}), std::invalid_argument);
+}

@@ -19,8 +19,15 @@
 // squared of each fresh observation against the PREDICTED belief's moment-matched mixture -- m = sum b-(j) mu_j,
 // S = sum b-(j) (var_j + mu_j^2) - m^2 -- averaged over the dimensions with variance: its expected value is 1 for a filter
 // whose stated spread is honest (>1 overconfident, <1 underconfident).  nis (this tick), nis_ema, nis_mean; and how often
-// the MAP node and the EPM's winner change (a belief that coasts through flicker switches less than the raw winner).
+// the MAP node and the EPM's winner change (a belief that coasts through flicker switches less than the raw winner).  head_nis:
+// the same statistic for the EPM winner's own decode head alone, taken before the head learns from the reading -- the heads'
+// calibration, free of the transition model (the predictive NIS above averages 1 only over all ticks, jumps included).
 // snapshot_state / restore_state carry the learned model (transitions, decode heads, belief) across runs.
+// THE HEADS' OWN STATISTICS (head_update "own", learned stepper Phase 3, operator 2026-11-15; "legacy" = the default, byte-identical):
+// a new node's decode head starts from its first sample, not the global mean and variance, and keeps the exact running mean and
+// variance of its own samples (gain 1/n down to gain_floor, no gain_cap), read with the small-sample correction n/(n-1).  The
+// legacy head started at the global variance and moved at most gain_cap per sample, so a node seen a few dozen times kept a spread
+// far wider than its own -- NIS 0.3-0.6 on the stepper's stance vocabulary.
 // An INSTRUMENT: nothing consumes it.  It owns no partition (CLAUDE.md §0 rule 1).
 // =============================================================================
 #pragma once
@@ -56,6 +63,8 @@ public:
     void restore_state(nlohmann::json const& s) override;
     double  nis()       const { return nis_; }
     double  nis_mean()  const { return nis_n_ > 0 ? nis_sum_ / double(nis_n_) : 0.0; }
+    double  head_nis()  const { return head_nis_; }
+    double  head_nis_mean() const { return head_nis_n_ > 0 ? head_nis_sum_ / double(head_nis_n_) : 0.0; }
 
     // ---- accessors for tests and the bench ----
     Eigen::VectorXf estimate() const { return est_; }        // E_b[mu], the filtered observation
@@ -81,6 +90,8 @@ private:
     double gain_floor_  = 0.002;
     double var_rel_floor_ = 0.01;
     int    min_count_   = 5;      // a node joins the correction once its decode head has this many samples
+    bool   head_own_    = false;  // head_update "own": a head's statistics are its own samples' (see the header)
+    Eigen::VectorXf head_var(int j) const;   // a node's decode-head variance as the likelihood reads it
 
     // state: nodes in index order
     std::vector<int> ids_;
@@ -100,6 +111,7 @@ private:
     double map_p_ = 0.0, entropy_ = 0.0, surprise_ = 0.0;
     int64_t ticks_ = 0, corrected_ = 0, agree_ = 0, compared_ = 0;
     double nis_ = 0.0, nis_ema_ = 0.0, nis_sum_ = 0.0; int64_t nis_n_ = 0;   // the consistency check (diag only)
+    double head_nis_ = 0.0, head_nis_sum_ = 0.0; int64_t head_nis_n_ = 0;      // the winner's decode head alone (diag only)
     int prev_map_ = -1, prev_winner_ = -1; int64_t map_switches_ = 0, winner_switches_ = 0;
 };
 

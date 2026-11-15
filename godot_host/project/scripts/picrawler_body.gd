@@ -13337,6 +13337,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["sb_nism"] = snappedf(float(bst.get("nis_mean", 0.0)), 0.001)
 		line["sb_sw"] = [int(bst.get("map_switches", 0)), int(bst.get("winner_switches", 0))]
 		line["sb_agree"] = snappedf(float(bst.get("agree_with_epm", 0.0)), 0.001)
+		line["sb_hnis"] = snappedf(float(bst.get("head_nis_mean", 0.0)), 0.001)
+	if metrics.has("belief_stance_legacy"):   # the legacy decode heads on the same stream, for the paired comparison (2026-11-15)
+		var bsl: Dictionary = metrics["belief_stance_legacy"]
+		line["sbl_map"] = int(bsl.get("map_node", -1))
+		line["sbl_nism"] = snappedf(float(bsl.get("nis_mean", 0.0)), 0.001)
+		line["sbl_hnis"] = snappedf(float(bsl.get("head_nis_mean", 0.0)), 0.001)
+		line["sbl_sw"] = [int(bsl.get("map_switches", 0)), int(bsl.get("winner_switches", 0))]
 	if metrics.has("stance_features"):
 		var sft: Dictionary = metrics["stance_features"]
 		line["sf_pub"] = int(sft.get("published", 0))

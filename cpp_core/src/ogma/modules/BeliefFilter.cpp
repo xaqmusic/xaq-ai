@@ -55,6 +55,7 @@ ParamSchema BeliefFilter::params_schema() const {
         {"gain_floor", ParamMutability::HotMutable, "Lower clamp on the decode heads' gain (drift).", ParamValue{0.002}},
         {"var_rel_floor", ParamMutability::HotMutable, "A node's variance never below this fraction of the observation's global variance.", ParamValue{0.01}},
         {"min_count", ParamMutability::HotMutable, "A node's own likelihood is used once its decode head has this many samples (before: the global one).", ParamValue{int64_t{5}}},
+        {"head_update", ParamMutability::ConstructionOnly, "\"legacy\" = a head starts at the global mean and variance and moves at most gain_cap per sample (byte-identical); \"own\" = it starts from its first sample and keeps its own samples' running mean and variance (gain 1/n down to gain_floor), read with the n/(n-1) correction.", ParamValue{std::string("legacy")}},
     };
 }
 
@@ -62,7 +63,7 @@ ParamMap BeliefFilter::current_params() const {
     return {{"reality_topic", ParamValue{reality_topic_}}, {"obs_topic", ParamValue{obs_topic_}},
             {"output_topic", ParamValue{output_topic_}}, {"alpha", ParamValue{alpha_}}, {"gain_cap", ParamValue{gain_cap_}},
             {"gain_floor", ParamValue{gain_floor_}}, {"var_rel_floor", ParamValue{var_rel_floor_}},
-            {"min_count", ParamValue{int64_t(min_count_)}}};
+            {"min_count", ParamValue{int64_t(min_count_)}}, {"head_update", ParamValue{std::string(head_own_ ? "own" : "legacy")}}};
 }
 
 void BeliefFilter::on_setup(Bus* bus, ParamMap const& params) {
@@ -76,6 +77,8 @@ void BeliefFilter::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "gain_floor",    [&](auto const& v){ gain_floor_    = get_double(v, "gain_floor"); });
     apply_param(params, "var_rel_floor", [&](auto const& v){ var_rel_floor_ = std::max(0.0, get_double(v, "var_rel_floor")); });
     apply_param(params, "min_count",     [&](auto const& v){ min_count_     = std::max(0, int(get_int(v, "min_count"))); });
+    apply_param(params, "head_update",   [&](auto const& v){ const std::string h = get_string(v, "head_update");
+        if (h != "legacy" && h != "own") throw std::invalid_argument("BeliefFilter: head_update must be \"legacy\" or \"own\""); head_own_ = h == "own"; });
     if (output_topic_.empty()) output_topic_ = "belief." + (id().empty() ? std::string("filter") : std::string(id()));
     sub_ids_.push_back(bus_->subscribe(reality_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ handle_reality(p); }));
@@ -141,6 +144,12 @@ void BeliefFilter::drop_node(int node) {
     if (s > 0) for (double& v : b_) v /= s;
 }
 
+Eigen::VectorXf BeliefFilter::head_var(int j) const {
+    if (!head_own_) return var_[size_t(j)];
+    const double n = n_[size_t(j)];
+    return n >= 2.0 ? Eigen::VectorXf(var_[size_t(j)] * float(n / (n - 1.0))) : var_[size_t(j)];
+}
+
 double BeliefFilter::belief_of(int node) const {
     auto it = idx_.find(node);
     return it == idx_.end() ? 0.0 : b_[size_t(it->second)];
@@ -175,7 +184,7 @@ void BeliefFilter::tick(uint64_t tick_id) {
             for (int j = 0; j < N; ++j) {
                 const double w = bp[size_t(j)]; if (w <= 0.0) continue;
                 const bool own = n_[size_t(j)] >= double(min_count_);
-                const Eigen::VectorXd mj = (own ? mu_[size_t(j)] : g_mu_).cast<double>(), vj = (own ? var_[size_t(j)] : g_var_).cwiseMax(vfl).cast<double>();
+                const Eigen::VectorXd mj = (own ? mu_[size_t(j)] : g_mu_).cast<double>(), vj = (own ? head_var(j) : g_var_).cwiseMax(vfl).cast<double>();
                 m += w * mj; s2 += w * (vj + mj.cwiseProduct(mj)); bs += w;
             }
             if (bs > 0.0) {
@@ -190,7 +199,7 @@ void BeliefFilter::tick(uint64_t tick_id) {
         for (int j = 0; j < N; ++j) {
             const bool own = n_[size_t(j)] >= double(min_count_);
             const Eigen::VectorXf& m = own ? mu_[size_t(j)] : g_mu_;
-            const Eigen::VectorXf v = (own ? var_[size_t(j)] : g_var_).cwiseMax(vfl);
+            const Eigen::VectorXf v = (own ? head_var(j) : g_var_).cwiseMax(vfl);
             double l = 0.0;
             for (int d = 0; d < dim_; ++d) {
                 const double e = double(obs_[d] - m[d]);
@@ -224,11 +233,27 @@ void BeliefFilter::tick(uint64_t tick_id) {
     if (winner_fresh_ && winner_ != prev_winner_) { if (prev_winner_ >= 0) ++winner_switches_; prev_winner_ = winner_; }
 
     // ---- learn from the EPM's label: transitions, and the winner's decode head ----
+    if (winner_fresh_ && have_obs && n_[size_t(idx_[winner_])] >= double(min_count_)) {   // the winner's head, before it learns this reading (diag only)
+        const int wi = idx_[winner_]; const Eigen::VectorXf vfl = (g_var_ * float(var_rel_floor_)).cwiseMax(1e-6f), v = head_var(wi).cwiseMax(vfl);
+        double acc = 0.0; int nd = 0;
+        for (int d = 0; d < dim_; ++d) { if (double(g_var_[d]) <= 1e-5) continue; const double e = double(obs_[d] - mu_[size_t(wi)][d]); acc += e * e / double(v[d]); ++nd; }
+        if (nd > 0) { head_nis_ = acc / nd; head_nis_sum_ += head_nis_; ++head_nis_n_; }
+    }
     if (winner_fresh_) {
         const int wi = idx_[winner_];
         if (last_winner_ >= 0 && idx_.count(last_winner_)) C_[size_t(idx_[last_winner_])][size_t(wi)] += 1.0;
         last_winner_ = winner_;
-        if (have_obs) {
+        if (have_obs && head_own_) {   // the head's own samples: exact running mean and variance, then the drift floor
+            const double nn = (n_[size_t(wi)] += 1.0);
+            if (nn <= 1.0) { mu_[size_t(wi)] = obs_; var_[size_t(wi)] = Eigen::VectorXf::Zero(dim_); }
+            else {
+                const float g = float(std::max(1.0 / nn, gain_floor_));
+                const Eigen::VectorXf dl = obs_ - mu_[size_t(wi)];
+                mu_[size_t(wi)] += g * dl;
+                var_[size_t(wi)] = (1.0f - g) * (var_[size_t(wi)] + g * dl.array().square().matrix());
+            }
+        }
+        else if (have_obs) {
             n_[size_t(wi)] += 1.0;
             const float g = float(std::clamp(1.0 / (n_[size_t(wi)] + 1.0), gain_floor_, gain_cap_));
             const Eigen::VectorXf dl = obs_ - mu_[size_t(wi)];
@@ -260,6 +285,7 @@ nlohmann::json BeliefFilter::diag_snapshot() const {
                           {"surprise", surprise_}, {"ticks", ticks_}, {"corrected", corrected_},
                           {"agree_with_epm", compared_ > 0 ? double(agree_) / compared_ : 0.0},
                           {"nis", nis_}, {"nis_ema", nis_ema_}, {"nis_mean", nis_mean()}, {"nis_n", nis_n_},
+                          {"head_nis", head_nis_}, {"head_nis_mean", head_nis_mean()},
                           {"map_switches", map_switches_}, {"winner_switches", winner_switches_}};
 }
 

@@ -15,7 +15,8 @@ Per bench, over the engaged rows that carry a fresh stance sample (sf_pub advanc
                the NMI (sqrt form, as tof_studies.py) of the EPM winner and of the belief's MAP node against the label, a node-level F1
                (a node predicts the label when the label holds on most of its rows) and the label's lift in those nodes -- each against
                a chance level from the label circularly shifted (10 shifts of at least 10 % of the run: same rate, same autocorrelation);
-  consistency  the belief's NIS (the run mean, sb_nism) and its switches against the EPM winner's (sb_sw)."""
+  consistency  the belief's NIS (the run mean, sb_nism) and its switches against the EPM winner's (sb_sw); with a second, legacy-head
+               BeliefFilter in the config (belief_stance_legacy), the decode heads' own NIS for both (sb_hnis / sbl_hnis) on the same stream."""
 import collections, glob, json, math, os, random, statistics as st, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _logio import open_log
@@ -105,7 +106,7 @@ def main(argv):
         fs = sorted(glob.glob(f'{d}/*_{b}*.jsonl.gz') + glob.glob(f'{d}/*_{b}*.jsonl'))
         if not fs: continue
         res = {k: {'win': [], 'map': [], 'cw': [], 'cm': [], 'f1': [], 'cf1': [], 'lift': [], 'rate': []} for k in ('room', 'inner', 'noseup', 'hang')}
-        voc = []; nis = []; sw = []; nmed = []
+        voc = []; nis = []; sw = []; nmed = []; heads = []
         for f in fs:
             rows = read(f)
             if len(rows) < 50: continue
@@ -122,6 +123,7 @@ def main(argv):
             if v: voc.append((v[len(v) // 2][0], v[3 * len(v) // 4][0], v[-1][0], v[-1][1], v[-1][2]))
             last = rows[-1]; nis.append(last.get('sb_nism', 0.0)); sw.append(tuple(last.get('sb_sw', [0, 0])))
             nmed.append(st.median(r.get('sb_nis', 0.0) for r in rows))
+            if 'sb_hnis' in last: heads.append((last['sb_hnis'], last.get('sbl_hnis'), last.get('sbl_nism'), tuple(last.get('sbl_sw', [0, 0]))))
         print(f'== {b} ({len(fs)} runs)')
         if voc: print('    vocabulary nodes at 50 / 75 / 100 %: ' + '  '.join(f'{a}/{c}/{e} (baked {g}, tle {h:.3f})' for a, c, e, g, h in voc))
         for k, R in res.items():
@@ -131,6 +133,9 @@ def main(argv):
                   f'  node F1 {m(R["f1"])} (chance {m(R["cf1"])}) lift {m(R["lift"])}  n={len(R["win"])}')
         if nis: print(f'    belief NIS mean {st.mean(nis):.2f} (runs {", ".join(f"{x:.2f}" for x in nis)}), median {st.mean(nmed):.2f};  switches MAP / winner: '
                       + ', '.join(f'{a}/{w}' for a, w in sw))
+        if heads: print('    decode-head NIS own / legacy: ' + ', '.join(f'{h:.2f}/{l:.2f}' for h, l, _, _ in heads if l is not None)
+                        + ';  legacy predictive NIS ' + ', '.join(f'{n:.2f}' for _, _, n, _ in heads if n is not None)
+                        + ';  legacy MAP switches ' + ', '.join(f'{w[0]}' for _, _, _, w in heads))
 
 
 if __name__ == '__main__':
