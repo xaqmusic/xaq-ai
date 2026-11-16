@@ -53,6 +53,7 @@ ParamSchema StanceFeatures::params_schema() const {
         {"freeze_after",  ParamMutability::HotMutable, "THE FROZEN ENCODER: after this many samples the running statistics stop updating, so the stance EPM's coordinates hold still across worlds (the EPM contract's frozen encoder). The count rides in the snapshot, so a carried state stays frozen. 0 = off (byte-identical). Measured 2026-11-15: a pure 1 / n absorbed six stairs runs (mean 0.4 sigma, sigma x1.5) and re-encoded the corridor.", ParamValue{int64_t{0}}},
         {"warmup",        ParamMutability::HotMutable, "Nothing is published for the first this many samples (the statistics are not yet a scale).", ParamValue{int64_t{200}}},
         {"clip",          ParamMutability::HotMutable, "Each z is clipped to +- this.", ParamValue{4.0}},
+        {"widen",         ParamMutability::HotMutable, "THE SCALE MAY ONLY WIDEN (with freeze_after): once frozen, a feature kind (ext, knee to straight, knee to fold, hip1, hip2, lift, load, contact, ground, relief over the four legs; pitch; roll) whose sample reaches the clip has its scale stretched by 1 / (ticks at the clip so far + warmup) of itself, all four legs alike; the centre stays frozen. Self-limiting: it stops when the excursion fits inside the clip, so the scale ends at the kind's range and holds. A step's size does not depend on the excursion's, so a glitch moves it half a percent. 0 = off (byte-identical). Measured 2026-11-16: the scale frozen in flat worlds held the ground at 2 mm and the pitch at 1 degree, and a riser clipped them.", ParamValue{0.0}},
         {"flicker_p",     ParamMutability::HotMutable, "THE FLICKER TEST: each contact flag is flipped with this probability per tick before it is featurised; 0 = off (byte-identical).", ParamValue{0.0}},
         {"flicker_seed",  ParamMutability::ConstructionOnly, "The flicker's random stream.", ParamValue{int64_t{1}}},
     };
@@ -62,7 +63,7 @@ ParamMap StanceFeatures::current_params() const {
     return {{"model_topic", ParamValue{model_topic_}}, {"pose_topic", ParamValue{pose_topic_}}, {"load_topic", ParamValue{load_topic_}},
             {"contact_topic", ParamValue{contact_topic_}}, {"up_topic", ParamValue{up_topic_}}, {"patch_topic", ParamValue{patch_topic_}},
             {"output_topic", ParamValue{output_topic_}}, {"obs_topic", ParamValue{obs_topic_}}, {"engage_min", ParamValue{engage_min_}},
-            {"n_max", ParamValue{int64_t(n_max_)}}, {"freeze_after", ParamValue{int64_t(freeze_after_)}}, {"warmup", ParamValue{int64_t(warmup_)}}, {"clip", ParamValue{clip_}},
+            {"n_max", ParamValue{int64_t(n_max_)}}, {"freeze_after", ParamValue{int64_t(freeze_after_)}}, {"warmup", ParamValue{int64_t(warmup_)}}, {"clip", ParamValue{clip_}}, {"widen", ParamValue{widen_}},
             {"flicker_p", ParamValue{flicker_p_}}, {"flicker_seed", ParamValue{int64_t(flicker_seed_)}}};
 }
 
@@ -75,7 +76,7 @@ void StanceFeatures::on_setup(Bus* bus, ParamMap const& params) {
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     apply_param(params, "flicker_seed", [&](auto const& v){ flicker_seed_ = uint32_t(get_double(v, "flicker_seed")); });
     rng_ = flicker_seed_ * 2654435761u + 1u;
-    for (auto const& k : {"engage_min", "n_max", "freeze_after", "warmup", "clip", "flicker_p"})
+    for (auto const& k : {"engage_min", "n_max", "freeze_after", "warmup", "clip", "widen", "flicker_p"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which) {
         if (topic.empty()) return;
@@ -91,6 +92,7 @@ void StanceFeatures::on_param_change(std::string_view key, ParamValue const& val
     else if (k == "freeze_after") freeze_after_ = std::max<int64_t>(0, int64_t(get_double(value, k)));
     else if (k == "warmup")     warmup_ = std::max(0, int(get_double(value, k)));
     else if (k == "clip")       clip_ = std::max(0.5, get_double(value, k));
+    else if (k == "widen")      widen_ = std::max(0.0, get_double(value, k));
     else if (k == "flicker_p")  flicker_p_ = std::clamp(get_double(value, k), 0.0, 1.0);
 }
 
@@ -152,15 +154,37 @@ void StanceFeatures::tick(uint64_t tick_id) {
     ++n_;
     const double a = n_max_ > 0 ? std::max(1.0 / double(n_), 1.0 / double(n_max_)) : 1.0 / double(n_);
     if (n_ == 1) { mean_ = x; var_.setZero(); }
-    else if (freeze_after_ > 0 && n_ > freeze_after_) {}   // frozen: the coordinates hold still
+    else if (freeze_after_ > 0 && n_ > freeze_after_) {   // frozen: the coordinates hold still
+        if (widen_ > 0.0) {   // ...except a kind whose samples reach the clip: its scale stretches, the centre stays
+            for (int k = 0; k < kKinds; ++k) {
+                const int i0 = k < 10 ? k : 40 + (k - 10), step = k < 10 ? 10 : 1, cnt = k < 10 ? 4 : 1;
+                bool at_clip = false;
+                for (int j = 0; j < cnt; ++j) { const int i = i0 + j * step; if (std::abs(x[i] - mean_[i]) / (std::sqrt(var_[i]) + 1e-4) >= clip_) at_clip = true; }
+                if (!at_clip) continue;
+                const double f = 1.0 + 1.0 / double(++widen_n_[size_t(k)] + warmup_);   // count-annealed: one frozen sd per `warmup` ticks at the clip
+                for (int j = 0; j < cnt; ++j) { const int i = i0 + j * step; const double sd = (std::sqrt(var_[i]) + 1e-4) * f - 1e-4; var_[i] = sd * sd; }
+            }
+        }
+    }
     else {
         const Eigen::VectorXd d = x - mean_;
         mean_ += a * d;
         var_ = (1.0 - a) * (var_ + a * d.cwiseProduct(d));
     }
     if (n_ <= warmup_) return;
-    const Eigen::VectorXd z = ((x - mean_).array() / (var_.array().sqrt() + 1e-4)).max(-clip_).min(clip_).matrix();
+    const Eigen::ArrayXd zr = (x - mean_).array() / (var_.array().sqrt() + 1e-4);   // before the clip: what the scale failed to hold
+    const Eigen::VectorXd z = zr.max(-clip_).min(clip_).matrix();
     last_z_ = z; ++published_;
+    {   // the saturation instrument (always on, deciding nothing): per feature kind, the samples at the clip and the largest |z|
+        ++sat_samples_; double s2 = 0.0;
+        for (int i = 0; i < kRaw; ++i) {
+            const size_t k = size_t(i < 40 ? i % 10 : 10 + (i - 40)); const double az = std::abs(zr[i]);
+            if (az >= clip_) ++sat_n_[k];
+            if (az > sat_zmax_[k]) sat_zmax_[k] = az;
+            s2 += zr[i] * zr[i];
+        }
+        last_zr_norm_ = std::sqrt(s2);
+    }
     const std::string pid = id().empty() ? std::string("stance_features") : std::string(id());
     auto out = std::make_shared<ProprioToken>();
     out->tick_id = tick_id; out->producer_id = pid; out->sensor = "stance_features";
@@ -178,13 +202,16 @@ void StanceFeatures::tick(uint64_t tick_id) {
 
 nlohmann::json StanceFeatures::diag_snapshot() const {
     return nlohmann::json{{"samples", n_}, {"published", published_}, {"flips", flips_}, {"ready", kin_.ready() && have_pose_},
-                          {"z_norm", last_z_.norm()}, {"frozen", freeze_after_ > 0 && n_ > freeze_after_}};
+                          {"z_norm", last_z_.norm()}, {"frozen", freeze_after_ > 0 && n_ > freeze_after_},
+                          {"zr_norm", last_zr_norm_}, {"sat_samples", sat_samples_}, {"sat_n", sat_n_}, {"sat_zmax", sat_zmax_}, {"widen_n", widen_n_}};
 }
 
 nlohmann::json StanceFeatures::snapshot_state() const {
-    return nlohmann::json{{"version", 1}, {"n", n_}, {"published", published_}, {"flips", flips_}, {"rng", rng_},
-                          {"mean", std::vector<double>(mean_.data(), mean_.data() + mean_.size())},
-                          {"var", std::vector<double>(var_.data(), var_.data() + var_.size())}};
+    nlohmann::json j{{"version", 1}, {"n", n_}, {"published", published_}, {"flips", flips_}, {"rng", rng_},
+                     {"mean", std::vector<double>(mean_.data(), mean_.data() + mean_.size())},
+                     {"var", std::vector<double>(var_.data(), var_.data() + var_.size())}};
+    if (widen_ > 0.0) j["widen_n"] = widen_n_;   // only when the lever is on: a state saved with it off is unchanged
+    return j;
 }
 
 void StanceFeatures::restore_state(nlohmann::json const& s) {
@@ -193,6 +220,7 @@ void StanceFeatures::restore_state(nlohmann::json const& s) {
     const auto m = s.at("mean").get<std::vector<double>>(), v = s.at("var").get<std::vector<double>>();
     if (int(m.size()) != kRaw || int(v.size()) != kRaw) throw std::invalid_argument("StanceFeatures::restore_state: width mismatch");
     for (int i = 0; i < kRaw; ++i) { mean_[i] = m[size_t(i)]; var_[i] = v[size_t(i)]; }
+    if (s.contains("widen_n")) { const auto w = s.at("widen_n").get<std::vector<int64_t>>(); if (int(w.size()) == kKinds) for (int k = 0; k < kKinds; ++k) widen_n_[size_t(k)] = w[size_t(k)]; }
     n_ = s.at("n").get<int64_t>(); published_ = s.value("published", int64_t{0}); flips_ = s.value("flips", int64_t{0}); rng_ = s.value("rng", rng_);
 }
 

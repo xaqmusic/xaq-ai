@@ -13358,6 +13358,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["sf_pub"] = int(sft.get("published", 0))
 		line["sf_flips"] = int(sft.get("flips", 0))
 		line["sf_z"] = snappedf(float(sft.get("z_norm", 0.0)), 0.01)
+		if sft.has("sat_n"):   # the saturation instrument (2026-11-16): per feature kind, samples at the clip and the largest |z|
+			line["sf_zr"] = snappedf(float(sft.get("zr_norm", 0.0)), 0.01)
+			line["sf_satn"] = int(sft.get("sat_samples", 0))
+			line["sf_sat"] = sft.get("sat_n", [])
+			var zm: Array = []
+			for v in sft.get("sat_zmax", []): zm.append(snappedf(float(v), 0.1))
+			line["sf_zmax"] = zm
 	line["gc_norm"] = snappedf(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0), 0.001)
 	line["cy_norm"] = snappedf(clamp(chassis_y / target_height, 0.0, 1.0), 0.001)
 	# TRUE swing fraction from the physics foot-contact sensor — the ground truth against

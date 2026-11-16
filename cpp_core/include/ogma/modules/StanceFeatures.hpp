@@ -24,6 +24,16 @@
 //                  sits at 45 degrees to it).  A geometric choice from the width, not a tuned scale.
 //   obs_topic      z alone -- the BeliefFilter's observation.
 //
+// THE SATURATION INSTRUMENT (2026-11-16, always on, deciding nothing): the diag carries, per feature kind, how many samples
+// reached the clip and the largest |z| before it (sat_n, sat_zmax over sat_samples; logged as sf_sat, sf_zmax, sf_satn).  A scale
+// frozen in flat worlds held the terrain and the tilt at their noise (ground sd 2 mm, pitch 1 degree), so a riser clips them.
+//
+// THE SCALE MAY ONLY WIDEN (widen, default 0 = off, byte-identical; 2026-11-16): the frozen encoder's complement.  A feature
+// that has not varied yet is frozen at its noise, and the first world where it does vary saturates the clip.  With widen on, a
+// frozen kind whose sample reaches the clip stretches its scale (the four legs alike, the centre held) by 1 / (its ticks at the
+// clip + warmup) of itself, and stops as soon as the excursion fits: the scale ends at the kind's range and holds there.  The
+// step does not depend on the excursion's size (a glitch of any size moves it half a percent), and the count is carried.
+//
 // THE FLICKER TEST (flicker_p, default 0 = off, byte-identical): each contact flag is flipped with this probability per tick
 // before it is featurised -- the injected FSR flicker of the Phase 3 gate (the belief must coast through it).
 #include <array>
@@ -69,7 +79,7 @@ private:
     std::string model_topic_ = "reality.proprio.leg_model", pose_topic_ = "pose.targets", load_topic_ = "reality.proprio.foot_load",
                 contact_topic_ = "reality.proprio.foot_contact", up_topic_ = "reality.proprio.up_body", patch_topic_ = "terrain.patch",
                 output_topic_ = "reality.proprio.stance_features", obs_topic_ = "reality.proprio.stance_obs";
-    double engage_min_ = 0.99, clip_ = 4.0, flicker_p_ = 0.0;
+    double engage_min_ = 0.99, clip_ = 4.0, flicker_p_ = 0.0, widen_ = 0.0;
     int n_max_ = 20000, warmup_ = 200;
     int64_t freeze_after_ = 0;   // > 0: the statistics stop updating after this many samples (the encoder held still); 0 = off
     uint32_t flicker_seed_ = 1u, rng_ = 1u;
@@ -83,6 +93,12 @@ private:
     Eigen::VectorXd mean_ = Eigen::VectorXd::Zero(kRaw), var_ = Eigen::VectorXd::Ones(kRaw);
     int64_t n_ = 0, published_ = 0, flips_ = 0;
     Eigen::VectorXd last_z_ = Eigen::VectorXd::Zero(kRaw);
+    // the saturation instrument (per run, not carried): per feature kind -- ext, knee to straight, knee to fold, hip1, hip2, lift,
+    // load, contact, ground, relief (each over the four legs), pitch, roll -- the samples whose |z| reached the clip and the largest
+    // |z| before the clip; the samples counted; the last unclipped norm.  A kind at the clip is a kind the frozen scale cannot hold.
+    static constexpr int kKinds = 12;
+    std::array<int64_t, kKinds> sat_n_{}; std::array<double, kKinds> sat_zmax_{}; int64_t sat_samples_ = 0; double last_zr_norm_ = 0.0;
+    std::array<int64_t, kKinds> widen_n_{};   // the widening lever: per kind, the ticks at the clip since the freeze (carried)
     Bus* bus_ = nullptr; std::vector<uint64_t> sub_ids_;
 };
 

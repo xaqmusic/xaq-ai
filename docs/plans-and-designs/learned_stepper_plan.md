@@ -321,7 +321,7 @@ i/o mappings that work and build upon them").*
 | 1 Prune | **done** — one rule of 16 redundant (the IK re-seed, covered by multistart); off in the stack configs, its code marked `PRUNE-P1` and kept until the cleanup pass (operator, 2026-11-15) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 1" |
 | 2 Split | **done** — gate met: LegSolver and the planner / executor / floor split byte-identical (15 of 15 runs each), the outcome stream and the room field-identical; unit tests per component | 2026-11-15 | 2026-11-15 "Learned stepper Phase 2" |
 | 3 Stance belief | **in flight** — built and measured; separation yes. Own-sample heads REGRESS against legacy; spares-baked stops the forgetting; growth traced to baking counting correlated samples. Curriculum (known worlds × 8, stairs × 6, return × 2): `bake_min_entries` 5 PARTIAL; a frozen stance encoder (`freeze_after`, scaffold count) is WORKING for retention (return ties pre-stairs TLE, reuse 0.60, 1 new node). Learning rate (`stepper_learning.py`): the known worlds learn (QE −7 %/doubling) and saturate in 6–8 min; the stairs do not learn at all in 7 min at either height. A long stairs block from the frozen brain (start-from-state, exact): no learning in 23 min (QE +0.2 %/doubling), the vocabulary grows and is slowly reused (0.25); not the stalls. The frozen flat-world encoder SATURATES on the stairs (ten terrain/tilt z clipped, |z| 12 vs 6). Entries under the still encoder: PARTIAL (60 % fewer stairs nodes, 3 % stairs fit cost). Gate re-scoped 2026-11-16 (no convergence on the stairs; no saturated feature on any bench). Next: the z-saturation instrument, then a per-feature freeze from the normaliser's own dynamics | 2026-11-16 | 2026-11-15 "Learned stepper Phase 3", "continued", "the settling normaliser", "entries to bake", "the frozen stance encoder"; 2026-11-16 "a long stairs block", "authority sooner" |
-| 4 First closed loop (landing offset by EFE) | — direction approved 2026-11-16; waits on Phase 3's gate, then the outcome-error instrument, then the operator's go for the gain-on battery | | 2026-11-16 "authority sooner" |
+| 4 First closed loop (landing offset by EFE) | — direction approved 2026-11-16; the outcome-and-behaviour instrument is built and its gain-0 baselines read (§9.1); waits on Phase 3's gate, then the lever at gain 0, then the operator's go for the gain-on battery | | 2026-11-16 "authority sooner" |
 | 5 Widen authority (shift, sideways, leg) | — | | |
 | 6 Whole-intent authority by precision | — | | |
 | 7 De-scaffold | — | | |
@@ -364,6 +364,63 @@ the dark room (§6.8), which is why the first value leaves progress to the scaff
 Unchanged: the scaffold stays frozen; the `PRUNE-P1` cleanup with its byte-identity check is still pending; the `zz_arm_*`
 and `sim60_stairs_seq2__p1*` configs stay uncommitted; godot is killed by PID only. Open: the one heap-corruption abort
 (`lb38` c4 r4).
+
+### 9.1 Progress since the decision (2026-11-16, evening)
+
+**Three instruments, no authority** (ledger 2026-11-16 "three instruments"):
+
+*Does the stance predict a step's consequence?* (`scripts_tools/stepper_predict.py <chain dir>...`, on the chains already
+run.) Every landing is one sample: its outcome record joined to the stance winner on the first row after the previous
+landing, when the scaffold planned it. Predictors are prequential (each step predicted from the steps before it in the
+chain's own order, then learned from); skill is the share of squared error removed beyond a running per-leg mean within the
+world. Controls: winner labels shuffled across steps never beat the leg mean (−0.01 to −0.17); the stepping leg's own
+extension slack on the planning row, an input of the stance vector, is recovered from the latent at +0.45 to +0.50 on the
+stairs.
+
+| Question | Answer | Data |
+|---|---|---|
+| Does a per-(node, leg) table work as a step model's address? | **Not on the stairs as the vocabulary stood.** A step is planned from a (leg, node) cell seen three or more times before in 8 % of stairs steps (61–63 % in the corridor and arena): skill +0.03 to +0.13 on most outcomes | `lb38`, `cvf` |
+| Is the information there when the address recurs? | **Yes.** In the cells with three or more earlier visits (about 50 steps a chain; a selected set, the repeated stances) the node removes 33 % of the landing offset's error, 22 % of the touchdown height's, 41 % of the duration's, 62 % of the room after the step, 72–74 % of the miss and hang scores | `lb38` |
+| Does the stance latent generalise across nodes? | **Modestly at 38 mm, clearly at 64 mm.** Eight principal components of the winner's prototype, per-leg recursive least squares: 38 mm — offset +0.07 to +0.13, room +0.34, miss +0.22; 64 mm — miss +0.26 to +0.33, duration +0.24 to +0.30, hang +0.18 to +0.22, touchdown height +0.17, offset +0.15 to +0.17 (t 3–10 over 6 chains). Sensitive to regularisation: 16 components with a loose prior diverge | `lb38`, `cvf`, `cvfe` |
+| Is the hand's landing relocation predictable? | **Weakly**: 2.2 cm rms at 38 mm, 13 % of its variance at best. It is mostly the obstacle reflex (0.65–0.70 cm of a 0.9 cm mean move), a reaction to a contact the swing did not expect | `lb38` |
+| Is there anything to learn in the known worlds? | **Little**: the offset is 0.5 cm rms and nothing beats the leg mean; the touchdown error (0.32 cm after the leg mean) falls 8–14 % with the step's parameters | `cvf` |
+
+**For Phase 4's model:** a per-(stance node, leg) local model alone starves on any world the body does not yet walk
+repeatably. Its heads should read the stance **latent** (which generalises across nodes), with the node as a local
+refinement where it has data — unless the widened encoder makes stairs stances recur, which the `cvw` battery reads. The
+"step parameters" columns of this reader are confounded (the scaffold's landing is a function of the stance), the
+identifiability argument of §6.7 with a number on it.
+
+*Where does the frozen encoder saturate?* (`StanceFeatures`' diag: per feature kind the samples at the clip and the largest
+|z| before it — `sf_sat`, `sf_zmax`, `sf_satn`; `scripts_tools/stepper_saturation.py`. Chain `sat0`: the `cvf` brain after
+run 8 on 38 mm, 64 mm, corridor, arena × 6 chains; identical to `lb38` run 1 in all 5.1 million shared fields.)
+
+| World | pitch | roll | ground | relief | knee | hip1 | hip2 | lift | ext | load |
+|---|---|---|---|---|---|---|---|---|---|---|
+| corridor | 0.6 % | 0.6 % | 0.0 % | 1.7 % | 0.3 % | 0.1 % | 0.2 % | 0.0 % | 0.0 % | 0.0 % |
+| arena | 0.7 % | 0.7 % | 0.6 % | 1.3 % | 0.4 % | 0.3 % | 0.3 % | 0.0 % | 0.0 % | 0.0 % |
+| 38 mm | 55 % | 35 % | 43 % | 15 % | 11 % | 2.3 % | 7.4 % | 2.0 % | 0.5 % | 1.5 % |
+| 64 mm | 82 % | 7 % | 43 % | 21 % | 9 % | 11 % | 12 % | 8.9 % | 3.9 % | 0.1 % |
+
+Not only the terrain and the tilt: the knee and hip room clip on about a tenth of riser samples (the knee peaks 21 flat-world
+sd from its mean — the commanded knee well past straight). The flat worlds are clean but for brief tilt transients (peaks
+11–19 sd). The re-scoped gate's last clause ("no feature saturated on any bench") fails on the frozen encoder by this table.
+
+*Phase 4's baseline* (`scripts_tools/stepper_practice.py <chain dir>...`: practice curves of touchdown error, the hand's
+correction, hang, miss, skipped turns, steps and progress per minute, stall share, falls, risers reached). On the gain-0
+chains every curve is flat, as a frozen scaffold's must be: corridor — touchdown error 0.61 cm, correction 0.12 cm, stall
+6 %, 59 cm/min; 38 mm — 1.3–1.8 cm, 0.9–1.6 cm, hang 1–5 %, stall 32–54 %, 19–32 cm/min; 64 mm — 2.5–3.1 cm, 1.4–1.8 cm,
+hang 10–19 %, miss 12–20 %, stall 70 %, 13 cm/min, never all four toes on the first tread. Saved beside the chains
+(`~/xaq_runs/stepper/{lb38,cvf}_practice.txt`); an arm is read against them.
+
+**The per-feature rule, as approved (operator, 2026-11-16: "I approve the widen rule and form. We will get more insights
+when I can observe the behavior in the UI").** `StanceFeatures.widen` (default 0, byte-identical: three stairs runs bytes-same
+against `sat0`; 7 of 7 tests): once frozen, the centre stays; a feature kind whose sample reaches the clip on any leg has
+its scale stretched, the four legs alike, by 1 / (its ticks at the clip so far + `warmup`) of itself. Self-limiting (it
+stops when the excursion fits), so a kind's scale ends at its persistent range and holds; the step does not depend on the
+excursion's size, so a glitch moves it half a percent. It does not remove the `freeze_after` count (still a scaffold).
+Considered and not built: re-opening a clipped feature's full statistics until it settles (follows mean shifts, re-encodes
+more, needs a settling criterion); one shared scale per physical unit (fixes ground and relief, not tilt or the knee).
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 

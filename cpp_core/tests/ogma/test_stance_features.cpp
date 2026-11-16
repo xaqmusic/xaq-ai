@@ -96,3 +96,29 @@ TEST(StanceFeatures, FrozenTheStatisticsHoldThroughANewRegimeAndThroughASnapshot
     EXPECT_GT(std::fabs(live.m.mean()[1] - m0[1]), 0.1) << "unfrozen, the new regime drags the mean";
     EXPECT_EQ(frz.m.samples(), 4000) << "the count keeps running";
 }
+
+TEST(StanceFeatures, FrozenAKindAtTheClipWidensItsScaleUntilTheExcursionFitsAndTheOthersHold) {
+    // the saturation instrument, then the widening lever: a pitch far outside the frozen scale
+    auto regime = [](Fix& f, uint64_t t0, uint64_t n, float pitch) { for (uint64_t t = t0; t < t0 + n; ++t) f.run(t, 1.0f, 0.3f + 0.1f * float(t % 7) / 7.0f, -1, {1, 1, 1, 1}, {0.0f, 1.0f, pitch + 0.01f * float(t % 5)}); };
+    ogma::ParamMap base{{"n_max", ogma::ParamValue{int64_t{0}}}, {"freeze_after", ogma::ParamValue{int64_t{1000}}}};
+    Fix off(base); regime(off, 0, 1000, 0.0f); const Eigen::VectorXd v0 = off.m.var(), m0 = off.m.mean();
+    regime(off, 1000, 3000, 0.3f);
+    EXPECT_EQ((off.m.var() - v0).norm(), 0.0) << "widen off: the frozen scale does not move";
+    auto d = off.m.diag_snapshot();
+    EXPECT_EQ(d["sat_n"][10].get<int64_t>(), 3000) << "the instrument: every sample of the pitch at the clip";
+    EXPECT_GT(d["sat_zmax"][10].get<double>(), 10.0); EXPECT_EQ(d["sat_n"][1].get<int64_t>(), 0) << "the knee's kind is inside its scale";
+    ogma::ParamMap on = base; on["widen"] = ogma::ParamValue{1.0};
+    Fix w(on); regime(w, 0, 1000, 0.0f);
+    EXPECT_EQ((w.m.var() - v0).norm(), 0.0) << "identical until the freeze";
+    regime(w, 1000, 3000, 0.3f);
+    EXPECT_EQ((w.m.mean() - m0).norm(), 0.0) << "the centre stays frozen";
+    for (int i = 0; i < StanceFeatures::kRaw; ++i) if (i != 40) EXPECT_EQ(w.m.var()[i], v0[i]) << "feature " << i << ": a kind inside its scale holds";
+    const double sd = std::sqrt(w.m.var()[40]), z = (std::atan2(0.3, 1.0) - m0[40]) / (sd + 1e-4);
+    EXPECT_GT(sd, 4.0 * std::sqrt(v0[40])) << "the pitch scale stretched";
+    EXPECT_LT(z, 4.0); EXPECT_GT(z, 3.3) << "and stopped where the excursion fits inside the clip";
+    const auto wn = w.m.diag_snapshot()["widen_n"][10].get<int64_t>(); EXPECT_GT(wn, 0); EXPECT_LT(wn, 3000) << "self-limiting";
+    Fix r(on); r.m.restore_state(w.m.snapshot_state());
+    EXPECT_EQ(r.m.diag_snapshot()["widen_n"][10].get<int64_t>(), wn) << "the count is carried";
+    EXPECT_FALSE(off.m.snapshot_state().contains("widen_n")) << "a state saved with the lever off is unchanged";
+}
+
