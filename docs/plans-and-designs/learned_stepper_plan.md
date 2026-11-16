@@ -230,7 +230,7 @@ asserted.
 - Every behaviour change is gain-0-guarded and byte-identical when off; every refactor is golden-trace identical.
 - Batteries never run while the operator is observing in the UI (they rotate the UI's log store); logs are gzipped
   on write.
-- The resume point for each session is this file's §8 table and the ledger's latest entry.
+- The resume point for each session is this file's §9 (the latest resume section), its §8 table and the ledger's latest entry.
 
 ## 8. Status
 
@@ -244,3 +244,73 @@ asserted.
 | 5 Policy in shadow | — | | |
 | 6 Authority by precision | — | | |
 | 7 De-scaffold | — | | |
+
+## 9. ▶ Resume here (2026-11-16): where Phase 3 stands, and the question of authority sooner
+
+**Read this section, then the ledger's three latest entries** (2026-11-15 "the frozen stance encoder", 2026-11-16 "a long
+stairs block"). The operator closed the 2026-11-16 session with an idea to discuss in a fresh context, recorded at the end.
+
+### 9.1 What is built (all instrument-only; the frozen `PoseSequencer` walks the body)
+
+- `StanceFeatures` → stance EPM (`epm_stance`) → three `BeliefFilter` heads (own, legacy, visit-counted). 42 features: per
+  leg room (5), lift, load share, contact, remembered ground and relief under the toe; body pitch and roll. Conditioned by a
+  pure 1/n running normaliser (`n_max` 0) with `freeze_after` (a scaffold count, 60 000 samples in the curriculum).
+- Persistence: the five stance modules carry across runs (`stepper_chain.sh KEEP=...`); `TerrainMemory` does not.
+- GNG options: `health_death_spares_baked`, `bake_min_entries` (entries = winner changes).
+- Harness: `stepper_chain.sh` (SCHEDULE for curricula, EXPECT asserts levers, FROM / FROM_RUN starts from a carried state;
+  seeds 10c + FROM_RUN + k). Readers: `stepper_curriculum.py` (per run: nodes, baked, reuse, heads), `stepper_learning.py`
+  (practice curves: slope per doubling, position-matched slope, last-rep change, return after a gap). Both cut a chain at its
+  first broken link.
+- Config of record: `sim60_stairs_seq2_belief__p3settle__p3vis__p3frz.json` (+`__p3entry` for entries to bake).
+
+### 9.2 What is measured
+
+| Question | Answer | Data |
+|---|---|---|
+| Does the vocabulary learn the known worlds? | Yes: QE −7 %/doubling (corridor), −4 % (arena); saturates in 6–8 min | `cvf` |
+| Is it retained across a world change? | Yes, with the normaliser frozen: return ties, 60 % reuse, 1 new node | `cvf` vs `cvcb` |
+| Does it learn the stairs? | **No**, at 38 or 64 mm, over 7 min (curriculum) or 23 min (long block): QE flat, vocabulary grows (+15–26 baked a run), 25 % cross-run reuse | `cvf`, `lb38` |
+| Is that the stalls? | No: QE is flat in moving rows too (the body is stalled at a riser ~50 % of stairs rows) | `lb38` |
+| Is the stairs' growth dwells? | ~60 % of it (entries to bake 5: 60 % fewer stairs nodes, +3 % stairs QE) — `PARTIAL` | `cvfe` |
+| Is the percept sound on the stairs? | **No**: the frozen flat-world scale (ground sd 2 mm, relief 7 mm, tilt 1°) clips ~10 terrain/tilt z at ±4 on a riser (stance |z| 12 vs 6) | `lb38` state + logs |
+
+Open: one heap-corruption abort in ~500 runs (`lb38` c4 r4). Pending cleanup (operator, 2026-11-15): delete the `PRUNE-P1`
+code once the promoted module is final, then `stepper_ident.py --check stepper_golden.json --label phase1_pruned`.
+
+### 9.3 The operator's idea (2026-11-16), to discuss before the next lever
+
+> "If the predictor is not controlling the body, then it seems a plateau is inevitable. With a truly learning brain in
+> control, the robot should be able to build the i/o mappings that work and build upon them."
+
+**The case for it, from this phase's own data.** Every stance curve so far measures how repeatable the *scaffold's*
+outcomes are, not what a brain can learn: the data distribution is set by a frozen policy that nothing learned feeds back
+into. Where the scaffold succeeds (corridor, arena) the vocabulary saturates low within minutes; where it fails (the stairs,
+half the time stalled, every attempt different) it plateaus high and no amount of practice moves it, because the learner can
+only change its model, never its inputs. Active inference has two ways to reduce error, and Phase 3 has removed one of them.
+An instrument-only learner's plateau is the scaffold's ceiling. This is CLAUDE.md's "LEARNED cooperates, IMPOSED fights" seen
+from the other side: a learner riding on an imposed controller can only describe it.
+
+**What the plan already says, and where the idea differs.** §1 is the closed-loop target (a step generator graded on the
+realised outcomes of its own steps, a policy minimising expected free energy against homeostatic priors, the floor as a
+reflex); §2 already gives the scaffold an "experience generator with epistemic jitter" role and a "fallback by precision"
+role. The difference is ordering: the plan reaches authority only at Phase 6, after three instrument-only gates, and Phase
+3's implicit gate (a vocabulary that converges on the stairs) may be unreachable while the scaffold drives — the same shape
+as *an unreachable target winds a learner into a trap*.
+
+**Points to settle in the discussion.**
+1. **Re-scope Phase 3's gate** to what an instrument can show: bounded, separating (NMI against the instrument labels),
+   retained, consistent on the known worlds — not converging on a world the scaffold cannot walk.
+2. **Fix the percept regardless.** A controlling brain needs the riser state visible too; the saturation instrument
+   (per-group z energy, clipped count) and a per-feature freeze (each feature's statistics stay open until it has varied)
+   are cheap and needed by every path.
+3. **The smallest closed loop.** Candidates: (a) the learned layer owns one continuous step parameter (landing offset or body
+   shift) within the scaffold's step, graded by its own touchdown/load prediction error — authority over one degree of
+   freedom, the scaffold keeping order and the floor; (b) epistemic jitter first (§2.1), so the data is no longer the
+   scaffold's alone, then (a); (c) Phases 4–6 merged on-policy: the generator learns from the steps it chose.
+4. **Where authority is earned.** In the known worlds first (where mappings that work exist to build on — the operator's
+   2026-11-15 "build a performant brain in the corridor or arena, then test it on the stairs"), then carried to the stairs
+   with start-from-state.
+5. **Safety and the bar.** The floor stays a reflex (*fatal events have no gradient*); authority by precision per stance
+   node keeps the scaffold as fallback; gain-0-guarded; the learning-rate tool re-pointed at *behaviour and outcome error*
+   (progress against the command, floor vetoes, touchdown error), not only the stance QE. The no-teacher rule holds: the
+   learned layer learns consequences of steps, never the scaffold's choices.
