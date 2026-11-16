@@ -28,6 +28,20 @@ def baked_ids(path):
     return {n['id'] for n in g['nodes'] if n['visits'] >= bt}, {n['id'] for n in g['nodes']}
 
 
+def broken_after(d):
+    """per chain, the last run of an unbroken link: a run that did not save its state (or failed to resume, or ended short) cuts
+    the chain there, because the next run would start from a fresh brain, not the carried one."""
+    cut = {}
+    try:
+        for l in open(f'{d}/runs.txt'):
+            m = re.match(r'c(\d+) r(\d+) ', l)
+            if m and not l.rstrip().endswith(' OK'):
+                c, k = int(m.group(1)), int(m.group(2)); cut[c] = min(cut.get(c, k - 1), k - 1)
+    except FileNotFoundError:
+        pass
+    return cut
+
+
 def rows(f):
     out = []; last_pub = -1
     with gzip.open(f, 'rt') as fh:
@@ -56,14 +70,16 @@ def main(dirs):
         chains = sorted({int(re.search(r'_c(\d+)_r', p).group(1)) for p in glob.glob(f'{d}/state_c*_r*.json')})
         first_stairs = next(k for k, b in enumerate(sched, 1) if b.startswith('b'))
         print(f'== {d}  ({os.path.basename(d)}; chains {len(chains)}; schedule {" ".join(sched)}; stairs from run {first_stairs})')
+        cut = broken_after(d)
+        for c, k in sorted(cut.items()): print(f'   chain {c} broken after run {k}: its later runs began from a fresh brain and are left out')
         known = {c: baked_ids(f'{d}/state_c{c}_r{first_stairs - 1}.json')[0] for c in chains}
         print('  run bench   nodes      baked      +baked   TLE(2nd half)   reuse known / prior   head NIS own / legacy / visits     MAP/winner own, legacy, visits')
         for k, b in enumerate(sched, 1):
             N, B, G, T, RK, RP, H, S = [], [], [], [], [], [], {'sb': [], 'sbl': [], 'sbv': []}, {'sb': [], 'sbl': [], 'sbv': []}
             for c in chains:
                 st_k = f'{d}/state_c{c}_r{k}.json'
-                if not os.path.exists(st_k): continue
-                bk, nk = baked_ids(st_k); prior = baked_ids(f'{d}/state_c{c}_r{k - 1}.json')[0] if k > 1 else set()
+                if k > cut.get(c, len(sched)) or not os.path.exists(st_k): continue
+                bk, nk = baked_ids(st_k); prior = baked_ids(f'{d}/state_c{c}_r{k - 1}.json')[0] if (k > 1 or os.path.exists(f'{d}/state_c{c}_r0.json')) else set()
                 N.append(len(nk)); B.append(len(bk)); G.append(len(bk - prior))
                 fs = glob.glob(f'{d}/r{k}/*_c{c}.jsonl.gz')
                 if not fs: continue
@@ -80,7 +96,7 @@ def main(dirs):
                   f'{m(H["sb"], "{:.2f}")} / {m(H["sbl"], "{:.2f}")} / {m(H["sbv"], "{:.2f}")}     '
                   f'{m(S["sb"], "{:.2f}")}, {m(S["sbl"], "{:.2f}")}, {m(S["sbv"], "{:.2f}")}')
         last_k = len(sched)
-        surv = [len(known[c] & baked_ids(f'{d}/state_c{c}_r{last_k}.json')[1]) / max(1, len(known[c])) for c in chains]
+        surv = [len(known[c] & baked_ids(f'{d}/state_c{c}_r{last_k}.json')[1]) / max(1, len(known[c])) for c in chains if c not in cut]
         print(f'  retention: of {m([len(known[c]) for c in chains], "{:.0f}")} nodes baked before the stairs, {m(surv, "{:.2f}")} survive to run {last_k}')
 
 

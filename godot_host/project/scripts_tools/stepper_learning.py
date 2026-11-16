@@ -35,6 +35,20 @@ ROW_S = 5 / 60.0   # one diag row = 5 ticks at 60 Hz
 BIN_M, BIN_MIN = 0.05, 20   # the matched slope's position bins (forward z, m) and the rows a bin needs in a repetition
 
 
+def broken_after(d):
+    """per chain, the last run of an unbroken link: a run that did not save its state (or failed to resume, or ended short) cuts
+    the chain there, because the next run would start from a fresh brain, not the carried one."""
+    cut = {}
+    try:
+        for l in open(f'{d}/runs.txt'):
+            m = re.match(r'c(\d+) r(\d+) ', l)
+            if m and not l.rstrip().endswith(' OK'):
+                c, k = int(m.group(1)), int(m.group(2)); cut[c] = min(cut.get(c, k - 1), k - 1)
+    except FileNotFoundError:
+        pass
+    return cut
+
+
 def rows(f):
     out = []; last_pub = -1
     with gzip.open(f, 'rt') as fh:
@@ -100,9 +114,12 @@ def main(dirs):
         print(f'== {os.path.basename(d)}  (chains {len(chains)}; schedule {" ".join(sched)})')
         # per chain: per world, the list of repetitions {k, mid_min, metrics, fifths}
         reps = {c: {w: [] for w in worlds} for c in chains}
+        cut = broken_after(d)
+        for c, k in sorted(cut.items()): print(f'   chain {c} broken after run {k}: its later runs began from a fresh brain and are left out')
         for c in chains:
             done = {w: 0.0 for w in worlds}
             for k, w in enumerate(sched, 1):
+                if k > cut.get(c, len(sched)): break
                 fs = glob.glob(f'{d}/r{k}/*_c{c}.jsonl.gz')
                 if not fs: continue
                 R = rows(fs[0])
@@ -114,7 +131,7 @@ def main(dirs):
                 for r in R:
                     if 'z' in r: bins.setdefault(int(math.floor(r['z'] / BIN_M)), []).append(r)
                 rec['bins'] = {b: {name: mean_of(B, key) for name, key in METRICS} for b, B in bins.items() if len(B) >= BIN_MIN}
-                b1, b0 = baked(f'{d}/state_c{c}_r{k}.json'), baked(f'{d}/state_c{c}_r{k - 1}.json') if k > 1 else 0
+                b1 = baked(f'{d}/state_c{c}_r{k}.json'); b0 = baked(f'{d}/state_c{c}_r{k - 1}.json') if (k > 1 or os.path.exists(f'{d}/state_c{c}_r0.json')) else 0
                 rec['gain'] = None if b1 is None or b0 is None else b1 - b0
                 rec['gap'] = bool(reps[c][w]) and k - reps[c][w][-1]['k'] > 2   # a gap: more than one other run since this world's last repetition
                 reps[c][w].append(rec); done[w] += dur
