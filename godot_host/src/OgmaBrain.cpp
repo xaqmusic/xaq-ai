@@ -680,6 +680,8 @@ Dictionary OgmaBrain::get_module_metrics() const {
                     d["tle"]          = double(rt->tle);
                     d["is_novel"]     = rt->is_novel;
                     d["winner_id"]    = rt->winner_id;
+                    d["quant_error"]  = double(rt->quant_error);       // the dual TLE's two parts (learning-rate reads, 2026-11-15)
+                    d["transition_surp"] = double(rt->transition_surp);
                     d["mitosis_count"]= rt->mitosis_count;
                     // v5.4.L Phase 2a — emit the EPM's latest published
                     // latent as a flattened double array.  Enables

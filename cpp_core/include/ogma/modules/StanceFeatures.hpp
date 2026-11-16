@@ -71,6 +71,7 @@ private:
                 output_topic_ = "reality.proprio.stance_features", obs_topic_ = "reality.proprio.stance_obs";
     double engage_min_ = 0.99, clip_ = 4.0, flicker_p_ = 0.0;
     int n_max_ = 20000, warmup_ = 200;
+    int64_t freeze_after_ = 0;   // > 0: the statistics stop updating after this many samples (the encoder held still); 0 = off
     uint32_t flicker_seed_ = 1u, rng_ = 1u;
     // inputs
     body::LegSolver kin_; stepper::StepperInputs patch_;

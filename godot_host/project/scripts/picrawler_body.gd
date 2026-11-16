@@ -13328,6 +13328,9 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["sb_n"] = int(se.get("node_count", -1))
 		line["sb_baked"] = int(se.get("baked_count", -1))
 		line["sb_tle"] = snappedf(float(se.get("tle", -1.0)), 0.0001)
+		line["sb_qe"] = snappedf(float(se.get("quant_error", -1.0)), 0.0001)   # the TLE's parts and the novelty flag: the learning-rate reads
+		line["sb_ts"] = snappedf(float(se.get("transition_surp", -1.0)), 0.0001)
+		line["sb_nov"] = 1 if bool(se.get("is_novel", false)) else 0
 	if metrics.has("belief_stance"):
 		var bst: Dictionary = metrics["belief_stance"]
 		line["sb_map"] = int(bst.get("map_node", -1))

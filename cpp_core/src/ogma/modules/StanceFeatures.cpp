@@ -50,6 +50,7 @@ ParamSchema StanceFeatures::params_schema() const {
         {"obs_topic",     ParamMutability::ConstructionOnly, "ProprioToken [42]: the conditioned stance alone -- the BeliefFilter's observation. \"\" = not published.", ParamValue{std::string("reality.proprio.stance_obs")}},
         {"engage_min",    ParamMutability::HotMutable, "Features are taken only while the stepper's engage is at least this (the stance is the stepper's).", ParamValue{0.99}},
         {"n_max",         ParamMutability::HotMutable, "The running statistics' rate anneals as 1 / n down to 1 / n_max (samples). 0 = no floor: a pure 1 / n, the statistics of every sample ever seen, which settle and hold across carried runs (Phase 3 continued, 2026-11-15).", ParamValue{int64_t{20000}}},
+        {"freeze_after",  ParamMutability::HotMutable, "THE FROZEN ENCODER: after this many samples the running statistics stop updating, so the stance EPM's coordinates hold still across worlds (the EPM contract's frozen encoder). The count rides in the snapshot, so a carried state stays frozen. 0 = off (byte-identical). Measured 2026-11-15: a pure 1 / n absorbed six stairs runs (mean 0.4 sigma, sigma x1.5) and re-encoded the corridor.", ParamValue{int64_t{0}}},
         {"warmup",        ParamMutability::HotMutable, "Nothing is published for the first this many samples (the statistics are not yet a scale).", ParamValue{int64_t{200}}},
         {"clip",          ParamMutability::HotMutable, "Each z is clipped to +- this.", ParamValue{4.0}},
         {"flicker_p",     ParamMutability::HotMutable, "THE FLICKER TEST: each contact flag is flipped with this probability per tick before it is featurised; 0 = off (byte-identical).", ParamValue{0.0}},
@@ -61,7 +62,7 @@ ParamMap StanceFeatures::current_params() const {
     return {{"model_topic", ParamValue{model_topic_}}, {"pose_topic", ParamValue{pose_topic_}}, {"load_topic", ParamValue{load_topic_}},
             {"contact_topic", ParamValue{contact_topic_}}, {"up_topic", ParamValue{up_topic_}}, {"patch_topic", ParamValue{patch_topic_}},
             {"output_topic", ParamValue{output_topic_}}, {"obs_topic", ParamValue{obs_topic_}}, {"engage_min", ParamValue{engage_min_}},
-            {"n_max", ParamValue{int64_t(n_max_)}}, {"warmup", ParamValue{int64_t(warmup_)}}, {"clip", ParamValue{clip_}},
+            {"n_max", ParamValue{int64_t(n_max_)}}, {"freeze_after", ParamValue{int64_t(freeze_after_)}}, {"warmup", ParamValue{int64_t(warmup_)}}, {"clip", ParamValue{clip_}},
             {"flicker_p", ParamValue{flicker_p_}}, {"flicker_seed", ParamValue{int64_t(flicker_seed_)}}};
 }
 
@@ -74,7 +75,7 @@ void StanceFeatures::on_setup(Bus* bus, ParamMap const& params) {
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     apply_param(params, "flicker_seed", [&](auto const& v){ flicker_seed_ = uint32_t(get_double(v, "flicker_seed")); });
     rng_ = flicker_seed_ * 2654435761u + 1u;
-    for (auto const& k : {"engage_min", "n_max", "warmup", "clip", "flicker_p"})
+    for (auto const& k : {"engage_min", "n_max", "freeze_after", "warmup", "clip", "flicker_p"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which) {
         if (topic.empty()) return;
@@ -87,6 +88,7 @@ void StanceFeatures::on_param_change(std::string_view key, ParamValue const& val
     const std::string k(key);
     if      (k == "engage_min") engage_min_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "n_max")      n_max_ = std::max(0, int(get_double(value, k)));
+    else if (k == "freeze_after") freeze_after_ = std::max<int64_t>(0, int64_t(get_double(value, k)));
     else if (k == "warmup")     warmup_ = std::max(0, int(get_double(value, k)));
     else if (k == "clip")       clip_ = std::max(0.5, get_double(value, k));
     else if (k == "flicker_p")  flicker_p_ = std::clamp(get_double(value, k), 0.0, 1.0);
@@ -150,6 +152,7 @@ void StanceFeatures::tick(uint64_t tick_id) {
     ++n_;
     const double a = n_max_ > 0 ? std::max(1.0 / double(n_), 1.0 / double(n_max_)) : 1.0 / double(n_);
     if (n_ == 1) { mean_ = x; var_.setZero(); }
+    else if (freeze_after_ > 0 && n_ > freeze_after_) {}   // frozen: the coordinates hold still
     else {
         const Eigen::VectorXd d = x - mean_;
         mean_ += a * d;
@@ -175,7 +178,7 @@ void StanceFeatures::tick(uint64_t tick_id) {
 
 nlohmann::json StanceFeatures::diag_snapshot() const {
     return nlohmann::json{{"samples", n_}, {"published", published_}, {"flips", flips_}, {"ready", kin_.ready() && have_pose_},
-                          {"z_norm", last_z_.norm()}};
+                          {"z_norm", last_z_.norm()}, {"frozen", freeze_after_ > 0 && n_ > freeze_after_}};
 }
 
 nlohmann::json StanceFeatures::snapshot_state() const {

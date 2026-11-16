@@ -79,3 +79,20 @@ TEST(StanceFeatures, WithNoFloorTheStatisticsSettleAndHoldWhereAFloorKeepsChasin
     EXPECT_LT(settled, 0.015) << "1 / n over 8 000 samples moves by about 400 / 8000 of the regimes' gap";
     EXPECT_LT(settled, floored / 5.0);
 }
+
+TEST(StanceFeatures, FrozenTheStatisticsHoldThroughANewRegimeAndThroughASnapshot) {
+    // settle on one regime, then a new one arrives: frozen, the mean does not move and the new regime reads far from it
+    Fix live({{"n_max", ogma::ParamValue{int64_t{0}}}}), frz({{"n_max", ogma::ParamValue{int64_t{0}}}, {"freeze_after", ogma::ParamValue{int64_t{2000}}}});
+    for (uint64_t t = 0; t < 2000; ++t) { const float k = 0.2f + 0.05f * float(t % 7) / 7.0f; live.run(t, 1.0f, k); frz.run(t, 1.0f, k); }
+    for (int i = 0; i < StanceFeatures::kRaw; ++i) EXPECT_DOUBLE_EQ(frz.m.mean()[i], live.m.mean()[i]) << "identical until the freeze";
+    const Eigen::VectorXd m0 = frz.m.mean(), v0 = frz.m.var();
+    Fix again({{"n_max", ogma::ParamValue{int64_t{0}}}, {"freeze_after", ogma::ParamValue{int64_t{2000}}}});
+    again.m.restore_state(frz.m.snapshot_state());
+    for (uint64_t t = 2000; t < 4000; ++t) { live.run(t, 1.0f, 0.6f); frz.run(t, 1.0f, 0.6f); again.run(t, 1.0f, 0.6f); }
+    for (int i = 0; i < StanceFeatures::kRaw; ++i) {
+        EXPECT_DOUBLE_EQ(frz.m.mean()[i], m0[i]); EXPECT_DOUBLE_EQ(frz.m.var()[i], v0[i]);
+        EXPECT_DOUBLE_EQ(again.m.mean()[i], m0[i]) << "a restored frozen state stays frozen";
+    }
+    EXPECT_GT(std::fabs(live.m.mean()[1] - m0[1]), 0.1) << "unfrozen, the new regime drags the mean";
+    EXPECT_EQ(frz.m.samples(), 4000) << "the count keeps running";
+}
