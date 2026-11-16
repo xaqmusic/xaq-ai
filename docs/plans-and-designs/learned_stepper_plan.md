@@ -8,6 +8,11 @@ supersedes the lever-by-lever work on `PoseSequencer` (ledger 2026-11-08 → 202
 built; register O71) and on the operator's careful-stepper intent (2026-11-06: *predict each footfall's FSR and IMU
 outcome from the terrain model, and reduce that prediction's error*).*
 
+*Re-ordered 2026-11-16 (operator's call, §9): authority comes sooner. Phase 3's gate no longer asks the stance vocabulary
+to converge on the stairs; after the percept fix, the next phase is the first closed loop — the learned layer owns one
+value of the scaffold's step (the landing's forward/back offset), chosen by expected free energy — and authority then
+widens one value at a time. The old Phases 4–5 (generator and policy as instruments) are folded into that ladder.*
+
 ---
 
 ## 0. Why this plan exists
@@ -91,7 +96,9 @@ it:
 
 1. **Experience generator.** Its steps produce the (stance, step, outcome) data the generator learns from. To widen
    coverage beyond its own choices, a gain-guarded epistemic jitter perturbs its chosen landing and shift within the
-   floor (exploration as the substrate does it: count-annealed, never during distress).
+   floor (exploration as the substrate does it: count-annealed, never during distress). *Since 2026-11-16 the jitter is
+   not a separate mechanism: it is the epistemic term of the learned layer's own choice (Phase 4), which explores while
+   its model is ungraded and exploits once it is graded.*
 2. **Fallback by precision.** Per stance node, the learned planner drives only where its graded error beats the
    scaffold's analytic prediction (the plan-drift instrument is that baseline, already built); elsewhere the scaffold
    drives. The learned planner's share of decisions is the de-scaffold metric.
@@ -118,9 +125,14 @@ traces before anything learned is added.
 inputs, the unloaded-toe book, `StepIntent`, `StepOutcome`) and `ogma/body/LegSolver`, owned by `PoseSequencer`, which is now
 the shell (topics, params, diag). Identity on the golden traces rules out bus modules here: every topic hop is a tick of
 latency. The executor asks for its next step through `intent_hook_` at exactly the point the monolith decided, so that hook is
-the seam where the `StepArbiter` goes; the bus split comes with Phase 5, when a second intent source exists. `step.outcome` is
+the seam where the `StepArbiter` goes; the bus split comes when a second whole-intent source exists (Phase 6 since the 2026-11-16 re-order; Phase 4's offset component
+sits in-process at this same seam). `step.outcome` is
 published when `outcome_topic` is set (on in the stack configs) and the diag carries the latest record (`ps_out`) and the room
 (`ps_room`); `scripts_tools/stepper_outcomes.py` reads them back.
+
+**Re-ordered (2026-11-16).** `StepGenerator` and `StepPolicy` are built small and grown, not built whole: their first form is
+the Phase 4 landing-offset component (one value, per (node, leg) RLS, an EFE choice over a candidate set), and each value
+Phase 5 earns widens their action vector. `StepArbiter` arrives at Phase 6, when whole intents exist.
 
 Persistence: `snapshot_state` / `restore_state` exist in the module contract and the EPM implements them; the
 `Generator`, `BeliefFilter`, `TerrainMemory` and the new modules must too, and the host gains a save / load of brain
@@ -161,26 +173,84 @@ asserted.
 ### Phase 3 — The stance belief (instrument)
 - `StanceFeatures` (conditioned: centred, scale-normalised — CLAUDE.md §0 rule 2) → stance EPM → `BeliefFilter`.
 - Persistence for the learned modules and the host's save / load.
-- **Gate:** the EPM bakes and stays bounded; its nodes separate the situations the instruments found decisive —
-  a rear leg short of room, a front toe at its inner reach, the body nose-up on a riser, a hung toe — measured by NMI
-  against instrument-derived labels used only for evaluation; the belief is consistent (NIS ≈ 1) through injected
-  FSR flicker.
+- **What is left (2026-11-16):** the percept fix, needed by every later phase — (1) an instrument first: per-group z energy
+  and clipped count in `StanceFeatures`' diag (room / lift / load and contact / ground and relief / tilt); (2) a per-feature
+  freeze from the normaliser's own dynamics (a component's statistics stay open until it has varied and settled; also the
+  de-scaffold of the `freeze_after` count); (3) re-read the stairs' stance curve on the fixed encoder, as a reading, not a
+  gate.
+- **Gate (re-scoped 2026-11-16 to what an instrument can show):** the EPM bakes, stays bounded and saturates on the known
+  worlds; its nodes separate the situations the instruments found decisive — a rear leg short of room, a front toe at its
+  inner reach, the body nose-up on a riser, a hung toe — measured by NMI against instrument-derived labels used only for
+  evaluation; the vocabulary is retained across a world change (return ties, reuse kept); the belief is consistent (NIS ≈ 1)
+  in a familiar world and through injected FSR flicker; **and no feature is saturated on any bench** (the clipped count on
+  the 38 and 64 mm risers near the corridor's). *Dropped:* convergence on the stairs. A vocabulary riding a frozen scaffold
+  can only describe that scaffold's outcomes; whether the stairs can be learned is now a question for the closed loop
+  (Phase 4), measured on outcome error, not stance QE.
 
-### Phase 4 — The step generator (instrument)
-- `StepGenerator` trained on the scaffold's steps plus the epistemic jitter, over many runs with saved state.
-- **Gate:** on held-out steps its errors beat the analytic models' — the next leg's liftability (the drift
-  instrument's baseline), the landing's realised offset, the touchdown height (TerrainMemory's foothold error), each
-  leg's room after the step — with NIS ≈ 1. If it cannot beat them, stop and redesign the representation before any
-  authority.
+### Phase 4 — The first closed loop: the landing offset by expected free energy (the first lever)
+*Replaces the old Phase 4 (generator as an instrument) and Phase 5 (policy in shadow) as the next step. Why sooner: under
+the frozen scaffold the step is a near-deterministic function of the stance, so an action-conditioned model trained on its
+steps alone cannot separate what the body did from where it was — the old Phase 4 gate would fail for a harness reason. A
+learned layer that varies its own action, and learns from the consequences, is the smallest thing that can build an
+input–output mapping (operator, 2026-11-16: "with a truly learning brain in control, the robot should be able to build the
+i/o mappings that work and build upon them").*
+- **Instrument first.** `stepper_learning.py` (or a sibling) re-pointed at outcome error and behaviour: per repetition the
+  touchdown error (`h_touch − h_pred`), the hand's correction magnitude (sum of `moves`), the hang rate, floor vetoes,
+  progress per minute against the commanded heading, the stall share, falls and risers reached; slopes per doubling of
+  practice as for QE. Read on the gain-0 chains before any arm.
+- **The one value owned.** The forward/back offset δ of the scaffold's *planned* landing (Plan intents only; Choice and
+  Unload intents untouched), along the body's commanded heading, over a small candidate set (about ±3 cm). The scaffold
+  keeps the leg order, the body shift and therefore the forward progress, so "stand still" cannot score: the progress
+  complement is the scaffold's in this phase. Why this value: the relocation tag (ledger 2026-11-14) finds the edge move
+  and the obstacle reflex move 23–29 % of planned stairs landings by more than 2 cm — the scaffold's own rules already
+  fight over this coordinate — and it is the operator's careful-stepper question (2026-11-06: *if I place my foot here, my
+  FSRs and IMU will report this*).
+- **The model.** Per (stance node, leg), a local RLS from [1, δ, the terrain at the candidate landing as `TerrainMemory`
+  predicts it] to the step's outcome vector: touchdown error, the hand's correction, hang, (later) the load shares after the
+  touch. Its targets are realised consequences (`step.outcome`, paired with the δ chosen at the decision by `seq`), never
+  the scaffold's choice; δ = 0 is not a target (no teacher, CLAUDE.md §5.6). Graded by its own error and NIS.
+- **The choice.** δ = argmin over the candidates the floor admits of risk − epistemic value: risk is the predicted
+  divergence from the outcome priors (touchdown meets the predicted ground, no correction, no hang), scaled by those
+  outcomes' own running spread, never a hand-set scale (CLAUDE.md §5.5); epistemic value is the model's predictive
+  uncertainty at δ. While a (node, leg) is ungraded the epistemic term dominates and the choice is the jitter of §2.1;
+  as it is graded, it exploits. No exploration during distress (floor veto, hang, tilt).
+- **The floor.** Re-checks support and IK for the shifted landing (the pose search guaranteed support for its own landing,
+  not for δ); a vetoed δ falls back to 0 and is counted.
+- **Seams.** In-process, as Phase 2: a component between `ScaffoldPlanner` and `StepExecutor` at `intent_hook_`, editing
+  `StepIntent.land`; `StepOutcome` already carries `h_pred`, `h_touch`, `hang`, `moves`. Its choice, predictions and
+  grade in the diag. Persistence through the state carry, like the stance modules.
+- **Gain-0-guarded:** at gain 0 the landing is the scaffold's, byte-identical on the golden traces (`phase1_pruned`) and
+  on the config of record.
+- **Where authority is earned, in order** (operator, 2026-11-16): (i) the corridor, as a no-harm gate — on flat ground the
+  touchdown error barely depends on δ, so the corridor teaches little about risers, but the loop must not cost anything
+  there; (ii) the launcher's graded flight (12 / 19 / 25 / 38 mm from 0.5 m), the first world where the mapping matters
+  and the scaffold succeeds; (iii) the 38 and 64 mm benches, started from the carried state (`stepper_chain.sh FROM=`).
+- **Gate (a signal: n = 6 chains, gain 0 against gain on, the full metric set):** (a) gain 0 byte-identical; (b) corridor:
+  progress, falls, floor vetoes and stall share tie the scaffold and the outcome error does not rise; (c) graded flight: the
+  outcome error falls with practice, loudly (a practice-curve slope readable at n = 6, not excavated), and a frozen-model
+  evaluation after practice ties or beats gain 0 on risers reached and progress with lower outcome error; (d) the 38 / 64
+  mm benches from the carried state, read and reported: does the outcome-error curve bend within the 23 minutes in which
+  the instrument-only stance curve did not? A flat curve here does not block (b)–(c), but it is diagnosed (which value,
+  which sense, the floor's vetoes) before Phase 5 widens anything; (e) the model is graded (NIS ≈ 1 on its outcome predictions); (f) observed in the UI before promotion.
+  Blind-metric complements: a layer that lowers touchdown error by landing short on the tread must lose on risers reached
+  and progress per step. **Kill** rather than power up if the effect only shows under heavy averaging (CLAUDE.md §3.3).
 
-### Phase 5 — The policy in shadow
-- `StepPolicy` computes its choice every decision, logged, not executed: its predicted outcomes against the
-  scaffold's, where they disagree and why.
-- **Gate:** in disagreements, the policy's predicted outcomes are better *and* its predictions there are graded
-  (no authority from an ungraded prediction, CLAUDE.md §5.6).
+### Phase 5 — Widen authority, one value at a time
+- The same mechanism takes the next value, each its own gain-guarded lever with its own A/B: the body shift before the
+  lift (it touches support directly, so the floor matters more), then the landing's sideways offset, then the choice of
+  leg (last: it removes the fixed crawl order, the imposed coordination topology, CLAUDE.md §5.7). The step model's action
+  vector grows with each value earned; the room and progress priors enter the risk when the layer owns a value that can
+  trade them (the shift and the leg choice — from then on the progress complement is the layer's, not the scaffold's).
+- Before a value gets gain, one battery in shadow: the layer's choice and predicted outcome for that value logged beside
+  the scaffold's, so no authority comes from an ungraded prediction (the old Phase 5 gate, per value). On-policy held-out
+  steps against the analytic models (the drift instrument, `TerrainMemory`'s foothold error, the room after the step) are
+  the grading criterion (the old Phase 4 gate, per value).
+- **Gate per value:** Phase 4's form — no harm in the corridor, outcome error falling with practice on the graded flight,
+  frozen evaluation at or above the previous stack on the battery's full metric set, fewer floor vetoes.
 
-### Phase 6 — Authority by precision (the first lever)
-- `StepArbiter` on, gain-0-guarded: per stance node, the better-graded intent drives.
+### Phase 6 — Whole-intent authority by precision
+- Once the layer owns landing, shift and leg, it emits whole step intents (`StepPolicy`); `StepArbiter` on, gain-0-guarded:
+  per stance node, the better-graded intent drives, the scaffold's or the layer's.
 - **Gate:** the battery's full metric set ties or beats the pruned scaffold with fewer floor vetoes; the learned
   share of decisions reported; observed in the UI before promotion.
 
@@ -221,12 +291,23 @@ asserted.
    is a few hundred floats per node. Sized at Phase 4.
 6. **Where the room comes from.** The commanded FK knows the target, not the real leg; the measured joint is only
    available in the sim (`HONEST_JOINTS`) and needs the sensor above on the robot.
+7. **Identifiability (2026-11-16).** A frozen policy's action is a function of its state, so an action-conditioned
+   model learned from its steps alone cannot separate the action's effect from the state's. The reason Phase 4 varies its
+   own action before any instrument-only gate on the step model.
+8. **The dark room.** A learner in control that minimises its own prediction error can do so by acting so nothing
+   surprising happens (standing, shuffling, landing only on flat tread). In Phase 4 the scaffold owns progress; from the
+   first value that can trade progress (Phase 5's shift and leg choice) the progress prior must be in the layer's risk,
+   and progress per step stays in every gate.
+9. **The floor under a moved landing.** The pose search guarantees support for its own landing; any learned change to
+   the step must be re-checked by the floor, and the floor's veto rate under the layer is reported (a floor that vetoes
+   often is a performance cap, §1).
 
 ## 7. Working protocol (autonomous execution)
 
 - One phase at a time, in order; each ends with its gate measured, a ledger entry and a commit (DCO-signed).
 - **Stop and ask the operator** at: a failed gate that changes the plan; any deletion of scaffold code (Phase 1's
-  list, before deleting); the first authority handover (Phase 6); anything that touches the robot.
+  list, before deleting); the first authority handover (Phase 4 since 2026-11-16: the operator approved the direction;
+  ask again before the first gain-on battery) and each new value Phase 5 hands over; anything that touches the robot.
 - Every behaviour change is gain-0-guarded and byte-identical when off; every refactor is golden-trace identical.
 - Batteries never run while the operator is observing in the UI (they rotate the UI's log store); logs are gzipped
   on write.
@@ -239,18 +320,58 @@ asserted.
 | 0 Freeze and baseline | **done** — gate met (15 of 15 runs byte-identical from the repo's tools) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 0" |
 | 1 Prune | **done** — one rule of 16 redundant (the IK re-seed, covered by multistart); off in the stack configs, its code marked `PRUNE-P1` and kept until the cleanup pass (operator, 2026-11-15) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 1" |
 | 2 Split | **done** — gate met: LegSolver and the planner / executor / floor split byte-identical (15 of 15 runs each), the outcome stream and the room field-identical; unit tests per component | 2026-11-15 | 2026-11-15 "Learned stepper Phase 2" |
-| 3 Stance belief | **in flight** — built and measured; separation yes. Own-sample heads REGRESS against legacy; spares-baked stops the forgetting; growth traced to baking counting correlated samples. Curriculum (known worlds × 8, stairs × 6, return × 2): `bake_min_entries` 5 PARTIAL; a frozen stance encoder (`freeze_after`, scaffold count) is WORKING for retention (return ties pre-stairs TLE, reuse 0.60, 1 new node). Learning rate (`stepper_learning.py`): the known worlds learn (QE −7 %/doubling) and saturate in 6–8 min; the stairs do not learn at all in 7 min at either height. A long stairs block from the frozen brain (start-from-state, exact): no learning in 23 min (QE +0.2 %/doubling), the vocabulary grows and is slowly reused (0.25); not the stalls. The frozen flat-world encoder SATURATES on the stairs (ten terrain/tilt z clipped, |z| 12 vs 6). Entries under the still encoder: PARTIAL (60 % fewer stairs nodes, 3 % stairs fit cost). Next (operator's call): a z-saturation instrument, then a per-feature freeze from the normaliser's own dynamics | 2026-11-16 | 2026-11-15 "Learned stepper Phase 3", "continued", "the settling normaliser", "entries to bake", "the frozen stance encoder"; 2026-11-16 "a long stairs block" |
-| 4 Step generator | — | | |
-| 5 Policy in shadow | — | | |
-| 6 Authority by precision | — | | |
+| 3 Stance belief | **in flight** — built and measured; separation yes. Own-sample heads REGRESS against legacy; spares-baked stops the forgetting; growth traced to baking counting correlated samples. Curriculum (known worlds × 8, stairs × 6, return × 2): `bake_min_entries` 5 PARTIAL; a frozen stance encoder (`freeze_after`, scaffold count) is WORKING for retention (return ties pre-stairs TLE, reuse 0.60, 1 new node). Learning rate (`stepper_learning.py`): the known worlds learn (QE −7 %/doubling) and saturate in 6–8 min; the stairs do not learn at all in 7 min at either height. A long stairs block from the frozen brain (start-from-state, exact): no learning in 23 min (QE +0.2 %/doubling), the vocabulary grows and is slowly reused (0.25); not the stalls. The frozen flat-world encoder SATURATES on the stairs (ten terrain/tilt z clipped, |z| 12 vs 6). Entries under the still encoder: PARTIAL (60 % fewer stairs nodes, 3 % stairs fit cost). Gate re-scoped 2026-11-16 (no convergence on the stairs; no saturated feature on any bench). Next: the z-saturation instrument, then a per-feature freeze from the normaliser's own dynamics | 2026-11-16 | 2026-11-15 "Learned stepper Phase 3", "continued", "the settling normaliser", "entries to bake", "the frozen stance encoder"; 2026-11-16 "a long stairs block", "authority sooner" |
+| 4 First closed loop (landing offset by EFE) | — direction approved 2026-11-16; waits on Phase 3's gate, then the outcome-error instrument, then the operator's go for the gain-on battery | | 2026-11-16 "authority sooner" |
+| 5 Widen authority (shift, sideways, leg) | — | | |
+| 6 Whole-intent authority by precision | — | | |
 | 7 De-scaffold | — | | |
 
-## 9. ▶ Resume here (2026-11-16): where Phase 3 stands, and the question of authority sooner
+## 9. ▶ Resume here (2026-11-16, decided): authority sooner — the percept fix, then one learned value by expected free energy
 
-**Read this section, then the ledger's three latest entries** (2026-11-15 "the frozen stance encoder", 2026-11-16 "a long
-stairs block"). The operator closed the 2026-11-16 session with an idea to discuss in a fresh context, recorded at the end.
+**Read this section, §4 Phases 3–5, then the ledger's latest entries** (2026-11-16 "a long stairs block", "authority
+sooner"). §10 keeps Phase 3's state and the question as it was put.
 
-### 9.1 What is built (all instrument-only; the frozen `PoseSequencer` walks the body)
+**The decision (operator, 2026-11-16).** The operator's idea — *an instrument-only learner riding a frozen controller can
+only plateau at that controller's ceiling; with a learning brain in control, the robot can build the input–output mappings
+that work and build on them* — is adopted, with four choices:
+1. **The direction:** after the percept fix, one value of the scaffold's step is owned by a learned layer that chooses it
+   by expected free energy — exploring while ungraded (this is §2.1's jitter), exploiting once graded. It replaces the old
+   Phases 4–5 as the next lever; each further value is earned as its own lever (Phase 5).
+2. **The value:** the landing's forward/back offset (about ±3 cm along the commanded heading) on the scaffold's planned
+   steps. The scaffold keeps leg order, shift and progress.
+3. **Where:** the corridor as a no-harm gate, then the launcher's graded flight (12 / 19 / 25 / 38 mm), then the 38 and 64 mm
+   benches from the carried state.
+4. **Phase 3:** the gate re-scoped to what an instrument can show (drop convergence on the stairs; add no saturated feature
+   on any bench); the percept fixed first.
+
+**The assessment behind it, in short.** "Plateau at the scaffold's ceiling" is true of behaviour by definition; it is not
+what the stance-QE curves measure (an observer can predict a poor controller's outcomes well — its ceiling is the
+scaffold's unpredictability given the percept). The stairs result of §10.2 is confounded twice: the percept is saturated
+there, and the moving-normaliser control did not learn the stairs either. The stronger reason for authority sooner is
+identifiability (§6.7): under a frozen scaffold the step is a function of the stance, so no step model can separate the
+action's effect from the state's; the old Phase 4 gate would have failed for a harness reason. The risk the idea carries is
+the dark room (§6.8), which is why the first value leaves progress to the scaffold.
+
+**Next, in order (each stops for the operator where §7 says):**
+1. Phase 3: the z-saturation instrument (per-group z energy and clipped count in `StanceFeatures`' diag), read on the
+   `lb38` / `cvf` states and logs; then the per-feature freeze from the normaliser's own dynamics, gain-guarded (operator's
+   approval of the form before the battery); then the re-scoped gate, measured.
+2. Phase 4's instrument: practice curves of outcome error and behaviour (touchdown error, hand corrections, hang, floor
+   vetoes, progress per minute, stall share, risers reached) on gain-0 chains.
+3. Phase 4's lever built gain-0-guarded (byte-identity on `phase1_pruned` and the config of record), then the operator's go
+   for the first gain-on battery.
+
+Unchanged: the scaffold stays frozen; the `PRUNE-P1` cleanup with its byte-identity check is still pending; the `zz_arm_*`
+and `sim60_stairs_seq2__p1*` configs stay uncommitted; godot is killed by PID only. Open: the one heap-corruption abort
+(`lb38` c4 r4).
+
+## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
+
+*Superseded as the resume point by §9, which records the decision.* The ledger's entries 2026-11-15 "the frozen stance
+encoder" and 2026-11-16 "a long stairs block" are the evidence. The operator closed the 2026-11-16 session with an idea to
+discuss in a fresh context, recorded at the end.
+
+### 10.1 What is built (all instrument-only; the frozen `PoseSequencer` walks the body)
 
 - `StanceFeatures` → stance EPM (`epm_stance`) → three `BeliefFilter` heads (own, legacy, visit-counted). 42 features: per
   leg room (5), lift, load share, contact, remembered ground and relief under the toe; body pitch and roll. Conditioned by a
@@ -263,7 +384,7 @@ stairs block"). The operator closed the 2026-11-16 session with an idea to discu
   first broken link.
 - Config of record: `sim60_stairs_seq2_belief__p3settle__p3vis__p3frz.json` (+`__p3entry` for entries to bake).
 
-### 9.2 What is measured
+### 10.2 What is measured
 
 | Question | Answer | Data |
 |---|---|---|
@@ -277,7 +398,7 @@ stairs block"). The operator closed the 2026-11-16 session with an idea to discu
 Open: one heap-corruption abort in ~500 runs (`lb38` c4 r4). Pending cleanup (operator, 2026-11-15): delete the `PRUNE-P1`
 code once the promoted module is final, then `stepper_ident.py --check stepper_golden.json --label phase1_pruned`.
 
-### 9.3 The operator's idea (2026-11-16), to discuss before the next lever
+### 10.3 The operator's idea (2026-11-16), to discuss before the next lever
 
 > "If the predictor is not controlling the body, then it seems a plateau is inevitable. With a truly learning brain in
 > control, the robot should be able to build the i/o mappings that work and build upon them."
