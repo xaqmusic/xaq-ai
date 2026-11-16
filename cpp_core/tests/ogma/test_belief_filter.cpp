@@ -1,5 +1,6 @@
 // BeliefFilter: predict-then-correct over an EPM's nodes (design note generator_and_belief_filter.md §3.2).
 #include <gtest/gtest.h>
+#include <iostream>
 #include <cmath>
 #include <random>
 #include <nlohmann/json.hpp>
@@ -104,4 +105,31 @@ TEST(BeliefFilter, WithManyThinlySampledStatesTheOwnHeadsAreConsistentWhereTheLe
     EXPECT_LT(legacy, 0.5) << "the legacy heads are underconfident on thinly sampled states";
     EXPECT_NEAR(own, 1.0, 0.2) << "heads from their own samples state an honest spread";
     EXPECT_THROW(Fix({{"head_update", ogma::ParamValue{std::string("bogus")}}}), std::invalid_argument);
+}
+
+TEST(BeliefFilter, WhenEachVisitDwellsTheVisitHeadsAreConsistentWhereTheOwnHeadsAreOverconfident) {
+    // 40 states on a line, each visit a DWELL of 30 ticks (the stance stream at the tick rate): a visit sits at the state plus its
+    // own offset (sd 0.05), each tick at that plus a small noise (sd 0.01). The own heads count ticks: the first visit alone passes
+    // min_count, and with ~15 visits a state in 18 000 ticks its spread is an estimate from a few independent visits read as known.
+    // The visit heads count visits, read the between-visit spread as the Student-t predictive of n estimated visits and add the
+    // pooled within-visit spread: a tick in a new visit is predicted honestly.
+    auto run = [](const char* mode, uint64_t TICKS) {
+        Fix fx({{"head_update", ogma::ParamValue{std::string(mode)}}, {"var_rel_floor", ogma::ParamValue{1e-6}}}); std::mt19937 rng(7);
+        std::normal_distribution<float> off(0.0f, 0.05f), tick(0.0f, 0.01f); std::uniform_int_distribution<int> pick(0, 39); int k = 0; float o = 0.0f;
+        for (uint64_t t = 0; t < TICKS; ++t) { if (t % 30 == 0) { k = pick(rng); o = off(rng); } fx.step(t, k, float(k) * 0.5f + o + tick(rng)); }
+        return fx.f.head_nis_mean();
+    };
+    const double own = run("own", 18000), visits = run("visits", 18000);
+    EXPECT_GT(own, 1.4) << "a head that counts ticks states the spread of an estimate from a few visits as if it were known";
+    EXPECT_NEAR(visits, 1.0, 0.2) << "counting visits, and reading the spread as the predictive of n estimated visits";
+}
+
+TEST(BeliefFilter, TheVisitHeadsRoundTripThroughASnapshot) {
+    Fix a({{"head_update", ogma::ParamValue{std::string("visits")}}}); std::mt19937 rng(3); std::normal_distribution<float> n(0.0f, 0.05f);
+    for (uint64_t t = 0; t < 3000; ++t) a.step(t, int(t / 20) % 6, float(int(t / 20) % 6) + n(rng));
+    const auto s = a.f.snapshot_state(); ASSERT_TRUE(s.contains("wss"));
+    Fix b({{"head_update", ogma::ParamValue{std::string("visits")}}}); b.f.restore_state(s);
+    EXPECT_EQ(b.f.snapshot_state(), s);
+    Fix l; for (uint64_t t = 0; t < 300; ++t) l.step(t, int(t / 20) % 6, float(int(t / 20) % 6));
+    EXPECT_FALSE(l.f.snapshot_state().contains("wss")) << "legacy snapshots unchanged";
 }

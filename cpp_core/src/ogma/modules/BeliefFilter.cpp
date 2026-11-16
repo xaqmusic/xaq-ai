@@ -55,7 +55,7 @@ ParamSchema BeliefFilter::params_schema() const {
         {"gain_floor", ParamMutability::HotMutable, "Lower clamp on the decode heads' gain (drift).", ParamValue{0.002}},
         {"var_rel_floor", ParamMutability::HotMutable, "A node's variance never below this fraction of the observation's global variance.", ParamValue{0.01}},
         {"min_count", ParamMutability::HotMutable, "A node's own likelihood is used once its decode head has this many samples (before: the global one).", ParamValue{int64_t{5}}},
-        {"head_update", ParamMutability::ConstructionOnly, "\"legacy\" = a head starts at the global mean and variance and moves at most gain_cap per sample (byte-identical); \"own\" = it starts from its first sample and keeps its own samples' running mean and variance (gain 1/n down to gain_floor), read with the n/(n-1) correction.", ParamValue{std::string("legacy")}},
+        {"head_update", ParamMutability::ConstructionOnly, "\"legacy\" = a head starts at the global mean and variance and moves at most gain_cap per sample (byte-identical); \"own\" = it starts from its first sample and keeps its own samples' running mean and variance (gain 1/n down to gain_floor), read with the n/(n-1) correction; \"visits\" = as own, but n counts visits: each visit folds in once, as its mean, and its within-visit spread is pooled and added (the header).", ParamValue{std::string("legacy")}},
     };
 }
 
@@ -63,7 +63,7 @@ ParamMap BeliefFilter::current_params() const {
     return {{"reality_topic", ParamValue{reality_topic_}}, {"obs_topic", ParamValue{obs_topic_}},
             {"output_topic", ParamValue{output_topic_}}, {"alpha", ParamValue{alpha_}}, {"gain_cap", ParamValue{gain_cap_}},
             {"gain_floor", ParamValue{gain_floor_}}, {"var_rel_floor", ParamValue{var_rel_floor_}},
-            {"min_count", ParamValue{int64_t(min_count_)}}, {"head_update", ParamValue{std::string(head_own_ ? "own" : "legacy")}}};
+            {"min_count", ParamValue{int64_t(min_count_)}}, {"head_update", ParamValue{std::string(head_visits_ ? "visits" : head_own_ ? "own" : "legacy")}}};
 }
 
 void BeliefFilter::on_setup(Bus* bus, ParamMap const& params) {
@@ -78,7 +78,8 @@ void BeliefFilter::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "var_rel_floor", [&](auto const& v){ var_rel_floor_ = std::max(0.0, get_double(v, "var_rel_floor")); });
     apply_param(params, "min_count",     [&](auto const& v){ min_count_     = std::max(0, int(get_int(v, "min_count"))); });
     apply_param(params, "head_update",   [&](auto const& v){ const std::string h = get_string(v, "head_update");
-        if (h != "legacy" && h != "own") throw std::invalid_argument("BeliefFilter: head_update must be \"legacy\" or \"own\""); head_own_ = h == "own"; });
+        if (h != "legacy" && h != "own" && h != "visits") throw std::invalid_argument("BeliefFilter: head_update must be \"legacy\", \"own\" or \"visits\"");
+        head_own_ = h == "own" || h == "visits"; head_visits_ = h == "visits"; });
     if (output_topic_.empty()) output_topic_ = "belief." + (id().empty() ? std::string("filter") : std::string(id()));
     sub_ids_.push_back(bus_->subscribe(reality_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ handle_reality(p); }));
@@ -121,6 +122,7 @@ int BeliefFilter::index_of(int node) {
     mu_.push_back(dim_ > 0 ? g_mu_ : Eigen::VectorXf());
     var_.push_back(dim_ > 0 ? g_var_ : Eigen::VectorXf());
     n_.push_back(0.0);
+    wss_.push_back(dim_ > 0 ? Eigen::VectorXf::Zero(dim_) : Eigen::VectorXf()); wT_.push_back(0.0);
     for (auto& row : C_) row.push_back(0.0);
     C_.push_back(std::vector<double>(ids_.size(), 0.0));
     // a new state enters with the belief the smoothing would give it
@@ -134,6 +136,8 @@ void BeliefFilter::drop_node(int node) {
     if (it == idx_.end()) return;
     const int i = it->second;
     ids_.erase(ids_.begin() + i); mu_.erase(mu_.begin() + i); var_.erase(var_.begin() + i); n_.erase(n_.begin() + i);
+    wss_.erase(wss_.begin() + i); wT_.erase(wT_.begin() + i);
+    if (vis_j_ == node) { vis_j_ = -1; vis_len_ = 0.0; }
     b_.erase(b_.begin() + i);
     C_.erase(C_.begin() + i);
     for (auto& row : C_) row.erase(row.begin() + i);
@@ -147,7 +151,31 @@ void BeliefFilter::drop_node(int node) {
 Eigen::VectorXf BeliefFilter::head_var(int j) const {
     if (!head_own_) return var_[size_t(j)];
     const double n = n_[size_t(j)];
-    return n >= 2.0 ? Eigen::VectorXf(var_[size_t(j)] * float(n / (n - 1.0))) : var_[size_t(j)];
+    Eigen::VectorXf v = n >= 2.0 ? Eigen::VectorXf(var_[size_t(j)] * float(n / (n - 1.0))) : var_[size_t(j)];
+    // "visits": the between-visit part as the PREDICTIVE spread of a new visit when the mean and the variance are both estimated
+    // from n visits (Student-t, n - 1 degrees of freedom): s^2 (1 + 1/n) (n - 1)/(n - 3) = var_ (n + 1)/(n - 3) -- derived, not tuned;
+    // a few independent visits is exactly the regime a dwelling stream leaves a head in.
+    if (head_visits_ && n > 3.0) v = var_[size_t(j)] * float((n + 1.0) / (n - 3.0));
+    if (head_visits_ && wT_[size_t(j)] - n > 0.0) v += wss_[size_t(j)] / float(wT_[size_t(j)] - n);   // + the pooled within-visit variance
+    return v;
+}
+
+// head_update "visits": fold the visit that just ended into its node's head -- its mean once (the "own" recursion over visit
+// means), its spread about that mean into the pooled within-visit sum.
+void BeliefFilter::close_visit() {
+    if (vis_j_ < 0 || vis_len_ <= 0.0 || !idx_.count(vis_j_)) { vis_j_ = -1; vis_len_ = 0.0; return; }
+    const size_t j = size_t(idx_[vis_j_]);
+    const Eigen::VectorXd vm = vis_sum_ / vis_len_;
+    wss_[j] += (vis_ss_ - vis_len_ * vm.cwiseProduct(vm)).cwiseMax(0.0).cast<float>(); wT_[j] += vis_len_;
+    const double nn = (n_[j] += 1.0); const Eigen::VectorXf vmf = vm.cast<float>();
+    if (nn <= 1.0) { mu_[j] = vmf; var_[j] = Eigen::VectorXf::Zero(dim_); }
+    else {
+        const float g = float(std::max(1.0 / nn, gain_floor_));
+        const Eigen::VectorXf dl = vmf - mu_[j];
+        mu_[j] += g * dl;
+        var_[j] = (1.0f - g) * (var_[j] + g * dl.array().square().matrix());
+    }
+    vis_j_ = -1; vis_len_ = 0.0;
 }
 
 double BeliefFilter::belief_of(int node) const {
@@ -160,7 +188,7 @@ void BeliefFilter::tick(uint64_t tick_id) {
     if (obs_fresh_ && dim_ == 0 && obs_.size() > 0) {
         dim_ = int(obs_.size());
         g_mu_ = obs_; g_var_ = Eigen::VectorXf::Constant(dim_, 1e-6f);
-        for (size_t i = 0; i < mu_.size(); ++i) { mu_[i] = g_mu_; var_[i] = g_var_; }
+        for (size_t i = 0; i < mu_.size(); ++i) { mu_[i] = g_mu_; var_[i] = g_var_; wss_[i] = Eigen::VectorXf::Zero(dim_); }
     }
     if (winner_fresh_) index_of(winner_);
     const int N = int(ids_.size());
@@ -243,7 +271,11 @@ void BeliefFilter::tick(uint64_t tick_id) {
         const int wi = idx_[winner_];
         if (last_winner_ >= 0 && idx_.count(last_winner_)) C_[size_t(idx_[last_winner_])][size_t(wi)] += 1.0;
         last_winner_ = winner_;
-        if (have_obs && head_own_) {   // the head's own samples: exact running mean and variance, then the drift floor
+        if (have_obs && head_visits_) {   // a visit's ticks accumulate; it folds into the head when the winner moves on
+            if (winner_ != vis_j_) { close_visit(); vis_j_ = winner_; vis_len_ = 0.0; vis_sum_ = Eigen::VectorXd::Zero(dim_); vis_ss_ = Eigen::VectorXd::Zero(dim_); }
+            const Eigen::VectorXd o = obs_.cast<double>(); vis_sum_ += o; vis_ss_ += o.cwiseProduct(o); vis_len_ += 1.0;
+        }
+        else if (have_obs && head_own_) {   // the head's own samples: exact running mean and variance, then the drift floor
             const double nn = (n_[size_t(wi)] += 1.0);
             if (nn <= 1.0) { mu_[size_t(wi)] = obs_; var_[size_t(wi)] = Eigen::VectorXf::Zero(dim_); }
             else {
@@ -298,8 +330,13 @@ Eigen::VectorXf vecf(const nlohmann::json& j) { const auto d = j.get<std::vector
 nlohmann::json BeliefFilter::snapshot_state() const {
     nlohmann::json mu = nlohmann::json::array(), var = nlohmann::json::array();
     for (size_t i = 0; i < ids_.size(); ++i) { mu.push_back(vecd(mu_[i])); var.push_back(vecd(var_[i])); }
-    return nlohmann::json{{"version", 1}, {"dim", dim_}, {"ids", ids_}, {"mu", mu}, {"var", var}, {"n", n_}, {"C", C_}, {"b", b_},
-                          {"last_winner", last_winner_}, {"g_mu", vecd(g_mu_)}, {"g_var", vecd(g_var_)}, {"g_n", g_n_}};
+    nlohmann::json s{{"version", 1}, {"dim", dim_}, {"ids", ids_}, {"mu", mu}, {"var", var}, {"n", n_}, {"C", C_}, {"b", b_},
+                     {"last_winner", last_winner_}, {"g_mu", vecd(g_mu_)}, {"g_var", vecd(g_var_)}, {"g_n", g_n_}};
+    if (head_visits_) {   // emitted only in "visits" mode (byte-identical otherwise); the open visit is closed at the run's end, not carried
+        nlohmann::json w = nlohmann::json::array(); for (auto const& v : wss_) w.push_back(vecd(v));
+        s["wss"] = w; s["wT"] = wT_;
+    }
+    return s;
 }
 
 void BeliefFilter::restore_state(nlohmann::json const& s) {
@@ -312,6 +349,11 @@ void BeliefFilter::restore_state(nlohmann::json const& s) {
     n_ = s.at("n").get<std::vector<double>>(); C_ = s.at("C").get<std::vector<std::vector<double>>>(); b_ = s.at("b").get<std::vector<double>>();
     last_winner_ = s.at("last_winner").get<int>(); g_mu_ = vecf(s.at("g_mu")); g_var_ = vecf(s.at("g_var")); g_n_ = s.at("g_n").get<double>();
     idx_.clear(); for (int k = 0; k < int(ids_.size()); ++k) idx_[ids_[size_t(k)]] = k;
+    wss_.clear(); wT_.assign(ids_.size(), 0.0);
+    if (s.contains("wss")) { for (auto const& v : s.at("wss")) wss_.push_back(vecf(v)); wT_ = s.at("wT").get<std::vector<double>>(); }
+    else wss_.assign(ids_.size(), Eigen::VectorXf::Zero(dim_));
+    vis_j_ = -1; vis_len_ = 0.0;
+    if (wss_.size() != ids_.size() || wT_.size() != ids_.size()) throw std::invalid_argument("BeliefFilter::restore_state: inconsistent visit sizes");
     if (mu_.size() != ids_.size() || var_.size() != ids_.size() || n_.size() != ids_.size() || C_.size() != ids_.size() || b_.size() != ids_.size())
         throw std::invalid_argument("BeliefFilter::restore_state: inconsistent sizes");
 }

@@ -742,3 +742,46 @@ TEST(GNGRetention, BaseDecaySetsHowLongAnUnvisitedRegionIsRemembered) {
     EXPECT_LT(forgetting, remembering) << "4000 steps away is ~29 half-lives at 0.995";
     EXPECT_EQ(forgetting, 0);
 }
+
+// ---- Entries to bake (Config::bake_min_entries, 2026-11-15) ----
+namespace {
+// Points near one of three centres; the dwell centre C is seen once, in one long run (a stall), A and B alternate in short runs.
+struct DwellStream {
+    Eigen::VectorXf A, B, C; std::mt19937 rng{11}; std::normal_distribution<float> nz{0.0f, 0.01f};
+    DwellStream() : A(Eigen::VectorXf::Zero(8)), B(Eigen::VectorXf::Zero(8)), C(Eigen::VectorXf::Zero(8)) { A[0] = 1; B[1] = 1; C[2] = 1; }
+    Eigen::VectorXf near(const Eigen::VectorXf& c) { Eigen::VectorXf x = c; for (int i = 0; i < 8; ++i) x[i] += nz(rng); return x; }
+};
+// Baked nodes within 0.3 of a centre, after: 200 alternating ticks, one 300-tick dwell at C, then 6000 alternating ticks (runs of 10).
+std::array<int, 3> baked_near_centres(int bake_min_entries, nlohmann::json* out = nullptr) {
+    GNG::Config cfg; cfg.dim = 8; cfg.baking_threshold = 50; cfg.bake_min_entries = bake_min_entries; cfg.health_death_spares_baked = true;
+    GNG gng(cfg); DwellStream s;
+    auto alt = [&](int n) { for (int t = 0; t < n; ++t) gng.step(s.near((t / 10) % 2 ? s.B : s.A)); };
+    alt(200); for (int t = 0; t < 300; ++t) gng.step(s.near(s.C)); alt(6000);
+    const auto j = gng.to_json(); if (out) *out = j;
+    std::array<int, 3> n{0, 0, 0};
+    for (const auto& nd : j["nodes"]) {
+        if (nd["visits"].get<int>() < cfg.baking_threshold) continue;
+        auto p = nd["prototype"].get<std::vector<float>>(); Eigen::Map<const Eigen::VectorXf> v(p.data(), 8);
+        if ((v - s.A).norm() < 0.3f) ++n[0]; else if ((v - s.B).norm() < 0.3f) ++n[1]; else if ((v - s.C).norm() < 0.3f) ++n[2];
+    }
+    return n;
+}
+}  // namespace
+
+TEST(GNGEntriesToBake, ADwellBakesANodeOnlyWhenEntriesAreNotCounted) {
+    const auto off = baked_near_centres(0), on = baked_near_centres(5);
+    EXPECT_GE(off[2], 1) << "with visits alone, one 300-tick dwell bakes the dwell's node";
+    EXPECT_EQ(on[2], 0) << "entered once, it is held short of baking however long the dwell";
+    EXPECT_GE(on[0], 1); EXPECT_GE(on[1], 1) << "re-entered states still bake";
+}
+
+TEST(GNGEntriesToBake, OffAddsNothingToASnapshotAndOnRoundTrips) {
+    nlohmann::json off_j, on_j; baked_near_centres(0, &off_j); baked_near_centres(5, &on_j);
+    EXPECT_FALSE(off_j.contains("bake_min_entries")); EXPECT_FALSE(off_j.contains("prev_winner"));
+    for (const auto& nd : off_j["nodes"]) EXPECT_FALSE(nd.contains("entries"));
+    const GNG back = GNG::from_json(on_j);
+    EXPECT_EQ(back.config().bake_min_entries, 5);
+    EXPECT_EQ(back.to_json()["prev_winner"], on_j["prev_winner"]);
+    int with_entries = 0; for (const auto& nd : on_j["nodes"]) with_entries += nd.value("entries", 0) > 0;
+    EXPECT_GT(with_entries, 2);
+}

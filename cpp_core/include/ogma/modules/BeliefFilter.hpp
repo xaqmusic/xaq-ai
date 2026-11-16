@@ -28,6 +28,12 @@
 // variance of its own samples (gain 1/n down to gain_floor, no gain_cap), read with the small-sample correction n/(n-1).  The
 // legacy head started at the global variance and moved at most gain_cap per sample, so a node seen a few dozen times kept a spread
 // far wider than its own -- NIS 0.3-0.6 on the stepper's stance vocabulary.
+// THE HEADS' VISITS (head_update "visits", 2026-11-15): on a tick-rate stream a run of wins is one observation, and a head
+// built from one ~2 s dwell holds ~100 near-identical samples -- "own" heads read NIS ~2.5 on the stairs for that reason.  Here
+// a head's n counts VISITS (entries of the winner): each visit is folded in once, at its end, as its mean (the "own" recursion
+// over visit means, so between-visit spread), and its spread about that mean is pooled into a within-visit variance.  The
+// head's variance is the two summed -- the predictive spread of a tick in a new visit, the between part as the Student-t
+// predictive of n estimated visits, var (n + 1)/(n - 3).  min_count then counts visits.
 // An INSTRUMENT: nothing consumes it.  It owns no partition (CLAUDE.md §0 rule 1).
 // =============================================================================
 #pragma once
@@ -90,7 +96,12 @@ private:
     double gain_floor_  = 0.002;
     double var_rel_floor_ = 0.01;
     int    min_count_   = 5;      // a node joins the correction once its decode head has this many samples
-    bool   head_own_    = false;  // head_update "own": a head's statistics are its own samples' (see the header)
+    bool   head_own_    = false;  // head_update "own" (or "visits"): a head's statistics are its own samples' (see the header)
+    bool   head_visits_ = false;  // head_update "visits": its n counts visits, not ticks (see the header)
+    // head_update "visits": per node the pooled within-visit sum of squares and ticks; the open visit's node id and sums
+    std::vector<Eigen::VectorXf> wss_; std::vector<double> wT_;
+    int vis_j_ = -1; double vis_len_ = 0.0; Eigen::VectorXd vis_sum_, vis_ss_;
+    void close_visit();
     Eigen::VectorXf head_var(int j) const;   // a node's decode-head variance as the likelihood reads it
 
     // state: nodes in index order

@@ -228,6 +228,7 @@ private:
     // GNG is a pure query, transition_counts_ is held, the commissioning window
     // and the residual RMS scale do not advance.  A param, not snapshot state.
     bool learning_enabled_   = true;
+    int  bake_min_entries_   = 0;      // GNG Config::bake_min_entries (0 = off)
     // The latent most recently stepped while frozen.  The frozen GNG leaves its
     // own last_x untouched (it places the next baked-q insertion and is saved
     // with the brain), so diag_snapshot() reports this instead: a viewer of

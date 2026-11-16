@@ -171,6 +171,11 @@ ParamSchema EPM::params_schema() const {
          "1→16→29 (orphaning every consumer keyed on winner_id).  For a REGIME vocabulary — "
          "permanent facts about the body — earned nodes should not be forgotten for a long "
          "absence.  false = legacy, byte-identical.", ParamValue{false}},
+        {"bake_min_entries", ParamMutability::HotMutable,
+         "A node bakes only after it has also been ENTERED (become the winner from another node) this many times "
+         "(2026-11-15).  On a tick-rate stream a run of wins is one observation: the picrawler's stance EPM baked "
+         "nodes from single ~2 s stalls that never recurred.  A count of independent episodes, not a scale; the "
+         "GNG Config documents it.  0 (default) = off, byte-identical.", ParamValue{int64_t{0}}},
         {"stale_window_factor",     ParamMutability::HotMutable, "Stale prune window",          ParamValue{12000.0}},
         // ---- Retention: the GNG's health model -------------------------------------------
         // How long an unvisited node is remembered.  That is a property of the world's own
@@ -359,6 +364,8 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "learning_enabled",        [&](auto const& v){ learning_enabled_ = get_bool(v, "learning_enabled"); });
     gng_cfg.learning_enabled = learning_enabled_;
     apply_param(params, "health_death_spares_baked", [&](auto const& v){ gng_cfg.health_death_spares_baked = get_bool(v, "health_death_spares_baked"); });
+    apply_param(params, "bake_min_entries", [&](auto const& v){ bake_min_entries_ = std::max(0, int(get_double(v, "bake_min_entries"))); });
+    gng_cfg.bake_min_entries = bake_min_entries_;
     apply_param(params, "stale_window_factor",     [&](auto const& v){ gng_cfg.stale_window_factor     = float(get_double(v, "stale_window_factor")); });
     apply_param(params, "health_boost",            [&](auto const& v){ gng_cfg.health_boost            = float(checked_range(get_double(v, "health_boost"), 0.0, 100.0, "health_boost")); });
     apply_param(params, "health_base_decay",       [&](auto const& v){ gng_cfg.health_base_decay       = float(checked_range(get_double(v, "health_base_decay"), 0.5, 1.0, "health_base_decay")); });
@@ -518,6 +525,7 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "stale_prune_enabled")     gng_->set_stale_prune_enabled(get_bool(value, k));
     else if (k == "learning_enabled")        { learning_enabled_ = get_bool(value, k); gng_->set_learning_enabled(learning_enabled_); }
     else if (k == "health_death_spares_baked") gng_->set_health_death_spares_baked(get_bool(value, k));
+    else if (k == "bake_min_entries")        { bake_min_entries_ = std::max(0, int(get_double(value, k))); gng_->set_bake_min_entries(bake_min_entries_); }
     else if (k == "stale_window_factor")     gng_->set_stale_window_factor(float(get_double(value, k)));
     else if (k == "max_nodes")               gng_->set_max_nodes(int(get_int(value, k)));   // declared hot; was refused live
     else if (k == "health_boost")            gng_->set_health_boost(float(checked_range(get_double(value, k), 0.0, 100.0, k)));
@@ -1127,6 +1135,7 @@ void EPM::restore_state(nlohmann::json const& s) {
         // instance's param, not snapshot state, so re-apply it.  Without this a
         // restore (or clone) of a frozen EPM would silently resume learning.
         gng_->set_learning_enabled(learning_enabled_);
+        gng_->set_bake_min_entries(bake_min_entries_);   // likewise this instance's param
     }
     has_prev_prototype_ = s.value("has_prev_prototype", false);
     if (has_prev_prototype_ && s.contains("prev_winner_prototype") &&

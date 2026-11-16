@@ -13344,6 +13344,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["sbl_nism"] = snappedf(float(bsl.get("nis_mean", 0.0)), 0.001)
 		line["sbl_hnis"] = snappedf(float(bsl.get("head_nis_mean", 0.0)), 0.001)
 		line["sbl_sw"] = [int(bsl.get("map_switches", 0)), int(bsl.get("winner_switches", 0))]
+	if metrics.has("belief_stance_visits"):   # the visit-counting decode heads on the same stream (2026-11-15)
+		var bsv: Dictionary = metrics["belief_stance_visits"]
+		line["sbv_map"] = int(bsv.get("map_node", -1))
+		line["sbv_nism"] = snappedf(float(bsv.get("nis_mean", 0.0)), 0.001)
+		line["sbv_hnis"] = snappedf(float(bsv.get("head_nis_mean", 0.0)), 0.001)
+		line["sbv_sw"] = [int(bsv.get("map_switches", 0)), int(bsv.get("winner_switches", 0))]
 	if metrics.has("stance_features"):
 		var sft: Dictionary = metrics["stance_features"]
 		line["sf_pub"] = int(sft.get("published", 0))

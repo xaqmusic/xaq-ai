@@ -44,6 +44,7 @@ struct GNGNode {
     double  error             = 0.0;
     double  ema_error         = 0.0;
     int     visits            = 0;
+    int     entries           = 0;      // times the node became the winner from another (Config::bake_min_entries)
     int     last_visited_step = 0;
     bool    bake_checked      = false;  // one-shot: consistency gate has fired
     // Post-bake tracking for Mitosis Gatekeeper
@@ -175,6 +176,15 @@ public:
         // body; earned nodes should not be forgotten for the crime of a long
         // absence.
         bool  health_death_spares_baked = false;
+        // ENTRIES TO BAKE (2026-11-15, learned stepper Phase 3).  `visits` counts every tick a node wins, and on a stream
+        // published at the tick rate consecutive wins are one observation, not many: the picrawler's stance EPM baked a
+        // node from a single ~2 s stall (baking_threshold 100), 80-100 % of its visits inside one ~12 s window, and with
+        // health_death_spares_baked kept it for good although it rarely recurred -- a vocabulary growing ~15-22 baked
+        // nodes a run without end.  > 0 = a node bakes only after it has also been ENTERED (become the winner from another
+        // node) this many times: its visits hold at baking_threshold - 1 until then, so every "is it baked" test in the GNG
+        // stays the visits test it was.  "Revisited enough" (the EPM contract) means re-entered.  A count of independent
+        // episodes, not a scale.  0 (default) = off, byte-identical (nothing counted, nothing serialised).
+        int   bake_min_entries = 0;
         // Mitosis Gatekeeper
         bool  mitosis_enabled         = true;
         float mitosis_error_threshold = 0.30f;
@@ -302,6 +312,8 @@ public:
 
     void set_stale_prune_enabled(bool enabled) { cfg_.stale_prune_enabled = enabled; }
     void set_health_death_spares_baked(bool v) { cfg_.health_death_spares_baked = v; }
+    void set_bake_min_entries(int v)           { cfg_.bake_min_entries = v < 0 ? 0 : v; }
+    int  entry_count(int node_id) const;       // the node's entries (0 when unknown or the count is off)
 
     // Health model (Config "Biological health model").  These set how long an unvisited node
     // is remembered, which is a property of the world's timescale, not of the clusterer: a
@@ -410,6 +422,8 @@ private:
 
     // Set by step() when the winner just crossed the baking gate
     bool last_step_baked_ = false;
+    // The previous step's winner (Config::bake_min_entries; -1 = none)
+    int prev_winner_ = -1;
 
     // Metabolic Cleanup (D1)
     std::vector<int> last_pruned_ids_;

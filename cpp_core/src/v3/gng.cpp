@@ -290,7 +290,13 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
     running_mean_error_ = 0.95f * running_mean_error_ + 0.05f * static_cast<float>(d1_sq);
 
     // 12. Update winner stats: visits, last-visited, health boost
+    if (cfg_.bake_min_entries > 0) {                  // entries to bake (Config): a run of wins is one entry
+        if (s1_id != prev_winner_) ++s1.entries;
+        prev_winner_ = s1_id;
+    }
     s1.visits++;
+    if (cfg_.bake_min_entries > 0 && s1.entries < cfg_.bake_min_entries && s1.visits >= cfg_.baking_threshold)
+        s1.visits = cfg_.baking_threshold - 1;        // held short of baking until it has been re-entered enough
     s1.last_visited_step = step_;
     s1.health = std::min(100.0f, s1.health + cfg_.health_boost); // Activity-dependent potentiation
 
@@ -528,7 +534,14 @@ bool GNG::boost_visits(int node_id, int amount) {
     // Only boost unbaked nodes — already-baked nodes don't need acceleration
     if (node.visits >= cfg_.baking_threshold) return false;
     node.visits = std::min(node.visits + amount, cfg_.baking_threshold);
+    if (cfg_.bake_min_entries > 0 && node.entries < cfg_.bake_min_entries && node.visits >= cfg_.baking_threshold)
+        node.visits = cfg_.baking_threshold - 1;     // a boost is visits, not entries
     return true;
+}
+
+int GNG::entry_count(int node_id) const {
+    auto it = nodes_.find(node_id);
+    return it != nodes_.end() ? it->second.entries : 0;
 }
 
 int GNG::prune_unbaked() {
@@ -685,6 +698,11 @@ nlohmann::json GNG::to_json() const {
     // The history MUST round-trip: a restored GNG that re-warms from an empty
     // history has no gate for its first kAutotuneWarmup steps and grows
     // unbounded in exactly that window -- same class of bug as EPM Invariant 11.
+    // Entries to bake: emitted ONLY when on (byte-identical otherwise).
+    if (cfg_.bake_min_entries > 0) {
+        j["bake_min_entries"] = cfg_.bake_min_entries;
+        j["prev_winner"]      = prev_winner_;
+    }
     if (cfg_.insertion_autotune) {
         j["insertion_autotune"]          = cfg_.insertion_autotune;
         j["insertion_autotune_quantile"] = cfg_.insertion_autotune_quantile;
@@ -748,6 +766,7 @@ nlohmann::json GNG::to_json() const {
         nj["bake_checked"]     = node.bake_checked;
         nj["post_bake_visits"] = node.post_bake_visits;
         nj["post_bake_error"]  = node.post_bake_error;
+        if (cfg_.bake_min_entries > 0) nj["entries"] = node.entries;
         if (cfg_.drift_ratio > 0.0f && node.post_bake_resid_sum.size() > 0) {
             std::vector<float> rs(node.post_bake_resid_sum.data(),
                                   node.post_bake_resid_sum.data() + node.post_bake_resid_sum.size());
@@ -801,6 +820,8 @@ GNG GNG::from_json(const nlohmann::json& j) {
     gng.cfg_.drift_gain  = j.value("drift_gain",  1.0f);
     gng.drift_count_     = j.value("drift_count", 0);
     gng.autotune_value_ = j.value("autotune_value", -1.0f);
+    gng.cfg_.bake_min_entries = j.value("bake_min_entries", 0);
+    gng.prev_winner_          = j.value("prev_winner", -1);
     if (j.contains("health") && j["health"].is_object()) {
         auto const& h = j["health"];
         Config d{};
@@ -845,6 +866,7 @@ GNG GNG::from_json(const nlohmann::json& j) {
         node.bake_checked      = nj.value("bake_checked",      false);
         node.post_bake_visits  = nj.value("post_bake_visits",  0);
         node.post_bake_error   = nj.value("post_bake_error",   0.0);
+        node.entries           = nj.value("entries",           0);
         if (nj.contains("post_bake_resid_sum") && nj["post_bake_resid_sum"].is_array()) {
             auto rs = nj["post_bake_resid_sum"].get<std::vector<float>>();
             node.post_bake_resid_sum = Eigen::Map<const Eigen::VectorXf>(rs.data(), rs.size());
