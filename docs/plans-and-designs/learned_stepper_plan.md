@@ -321,7 +321,7 @@ i/o mappings that work and build upon them").*
 | 1 Prune | **done** — one rule of 16 redundant (the IK re-seed, covered by multistart); off in the stack configs, its code marked `PRUNE-P1` and kept until the cleanup pass (operator, 2026-11-15) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 1" |
 | 2 Split | **done** — gate met: LegSolver and the planner / executor / floor split byte-identical (15 of 15 runs each), the outcome stream and the room field-identical; unit tests per component | 2026-11-15 | 2026-11-15 "Learned stepper Phase 2" |
 | 3 Stance belief | **in flight** — built and measured; separation yes. Own-sample heads REGRESS against legacy; spares-baked stops the forgetting; growth traced to baking counting correlated samples. Curriculum (known worlds × 8, stairs × 6, return × 2): `bake_min_entries` 5 PARTIAL; a frozen stance encoder (`freeze_after`, scaffold count) is WORKING for retention (return ties pre-stairs TLE, reuse 0.60, 1 new node). Learning rate (`stepper_learning.py`): the known worlds learn (QE −7 %/doubling) and saturate in 6–8 min; the stairs do not learn at all in 7 min at either height. A long stairs block from the frozen brain (start-from-state, exact): no learning in 23 min (QE +0.2 %/doubling), the vocabulary grows and is slowly reused (0.25); not the stalls. The frozen flat-world encoder SATURATES on the stairs (ten terrain/tilt z clipped, |z| 12 vs 6). Entries under the still encoder: PARTIAL (60 % fewer stairs nodes, 3 % stairs fit cost). Gate re-scoped 2026-11-16 (no convergence on the stairs; no saturated feature on any bench). The saturation instrument: the knee and hips clip too. `widen` (the approved per-feature rule): WORKING for saturation (≤ 0.5 % at the clip on every bench) and for retention after one re-encoding of the known worlds (second return: reuse 0.74 / 0.62); stairs stances still do not recur (7–9 %). Left: NMI and flicker re-read under the widened encoder | 2026-11-16 | 2026-11-15 "Learned stepper Phase 3", "continued", "the settling normaliser", "entries to bake", "the frozen stance encoder"; 2026-11-16 "a long stairs block", "authority sooner", "three instruments", "the widening scale" |
-| 4 First closed loop (landing offset by EFE) | **built at gain 0, not yet run with authority** — `stepper/LandingOffset` at the intent hook (`lo_gain`, `lo_learn`); byte-identical off; a shadow mode learns from the scaffold's own landings; the model reads δ and the remembered terrain at the candidate, per leg (§9.1). **Waits on the operator's go for the first gain-on battery** | 2026-11-16 | 2026-11-16 "authority sooner", "three instruments", "the landing offset" |
+| 4 First closed loop (landing offset by EFE) | **first form REGRESSION in context** — `stepper/LandingOffset` at the intent hook (`lo_gain`, `lo_learn`); byte-identical off; shadow mode; the model reads δ and the remembered terrain at the candidate, per leg (§9.1). With authority (§9.2): the floor admits backward offsets only; corridor progress −19 % (t −3.8, n = 6 chains), graded flight −16 % (n = 5), no outcome gained; cause: the value sits at the scaffold's limit, the outcome vector has no entry for progress, and a standing −0.43 cm touchdown bias feeds the choice noise. Stays at gain 0. **Waits on the operator: the next owned value** (lift height recommended) | 2026-11-16 | 2026-11-16 "authority sooner", "three instruments", "the landing offset", "the first battery with authority" |
 | 5 Widen authority (shift, sideways, leg) | — | | |
 | 6 Whole-intent authority by precision | — | | |
 | 7 De-scaffold | — | | |
@@ -332,9 +332,11 @@ i/o mappings that work and build upon them").*
 sooner"). §10 keeps Phase 3's state and the question as it was put.
 
 **Where it stands (2026-11-16, night).** Of "Next, in order" below: item 1 is done but for two re-reads (the widened encoder
-clears the clip and retains after one re-encoding; NMI and flicker not yet re-read under it), item 2 is done, item 3 is built
-and byte-identical off. **The next act is the operator's: the go for the first gain-on battery** (§9.1, last paragraphs, has
-the proposed battery and the config to watch in the UI).
+clears the clip and retains after one re-encoding; NMI and flicker not yet re-read under it), item 2 is done, item 3 is built,
+byte-identical off, and **measured with authority (2026-11-16, late; §9.2): the corridor's no-harm gate is failed** — the
+landing offset, backward only under the floor, costs 19 % of the corridor's progress and 16 % of the graded flight's, and buys
+nothing its outcomes can show. **The next act is the operator's: which value the layer owns next** (§9.2 has the three
+candidates; the lift height is recommended).
 
 **The decision (operator, 2026-11-16).** The operator's idea — *an instrument-only learner riding a frozen controller can
 only plateau at that controller's ceiling; with a learning brain in control, the robot can build the input–output mappings
@@ -482,6 +484,79 @@ error does not rise; (ii) the graded flight: 6 chains × 6 `grad` runs, the mode
 then a frozen-model evaluation; (iii) 38 and 64 mm from the carried state. Also for the operator: `widen` as the encoder of
 record under these arms (they are built on the frozen `p3frz` config, since the first model does not read the stance).
 
+### 9.2 The first battery with authority: the corridor gate (2026-11-16, late)
+
+The operator's go: "Continue with option 1" — run the landing offset as specified, the corridor first. Ledger 2026-11-16
+"the first battery with authority".
+
+**The battery.** `p4clo` (`lo_gain` 1) against `p4csh` (shadow: the scaffold's body, the model learning), six chains × four
+corridor runs, cold start, the model carried, paired by seed; 48 of 48 runs through every gate. Reader: `stepper_pair.py`
+(arm minus control per paired run; the chain is the unit).
+
+| | authority | shadow (control) | difference ± sd over chains | t (n = 6) |
+|---|---|---|---|---|
+| forward progress, cm/min | 47.9 | 59.2 | −11.3 ± 7.2 (−19 %) | −3.8 |
+| progress per landing, cm | 1.30 | 1.71 | −0.41 ± 0.25 | −4.0 |
+| rows stalled, % | 20 | 7 | +13 ± 9 | +3.5 |
+| landings per minute | 37.1 | 34.6 | +2.5 ± 1.8 | +3.5 |
+| skipped turns per 100 steps | 1.8 | 0.4 | +1.4 ± 2.0 | +1.7 |
+| touchdown error, cm | 0.60 | 0.60 | −0.01 ± 0.06 | −0.3 |
+| the hand's correction, cm | 0.14 | 0.13 | +0.01 ± 0.05 | +0.3 |
+| hang, miss, falls | 0, 0, 0 | 0, 0, 0 | | |
+
+**The no-harm gate is failed** (`REGRESSION` in context). The arm lost progress in 22 of 24 paired runs; the loss follows
+the dose (r = −0.91 between a run's mean offset and its lost progress, 11 cm/min per cm) and does not fade over the four
+repetitions. Half the planned landings moved, in two peaks: 49 % at the scaffold's landing, 35 % at the full 3 cm back.
+The floor refused 99.5 % of forward candidates, so the authority was backward only, as the smoke run said.
+
+**Why — three separable faults, none of them the choice rule.**
+1. *The owned value sits at the scaffold's limit.* Every admissible deviation shortens the step, and the landing's reach is
+   where the next shift's room comes from: a shorter landing is spent as progress. §4's argument that the scaffold's shift
+   keeps progress safe is refuted.
+2. *The outcome vector has no entry that progress reduces.* Touchdown error, correction, hang and miss are all indifferent
+   to a short step on flat ground, so the layer cannot see what it spends.
+3. *A prior at zero on an outcome with a standing offset.* Every leg model in both arms carries a touchdown intercept of
+   −0.43 ± 0.06 cm on the flat floor (the toe stops 4 mm below the memory's ground). No offset removes it; it is the largest
+   term of the risk; and the argmin then follows each leg's fitted slope of noise about it — 9 of 24 leg models settle at the
+   back limit and stay. To be traced as an instrument fault before a model is graded on touchdown error about zero.
+
+**What carries forward.** The machinery (the outcome model, the choice, the floor, shadow mode, the carried state, the paired
+reader) worked as built; what failed is the choice of value and of outcome set. Three rules for the next owned value, now in
+the ledger as principles: list what the value spends and check each cost is a predicted outcome; own a value with room on
+both sides of the scaffold's choice; judge an outcome about its own running level where it has a standing bias.
+
+**For the operator — the next form.** Candidates, in the order I would take them:
+- *The lift height* (recommended): not at a limit; its cost is the step's duration, which the outcome record already carries
+  (`ticks`), and its benefit is the hang and the miss, which the stairs produce and the corridor does not. Both sides of the
+  trade are observable by the layer.
+- *The landing offset again, with the cost in the vector*: add the step's realised advance against the plan's own as an
+  outcome. The floor stays one-sided, so the best it can do on flat ground is learn to choose 0.
+- *The lateral offset*: two-sided, but its cost is the next leg's support margin, which arrives a step late.
+
+**The graded flight, as a diagnostic** (not a promotion step: does a backward offset remove hangs or misses where the
+scaffold has them?). `p4glo` against `p4gsh`, six chains × six `grad` runs, each arm's model carried on from its corridor
+runs; chain 4 of the arm aborted in its first run (the open heap fault, below) and is left out with its pair, so n = 5.
+
+| | authority | shadow (control) | difference ± sd over chains | t (n = 5) |
+|---|---|---|---|---|
+| forward progress, cm/min | 35.1 | 41.8 | −6.7 ± 4.8 (−16 %) | −3.2 |
+| progress per landing, cm | 0.95 | 1.22 | −0.28 ± 0.17 | −3.8 |
+| rows stalled, % | 31 | 19 | +12 ± 8 | +3.4 |
+| highest toe on the flight, cm | 3.2 | 4.4 | −1.2 ± 0.9 | −3.0 |
+| hang, % of steps | 0.6 | 0.9 | −0.3 ± 1.6 | −0.4 |
+| touchdown error, cm | 0.85 | 0.93 | −0.08 ± 0.14 | −1.3 |
+| the hand's correction, cm | 0.45 | 0.75 | −0.29 ± 0.22 | −3.0 |
+
+The corridor's reading holds on the stairs. The one gain, the hand's correction, is all in the move off an obstacle (5.9
+against 11.5 % of steps) and is confounded: the arm climbs less, and a body that meets fewer riser faces has fewer landings
+to move off them. Hang and touchdown error are not separated, and the model's skill on its outcomes is no higher with
+authority than in shadow. No evidence, at this power, that a backward offset pays where the scaffold has errors.
+
+**State.** The landing offset stays in the build at gain 0 (`REGRESSION` in the context above; re-use context in the ledger).
+The 38 and 64 mm benches of the proposed order were not run: the gate before them is failed. Open, and now seen twice (`lb38`
+c4 r4; `p4glo` c4 r1): a heap-corruption abort, "corrupted size vs. prev_size", both on stairs worlds, both in chain 4
+(inspector port 8204), the first before this lever existed.
+
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 
 *Superseded as the resume point by §9, which records the decision.* The ledger's entries 2026-11-15 "the frozen stance
@@ -512,7 +587,7 @@ discuss in a fresh context, recorded at the end.
 | Is the stairs' growth dwells? | ~60 % of it (entries to bake 5: 60 % fewer stairs nodes, +3 % stairs QE) — `PARTIAL` | `cvfe` |
 | Is the percept sound on the stairs? | **No**: the frozen flat-world scale (ground sd 2 mm, relief 7 mm, tilt 1°) clips ~10 terrain/tilt z at ±4 on a riser (stance |z| 12 vs 6) | `lb38` state + logs |
 
-Open: one heap-corruption abort in ~500 runs (`lb38` c4 r4). Pending cleanup (operator, 2026-11-15): delete the `PRUNE-P1`
+Open: a heap-corruption abort, twice in ~630 runs (`lb38` c4 r4; `p4glo` c4 r1 — §9.2). Pending cleanup (operator, 2026-11-15): delete the `PRUNE-P1`
 code once the promoted module is final, then `stepper_ident.py --check stepper_golden.json --label phase1_pruned`.
 
 ### 10.3 The operator's idea (2026-11-16), to discuss before the next lever

@@ -189,6 +189,18 @@ higher-level prior and must carry its own error.
   already smelled the food, squeezing it out of its own seen-but-not-smelled regime. Give a range
   sense a range-scaled value and a bearing sense a detection-scaled value; the shared unit the
   arbiter needs is [0,1] confidence, not a common physical scale.
+- **The preference vector must contain what the action spends.** A chooser by expected free energy
+  sees only the outcomes it predicts; a cost outside that vector is free to it, and the degenerate
+  choice that scores well on the vector is the one it finds. Measured 2026-11-16 (picrawler, the
+  learned stepper's first authority): a layer that owned a landing's forward/back offset and
+  predicted touchdown error, correction, hang and miss shortened half its steps and cost a fifth of
+  the corridor's progress, because no predicted outcome moved when a step was short. Before a layer
+  is given a value, list what that value spends and check each cost is a predicted outcome — §8's
+  blind-metric rule applied to the learner's own objective. Two riders from the same run: own a
+  value with room on **both** sides of the incumbent's choice (at a limit, every admissible
+  deviation is the costly one and exploration becomes a tax); and a preference fixed at zero on an
+  outcome with a standing offset hands the chooser a gradient made of noise, so judge such an
+  outcome about its own running level.
 
 ### 2.3 Precision is a controlled variable — the principled arbitration
 

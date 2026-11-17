@@ -4,7 +4,9 @@
 //
 // THE ONE VALUE OWNED.  The forward/back offset delta of the scaffold's PLANNED landing (StepIntent::Plan only; Choice and Unload
 // pass through), along the body's forward axis, over candidates gain x max_m either side on cell_m.  The scaffold keeps the leg
-// order, the body's shift and so the forward progress: standing still cannot score.
+// order and the body's shift.  MEASURED 2026-11-16 (ledger "the first battery with authority"): that does NOT keep progress safe --
+// the floor admits backward offsets only (the scaffold already lands at its forward limit), a shorter landing is spent as
+// progress (corridor -19 %), and no outcome below prices it.  REGRESSION in that context; the layer stays at gain 0.
 //
 // THE ERROR IT MINIMISES (CLAUDE.md section 1).  Each step's realised consequence against the stepper's own outcome priors: the
 // toe meets the ground the memory predicted (touchdown error 0), the hand does not have to correct the landing (correction 0),
