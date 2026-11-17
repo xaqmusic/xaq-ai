@@ -13256,6 +13256,17 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			for key in ["s2", "r2", "nis"]:
 				for v in ps.get("lo_" + key, []): los.append(snappedf(float(v), 0.0001))
 			line["ps_los"] = los
+		if ps.has("at_rec"):   # the after-touch record (2026-11-17, learned stepper plan 9.5; only when at_learn > 0): the last closed record [seq, leg, touched, y_touch, y_pred, y_hold0, gap (m, the stance's hold over the touch), h_touch, h_pred, load at the touch, tilt at the touch, tilt at the close (deg), ticks open, planted, contact, loaded, mean load, mean held height, creep, the leg that went next, the search skipped the wave's turn, close reason (0 next landing, 1 cap, 2 disengage), the outcomes x 4 (not bearing, same leg next, tilt change, turn skipped; -1 = not given), the predictions x 4, the go was seen, spare]; the counts [opened, closed, dropped, capped, with a bearing read, not bearing, with a go, re-steps, skipped turns, sunk]; the grades per outcome [n, mean, the model's residual mean square, the base rate's, NIS]
+			var atr: Array = []
+			var atv: Array = ps.get("at_rec", [])
+			for k in range(atv.size()): atr.append(int(atv[k]) if k in [0, 1, 2, 12, 13, 14, 15, 19, 20, 21, 30] else snappedf(float(atv[k]), 0.0001))
+			line["ps_aft"] = atr
+			var atn: Array = []
+			for v in ps.get("at_n", []): atn.append(int(v))
+			line["ps_aftn"] = atn
+			var atg: Array = []
+			for v in ps.get("at_grade", []): atg.append(snappedf(float(v), 0.0001))
+			line["ps_aftg"] = atg
 		var rm: Array = ps.get("room", [])
 		if rm.size() >= 4:
 			var rma: Array = []

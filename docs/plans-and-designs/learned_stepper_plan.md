@@ -331,7 +331,15 @@ i/o mappings that work and build upon them").*
 **Read this section, §4 Phases 3–5, then the ledger's latest entries** (2026-11-16 "a long stairs block", "authority
 sooner"). §10 keeps Phase 3's state and the question as it was put.
 
-**Where it stands (2026-11-17, afternoon).** The operator watched the pair for 25 minutes of rough terrain in the outer field
+**Where it stands (2026-11-17, evening).** The operator's word on §9.4: "go straight to the shadow build. I don't know what
+levers will bear fruit so lets investigate." Built and measured the same day (§9.5): the **after-touch record**
+(`AfterTouch`, `at_learn`), in shadow on the stack of record, graded; and what it found — the re-stepping follows landings
+the executor moved off their plan (the lowering retreat: the same leg steps again after 97 % of them), the plan's own
+prediction that the next leg will be liftable fails on 29 % of steps, and three scaffold arms aimed at it leave the stall in
+place (two regress, the crouch ties). **The next act is the operator's choice (§9.5, "The proposal"): a learned choice at
+the decisions where the wave's turn is skipped.** Nothing with learned authority has been run.
+
+**Where it stood (2026-11-17, afternoon).** The operator watched the pair for 25 minutes of rough terrain in the outer field
 (74 960 ticks, no fall, no reset) and **promoted it**: the stack of record is now
 `sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__kgpm.json` (the frozen sequencer + `ik_knee_guard` 1 +
 `plan_model_margin` 1); `…__p3frz.json` is the pre-promotion control. The one failure they saw: past about 10° of chassis
@@ -620,7 +628,7 @@ the operator's own run cannot be read). Reader: one leg landing three or more ti
   taking the wave's turn — so the same leg is chosen again.
 - The planner's block instrument names the constraint: in 90 % of the blocked plans inside an episode, the smallest body
   shift that would give the skipped leg its margin takes **another planted toe inside its minimum reach** (60 mm; that toe
-  sits at a median 65 mm from its hip). That toe is one of the two highest of the four 78 % of the time (50 % by chance).
+  sits at a median 65 mm from its hip — 82 mm with the reader's hip coordinates corrected, §9.5). That toe is one of the two highest of the four 78 % of the time (50 % by chance).
 - Blocked plans rise with tilt: 3.2 a minute below 5°, 7.4 at 5–10°, 10.0 at 10–15°, 26 above 15°. At 10–15° nearly half
   (47 %) are a shift that exists by the planner's geometry and is refused by the support model's margin.
 - No episode in these runs outlasted 14 s, and the share of time spent re-stepping is flat across the tilt bins (4–5 %): the
@@ -637,7 +645,7 @@ hang in 18 minutes, and the stairs benches 1–3 % of steps each.
 moved by hand on the terrain battery's seeds, and both lengthen the re-stepping: `level_gain` 1.0 gives 256 s of it against
 42 s (t +2.5), with episodes up to 63 s at 3–9° of tilt; `land_r_min_m` 0.09 gives 148 s (t +2.1). Distance is not separated
 in either. The hypothesis in the form "level harder and the block goes" is refuted: levelling spends the legs' reach, and the
-block is a reach limit. What binds is how the body comes to stand over its planted toes — the blocking toe sits 63–65 mm
+block is a reach limit. What binds is how the body comes to stand over its planted toes — the blocking toe sits 63–65 mm (68–82 mm corrected, §9.5)
 from its hip in every arm, wherever the landings are kept — and no single constant moved globally improves it.
 
 **The operator's stall reproduced (`tilt1`, six 10-minute runs along their path; `stepper_tilt.py`).** Re-stepping takes
@@ -663,6 +671,54 @@ a threshold outcome, not a share regression.
 those are small. The error left is in the stance — whether the next leg can be lifted — and the outcome vector of Phase 4
 has no entry for it (nor for the body's tilt or the load on the other feet after the touch). §9.2's first rule applies
 again: the outcome set comes before the value. The candidates and the order are the operator's discussion (2026-11-17).
+
+### 9.5 The after-touch record in shadow, and what it found (2026-11-17, evening)
+
+**Built.** `stepper/AfterTouch.{hpp,cpp}`, switched by `PoseSequencer at_learn` (0 = off, byte-identical). A record per
+step, opened at its outcome and closed at the next: the **gap** (the height the stance gives the toe on the tick of its
+touch, over the height it touched at), the touch height the executor expected at the go, the contact and load over the
+toe's planted ticks, the leg that goes next, whether the search that chose it skipped the wave's turn, the tilt at the
+touch and the close. A recursive least squares per leg and per outcome predicts at the touch [the toe will not bear, the
+same leg lifts next, the tilt's change, the wave's turn is skipped] from [1, gap, its positive part, tilt, the toe's load];
+each outcome keeps its own posterior because a record cannot always give every outcome (a toe lifted again at once has no
+bearing to read). It reads and moves nothing — the body with and without it is identical row for row. Config
+`…__p3frz__kgpm__aft.json` (in the launcher); reader `scripts_tools/stepper_after.py`; ledger 2026-11-17 (evening).
+
+**The shadow battery** (the stack of record, the six spawns and seeds of `tilt1`, 6 × 10 min, 1615 records). 22 % of
+readable landings do not bear; the same leg lifts next after 36 %. The model's skill against each leg's own base rate is
++26 / +34 / +23 / +23 % on the four outcomes, NIS 1.10–1.29. The gate of Phase 5's shadow step (no authority from an
+ungraded prediction) is met for these outcomes on this terrain.
+
+**What it found.**
+
+- **The re-stepping is a landing the plan did not get.** 45 % of planned landings end more than 2 cm from their plan (65 %
+  at 10–15°). After a lowering retreat of more than 1 cm — the executor walking the landing toward the hip because the toe
+  cannot reach the ground where it was sent — **the same leg steps again 97 % of the time** (346 landings), against 16 %
+  when no rule moved the landing. Those are front legs on a tilted body, the toe meeting the ground a median 43 mm below
+  the ground the executor expected; the memory's height there had been refused by a fixed band (`land_band_lo_m`, 2 cm).
+- **The plan's prediction of its own step fails on 29 % of steps** (the drift instrument: predicted the next leg liftable,
+  found it not), and in 83 % of those the landed toe alone breaks it — a mean 51 mm from its planned place.
+- **A plan made right still stalls.** With `land_band_lo_m` 0.04 the retreat disappears and the prediction fails 5 % of the
+  time, and the walk is worse (0.31 m against 1.20 m): the plan now knows its step frees nothing and takes it, because it
+  is the only feasible one. Keeping each toe's landed height in the stance is worse again (the plane stance is what holds
+  the body parallel to its footholds). The crouch (`crouch_max_m` 0.03) removes 86 % of the retreats, evens the legs' step
+  counts and ties on distance and re-stepping (`PARTIAL`).
+- **Corrections to §9.4.** In a re-step the fourth toe has almost no stance to be unloaded in; the press after first
+  contact proposed there is weakened (its dose-response, the landed-height stance, cost attitude). The blocking toe's
+  radius was read with wrong hip coordinates: 68–82 mm, not 56–65.
+
+**The proposal (the operator's decision).** Eight imposed rules or constants have been tried at this knot; each closes one
+way into the stall and leaves the stall. What none of them supplies is a choice at the decision where the scaffold has no
+good answer. So the value proposed for the first closed loop is not a coordinate of the step but **the step intent at the
+decisions where the wave's turn is skipped** (43 % of decisions on this terrain; how rare it is on the corridor is the first thing
+to measure, since the layer costs nothing where it never acts): the scaffold enumerates the intents its floor admits there — each other leg's landings, and a
+body shift without a step — and the layer chooses among them by expected free energy over the after-touch outcomes (the
+wave's turn skipped again, the same leg again, the tilt's change) plus Phase 4's (the hand's correction, the touchdown
+error). The gate is the state the scaffold fails in (CLAUDE.md §1 rule 4), the scaffold's choice stays a candidate, and
+everywhere else the scaffold walks. This is Phase 5's shift and leg choice taken together, but only where the fixed order
+has already broken. Before it gets gain: one shadow battery with the candidates and their predicted outcomes logged beside
+the scaffold's choice. Alternatives the operator may prefer: the crouch promoted as a scaffold lever after a look in the
+UI; or the landing's depth belief (the band) made the memory's own uncertainty instead of a constant.
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 

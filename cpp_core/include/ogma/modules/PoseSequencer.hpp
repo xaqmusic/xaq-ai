@@ -46,6 +46,7 @@
 #include "ogma/Topics.hpp"
 #include "ogma/body/LegKinematics.hpp"
 #include "ogma/body/LegSolver.hpp"
+#include "ogma/modules/stepper/AfterTouch.hpp"
 #include "ogma/modules/stepper/LandingOffset.hpp"
 #include "ogma/modules/stepper/ScaffoldPlanner.hpp"
 #include "ogma/modules/stepper/StepExecutor.hpp"
@@ -68,7 +69,7 @@ public:
     void tick(uint64_t tick_id) override;
     void on_param_change(std::string_view key, ParamValue const& value) override;
     nlohmann::json diag_snapshot() const override;
-    nlohmann::json snapshot_state() const override;   // the landing offset's model only, and only when it is on (the scaffold itself carries nothing)
+    nlohmann::json snapshot_state() const override;   // the learned layers' models only (the landing offset, the after-touch record), each only when it is on (the scaffold itself carries nothing)
     void restore_state(nlohmann::json const&) override;
 
     using Phase = stepper::Phase;
@@ -78,6 +79,7 @@ public:
     const stepper::StepExecutor& executor() const { return executor_; }
     const stepper::ScaffoldPlanner& planner() const { return planner_; }
     const stepper::LandingOffset& offset() const { return offset_; }
+    const stepper::AfterTouch& after() const { return after_; }
     body::Vec3f toe_of(int leg, const std::array<double, 3>& t) const { return kin_.toe_of(leg, t); }   // body-frame toe for joint angles
     std::array<double, 3> angles_of_u(int leg, const std::array<double, 3>& u) const { return kin_.angles_of_u(leg, u); }
     std::array<double, 3> u_of_angles(int leg, const std::array<double, 3>& t) const { return kin_.u_of_angles(leg, t); }
@@ -135,6 +137,10 @@ private:
     // THE LANDING OFFSET (learned stepper plan Phase 4, 2026-11-16; lo_gain 0 and lo_learn 0 = off, byte-identical): the first
     // learned authority over the step, sitting between the planner's intent and the executor -- see stepper/LandingOffset.hpp
     stepper::LandingOffset offset_;
+    // THE AFTER-TOUCH RECORD (learned stepper plan 9.5, 2026-11-17; at_learn 0 = off, byte-identical): each step's record carried
+    // past first contact -- does the landed toe bear, does the same leg lift next, the tilt -- and a model of it in shadow; it
+    // reads the components and moves nothing -- see stepper/AfterTouch.hpp
+    stepper::AfterTouch after_;
 };
 
 } // namespace ogma

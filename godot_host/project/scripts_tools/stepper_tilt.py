@@ -3,7 +3,7 @@
 # planner's block instrument (ps_bkr) names inside it. Written 2026-11-17 for the operator's "front right toe tapping in place" past 10 degrees.
 import gzip, json, sys, math, collections
 NAMES = ['FL', 'FR', 'RL', 'RR']; WHY = ['shift ok, model refuses', 'reach max', 'reach min', 'protect', 'sector', 'extension margin', '?']
-HIP = [(-0.049, 0.049), (0.049, 0.049), (-0.049, -0.049), (0.049, -0.049)]
+HIP = [(-0.0383, 0.033), (0.0383, 0.033), (-0.0383, -0.033), (0.0383, -0.033)]   # hip1 mounts: HIP_X_SPAN 76.6 mm, HIP_Z_SPAN 66 mm (was +-49 mm until 2026-11-17 evening: the radii printed before then read ~10 mm short)
 BINS = [(0, 5), (5, 10), (10, 15), (15, 90)]
 def load(p):
     rows = []

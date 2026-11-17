@@ -141,6 +141,7 @@ ParamSchema PoseSequencer::params_schema() const {
         {"lo_learn",      ParamMutability::HotMutable, "> 0: the landing offset's outcome model learns from every planned step and reports (diag lo); with lo_gain 0 it learns in shadow from the scaffold's own landings and moves nothing.", ParamValue{0.0}},
         {"lo_max_m",      ParamMutability::HotMutable, "The landing offset's full range either side (m) at lo_gain 1; also the unit of the model's offset feature.", ParamValue{0.03}},
         {"lo_cell_m",     ParamMutability::HotMutable, "The landing offset's candidate spacing (m).", ParamValue{0.01}},
+        {"at_learn",      ParamMutability::HotMutable, "THE AFTER-TOUCH RECORD (learned stepper plan 9.5; stepper/AfterTouch.hpp): > 0 = each step's record is carried past first contact (the gap between the height the stance gives the landed toe and the height it touched at, whether the toe then bears, whether the same leg lifts next, the tilt) and a model predicts it at the touch, in shadow -- it reads and moves nothing (diag at_*). 0 = off (byte-identical).", ParamValue{0.0}},
         {"plan_adv_w",    ParamMutability::HotMutable, "The landing's forward offset is worth this much of the next leg's margin (per metre, both in metres): progress against the margin kept.", ParamValue{0.3}},
         {"relief",        ParamMutability::HotMutable, "1 = the RELIEF step: when the leg whose turn it is blocks the shift at its own reach limit and is unsafe to lift, another safe leg steps along its heading to where the stuck leg gains its margin without a shift, then the stuck leg's turn is retried; 0 = the turn passes (byte-identical).", ParamValue{0.0}},
         {"relief_step_m", ParamMutability::HotMutable, "The relief planner's candidate landings are this far apart along the leg's heading ...", ParamValue{0.01}},
@@ -205,7 +206,7 @@ ParamMap PoseSequencer::current_params() const {
             {"margin_min_m", ParamValue{floor_.margin_min_m_}}, {"lift_clear_m", ParamValue{executor_.lift_clear_m_}}, {"lift_v_mps", ParamValue{executor_.lift_v_}}, {"swing_v_mps", ParamValue{executor_.swing_v_}},
             {"lower_v_mps", ParamValue{executor_.lower_v_}}, {"lower_fast_v_mps", ParamValue{executor_.lower_fast_v_}}, {"lower_standoff_m", ParamValue{executor_.lower_standoff_m_}}, {"lower_standoff_k", ParamValue{executor_.lower_standoff_k_}}, {"land_edge_m", ParamValue{executor_.land_edge_m_}}, {"land_edge_max_m", ParamValue{executor_.land_edge_max_m_}}, {"stride_m", ParamValue{executor_.stride_m_}}, {"sink_max_m", ParamValue{executor_.sink_max_m_}}, {"tilt_disengage", ParamValue{floor_.tilt_disengage_}},
             {"dt_s", ParamValue{executor_.dt_}}, {"ik_iters", ParamValue{int64_t(kin_.p.ik_iters)}}, {"ik_damping_m", ParamValue{kin_.p.ik_damping_m}}, {"ik_step_max_rad", ParamValue{kin_.p.ik_step_max_rad}}, {"ik_tol_m", ParamValue{kin_.p.ik_tol_m}},
-            {"lo_gain", ParamValue{offset_.gain_}}, {"lo_learn", ParamValue{offset_.learn_}}, {"lo_max_m", ParamValue{offset_.max_m_}}, {"lo_cell_m", ParamValue{offset_.cell_m_}}};
+            {"lo_gain", ParamValue{offset_.gain_}}, {"lo_learn", ParamValue{offset_.learn_}}, {"lo_max_m", ParamValue{offset_.max_m_}}, {"lo_cell_m", ParamValue{offset_.cell_m_}}, {"at_learn", ParamValue{after_.learn_}}};
 }
 
 void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
@@ -218,7 +219,7 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "gait_action_topics", [&](auto const& v){ if (auto p = std::get_if<std::vector<std::string>>(&v)) gait_action_topics_ = *p; });
     apply_param(params, "order", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) planner_.order_ = *p; });
     for (auto const& k : {"engage", "engage_ramp_ticks", "elev_source", "crouch_max_m", "ik_reseed_ticks", "ik_multistart", "free_form", "front_drop_gain", "clip_ticks", "unloaded_shift_m", "land_r_min_m", "ext_margin_m", "ext_lifting", "overdue", "plan_next_first", "ext_urgent_m", "unloaded_share", "unloaded_ticks", "unloaded_landings_min", "unloaded_skips_min", "miss_reacquire", "miss_ticks", "null_step_m", "front_drop_max_m", "front_drop_deadband", "front_drop_tau_ticks", "depth_max_m", "free_margin_m", "free_out_m", "free_noise_m", "face_gap_m", "face_penalty_m", "ik_switch_m", "ik_knee_guard", "hang_ticks", "drag_back_m", "free_back_m", "free_extra_m", "free_retract_m", "ik_reseed_rate_rad", "crouch_v_mps", "crouch_relax_v_mps", "stand_h_m", "level_gain", "level_max_m", "sector_half_rad", "land_sector_rad", "land_band_lo_m", "land_band_hi_m", "neutral_r_m", "settle_v_mps", "settle", "land_clamp", "obstacle_ticks", "heading_hold", "heading_ref", "heading_gain", "yaw_rate_max", "shift_realised", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_load_min", "advance_reach_m", "relief", "plan", "plan_model_margin", "plan_shift_m", "plan_shift_fwd_m", "plan_land_m", "plan_cell_m", "plan_adv_w", "relief_step_m", "relief_cells", "creep_load_relax", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps", "lower_fast_v_mps", "lower_standoff_m", "lower_standoff_k", "land_edge_m", "land_edge_max_m",
-                          "stride_m", "sink_max_m", "tilt_disengage", "dt_s", "ik_iters", "ik_damping_m", "ik_step_max_rad", "ik_tol_m", "lo_gain", "lo_learn", "lo_max_m", "lo_cell_m"})
+                          "stride_m", "sink_max_m", "tilt_disengage", "dt_s", "ik_iters", "ik_damping_m", "ik_step_max_rad", "ik_tol_m", "lo_gain", "lo_learn", "lo_max_m", "lo_cell_m", "at_learn"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which, int idx) {
         if (topic.empty()) return;
@@ -275,6 +276,7 @@ void PoseSequencer::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "lo_learn")         offset_.learn_ = std::max(0.0, get_double(value, k));
     else if (k == "lo_max_m")         offset_.max_m_ = std::clamp(get_double(value, k), 1e-3, 0.06);
     else if (k == "lo_cell_m")        offset_.cell_m_ = std::max(2e-3, get_double(value, k));
+    else if (k == "at_learn")         after_.learn_ = std::max(0.0, get_double(value, k));
     else if (k == "relief")           executor_.relief_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "relief_step_m")    planner_.relief_step_m_ = std::max(1e-3, get_double(value, k));
     else if (k == "relief_cells")     planner_.relief_cells_ = std::clamp(int(get_double(value, k)), 0, 20);
@@ -425,6 +427,7 @@ void PoseSequencer::tick(uint64_t tick_id) {
         executor_.solve_ik();
         if (offset_.on()) offset_.absorb(executor_);   // a step that landed this tick is learned from
     }
+    if (after_.on()) after_.observe(executor_, planner_, in_, book_);   // the after-touch record (reads only); also while idle, where it drops an open record
     if (!odom_out_topic_.empty()) {   // the odometry: the sequencer's own while engaged, the body's passed through otherwise
         if (executor_.phase_ == Phase::Idle || !odom_anchored_) { if (in_.have_odom_in_) { executor_.px_ = in_.odom_in_[0]; executor_.py_ = in_.odom_in_[1]; } odom_anchored_ = in_.have_odom_in_; }
         auto od = std::make_shared<ProprioToken>();
@@ -461,16 +464,21 @@ nlohmann::json PoseSequencer::diag_snapshot() const {
                           {"toe_tgt", tg}, {"u", uu}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {executor_.air_ticks_[0], executor_.air_ticks_[1], executor_.air_ticks_[2], executor_.air_ticks_[3]}}, {"lift_h", executor_.lift_h_}, {"land_h", executor_.land_h_}, {"shift_acc", executor_.shift_acc_}, {"phase_ticks", executor_.phase_ticks_}, {"room", room}, {"outcome", executor_.outcome_.floats()}};
     if (planner_.plan_model_margin_ > 0.0) out["plan_model_margin"] = {double(planner_.model_bias_n_), planner_.model_bias_sum_};   // only when on: [decisions with the model's margin > 1 mm below the geometric one, the summed shortfall m]
     if (kin_.p.knee_guard > 0.0) out["knee_guard"] = {kin_.knee_retries, kin_.knee_unsolved};   // only when the guard is on (the default diag is unchanged)
+    if (after_.on()) { const nlohmann::json at = after_.diag(); for (auto const& [k, v] : at.items()) out["at_" + k] = v; }   // only when on; flat keys (the host drops a nested object)
     if (offset_.on()) { const nlohmann::json lo = offset_.diag(); for (auto const& [k, v] : lo.items()) out["lo_" + k] = v; }   // only when the layer is on (the default diag is unchanged); flat keys, because the host passes scalars and arrays to the body and drops a nested object
     return out;
 }
 
 nlohmann::json PoseSequencer::snapshot_state() const {
-    if (!offset_.on()) return Module::snapshot_state();
-    return nlohmann::json{{"version", 1}, {"lo", offset_.snapshot()}};
+    if (!offset_.on() && !after_.on()) return Module::snapshot_state();
+    nlohmann::json j{{"version", 1}};
+    if (offset_.on()) j["lo"] = offset_.snapshot();
+    if (after_.on()) j["at"] = after_.snapshot();
+    return j;
 }
 void PoseSequencer::restore_state(nlohmann::json const& s) {
     if (offset_.on() && s.is_object() && s.contains("lo")) offset_.restore(s.at("lo"));
+    if (after_.on() && s.is_object() && s.contains("at")) after_.restore(s.at("at"));
 }
 
 } // namespace ogma
