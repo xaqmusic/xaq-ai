@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "LEVERS \u2014 the knee guard + the plan predicts its lift gate (2026-11-17) \u00b7 on the frozen sequencer (the scaffold alone)",
-    "description": "The frozen sequencer (the scaffold alone, no learned authority) with both levers of 2026-11-17: ik_knee_guard 1 (a solve that leaves a knee past straight is reset and retried with the knee bent) and plan_model_margin 1 (the pose search allows for the model's lift margin, so a plan the lift check refuses is not re-issued). WATCH: the rear legs never bend backward; the body does not stand still re-planning on tilted ground. LIVE: the [M] panel's STEPPER section.",
+    "name": "STACK OF RECORD (2026-11-17) \u2014 the frozen sequencer + the knee guard + the plan predicts its lift gate \u00b7 the scaffold alone, no learned authority",
+    "description": "The sequencer's config of record since 2026-11-17 (operator's promotion after a 25-minute rough-terrain run without a fall): the frozen sequencer (the scaffold alone) with ik_knee_guard 1 (a solve that leaves a knee past straight is reset and retried with the knee bent) and plan_model_margin 1 (the pose search allows for the model's lift margin, so a plan the lift check refuses is not re-issued). The control for every lever from here on; the pre-promotion control is ...__p3frz.json. LIVE: the [M] panel's STEPPER section.",
     "env_target": "picrawler",
     "gym_mode": "stairs",
     "phase_tag": "motor-epm (minimal/deploy)",

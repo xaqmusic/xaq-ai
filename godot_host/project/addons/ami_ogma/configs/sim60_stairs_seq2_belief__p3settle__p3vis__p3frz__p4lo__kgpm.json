@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "LEVERS \u2014 the knee guard + the plan predicts its lift gate (2026-11-17) \u00b7 on the learned landing offset config",
-    "description": "BOTH of 2026-11-17 on the learned landing offset config (lo_gain 1): ik_knee_guard 1 (a solve that leaves a knee past straight is reset and retried with the knee bent) and plan_model_margin 1 (the pose search allows for the model's lift margin, so a plan the lift check refuses is not re-issued). WATCH: the rear legs never bend backward; the body does not stand still re-planning on tilted ground. LIVE: the [M] panel's STEPPER section has both switches and the offset authority.",
+    "name": "LEVER (measured: costs progress) \u2014 learned landing offset by expected free energy \u00b7 on the stack of record (knee guard + plan predicts its lift gate)",
+    "description": "The learned landing offset (lo_gain 1, learned stepper Phase 4) on the stack of record of 2026-11-17 (ik_knee_guard 1, plan_model_margin 1). The config of the operator's 25-minute rough-terrain run (2026-11-17: no fall; a front toe re-stepping in place once the chassis passed about 10 degrees). The offset itself is REGRESSION in context on the corridor (-19 % progress); the [M] panel's STEPPER slider drives pose_sequencer.lo_gain live (0 = the scaffold's landings), beside the two switches.",
     "env_target": "picrawler",
     "gym_mode": "stairs",
     "phase_tag": "motor-epm (minimal/deploy)",

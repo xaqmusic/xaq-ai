@@ -331,7 +331,14 @@ i/o mappings that work and build upon them").*
 **Read this section, §4 Phases 3–5, then the ledger's latest entries** (2026-11-16 "a long stairs block", "authority
 sooner"). §10 keeps Phase 3's state and the question as it was put.
 
-**Where it stands (2026-11-17).** Before the next owned value, the operator's priority was the freeze (§9.3): it was the
+**Where it stands (2026-11-17, afternoon).** The operator watched the pair for 25 minutes of rough terrain in the outer field
+(74 960 ticks, no fall, no reset) and **promoted it**: the stack of record is now
+`sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__kgpm.json` (the frozen sequencer + `ik_knee_guard` 1 +
+`plan_model_margin` 1); `…__p3frz.json` is the pre-promotion control. The one failure they saw: past about 10° of chassis
+tilt the stepper "could not figure out the next step" and a front toe re-stepped in place (§9.4). **The next act is a
+discussion with the operator: which value the learned layer owns next** — §9.4 changes §9.2's order.
+
+**Where it stood (2026-11-17, midday).** Before the next owned value, the operator's priority was the freeze (§9.3): it was the
 simulated body asleep — fixed in the body script — and every stairs number in this plan from before 2026-11-17 includes runs
 that were dead from some tick on. Two levers came out of the same day, both at 0 in the configs of record: `ik_knee_guard`
 and `plan_model_margin`. **The next acts are the operator's:** watch the pair (`…__p4lo__kgpm`, or the `[M]` panel's two
@@ -589,10 +596,47 @@ The corridor numbers are unaffected (no corridor run slept), so §9.2's corridor
 | `plan_model_margin` | the pose search lowers its own lift margin for a leg by however much the support model's margin sits below it, so it does not re-issue a zero-shift plan the lift check refuses | no re-plan loop in 12 runs with it |
 | both | | terrain: 2 freezes against 3, none a loop or a hyperextension; corridor identical to the control; 38 mm +9.9 cm/min (t +2.3); graded flight +7.9 cm/min (t +2.4); 64 mm mixed (no falls, but more missed landings and stall) |
 
-**Open, in order.** (1) The operator's observation of the pair in the UI. (2) Each lever singly at 64 mm (the cost there is
+**Open, in order.** (1) ~~The operator's observation of the pair in the UI~~ done 2026-11-17: promoted (§9.4). (2) Each lever singly at 64 mm (the cost there is
 not attributed). (3) New golden traces on the corrected simulator, then the Phase 3 re-reads and the Phase 4 graded-flight
 re-read. (4) The host's heap abort (three times in about 700 runs) under a sanitizer build. (5) Why the hang share rises
 under the guard.
+
+### 9.4 The pair promoted; what is left is the plan on a tilted body (2026-11-17, afternoon)
+
+**Promotion.** The operator ran `…__p4lo__kgpm` for 25 minutes of rough terrain in the outer field of the terrain arena
+(seed 42, 74 960 ticks: no fall, no reset, 100 % upright) and promoted the pair. The stack of record is
+`sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__kgpm.json`; it is the control for every lever from here on, and
+`…__p3frz.json` stays as the pre-promotion control. The parameters' defaults in the code stay 0. New golden traces for the
+refactor gate are owed on this config and the corrected simulator (§9.3 item 3).
+
+**The operator's observation.** "It wasn't until the chassis was forced to exceed 10 degrees that the robot could not figure
+out the next step (front right toe tapping in place)."
+
+**What the terrain logs already hold** (`frz5/a_kgpm`: the same config, six 3-minute runs; the UI keeps no per-tick log, so
+the operator's own run cannot be read). Reader: one leg landing three or more times in a row.
+
+- It is there, and it is a front leg every time (FL 3, FR 4 episodes): 2–14 s each, 4 % of engaged time, the body moving
+  under 2.5 cm. Through each episode the wave's own leg is skipped for want of a lift margin, and a later leg steps without
+  taking the wave's turn — so the same leg is chosen again.
+- The planner's block instrument names the constraint: in 90 % of the blocked plans inside an episode, the smallest body
+  shift that would give the skipped leg its margin takes **another planted toe inside its minimum reach** (60 mm; that toe
+  sits at a median 65 mm from its hip). That toe is one of the two highest of the four 78 % of the time (50 % by chance).
+- Blocked plans rise with tilt: 3.2 a minute below 5°, 7.4 at 5–10°, 10.0 at 10–15°, 26 above 15°. At 10–15° nearly half
+  (47 %) are a shift that exists by the planner's geometry and is refused by the support model's margin.
+- No episode in these runs outlasted 14 s, and the share of time spent re-stepping is flat across the tilt bins (4–5 %): the
+  operator's lasting case is not reproduced yet (six 10-minute runs along their path are the next read: `tilt1`).
+
+**The reading (a hypothesis, to be tested by dose-response).** The stance's levelling is proportional only (`level_gain`
+0.5, each toe moved at most `level_max_m` 2 cm), so about two thirds of the ground's slope stays in the body. A tilted body
+carries its centre of mass downhill of the toes by its height times the tangent of the tilt — about 14 mm at 10°, against a
+lift margin of 10 mm asked. The shift that would answer it is uphill, toward toes that already stand close under their
+hips. The swing is not where the stepper fails: on the corrected simulator the terrain runs record no missed landing and no
+hang in 18 minutes, and the stairs benches 1–3 % of steps each.
+
+**What it does to §9.2's order.** The lift height's benefit was the hang and the miss; with the dead runs out of the record
+those are small. The error left is in the stance — whether the next leg can be lifted — and the outcome vector of Phase 4
+has no entry for it (nor for the body's tilt or the load on the other feet after the touch). §9.2's first rule applies
+again: the outcome set comes before the value. The candidates and the order are the operator's discussion (2026-11-17).
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 
@@ -611,7 +655,7 @@ discuss in a fresh context, recorded at the end.
   seeds 10c + FROM_RUN + k). Readers: `stepper_curriculum.py` (per run: nodes, baked, reuse, heads), `stepper_learning.py`
   (practice curves: slope per doubling, position-matched slope, last-rep change, return after a gap). Both cut a chain at its
   first broken link.
-- Config of record: `sim60_stairs_seq2_belief__p3settle__p3vis__p3frz.json` (+`__p3entry` for entries to bake).
+- Config of record: `sim60_stairs_seq2_belief__p3settle__p3vis__p3frz.json` (+`__p3entry` for entries to bake). *Since 2026-11-17: `…__p3frz__kgpm.json` (§9.4).*
 
 ### 10.2 What is measured
 
