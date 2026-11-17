@@ -640,6 +640,25 @@ in either. The hypothesis in the form "level harder and the block goes" is refut
 block is a reach limit. What binds is how the body comes to stand over its planted toes — the blocking toe sits 63–65 mm
 from its hip in every arm, wherever the landings are kept — and no single constant moved globally improves it.
 
+**The operator's stall reproduced (`tilt1`, six 10-minute runs along their path; `stepper_tilt.py`).** Re-stepping takes
+11–12 % of the time below 10° of chassis tilt and 44–51 % above it, and two episodes last five minutes (a front-left toe,
+121 and 225 landings, the body at 15° and 11°, moving 0.5 and 1.4 cm). In them the body stands on three legs; the fourth
+toe carries 1–3 % of the weight and its contact flag is on 3–8 % of the time. Its touch is counted a landing, it is the
+only leg with a lift margin, and it steps again; the leg whose turn it is cannot be freed, because the shift would take a
+bearing toe inside its minimum reach. Every counter reads a normal step: no hang, no miss, no timeout. It is the knot of
+2026-11-08 (the unloaded toe re-stepped on the approach), where three local rules failed; with today's two constants, five
+imposed forms have now failed at it.
+
+**What it says about the learned layer.** The stepper's record of a step ends at the first contact. The prediction that
+fails here is one it does not make — *the toe I have just placed will carry its share* — which is the operator's
+2026-11-06 sentence ("if I place my foot here, my FSRs and IMU will report this") and the plan's own deferred outcome
+("(later) the load shares after the touch"). The first addition is therefore to the outcome vector, in shadow: whether the
+landed toe bears a second after the touch, the body's tilt then, and whether the next leg in turn has a feasible lift. The
+value proposed to the operator for the first closed loop on it: what the toe does after first contact (how far it presses
+before the step is called landed). Its costs are the tilt, the other toes' load and the leg's remaining extension, all
+observed in the same step. Caveat carried from the robot: the FSRs are trusted as thresholds, not magnitudes, so "bears" is
+a threshold outcome, not a share regression.
+
 **What it does to §9.2's order.** The lift height's benefit was the hang and the miss; with the dead runs out of the record
 those are small. The error left is in the stance — whether the next leg can be lifted — and the outcome vector of Phase 4
 has no entry for it (nor for the body's tilt or the load on the other feet after the touch). §9.2's first rule applies
