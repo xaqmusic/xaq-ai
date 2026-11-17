@@ -1,5 +1,6 @@
 extends Control
-## Live tuning panel for the sim: the LoadPhaseGait stack's gait, servo, height and learner controls.
+## Live tuning panel for the sim: the LoadPhaseGait stack's gait, servo, height and learner controls, and (when the config
+## carries a PoseSequencer) the learned stepper's authority.
 ##
 ## Unlike reward_panel (which writes body @export fields), this writes BRAIN
 ## module params via brain.apply_patch({"op":"set_param","id":"motor_epm",...}).
@@ -24,7 +25,11 @@ const _MODULE_ID: String = "motor_epm"
 # the height homeostat, agency, rear landing ...), none of it in the current stack.  These are the controls of
 # the LoadPhaseGait stack, for walking-speed and posture experiments.  A key the loaded config does not have
 # shows "—" and does nothing.  The old list is in git history (motor_epm_panel.gd before this change).
+# "only_if": <module id> on a section or a slider hides it when the loaded config has no such module (2026-11-17,
+# operator: the stepper's authority beside the LPG controls) -- the stepper rows show only on a sequencer config.
 const _SLIDERS: Array = [
+	{"section": "STEPPER  (PoseSequencer: learned landing offset)", "only_if": "pose_sequencer"},
+	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "lo_gain", "label": "offset authority (0 = scaffold)", "min": 0.0, "max": 1.0, "step": 0.05},
 	{"section": "PACE  (meta: period + stroke together)"},
 	{"meta": "pace", "key": "pace", "label": "pace (0 slow .. 1 fast)", "min": 0.0, "max": 1.0, "step": 0.05},
 	{"section": "GAIT  (LoadPhaseGait)"},
@@ -73,6 +78,7 @@ var _content_vb: VBoxContainer = null
 var _status: Label = null
 var _minimise_btn: Button = null
 var _value_labels: Dictionary = {}    # "where/key" -> Label (where = module id, or "body")
+var _optional: Array = []             # [module id, Control]: rows and headings shown only when the config has that module
 var _synced: bool = false             # initial pull landed (brain ready)
 # Minimise/expand: collapse to the header row.  The panel
 # is anchored bottom=1.0, so we must flip anchor_bottom to 0.0 and clamp
@@ -122,7 +128,7 @@ func _ready() -> void:
 	header.add_theme_constant_override("separation", 4)
 	outer.add_child(header)
 	var title := Label.new()
-	title.text = "SIM TUNING  (LPG stack: gait, servos, height)"
+	title.text = "SIM TUNING  (stepper, LPG gait, servos, height)"
 	title.add_theme_font_size_override("font_size", 13)
 	title.add_theme_color_override("font_color", Color(0.9, 1.0, 0.9, 1.0))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -145,6 +151,8 @@ func _ready() -> void:
 			sec.add_theme_font_size_override("font_size", 11)
 			sec.add_theme_color_override("font_color", Color(0.75, 0.9, 1.0, 1.0))
 			_content_vb.add_child(sec)
+			if spec.has("only_if"):
+				_optional.append([str(spec["only_if"]), sec])
 		else:
 			_build_slider_row(_content_vb, spec)
 
@@ -184,6 +192,9 @@ func _build_slider_row(parent: VBoxContainer, spec: Dictionary) -> void:
 	value_label.text = "—"
 	row.add_child(value_label)
 	_value_labels[where + "/" + key] = value_label
+	if spec.has("only_if"):
+		_optional.append([str(spec["only_if"]), row])
+		value_label.set_meta("only_if", str(spec["only_if"]))
 	# stash the slider so the initial pull can set it without re-emitting apply
 	value_label.set_meta("slider", slider)
 
@@ -214,6 +225,7 @@ func _sync_from_module() -> bool:
 		return false
 	var cur: Dictionary = {}      # "where/key" -> value
 	var ok_main := false
+	var present: Dictionary = {}   # module ids the loaded config answers for
 	var ids: Dictionary = {}
 	for spec in _SLIDERS:
 		if spec.has("key") and not bool(spec.get("body", false)):
@@ -222,6 +234,7 @@ func _sync_from_module() -> bool:
 		var schema = br.get_module_param_schema(mid)
 		if typeof(schema) != TYPE_ARRAY or schema.is_empty():
 			continue
+		present[mid] = true
 		if mid == _MODULE_ID:
 			ok_main = true
 		for entry in schema:
@@ -240,10 +253,16 @@ func _sync_from_module() -> bool:
 		_pace_period_cfg = float(cur["load_phase/period_ticks"])
 		_pace_stroke_cfg = float(cur[_MODULE_ID + "/stroke_gain"])
 		cur["meta/pace"] = _pace_from_period(_pace_period_cfg)
+	for opt in _optional:
+		(opt[1] as Control).visible = present.has(opt[0])
 	var missing := 0
+	var hidden := 0
 	for k in _value_labels.keys():
 		var lbl: Label = _value_labels[k]
 		var sld: HSlider = lbl.get_meta("slider")
+		if lbl.has_meta("only_if") and not present.has(str(lbl.get_meta("only_if"))):
+			hidden += 1   # a row for a module this config does not have: not shown, not counted as missing
+			continue
 		if cur.has(k) and cur[k] != null and typeof(cur[k]) in [TYPE_FLOAT, TYPE_INT, TYPE_BOOL]:
 			var v := float(cur[k])
 			sld.set_value_no_signal(v)
@@ -253,19 +272,37 @@ func _sync_from_module() -> bool:
 			lbl.text = "—"
 			missing += 1
 	_status.text = "live — drag to retune" + (("  (%d controls not in this config)" % missing) if missing > 0 else "")
-	print("SimTuningPanel: synced %d controls (%d not in this config)" % [_value_labels.size() - missing, missing])
-	# OGMA_PANEL_SELFTEST=1: turn one gait knob and one body knob through the real handler and read them back
-	# (a headless run cannot drag a slider).
+	print("SimTuningPanel: synced %d controls (%d not in this config)" % [_value_labels.size() - hidden - missing, missing])
+	# OGMA_PANEL_SELFTEST=1: turn one gait knob, one body knob and (on a sequencer config) the stepper's authority through
+	# the real handler and read them back (a headless run cannot drag a slider).  The read-back waits a few physics frames:
+	# a patch lands at the brain's next tick, and a read in the same frame returns the value before it (2026-11-17: the
+	# first form of this test printed the config's own 30 after setting 41).
 	if OS.get_environment("OGMA_PANEL_SELFTEST") == "1":
 		_on_slider("load_phase", "period_ticks", 41.0)
 		_on_slider("body", "MAX_SERVO_SPEED", 5.5)
-		var sch = br.get_module_param_schema("load_phase")
-		var got = null
-		for e in sch:
-			if typeof(e) == TYPE_DICTIONARY and str(e.get("key", "")) == "period_ticks":
-				got = e.get("current_value", null)
-		print("SimTuningPanel selftest: load_phase.period_ticks -> %s, body MAX_SERVO_SPEED -> %s" % [str(got), str(_body.get("MAX_SERVO_SPEED"))])
+		if present.has("pose_sequencer"):
+			_on_slider("pose_sequencer", "lo_gain", 0.35)
+		_selftest_readback(present.has("pose_sequencer"))
 	return true
+
+func _schema_value(mid: String, key: String):
+	var br = _brain()
+	if br == null:
+		return null
+	for e in br.get_module_param_schema(mid):
+		if typeof(e) == TYPE_DICTIONARY and str(e.get("key", "")) == key:
+			return e.get("current_value", null)
+	return null
+
+func _selftest_readback(has_stepper: bool) -> void:
+	for _i in range(10):
+		await get_tree().physics_frame
+	print("SimTuningPanel selftest: load_phase.period_ticks -> %s (set 41), body MAX_SERVO_SPEED -> %s (set 5.5)" % [str(_schema_value("load_phase", "period_ticks")), str(_body.get("MAX_SERVO_SPEED"))])
+	var row_visible := str(_value_labels["pose_sequencer/lo_gain"].get_parent().visible)
+	if has_stepper:
+		print("SimTuningPanel selftest: pose_sequencer.lo_gain -> %s (set 0.35; row visible %s)" % [str(_schema_value("pose_sequencer", "lo_gain")), row_visible])
+	else:
+		print("SimTuningPanel selftest: no pose_sequencer in this config (stepper rows visible %s)" % row_visible)
 
 func _pace_from_period(period: float) -> float:
 	return clampf((_PACE_PERIOD_SLOW - period) / (_PACE_PERIOD_SLOW - _PACE_PERIOD_FAST), 0.0, 1.0)
