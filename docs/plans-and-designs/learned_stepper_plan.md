@@ -633,6 +633,13 @@ lift margin of 10 mm asked. The shift that would answer it is uphill, toward toe
 hips. The swing is not where the stepper fails: on the corrected simulator the terrain runs record no missed landing and no
 hang in 18 minutes, and the stairs benches 1–3 % of steps each.
 
+**The dose-response, same day (`tilt2`, n = 6 × 3 min, signals; ledger).** Both constants the reading pointed at were
+moved by hand on the terrain battery's seeds, and both lengthen the re-stepping: `level_gain` 1.0 gives 256 s of it against
+42 s (t +2.5), with episodes up to 63 s at 3–9° of tilt; `land_r_min_m` 0.09 gives 148 s (t +2.1). Distance is not separated
+in either. The hypothesis in the form "level harder and the block goes" is refuted: levelling spends the legs' reach, and the
+block is a reach limit. What binds is how the body comes to stand over its planted toes — the blocking toe sits 63–65 mm
+from its hip in every arm, wherever the landings are kept — and no single constant moved globally improves it.
+
 **What it does to §9.2's order.** The lift height's benefit was the hang and the miss; with the dead runs out of the record
 those are small. The error left is in the stance — whether the next leg can be lifted — and the outcome vector of Phase 4
 has no entry for it (nor for the body's tilt or the load on the other feet after the touch). §9.2's first rule applies
