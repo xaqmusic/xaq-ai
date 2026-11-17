@@ -32,7 +32,17 @@ public:
     int  choose_leg();
     bool shift_feasible(int lifting, const std::array<Vec3f, 4>& toes, double sx, double sz) const;
     int  shift_refusal(int lifting, const std::array<Vec3f, 4>& toes, double sx, double sz, int& toe) const;
-    double best_margin_over_shifts(int leg, const std::array<Vec3f, 4>& toes, double cx, double cz, double& sx, double& sz, bool forward_first) const;
+    double best_margin_over_shifts(int leg, const std::array<Vec3f, 4>& toes, double cx, double cz, double& sx, double& sz, bool forward_first, double bias = 0.0) const;
+    // THE PLAN PREDICTS ITS GATE (2026-11-17; plan_model_margin 0 = off, byte-identical).  The search rates a leg's lift margin
+    // from the commanded toes in the body's own plane; the executor lets the leg go only if SupportModel's margin agrees
+    // (all four toes bearing).  On a tilted body the two differ by millimetres (the stance height times the tilt), and where the
+    // search's best shift is ZERO the difference is a fixed point: the plan arrives at once, the gate refuses it, the turn
+    // passes, and the same plan comes back -- 68 times over 30 s in the terrain arena, the body standing still (and, in the
+    // sim, falling asleep).  With it, the search's own margin for the leg it is about to lift is lowered by however much the
+    // model's margin sits below the geometric one at the present pose (never raised), so the shift it plans is one the gate
+    // will pass, or the leg is skipped as having no margin and another is tried.
+    double model_bias(int leg, double cx, double cz);
+    double plan_model_margin_ = 0.0; int64_t model_bias_n_ = 0; double model_bias_sum_ = 0.0;
     void check_drift(double cx, double cz, double need);
     void diagnose_block(int leg, double cx, double cz, double need);
 

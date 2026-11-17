@@ -33,6 +33,15 @@ bool LegSolver::set_model(const float* v, std::size_t n) {
         }
         ext_lmax_ok_ = true;
     }
+    if (!knee_straight_ok_) {   // the knee guard's reference, once: the knee angle of the straight leg (the longest hip2-to-toe), and the fold's side of it
+        const double klo = knee_rest_ - (knee_widening_ ? knee_hyper_ : hip2_range_), khi = knee_rest_ + (knee_widening_ ? knee_fold_ : hip2_range_);
+        auto reach = [&](double k) { return double(len(sub(toe_of(0, {0.0, 0.0, k}), anchors_[0].hip2_world))); };
+        double bk = klo, best = -1.0;
+        for (int j = 0; j <= 256; ++j) { const double k = klo + (khi - klo) * j / 256.0, r = reach(k); if (r > best) { best = r; bk = k; } }
+        double a = std::max(klo, bk - (khi - klo) / 256.0), b = std::min(khi, bk + (khi - klo) / 256.0);   // refined by a ternary search on the bracket
+        for (int it = 0; it < 60; ++it) { const double m1 = a + (b - a) / 3.0, m2 = b - (b - a) / 3.0; if (reach(m1) < reach(m2)) a = m1; else b = m2; }
+        knee_straight_ = 0.5 * (a + b); knee_fold_sign_ = (khi - knee_straight_) >= (knee_straight_ - klo) ? 1.0 : -1.0; knee_straight_ok_ = true;
+    }
     return true;
 }
 
@@ -52,7 +61,7 @@ std::array<double, 3> LegSolver::u_of_angles(int leg, const std::array<double, 3
     return {std::clamp((t[0] - hip1_rest_) / hip1_range_, -1.0, 1.0), std::clamp((t[1] - hip2_rest_) / hip2_range_, -1.0, 1.0), std::clamp(dk / kr, -1.0, 1.0)};
 }
 // one damped least-squares step toward `target`: dt = J^T (J J^T + lambda^2 I)^-1 e, J by central differences, the step bounded
-bool LegSolver::ik_step(int leg, const Vec3f& target, std::array<double, 3>& t) const {
+bool LegSolver::ik_step(int leg, const Vec3f& target, std::array<double, 3>& t, bool knee_floor) const {
     const Vec3f cur = toe_of(leg, t);
     const Vec3f e = sub(target, cur);
     const double en = len(e);
@@ -81,10 +90,25 @@ bool LegSolver::ik_step(int leg, const Vec3f& target, std::array<double, 3>& t) 
     for (int j = 0; j < 3; ++j) t[std::size_t(j)] += dt[j] * sc;
     // joint limits, in action units
     const auto u = u_of_angles(leg, t); t = angles_of_u(leg, u);
+    if (knee_floor && knee_straight_ok_ && knee_bend(t) < p.knee_floor_rad) t[2] = knee_straight_ + knee_fold_sign_ * p.knee_floor_rad;   // the guard's retry: never past straight
     return false;
 }
 
 bool LegSolver::ik_solve(int leg, const Vec3f& target, std::array<double, 3>& t, bool allow_multistart) {
+    if (p.knee_guard > 0.0 && knee_straight_ok_) {   // THE KNEE GUARD: a solve that ends past straight is discarded and retried from the last pose, the knee turned back
+        const std::array<double, 3> t0 = t;
+        const bool done = ik_solve_free(leg, target, t, allow_multistart);
+        if (knee_bend(t) >= 0.0) return done;
+        ++knee_retries;
+        t = t0; t[2] = knee_straight_ + knee_fold_sign_ * std::max(std::fabs(knee_bend(t0)), p.knee_nudge_rad);   // the last pose, its knee on the bent side (mirrored if it was already past)
+        bool ok = false; for (int k = 0; k < 12 && !ok; ++k) ok = ik_step(leg, target, t, true);
+        if (!ok && len(sub(toe_of(leg, t), target)) > 2.0 * p.ik_tol_m) ++knee_unsolved;
+        return ok;
+    }
+    return ik_solve_free(leg, target, t, allow_multistart);
+}
+
+bool LegSolver::ik_solve_free(int leg, const Vec3f& target, std::array<double, 3>& t, bool allow_multistart) {
     bool done = false;
     for (int k = 0; k < p.ik_iters && !done; ++k) done = ik_step(leg, target, t);
     if (done || !allow_multistart) return done;

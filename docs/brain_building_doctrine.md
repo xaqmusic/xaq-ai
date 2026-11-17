@@ -546,6 +546,23 @@ recurs at every layer.
   it has a prior clause: ***is the instrument watching the thing you changed, in the process
   you are running?*** Verify a new instrument reports non-zero on an arm where it must, before
   trusting a zero anywhere else.
+- **★ BEFORE DIAGNOSING A CONTROLLER, PROVE THE PLANT IS STILL BEING SIMULATED.** The picrawler's
+  careful stepper "froze" for days, and the freezes were worked as controller faults: an
+  unloaded toe, a null step, a wrong IK branch, a hung toe, a planner deadlock. Each was real
+  and none was the freeze. The physics engine puts a rigid body to sleep after half a second of
+  stillness, and a sleeping body ignores its joint motors; a gait that always moves never met
+  it, and a stepper that stands still to decide met it in 40 % of its golden stairs runs. The
+  tell was in the log the whole time: **every real joint, the chassis height and the tilt
+  exactly constant, row after row, while the commands swung 3 rad** — a body does not hold
+  still to the last digit, an engine state does. The rule: when a body stops, the first read is
+  *commanded against realised, at the joints*; an exact constant is a dead plant, and a
+  controller verdict drawn over it is `NULL`-against-a-broken-baseline. Two corollaries the
+  same day supplied. **A solver's small residual is not evidence the body is there**: past a
+  singularity it found a pose on the target that the body did not take, and every guard keyed
+  to the residual stayed silent. And **a lever that makes things worse may have removed the
+  noise that hid the next fault**: the guard that stopped the hyperextension tripled the
+  freezes, and that regression is what exposed the sleeping body
+  (ledger 2026-11-17).
 - **★ A DISPLACEMENT-RECOVERY TEST BETWEEN TWO ATTRACTORS MEASURES LANDSCAPE COMPOSITION,
   NOT SEARCH CAPABILITY.** The PART IV decision experiment displaced one gain into its
   measured bad band and scored the search on re-entering the good band. It returned a

@@ -191,6 +191,11 @@ revisit if X" is a complete verdict; "dead" is not one.
    harness set** (the Cell's "20 varied worlds" shared one pillar layout for two months) and
    assert the lever landed (`OGMA_DUMP_PARAMS=1`, the duck's read-backs).
 
+8. **Plant.** Is the body still being simulated? Real joints exactly constant while the
+   commands move is the physics engine (a sleeping body ignores its motors), not a behaviour:
+   read commanded against realised before reading the controller (`stepper_freeze.py`; the
+   body log's `slp`; 2026-11-17).
+
 **Failing any of these means you measured your harness, not your idea.** Every one of these
 has produced a false verdict here; the ledger §7 has the cases.
 
@@ -252,6 +257,10 @@ godot4 --headless --fixed-fps 60 --quit-after 4000000 \
   (distinct world and play seeds per job, a seed manifest, paired t; `--legacy-seeding`
   reproduces the pre-2026-09-06 fixed-world runs). Perturbations:
   `cell_perturbation_d.py --vary-world --lesion vision|stick|scent_noise|heading_drift`.
+- **The powered body never sleeps** (2026-11-17): Godot slept the rigid bodies after 0.5 s of stillness and a
+  sleeping body ignores its motors — the careful stepper's permanent "freeze", present in 40 % of its golden stairs
+  runs. `OGMA_PICRAWLER_ALLOW_SLEEP=1` restores the old behaviour to reproduce a log from before; stepper numbers
+  measured on stairs or terrain before this date include dead runs.
 - Body diagnostics are JSON-per-line on stdout (`fwd_v`, `gc_raw`/`gc_norm`/`cy_norm`,
   `h_ema`/`h_max`/`h_bias`, chassis `y`, `knee[]`, `feet_y[]`, `auto_reset_count`).
 - **UI:** `[P]` toggles the per-metre path trail; `[X]` hides the cloud of touches (purple: the body's own FK

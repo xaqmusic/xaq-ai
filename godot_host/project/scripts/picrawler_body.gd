@@ -5423,6 +5423,39 @@ func _rebuild_body(geometry_path: String = "") -> void:
 		% _geometry_name)
 	_ui_notify("[body] swapped → %s" % _geometry_name)
 
+# THE POWERED BODY NEVER SLEEPS (2026-11-17).  Godot's rigid bodies fall asleep after half a second below its speed thresholds
+# (0.1 m/s, 8 deg/s), and a sleeping body ignores its joints' motor targets: the comments at the ragdoll and motor-test toggles
+# already say so, and both wake the body by hand -- the normal powered path never did.  A gait that always moves never sleeps.
+# The careful stepper stands still while it decides (a planned shift of zero that its own lift check refuses, re-planned every
+# 20 ticks), the body sleeps, and from then on no command moves it: the stepper goes on counting "steps" (one leg 79 times in
+# 40 s) over joints that are exactly constant.  Measured: 3 of 6 terrain-arena runs with the knee guard, and 3 of 72 of the
+# graded-flight runs of 2026-11-16 (still to the log's end, commands swinging 3.5 rad).  A servo robot has no such state, so
+# the body's segments are kept awake.  OGMA_PICRAWLER_ALLOW_SLEEP=1 restores the engine's default (to reproduce an older log).
+# The env is read HERE, at the build, and the engine's own flags are printed back (an env parsed after the build never lands).
+func _apply_sleep_policy() -> void:
+	var ev: String = OS.get_environment("OGMA_PICRAWLER_ALLOW_SLEEP")
+	var allow: bool = (ev != "" and ev != "0")
+	var n_can: int = 0
+	var n_all: int = 0
+	for b in [_chassis] + (_coxas as Array) + (_uppers as Array) + (_lowers as Array):
+		if b == null:
+			continue
+		b.can_sleep = allow or _ragdoll_mode
+		if not b.can_sleep:
+			b.sleeping = false
+		n_all += 1
+		if b.can_sleep:
+			n_can += 1
+	print("PicrawlerBody: sleep policy — %d of %d body segments may sleep (OGMA_PICRAWLER_ALLOW_SLEEP=%s)" % [n_can, n_all, "1" if allow else "0"])
+
+# how many of the body's segments the engine has asleep now (an instrument: the body log's `slp`)
+func _sleeping_segments() -> int:
+	var n: int = 0
+	for b in [_chassis] + (_coxas as Array) + (_uppers as Array) + (_lowers as Array):
+		if b != null and b.sleeping:
+			n += 1
+	return n
+
 func _build_body() -> void:
 	# Chassis
 	_chassis = RigidBody3D.new()
@@ -5601,6 +5634,7 @@ func _build_body() -> void:
 	# on the previous geometry — a stale cache would not fail loudly, it would publish
 	# confident poses for a body that no longer exists, into feet_y_gravity_cmd_imu.
 	_legkin_refresh()
+	_apply_sleep_policy()
 	_report_geometry()
 	_report_selfcol_map()
 
@@ -6550,6 +6584,8 @@ func _input(event: InputEvent) -> void:
 			b.can_sleep = not _motor_test_mode
 			if _motor_test_mode:
 				b.sleeping = false
+		if not _motor_test_mode:
+			_apply_sleep_policy()   # leaving the motor test: the powered body stays awake (2026-11-17)
 		# Sync _eff_target + torque history to the CURRENT measured joint
 		# state so the first powered tick has zero PD error.  Without
 		# this, stale brain-accumulated targets fire on entry and slam
@@ -13069,6 +13105,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			for li in range(4):
 				for ji in range(3): ca.append(snappedf(_cmd_angle(li, ji), 0.001))
 			line["cmd_ang"] = ca; line["cmd_fk_src"] = cmd_fk_source
+			line["slp"] = _sleeping_segments()   # body segments the physics engine has asleep (2026-11-17: a sleeping body ignores its motors)
 		if _touch_feet_y.size() >= 4: line["toe_y"] = [snappedf(float(_touch_feet_y[0]), 0.0001), snappedf(float(_touch_feet_y[1]), 0.0001), snappedf(float(_touch_feet_y[2]), 0.0001), snappedf(float(_touch_feet_y[3]), 0.0001)]   # the toe tips' gravity heights the brain reads
 		var pr: Array = tm.get("prediction", [])
 		if pr.size() >= 4:
@@ -13200,6 +13237,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			for k in range(oc.size()): oca.append(int(oc[k]) if k in [0, 1, 2, 3, 10, 11] else snappedf(float(oc[k]), 0.0001))
 			line["ps_out"] = oca
 		# the landing offset (2026-11-16, learned stepper Phase 4; only when the layer is on -- lo_gain or lo_learn): the latest decision [its count, leg, delta m, risk, epistemic value, candidates admitted, distress, leverage, yhat x 4 (touchdown error cm, correction cm, hang, miss)], the latest update [the outcome's seq, leg, delta m, the prequential error x 4], the counts [decisions, shifted, vetoed candidates, in distress, updates, abandoned, unpaired, then the vetoes by check and side: landing checks forward / back, next-leg margin forward / back], the chosen offsets (cells -6 .. +6), and [each outcome's mean square x 4, the model's residual mean square x 4, its NIS x 4]
+		if ps.has("plan_model_margin"):   # the plan predicts its gate (2026-11-17), only when on: [decisions biased, the summed shortfall m]
+			var pmm: Array = ps.get("plan_model_margin", [])
+			if pmm.size() >= 2: line["ps_pmm"] = [int(pmm[0]), snappedf(float(pmm[1]), 0.0001)]
+		if ps.has("knee_guard"):   # the knee guard (2026-11-17), only when it is on: [solves discarded for a knee past straight, retries left off the target]
+			var kg: Array = ps.get("knee_guard", [])
+			if kg.size() >= 2: line["ps_kg"] = [int(kg[0]), int(kg[1])]
 		if ps.has("lo_dec"):
 			for key in [["dec", "ps_lo"], ["upd", "ps_lou"]]:
 				var lv: Array = []

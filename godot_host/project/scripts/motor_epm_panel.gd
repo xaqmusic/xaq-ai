@@ -30,6 +30,8 @@ const _MODULE_ID: String = "motor_epm"
 const _SLIDERS: Array = [
 	{"section": "STEPPER  (PoseSequencer: learned landing offset)", "only_if": "pose_sequencer"},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "lo_gain", "label": "offset authority (0 = scaffold)", "min": 0.0, "max": 1.0, "step": 0.05},
+	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "ik_knee_guard", "label": "knee guard (1 = never past straight)", "min": 0.0, "max": 1.0, "step": 1.0},
+	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "plan_model_margin", "label": "plan predicts its lift gate (1 = on)", "min": 0.0, "max": 1.0, "step": 1.0},
 	{"section": "PACE  (meta: period + stroke together)"},
 	{"meta": "pace", "key": "pace", "label": "pace (0 slow .. 1 fast)", "min": 0.0, "max": 1.0, "step": 0.05},
 	{"section": "GAIT  (LoadPhaseGait)"},

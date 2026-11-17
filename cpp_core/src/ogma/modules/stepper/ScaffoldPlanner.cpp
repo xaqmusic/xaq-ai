@@ -132,7 +132,17 @@ bool ScaffoldPlanner::landing_ok(int c, const Vec3f& L) const {
     for (int it = 0; it < 8 && !ok; ++it) ok = kin_.ik_step(c, deep, ang);
     return ok || len(sub(kin_.toe_of(c, ang), deep)) <= 0.008;
 }
-double ScaffoldPlanner::best_margin_over_shifts(int leg, const std::array<Vec3f, 4>& toes, double cx, double cz, double& sx, double& sz, bool forward_first) const {
+// how far the model's lift margin for `leg` sits BELOW the geometric one at the present pose (<= 0; 0 when off, or with a toe not bearing: the model vetoes only with all four down)
+double ScaffoldPlanner::model_bias(int leg, double cx, double cz) {
+    if (plan_model_margin_ <= 0.0 || !in_.have_support_ || int(in_.support_[1] + 0.5f) < 4) return 0.0;
+    std::array<std::array<double, 2>, 3> t3{}; int kk = 0;
+    for (int i = 0; i < 4; ++i) if (i != leg && kk < 3) { t3[size_t(kk)] = {double(ex_.toe_tgt_[size_t(i)].x), double(ex_.toe_tgt_[size_t(i)].z)}; ++kk; }
+    double a, b; const double m_geo = tri_margin(t3, cx, cz, a, b);
+    const double bias = plan_model_margin_ * std::min(0.0, double(in_.support_[size_t(10 + 5 * leg)]) - m_geo);
+    if (bias < -1e-3) { ++model_bias_n_; model_bias_sum_ -= bias; }
+    return bias;
+}
+double ScaffoldPlanner::best_margin_over_shifts(int leg, const std::array<Vec3f, 4>& toes, double cx, double cz, double& sx, double& sz, bool forward_first, double bias) const {
     double best = -1e9, best_key = -1e9; sx = 0.0; sz = 0.0;
     const double need = floor_.margin_min_m_ + floor_.margin_extra_m_;
     const int nl = int(std::floor(plan_shift_m_ / plan_cell_m_ + 1e-9)), nf = int(std::floor(plan_shift_fwd_m_ / plan_cell_m_ + 1e-9));
@@ -141,7 +151,8 @@ double ScaffoldPlanner::best_margin_over_shifts(int leg, const std::array<Vec3f,
         if (!shift_feasible(leg, toes, tx, tz)) continue;
         std::array<std::array<double, 2>, 3> t3{}; int kk = 0;
         for (int i = 0; i < 4; ++i) if (i != leg && kk < 3) { t3[size_t(kk)] = {double(toes[size_t(i)].x) - tx, double(toes[size_t(i)].z) - tz}; ++kk; }
-        double a, b; const double m = tri_margin(t3, cx, cz, a, b);
+        double a, b; double m = tri_margin(t3, cx, cz, a, b);
+        if (bias != 0.0) m += bias;   // the model's margin, predicted (plan_model_margin)
         // the key: with the margin met, forward progress then the shortest shift; without it, the margin itself
         const double key = forward_first ? (m >= need ? 10.0 + tz - 0.1 * std::hypot(tx, tz) : m) : m;
         if (key > best_key) { best_key = key; best = m; sx = tx; sz = tz; }
@@ -204,7 +215,7 @@ bool ScaffoldPlanner::plan_step(int& leg_out, Vec3f& land_out, double& sx_out, d
             ++plan_skips_;
             if (k == 0 && overdue_ > 0.0 && protect_ < 0) protect_ = c;
         };
-        double sx, sz; const double m_now = best_margin_over_shifts(c, ex_.toe_tgt_, cx, cz, sx, sz, true);
+        double sx, sz; const double m_now = best_margin_over_shifts(c, ex_.toe_tgt_, cx, cz, sx, sz, true, model_bias(c, cx, cz));
         if (m_now < need) { ++skip_nomargin_[size_t(c)]; diagnose_block(c, cx, cz, need); skipped(); continue; }
         if (ex_.miss_reacquire_ > 0.0 && ex_.miss_count_[size_t(c)] >= 2 && k < n_order - 1) { ++miss_skips_; ++skip_miss_[size_t(c)]; continue; }   // let the others step first; the last candidate is never skipped
         // the leg the landing must leave liftable: the wave's own next leg (the one being skipped when c is a later leg --

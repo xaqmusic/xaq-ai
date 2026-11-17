@@ -115,3 +115,42 @@ TEST(StepExecutor, SettledItCrawls_EveryLegLandsAndTheRelocationTagCloses) {
     EXPECT_NEAR(double(o.land.x) - o.from.x, mx, 1e-6); EXPECT_NEAR(double(o.land.z) - o.from.z, mz, 1e-6);
     const auto f = o.floats(); ASSERT_EQ(int(f.size()), StepOutcome::kFloats); EXPECT_EQ(f[0], float(total)); EXPECT_EQ(f[6], o.land.x);
 }
+
+// THE PLAN PREDICTS ITS GATE (2026-11-17).  The executor lets a planned leg go only if SupportModel's margin agrees; the search
+// rated the leg from the commanded toes alone, and a zero-shift plan the model refuses came back unchanged 68 times in 30 s.
+TEST(ScaffoldPlanner, WithPlanModelMarginTheSearchAllowsForTheModelsShortfall_AndOffItIsUntouched) {
+    auto margin_after = [](Rig& r, const StepIntent& in) {   // the geometric lift margin of the planned leg after the planned shift
+        std::array<std::array<double, 2>, 3> t3{}; int kk = 0;
+        for (int i = 0; i < 4; ++i) if (i != in.leg && kk < 3) { t3[size_t(kk)] = {double(r.ex.toe_tgt_[size_t(i)].x) - in.sx, double(r.ex.toe_tgt_[size_t(i)].z) - in.sz}; ++kk; }
+        double a, b; return tri_margin(t3, double(r.in.support_[3]), double(r.in.support_[2]), a, b);
+    };
+    auto geo_now = [](Rig& r, int leg) {
+        std::array<std::array<double, 2>, 3> t3{}; int kk = 0;
+        for (int i = 0; i < 4; ++i) if (i != leg && kk < 3) { t3[size_t(kk)] = {double(r.ex.toe_tgt_[size_t(i)].x), double(r.ex.toe_tgt_[size_t(i)].z)}; ++kk; }
+        double a, b; return tri_margin(t3, double(r.in.support_[3]), double(r.in.support_[2]), a, b);
+    };
+    const double need = 0.005 + 0.005;
+    auto rig = [&](double lever, double shortfall) {
+        auto r = std::make_unique<Rig>(); r->pl.plan_ = 1.0; r->pl.plan_model_margin_ = lever;
+        r->in.support_[1] = 4.0f;   // all four toes bear: the model's veto is live
+        for (int i = 0; i < 4; ++i) r->in.support_[size_t(10 + 5 * i)] = float(geo_now(*r, i) - shortfall);   // the model's margin sits `shortfall` below the geometric one
+        return r;
+    };
+    // off: the model's margin is not read by the search at all
+    auto a = rig(0.0, 0.0), b = rig(0.0, 0.022);
+    const StepIntent ia = a->pl.decide(), ib = b->pl.decide();
+    EXPECT_EQ(ia.leg, ib.leg); EXPECT_EQ(ia.sx, ib.sx); EXPECT_EQ(ia.sz, ib.sz); EXPECT_EQ(ia.land.x, ib.land.x); EXPECT_EQ(ia.land.z, ib.land.z); EXPECT_EQ(b->pl.model_bias_n_, 0);
+    ASSERT_LT(margin_after(*b, ib) - 0.022, need) << "the off plan would pass the model anyway: the case tests nothing";
+    // on, the model agreeing: the same plan as off
+    auto c = rig(1.0, 0.0); const StepIntent ic = c->pl.decide();
+    EXPECT_EQ(ic.leg, ia.leg); EXPECT_EQ(ic.sx, ia.sx); EXPECT_EQ(ic.sz, ia.sz); EXPECT_EQ(c->pl.model_bias_n_, 0);
+    // on, the model 22 mm short: the plan the gate would refuse is not issued -- whatever is planned leaves its leg the margin
+    // by the MODEL's count (the geometric margin less the shortfall)
+    auto d = rig(1.0, 0.022); const StepIntent id = d->pl.decide();
+    EXPECT_GE(d->pl.model_bias_n_, 1);
+    EXPECT_FALSE(id.kind == StepIntent::Plan && id.leg == ib.leg && id.sx == ib.sx && id.sz == ib.sz);
+    if (id.kind == StepIntent::Plan) { EXPECT_GE(margin_after(*d, id) - 0.022, need - 1e-9); }
+    // on, the model hopelessly short for every leg: no leg is planned on a margin the gate will refuse
+    auto e = rig(1.0, 0.2); const StepIntent ie = e->pl.decide();
+    EXPECT_NE(ie.kind, StepIntent::Plan); EXPECT_GE(e->pl.plan_none_, 1);
+}

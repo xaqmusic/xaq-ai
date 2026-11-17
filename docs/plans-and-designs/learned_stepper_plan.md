@@ -331,7 +331,14 @@ i/o mappings that work and build upon them").*
 **Read this section, §4 Phases 3–5, then the ledger's latest entries** (2026-11-16 "a long stairs block", "authority
 sooner"). §10 keeps Phase 3's state and the question as it was put.
 
-**Where it stands (2026-11-16, night).** Of "Next, in order" below: item 1 is done but for two re-reads (the widened encoder
+**Where it stands (2026-11-17).** Before the next owned value, the operator's priority was the freeze (§9.3): it was the
+simulated body asleep — fixed in the body script — and every stairs number in this plan from before 2026-11-17 includes runs
+that were dead from some tick on. Two levers came out of the same day, both at 0 in the configs of record: `ik_knee_guard`
+and `plan_model_margin`. **The next acts are the operator's:** watch the pair (`…__p4lo__kgpm`, or the `[M]` panel's two
+switches), decide whether they join the config of record, and then the choice of the next owned value (§9.2) — which should
+be measured on the corrected simulator, with Phase 3's and Phase 4's stairs numbers re-read there first.
+
+**Where it stood (2026-11-16, night).** Of "Next, in order" below: item 1 is done but for two re-reads (the widened encoder
 clears the clip and retains after one re-encoding; NMI and flicker not yet re-read under it), item 2 is done, item 3 is built,
 byte-identical off, and **measured with authority (2026-11-16, late; §9.2): the corridor's no-harm gate is failed** — the
 landing offset, backward only under the floor, costs 19 % of the corridor's progress and 16 % of the graded flight's, and buys
@@ -556,6 +563,36 @@ authority than in shadow. No evidence, at this power, that a backward offset pay
 The 38 and 64 mm benches of the proposed order were not run: the gate before them is failed. Open, and now seen twice (`lb38`
 c4 r4; `p4glo` c4 r1): a heap-corruption abort, "corrupted size vs. prev_size", both on stairs worlds, both in chain 4
 (inspector port 8204), the first before this lever existed.
+
+### 9.3 The freeze (2026-11-17): a sleeping body, a knee past straight, and a plan its own gate refuses
+
+Ledger 2026-11-17 has the measurements; this is what it changes for the plan.
+
+**What the freeze was.** The physics engine put the body to sleep after half a second of stillness, and a sleeping body
+ignores its joint motors. The careful stepper stands still while it decides; the fast gait never did. The signature (every
+real joint exactly constant while the commands move) is in 6 of the 15 golden traces and in every stairs battery of Phases
+1–4. The body script now keeps the powered body awake (`OGMA_PICRAWLER_ALLOW_SLEEP=1` restores the old behaviour); a run that
+never slept is identical with the fix, field for field.
+
+**What this does to the record.** The golden traces (Phase 0's gate) remain valid as a byte-identity reference *only with
+sleep allowed*; a refactor gate run on the corrected simulator needs new golden traces. Phase 3's and Phase 4's stairs
+measurements — progress, frozen windows, hang and miss shares, the step-outcome stream the landing-offset model learned from
+— include dead runs (on the 64 mm bench the old simulator's hang share reads 16.0 % against 2.4 % awake, on the same seeds).
+The corridor numbers are unaffected (no corridor run slept), so §9.2's corridor verdict stands; its graded-flight numbers
+(3 of 72 runs asleep) should be re-read before they are quoted.
+
+**Two levers, built at 0.**
+
+| lever | what it does | measured (n = 6, signals) |
+|---|---|---|
+| `ik_knee_guard` | a solve that ends with a knee past straight is discarded; the leg is reset to its last pose with the knee turned to the bent side and solved again (the operator's rule) | knees past straight 4.1 % of rows → 0; alone it meets the re-plan loop more often (2 loops, 46 s, in 6 runs) |
+| `plan_model_margin` | the pose search lowers its own lift margin for a leg by however much the support model's margin sits below it, so it does not re-issue a zero-shift plan the lift check refuses | no re-plan loop in 12 runs with it |
+| both | | terrain: 2 freezes against 3, none a loop or a hyperextension; corridor identical to the control; 38 mm +9.9 cm/min (t +2.3); graded flight +7.9 cm/min (t +2.4); 64 mm mixed (no falls, but more missed landings and stall) |
+
+**Open, in order.** (1) The operator's observation of the pair in the UI. (2) Each lever singly at 64 mm (the cost there is
+not attributed). (3) New golden traces on the corrected simulator, then the Phase 3 re-reads and the Phase 4 graded-flight
+re-read. (4) The host's heap abort (three times in about 700 runs) under a sanitizer build. (5) Why the hang share rises
+under the guard.
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 
