@@ -25,6 +25,10 @@ public:
     StepIntent decide();   // the next step: the unloaded toe first, then the pose search, then the order / greedy choice
     bool plan_step(int& leg_out, Vec3f& land_out, double& sx_out, double& sz_out, double& score_out);   // the pose search (lever 2a)
     bool plan_relief(int stuck, double cx, double cz, int bearing, int& leg_out, Vec3f& land_out, double& margin_out) const;
+    // the pose search's own checks of one landing for leg c, as a query (Phase 4's floor: the landing offset asks before it shifts a
+    // planned landing; never called by the scaffold itself, counts nothing): within reach, outside the landing-radius floor, inside
+    // the sector, reachable at the stance's depth plus the landing band
+    bool landing_ok(int c, const Vec3f& L) const;
     int  choose_leg();
     bool shift_feasible(int lifting, const std::array<Vec3f, 4>& toes, double sx, double sz) const;
     int  shift_refusal(int lifting, const std::array<Vec3f, 4>& toes, double sx, double sz, int& toe) const;

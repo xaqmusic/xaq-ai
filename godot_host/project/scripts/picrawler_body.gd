@@ -13199,6 +13199,20 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			var oca: Array = []
 			for k in range(oc.size()): oca.append(int(oc[k]) if k in [0, 1, 2, 3, 10, 11] else snappedf(float(oc[k]), 0.0001))
 			line["ps_out"] = oca
+		# the landing offset (2026-11-16, learned stepper Phase 4; only when the layer is on -- lo_gain or lo_learn): the latest decision [its count, leg, delta m, risk, epistemic value, candidates admitted, distress, leverage, yhat x 4 (touchdown error cm, correction cm, hang, miss)], the latest update [the outcome's seq, leg, delta m, the prequential error x 4], the counts [decisions, shifted, vetoed candidates, in distress, updates, abandoned, unpaired, then the vetoes by check and side: landing checks forward / back, next-leg margin forward / back], the chosen offsets (cells -6 .. +6), and [each outcome's mean square x 4, the model's residual mean square x 4, its NIS x 4]
+		if ps.has("lo_dec"):
+			for key in [["dec", "ps_lo"], ["upd", "ps_lou"]]:
+				var lv: Array = []
+				for v in ps.get("lo_" + key[0], []): lv.append(snappedf(float(v), 0.0001))
+				line[key[1]] = lv
+			for key in [["n", "ps_lon"], ["hist", "ps_loh"]]:
+				var li: Array = []
+				for v in ps.get("lo_" + key[0], []): li.append(int(v))
+				line[key[1]] = li
+			var los: Array = []
+			for key in ["s2", "r2", "nis"]:
+				for v in ps.get("lo_" + key, []): los.append(snappedf(float(v), 0.0001))
+			line["ps_los"] = los
 		var rm: Array = ps.get("room", [])
 		if rm.size() >= 4:
 			var rma: Array = []

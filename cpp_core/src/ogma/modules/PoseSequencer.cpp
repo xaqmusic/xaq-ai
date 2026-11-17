@@ -29,7 +29,10 @@ const char* phase_name(PoseSequencer::Phase p) {
 
 PoseSequencer::PoseSequencer()
     : executor_(in_, floor_, book_, kin_, rng_), planner_(in_, floor_, book_, kin_, rng_, executor_) {
-    executor_.intent_hook_ = [this] { return planner_.decide(); };
+    executor_.intent_hook_ = [this] {   // the planner's intent, its planned landing offset by the learned layer when that is on
+        const stepper::StepIntent in = planner_.decide();
+        return offset_.on() ? offset_.decide(in, in_, floor_, planner_, executor_) : in;
+    };
     executor_.relief_hook_ = [this](int stuck, double cx, double cz, int bearing, int& leg_out, Vec3f& land_out, double& margin_out) {
         return planner_.plan_relief(stuck, cx, cz, bearing, leg_out, land_out, margin_out); };
     executor_.order_ref_ = &planner_.order_;
@@ -132,6 +135,10 @@ ParamSchema PoseSequencer::params_schema() const {
         {"plan_shift_fwd_m", ParamMutability::HotMutable, "... forward out to this (m) ...", ParamValue{0.04}},
         {"plan_land_m",   ParamMutability::HotMutable, "... and landings out to this from the leg's neutral place (m), all on plan_cell_m.", ParamValue{0.04}},
         {"plan_cell_m",   ParamMutability::HotMutable, "The search grid (m).", ParamValue{0.01}},
+        {"lo_gain",       ParamMutability::HotMutable, "THE LANDING OFFSET (learned stepper plan Phase 4; stepper/LandingOffset.hpp): the authority of the learned layer over a planned landing's forward/back offset -- the offsets on offer span lo_gain x lo_max_m either side of the scaffold's landing, chosen by expected free energy (risk against the step's outcome priors minus the model's epistemic value) among those the floor admits. 0 = the scaffold's landing (byte-identical with lo_learn 0). Read at every decision.", ParamValue{0.0}},
+        {"lo_learn",      ParamMutability::HotMutable, "> 0: the landing offset's outcome model learns from every planned step and reports (diag lo); with lo_gain 0 it learns in shadow from the scaffold's own landings and moves nothing.", ParamValue{0.0}},
+        {"lo_max_m",      ParamMutability::HotMutable, "The landing offset's full range either side (m) at lo_gain 1; also the unit of the model's offset feature.", ParamValue{0.03}},
+        {"lo_cell_m",     ParamMutability::HotMutable, "The landing offset's candidate spacing (m).", ParamValue{0.01}},
         {"plan_adv_w",    ParamMutability::HotMutable, "The landing's forward offset is worth this much of the next leg's margin (per metre, both in metres): progress against the margin kept.", ParamValue{0.3}},
         {"relief",        ParamMutability::HotMutable, "1 = the RELIEF step: when the leg whose turn it is blocks the shift at its own reach limit and is unsafe to lift, another safe leg steps along its heading to where the stuck leg gains its margin without a shift, then the stuck leg's turn is retried; 0 = the turn passes (byte-identical).", ParamValue{0.0}},
         {"relief_step_m", ParamMutability::HotMutable, "The relief planner's candidate landings are this far apart along the leg's heading ...", ParamValue{0.01}},
@@ -195,7 +202,8 @@ ParamMap PoseSequencer::current_params() const {
             {"engage_min_belly_m", ParamValue{floor_.engage_min_belly_m_}}, {"engage_min_tick", ParamValue{int64_t(floor_.engage_min_tick_)}}, {"engage_min_contacts", ParamValue{int64_t(floor_.engage_min_contacts_)}}, {"phase_max_ticks", ParamValue{int64_t(executor_.phase_max_ticks_)}}, {"shift_v_mps", ParamValue{executor_.shift_v_}}, {"shift_max_m", ParamValue{executor_.shift_max_m_}},
             {"margin_min_m", ParamValue{floor_.margin_min_m_}}, {"lift_clear_m", ParamValue{executor_.lift_clear_m_}}, {"lift_v_mps", ParamValue{executor_.lift_v_}}, {"swing_v_mps", ParamValue{executor_.swing_v_}},
             {"lower_v_mps", ParamValue{executor_.lower_v_}}, {"lower_fast_v_mps", ParamValue{executor_.lower_fast_v_}}, {"lower_standoff_m", ParamValue{executor_.lower_standoff_m_}}, {"lower_standoff_k", ParamValue{executor_.lower_standoff_k_}}, {"land_edge_m", ParamValue{executor_.land_edge_m_}}, {"land_edge_max_m", ParamValue{executor_.land_edge_max_m_}}, {"stride_m", ParamValue{executor_.stride_m_}}, {"sink_max_m", ParamValue{executor_.sink_max_m_}}, {"tilt_disengage", ParamValue{floor_.tilt_disengage_}},
-            {"dt_s", ParamValue{executor_.dt_}}, {"ik_iters", ParamValue{int64_t(kin_.p.ik_iters)}}, {"ik_damping_m", ParamValue{kin_.p.ik_damping_m}}, {"ik_step_max_rad", ParamValue{kin_.p.ik_step_max_rad}}, {"ik_tol_m", ParamValue{kin_.p.ik_tol_m}}};
+            {"dt_s", ParamValue{executor_.dt_}}, {"ik_iters", ParamValue{int64_t(kin_.p.ik_iters)}}, {"ik_damping_m", ParamValue{kin_.p.ik_damping_m}}, {"ik_step_max_rad", ParamValue{kin_.p.ik_step_max_rad}}, {"ik_tol_m", ParamValue{kin_.p.ik_tol_m}},
+            {"lo_gain", ParamValue{offset_.gain_}}, {"lo_learn", ParamValue{offset_.learn_}}, {"lo_max_m", ParamValue{offset_.max_m_}}, {"lo_cell_m", ParamValue{offset_.cell_m_}}};
 }
 
 void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
@@ -208,7 +216,7 @@ void PoseSequencer::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "gait_action_topics", [&](auto const& v){ if (auto p = std::get_if<std::vector<std::string>>(&v)) gait_action_topics_ = *p; });
     apply_param(params, "order", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) planner_.order_ = *p; });
     for (auto const& k : {"engage", "engage_ramp_ticks", "elev_source", "crouch_max_m", "ik_reseed_ticks", "ik_multistart", "free_form", "front_drop_gain", "clip_ticks", "unloaded_shift_m", "land_r_min_m", "ext_margin_m", "ext_lifting", "overdue", "plan_next_first", "ext_urgent_m", "unloaded_share", "unloaded_ticks", "unloaded_landings_min", "unloaded_skips_min", "miss_reacquire", "miss_ticks", "null_step_m", "front_drop_max_m", "front_drop_deadband", "front_drop_tau_ticks", "depth_max_m", "free_margin_m", "free_out_m", "free_noise_m", "face_gap_m", "face_penalty_m", "ik_switch_m", "hang_ticks", "drag_back_m", "free_back_m", "free_extra_m", "free_retract_m", "ik_reseed_rate_rad", "crouch_v_mps", "crouch_relax_v_mps", "stand_h_m", "level_gain", "level_max_m", "sector_half_rad", "land_sector_rad", "land_band_lo_m", "land_band_hi_m", "neutral_r_m", "settle_v_mps", "settle", "land_clamp", "obstacle_ticks", "heading_hold", "heading_ref", "heading_gain", "yaw_rate_max", "shift_realised", "reach_min_m", "retreat_m", "centre_gain", "advance_m", "margin_extra_m", "bear_tau_ticks", "bear_on", "bear_off", "touch_ticks", "touch_load", "creep_v_mps", "creep_load_min", "advance_reach_m", "relief", "plan", "plan_shift_m", "plan_shift_fwd_m", "plan_land_m", "plan_cell_m", "plan_adv_w", "relief_step_m", "relief_cells", "creep_load_relax", "creep_max_m", "creep_relax_v_mps", "elev_deadband_m", "elev_tau_ticks", "air_ticks_min", "elev_max_m", "reach_max_m", "unreach_tol_m", "engage_min_belly_m", "engage_min_tick", "engage_min_contacts", "phase_max_ticks", "shift_v_mps", "shift_max_m", "margin_min_m", "lift_clear_m", "lift_v_mps", "swing_v_mps", "lower_v_mps", "lower_fast_v_mps", "lower_standoff_m", "lower_standoff_k", "land_edge_m", "land_edge_max_m",
-                          "stride_m", "sink_max_m", "tilt_disengage", "dt_s", "ik_iters", "ik_damping_m", "ik_step_max_rad", "ik_tol_m"})
+                          "stride_m", "sink_max_m", "tilt_disengage", "dt_s", "ik_iters", "ik_damping_m", "ik_step_max_rad", "ik_tol_m", "lo_gain", "lo_learn", "lo_max_m", "lo_cell_m"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     auto sub = [&](std::string const& topic, std::string which, int idx) {
         if (topic.empty()) return;
@@ -260,6 +268,10 @@ void PoseSequencer::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "plan_land_m")      planner_.plan_land_m_ = std::max(0.0, get_double(value, k));
     else if (k == "plan_cell_m")      planner_.plan_cell_m_ = std::max(2e-3, get_double(value, k));
     else if (k == "plan_adv_w")       planner_.plan_adv_w_ = std::max(0.0, get_double(value, k));
+    else if (k == "lo_gain")          offset_.gain_ = std::clamp(get_double(value, k), 0.0, 1.0);
+    else if (k == "lo_learn")         offset_.learn_ = std::max(0.0, get_double(value, k));
+    else if (k == "lo_max_m")         offset_.max_m_ = std::clamp(get_double(value, k), 1e-3, 0.06);
+    else if (k == "lo_cell_m")        offset_.cell_m_ = std::max(2e-3, get_double(value, k));
     else if (k == "relief")           executor_.relief_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "relief_step_m")    planner_.relief_step_m_ = std::max(1e-3, get_double(value, k));
     else if (k == "relief_cells")     planner_.relief_cells_ = std::clamp(int(get_double(value, k)), 0, 20);
@@ -407,6 +419,7 @@ void PoseSequencer::tick(uint64_t tick_id) {
         executor_.step_machine();
         executor_.hold_stance();
         executor_.solve_ik();
+        if (offset_.on()) offset_.absorb(executor_);   // a step that landed this tick is learned from
     }
     if (!odom_out_topic_.empty()) {   // the odometry: the sequencer's own while engaged, the body's passed through otherwise
         if (executor_.phase_ == Phase::Idle || !odom_anchored_) { if (in_.have_odom_in_) { executor_.px_ = in_.odom_in_[0]; executor_.py_ = in_.odom_in_[1]; } odom_anchored_ = in_.have_odom_in_; }
@@ -437,11 +450,21 @@ nlohmann::json PoseSequencer::diag_snapshot() const {
     for (int i = 0; i < 4; ++i) { const auto u = kin_.u_of_angles(i, executor_.angles_[size_t(i)]); uu.push_back({u[0], u[1], u[2]}); }
     for (int i = 0; i < 4; ++i) { tg.push_back({executor_.toe_tgt_[size_t(i)].x, executor_.toe_tgt_[size_t(i)].y, executor_.toe_tgt_[size_t(i)].z}); st.push_back(executor_.steps_[size_t(i)]); gh.push_back(executor_.ground_h_[size_t(i)]);
                                   nt.push_back({executor_.neutral_[size_t(i)].x, executor_.neutral_[size_t(i)].z}); sc.push_back(planner_.score_[size_t(i)]); }
-    return nlohmann::json{{"phase", phase_name(executor_.phase_)}, {"phase_id", int(executor_.phase_)}, {"leg", executor_.leg_}, {"engage", engage_level_}, {"model", kin_.ready()}, {"support", in_.have_support_},
+    nlohmann::json out = nlohmann::json{{"phase", phase_name(executor_.phase_)}, {"phase_id", int(executor_.phase_)}, {"leg", executor_.leg_}, {"engage", engage_level_}, {"model", kin_.ready()}, {"support", in_.have_support_},
                           {"patch", in_.have_patch_}, {"steps", st}, {"cycles", executor_.cycles_}, {"shift_exhausted", executor_.shift_exhausted_}, {"shift_ticks", executor_.shift_ticks_},
                           {"disengaged_tilt", disengaged_tilt_}, {"lower_sunk", executor_.lower_sunk_}, {"phase_timeouts", executor_.phase_timeouts_}, {"engaged_at", executor_.engaged_at_},
                           {"landings", executor_.landings_}, {"missed", executor_.missed_}, {"land_h_rejected", executor_.land_h_rejected_}, {"fast_ticks", executor_.fast_ticks_}, {"slow_ticks", executor_.slow_ticks_}, {"edge_moves", executor_.edge_moves_}, {"edge_stuck", executor_.edge_stuck_}, {"land_sigma", executor_.land_sigma_}, {"blocked_leg", executor_.blocked_leg_}, {"advance_yields", executor_.advance_yields_}, {"relief_steps", executor_.relief_steps_}, {"plans", planner_.plans_}, {"lower_fold_ticks", executor_.lower_fold_ticks_}, {"crouch", executor_.crouch_}, {"reseeds", executor_.reseeds_}, {"multistarts", kin_.multistarts}, {"face_penalties", planner_.face_penalties_}, {"front_drop", executor_.front_drop_}, {"clips", executor_.clips_}, {"unload_shifts", planner_.unload_shifts_}, {"land_r_rejects", planner_.land_r_rejects_}, {"ext_rejects", planner_.ext_rejects_}, {"ext_lift_rejects", planner_.ext_lift_rejects_}, {"overdue", {planner_.overdue_decisions_, planner_.overdue_rejects_, planner_.urgent_jumps_, planner_.urgent_fails_}}, {"skip_nomargin", planner_.skip_nomargin_}, {"skip_noland", planner_.skip_noland_}, {"skip_miss", planner_.skip_miss_}, {"block", planner_.block_}, {"next_lift", planner_.next_lift_}, {"drift", planner_.drift_}, {"drift_cause", planner_.drift_cause_}, {"drift_mag", planner_.drift_mag_}, {"drift_mag_all", planner_.drift_mag_all_}, {"reloc_n", executor_.reloc_n_}, {"reloc_sum", executor_.reloc_sum_}, {"reloc_top", executor_.reloc_top_}, {"reloc_off", executor_.reloc_off_}, {"reloc_resid", executor_.reloc_resid_}, {"block_d", planner_.block_d_}, {"block_short", planner_.block_short_}, {"ext", {kin_.ext_slack(0, executor_.toe_tgt_[0]), kin_.ext_slack(1, executor_.toe_tgt_[1]), kin_.ext_slack(2, executor_.toe_tgt_[2]), kin_.ext_slack(3, executor_.toe_tgt_[3])}}, {"ext_fk", {ext_slack_fk(0), ext_slack_fk(1), ext_slack_fk(2), ext_slack_fk(3)}}, {"null_steps", executor_.null_steps_}, {"miss_skips", planner_.miss_skips_}, {"miss_count", {executor_.miss_count_[0], executor_.miss_count_[1], executor_.miss_count_[2], executor_.miss_count_[3]}}, {"depth_caps", executor_.depth_caps_}, {"free_out", {executor_.free_out_dx_, executor_.free_out_dy_}}, {"branch_switches", kin_.branch_switches}, {"hangs", executor_.hangs_}, {"hangs_by_contact", executor_.hangs_by_contact_}, {"hangs_by_drag", executor_.hangs_by_drag_}, {"swing_d_fwd", executor_.swing_d_fwd_}, {"a_lin_z_ema", executor_.a_lin_z_ema_}, {"crouch_ticks", executor_.crouch_ticks_}, {"elev_landed", {executor_.elev_landed_[0], executor_.elev_landed_[1], executor_.elev_landed_[2], executor_.elev_landed_[3]}}, {"plan_skips", planner_.plan_skips_}, {"plan_none", planner_.plan_none_}, {"plan_reached", executor_.plan_reached_}, {"plan_shift", {executor_.plan_sx_, executor_.plan_sz_}}, {"plan_score", executor_.plan_score_}, {"relief_none", executor_.relief_none_}, {"relief_for", executor_.relief_for_}, {"creep_load_ticks", executor_.creep_load_ticks_}, {"creep", {executor_.creep_[0], executor_.creep_[1], executor_.creep_[2], executor_.creep_[3]}}, {"settle_ticks", executor_.settle_ticks_}, {"obstacle_hits", executor_.obstacle_hits_}, {"resets_seen", resets_seen_}, {"odom", {executor_.px_, executor_.py_}}, {"yaw_err", executor_.yaw_err_}, {"shift_blocked", executor_.shift_blocked_}, {"retreats", executor_.retreats_}, {"shift_d", {executor_.shift_dx_, executor_.shift_dz_}}, {"steps_no_advance", executor_.steps_no_advance_}, {"deadlock_ticks", executor_.deadlock_ticks_}, {"turns_passed", executor_.turns_passed_}, {"creep", {executor_.creep_[0], executor_.creep_[1], executor_.creep_[2], executor_.creep_[3]}}, {"bear", {executor_.bear_[0], executor_.bear_[1], executor_.bear_[2], executor_.bear_[3]}}, {"land_err", executor_.land_err_last_}, {"land_rms", std::sqrt(executor_.land_err_ms_)}, {"elev", {executor_.elev_[0], executor_.elev_[1], executor_.elev_[2], executor_.elev_[3]}}, {"ik_err", executor_.ik_err_ema_}, {"fk_err", fk_err_ema_}, {"ticks_engaged", ticks_engaged_},
                           {"toe_tgt", tg}, {"u", uu}, {"ground_h", gh}, {"neutral", nt}, {"score", sc}, {"air_ticks", {executor_.air_ticks_[0], executor_.air_ticks_[1], executor_.air_ticks_[2], executor_.air_ticks_[3]}}, {"lift_h", executor_.lift_h_}, {"land_h", executor_.land_h_}, {"shift_acc", executor_.shift_acc_}, {"phase_ticks", executor_.phase_ticks_}, {"room", room}, {"outcome", executor_.outcome_.floats()}};
+    if (offset_.on()) { const nlohmann::json lo = offset_.diag(); for (auto const& [k, v] : lo.items()) out["lo_" + k] = v; }   // only when the layer is on (the default diag is unchanged); flat keys, because the host passes scalars and arrays to the body and drops a nested object
+    return out;
+}
+
+nlohmann::json PoseSequencer::snapshot_state() const {
+    if (!offset_.on()) return Module::snapshot_state();
+    return nlohmann::json{{"version", 1}, {"lo", offset_.snapshot()}};
+}
+void PoseSequencer::restore_state(nlohmann::json const& s) {
+    if (offset_.on() && s.is_object() && s.contains("lo")) offset_.restore(s.at("lo"));
 }
 
 } // namespace ogma

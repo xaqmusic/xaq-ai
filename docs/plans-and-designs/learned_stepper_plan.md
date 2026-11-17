@@ -320,8 +320,8 @@ i/o mappings that work and build upon them").*
 | 0 Freeze and baseline | **done** — gate met (15 of 15 runs byte-identical from the repo's tools) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 0" |
 | 1 Prune | **done** — one rule of 16 redundant (the IK re-seed, covered by multistart); off in the stack configs, its code marked `PRUNE-P1` and kept until the cleanup pass (operator, 2026-11-15) | 2026-11-14 | 2026-11-14 "Learned stepper Phase 1" |
 | 2 Split | **done** — gate met: LegSolver and the planner / executor / floor split byte-identical (15 of 15 runs each), the outcome stream and the room field-identical; unit tests per component | 2026-11-15 | 2026-11-15 "Learned stepper Phase 2" |
-| 3 Stance belief | **in flight** — built and measured; separation yes. Own-sample heads REGRESS against legacy; spares-baked stops the forgetting; growth traced to baking counting correlated samples. Curriculum (known worlds × 8, stairs × 6, return × 2): `bake_min_entries` 5 PARTIAL; a frozen stance encoder (`freeze_after`, scaffold count) is WORKING for retention (return ties pre-stairs TLE, reuse 0.60, 1 new node). Learning rate (`stepper_learning.py`): the known worlds learn (QE −7 %/doubling) and saturate in 6–8 min; the stairs do not learn at all in 7 min at either height. A long stairs block from the frozen brain (start-from-state, exact): no learning in 23 min (QE +0.2 %/doubling), the vocabulary grows and is slowly reused (0.25); not the stalls. The frozen flat-world encoder SATURATES on the stairs (ten terrain/tilt z clipped, |z| 12 vs 6). Entries under the still encoder: PARTIAL (60 % fewer stairs nodes, 3 % stairs fit cost). Gate re-scoped 2026-11-16 (no convergence on the stairs; no saturated feature on any bench). Next: the z-saturation instrument, then a per-feature freeze from the normaliser's own dynamics | 2026-11-16 | 2026-11-15 "Learned stepper Phase 3", "continued", "the settling normaliser", "entries to bake", "the frozen stance encoder"; 2026-11-16 "a long stairs block", "authority sooner" |
-| 4 First closed loop (landing offset by EFE) | — direction approved 2026-11-16; the outcome-and-behaviour instrument is built and its gain-0 baselines read (§9.1); waits on Phase 3's gate, then the lever at gain 0, then the operator's go for the gain-on battery | | 2026-11-16 "authority sooner" |
+| 3 Stance belief | **in flight** — built and measured; separation yes. Own-sample heads REGRESS against legacy; spares-baked stops the forgetting; growth traced to baking counting correlated samples. Curriculum (known worlds × 8, stairs × 6, return × 2): `bake_min_entries` 5 PARTIAL; a frozen stance encoder (`freeze_after`, scaffold count) is WORKING for retention (return ties pre-stairs TLE, reuse 0.60, 1 new node). Learning rate (`stepper_learning.py`): the known worlds learn (QE −7 %/doubling) and saturate in 6–8 min; the stairs do not learn at all in 7 min at either height. A long stairs block from the frozen brain (start-from-state, exact): no learning in 23 min (QE +0.2 %/doubling), the vocabulary grows and is slowly reused (0.25); not the stalls. The frozen flat-world encoder SATURATES on the stairs (ten terrain/tilt z clipped, |z| 12 vs 6). Entries under the still encoder: PARTIAL (60 % fewer stairs nodes, 3 % stairs fit cost). Gate re-scoped 2026-11-16 (no convergence on the stairs; no saturated feature on any bench). The saturation instrument: the knee and hips clip too. `widen` (the approved per-feature rule): WORKING for saturation (≤ 0.5 % at the clip on every bench) and for retention after one re-encoding of the known worlds (second return: reuse 0.74 / 0.62); stairs stances still do not recur (7–9 %). Left: NMI and flicker re-read under the widened encoder | 2026-11-16 | 2026-11-15 "Learned stepper Phase 3", "continued", "the settling normaliser", "entries to bake", "the frozen stance encoder"; 2026-11-16 "a long stairs block", "authority sooner", "three instruments", "the widening scale" |
+| 4 First closed loop (landing offset by EFE) | **built at gain 0, not yet run with authority** — `stepper/LandingOffset` at the intent hook (`lo_gain`, `lo_learn`); byte-identical off; a shadow mode learns from the scaffold's own landings; the model reads δ and the remembered terrain at the candidate, per leg (§9.1). **Waits on the operator's go for the first gain-on battery** | 2026-11-16 | 2026-11-16 "authority sooner", "three instruments", "the landing offset" |
 | 5 Widen authority (shift, sideways, leg) | — | | |
 | 6 Whole-intent authority by precision | — | | |
 | 7 De-scaffold | — | | |
@@ -330,6 +330,11 @@ i/o mappings that work and build upon them").*
 
 **Read this section, §4 Phases 3–5, then the ledger's latest entries** (2026-11-16 "a long stairs block", "authority
 sooner"). §10 keeps Phase 3's state and the question as it was put.
+
+**Where it stands (2026-11-16, night).** Of "Next, in order" below: item 1 is done but for two re-reads (the widened encoder
+clears the clip and retains after one re-encoding; NMI and flicker not yet re-read under it), item 2 is done, item 3 is built
+and byte-identical off. **The next act is the operator's: the go for the first gain-on battery** (§9.1, last paragraphs, has
+the proposed battery and the config to watch in the UI).
 
 **The decision (operator, 2026-11-16).** The operator's idea — *an instrument-only learner riding a frozen controller can
 only plateau at that controller's ceiling; with a learning brain in control, the robot can build the input–output mappings
@@ -421,6 +426,61 @@ stops when the excursion fits), so a kind's scale ends at its persistent range a
 excursion's size, so a glitch moves it half a percent. It does not remove the `freeze_after` count (still a scaffold).
 Considered and not built: re-opening a clipped feature's full statistics until it settles (follows mean shifts, re-encodes
 more, needs a settling criterion); one shared scale per physical unit (fixes ground and relief, not tilt or the knee).
+
+**The widen arm, measured (ledger 2026-11-16 "the widening scale").** `cvw` (the frozen `cvf` brain after run 8, then 38 mm × 3,
+64 mm × 3, corridor, arena; paired by seed with `cvf` runs 9–16; the body field-for-field identical to the control) and `cvw2`
+(the same arm continued on new seeds: 38 mm, 64 mm, corridor, arena).
+
+| Question | Answer | Data |
+|---|---|---|
+| Is any feature still saturated? | **No.** At the clip, frozen → widened: pitch 55 → 3 % (38 mm), 82 → 1 % (64 mm); ground 43 → under 1 %; knee 11 → under 1 %; every kind ≤ 0.5 % on every bench in the second pass. The scales grew × 1.7 to × 7 and then held (0–12 % further on new stairs seeds, none in the flat worlds) | `sat0`, `cvw`, `cvw2` |
+| Is the known-world vocabulary retained? | **After one re-encoding.** First return: reuse 0.02 (frozen 0.60), 34 new corridor nodes — the rescale strands the old nodes. Second return, the scale settled: reuse 0.74 corridor / 0.62 arena, 4 and 9 new nodes | `cvw`, `cvw2` |
+| Do stairs stances recur now? | **No.** A step planned from a (leg, node) cell seen three or more times: 7 % and 9 %, against 7 % and 8 % frozen, on the same steps. Saturation was not the cause | `cvw` vs `cvf` |
+| What did the stance gain? | The tilt: the latent's read of pitch +0.22 → +0.37 (38 mm), of the miss +0.26 → +0.45 (64 mm). The landing offset is no more predictable | `cvw` vs `cvf` |
+
+`widen` is `WORKING` for the gate's saturation and retention clauses (a signal, n = 6 chains), at the cost of one re-encoding of
+the known worlds. Still to re-read under it before Phase 3 closes: the NMI separation and the belief through flicker. If the
+one-off re-encoding must be avoided (the robot), the re-use form is a scale that widens only beyond the clip.
+
+**Phase 4's lever, built at gain 0** (ledger 2026-11-16 "the landing offset"). `stepper/LandingOffset` sits at the intent hook
+between `ScaffoldPlanner` and `StepExecutor`; `PoseSequencer` params `lo_gain` (authority: the offsets on offer span
+`lo_gain` × `lo_max_m`, read at every decision), `lo_learn` (the model learns and reports; with `lo_gain` 0 it runs in shadow
+on the scaffold's own landings), `lo_max_m` 0.03, `lo_cell_m` 0.01. Both at 0 (the default) it is never consulted.
+
+- *The model, as built — one change from §4's wording.* Per **leg**, a recursive least squares from what varies across the
+  candidates — δ, δ², and the remembered terrain at the candidate (its rise over the ground under the toe now, the relief
+  around it, the memory's uncertainty there, whether the memory knows it) — to the outcome vector [touchdown error, the hand's
+  correction, hang, miss]. Not per (stance node, leg): the widen arm shows stance cells do not recur on the stairs even
+  unsaturated, and a term that is the same for every candidate (the stance alone) cancels in the choice. The stance enters
+  where it can change a choice, as interactions with δ — its own lever after this one, reading the latent.
+- *The choice.* G = Σ ŷ²/(2 s²) − (K/2) ln(1 + φᵀPφ) over the candidates the floor admits; s² each outcome's own running mean
+  square; ties to the smaller offset. In distress (the last step hung or missed, the search skipped a leg, the body tilted
+  half-way to the disengage) the epistemic term is dropped.
+- *The floor.* The scaffold's landing is always a candidate; a shifted one must pass the pose search's own landing checks
+  (`ScaffoldPlanner::landing_ok`, a query added for this) and leave the next leg no less liftable than the scaffold's did.
+- *Carried and logged.* The model rides `PoseSequencer`'s snapshot only while the layer is on (add `pose_sequencer` to `KEEP`);
+  the log carries each decision, each update, the counts, the chosen offsets and the model's grade (`ps_lo`, `ps_lou`,
+  `ps_lon`, `ps_loh`, `ps_los`); `stepper_practice.py` reads them beside the outcome and behaviour curves.
+  `stepper_chain.sh` has a `grad` bench (the launcher's graded flight).
+- *Identity.* Off (both 0): the golden battery (15 runs) bytes the same as the post-split traces (`p2d`), the config of record bytes
+  the same on three stairs chains (`idl3` against `sat0`). Shadow (`ids3`): 0 of 2.59 million shared fields differ, only the
+  new keys added. A first shadow reading, three chains × one 38 mm run, about 85 steps each (a reading, not a result): 93 % of
+  planned decisions paired with their landing, 11 % made in distress; from the terrain at the scaffold's own landing the
+  model removes 19 ± 8 % of the touchdown error's mean square and 23 ± 11 % of the correction's; its grade is 1.6 and 1.3.
+- *The floor on a smoke run* (the authority config, 3 000 ticks on one 38 mm riser and one corridor, read for the floor's
+  counts only): **every forward candidate is refused by the pose search's own landing checks** (117 of 117, 84 of 84). The
+  scaffold's search rewards advance, so its landing already sits at the forward edge of what the floor admits: as specified, the
+  offsets on offer are backward only. Refusals are counted by check and side (`ps_lon` entries 8–11).
+- *Configs.* `…__p3frz__p4shadow` (`lo_learn` 1) and `…__p3frz__p4lo` (`lo_learn` 1, `lo_gain` 1; named for the launcher).
+
+**Stops here for the operator (§9 item 3):** the first gain-on battery — and, before it, one question the smoke run raises:
+the authority is one-sided (back only). Run it as specified (the corridor gate will price a layer that can only shorten
+steps), or first move the owned value to one the scaffold has not pushed to its limit (the lateral offset; the lift
+height)? Proposed if run as specified, in the plan's order — (i) corridor, no harm:
+6 chains × 4 corridor runs, `p4lo` against `p4shadow` paired by seed, progress / stall / vetoes / falls tie and the outcome
+error does not rise; (ii) the graded flight: 6 chains × 6 `grad` runs, the model carried, practice curves of outcome error,
+then a frozen-model evaluation; (iii) 38 and 64 mm from the carried state. Also for the operator: `widen` as the encoder of
+record under these arms (they are built on the frozen `p3frz` config, since the first model does not read the stance).
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 

@@ -123,6 +123,15 @@ void ScaffoldPlanner::diagnose_block(int leg, double cx, double cz, double need)
 // the best lift margin `leg` can be given by a feasible shift of the body over `toes` (the centre of mass at (cx, cz) in the
 // body frame moves with the body; the toes move the other way); forward_first prefers, among shifts that give the margin
 // asked, the most forward one, else the largest margin
+bool ScaffoldPlanner::landing_ok(int c, const Vec3f& L) const {
+    const Vec3f hip = kin_.hip1(c);
+    const double r = std::hypot(L.x - hip.x, L.z - hip.z); if (r < kin_.p.reach_min_m || r > kin_.p.reach_max_m - 0.01) return false;
+    if (land_r_min_m_ > 0.0 && r < land_r_min_m_) return false;
+    { Vec3f probe = L; if (kin_.sector_clamp(c, probe, std::min(kin_.p.sector_half_rad, ex_.land_sector_rad_))) return false; }
+    const Vec3f deep(L.x, float(-ex_.stand_h_m_ - ex_.land_band_lo_m_), L.z); auto ang = ex_.angles_[size_t(c)]; bool ok = false;
+    for (int it = 0; it < 8 && !ok; ++it) ok = kin_.ik_step(c, deep, ang);
+    return ok || len(sub(kin_.toe_of(c, ang), deep)) <= 0.008;
+}
 double ScaffoldPlanner::best_margin_over_shifts(int leg, const std::array<Vec3f, 4>& toes, double cx, double cz, double& sx, double& sz, bool forward_first) const {
     double best = -1e9, best_key = -1e9; sx = 0.0; sz = 0.0;
     const double need = floor_.margin_min_m_ + floor_.margin_extra_m_;

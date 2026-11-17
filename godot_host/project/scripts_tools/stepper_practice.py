@@ -17,6 +17,13 @@ The x-axis is practice: minutes of engaged stance in one world class before the 
   stall %   rows with less than 1 cm of progress over the next 2 s
   falls     auto resets in the run
   risers    stairs only: the highest riser any toe stood on, and the highest all four stood on (god's-eye, analysis only)
+With the landing offset on (Phase 4; the diag's lo block logged as ps_lon / ps_loh / ps_los), also per repetition:
+  |d| cm    the mean size of the chosen offset            shift %  decisions that moved the landing
+  veto/dec  candidates the floor refused, per decision    distr %  decisions made in distress (no exploration)
+  pair %    planned decisions whose step landed and was learned from
+  skill.*   1 - (the model's prequential error) / (the outcome's mean square about its prior), per outcome: touchdown, correction,
+            hang, miss -- at the run's end, cumulative over the carried model's life
+  nis.*     the model's grade per outcome (1 = its errors are the size it expects)
 Then, per metric, the change per DOUBLING of practice over the repetitions before any gap (fit per chain; mean ± sd, % of the
 first repetition, t over chains) and the last repetition minus the one before. Blind-metric complements, read together: a lower
 touchdown error with lower progress or fewer risers is a body that stopped trying; high step/min with high stall is stepping in
@@ -31,7 +38,11 @@ ROW_S = 5 / 60.0
 STALL_ROWS, STALL_M = 24, 0.01
 COLS = [('td', 'td cm', '{:.2f}'), ('corr', 'corr cm', '{:.2f}'), ('hang', 'hang %', '{:.1f}'), ('miss', 'miss %', '{:.1f}'), ('skip', 'skip/100', '{:.1f}'),
         ('spm', 'step/min', '{:.1f}'), ('prog', 'prog cm/min', '{:.1f}'), ('stall', 'stall %', '{:.0f}'), ('falls', 'falls', '{:.1f}'),
-        ('top', 'riser any', '{:.2f}'), ('all', 'riser all', '{:.2f}')]
+        ('top', 'riser any', '{:.2f}'), ('all', 'riser all', '{:.2f}'),
+        ('lo_d', '|d| cm', '{:.2f}'), ('lo_shift', 'shift %', '{:.0f}'), ('lo_veto', 'veto/dec', '{:.2f}'), ('lo_distr', 'distr %', '{:.0f}'), ('lo_pair', 'pair %', '{:.0f}'),
+        ('lo_sk0', 'skill.td', '{:+.2f}'), ('lo_sk1', 'skill.corr', '{:+.2f}'), ('lo_sk2', 'skill.hang', '{:+.2f}'), ('lo_sk3', 'skill.miss', '{:+.2f}'),
+        ('lo_nis0', 'nis.td', '{:.2f}'), ('lo_nis1', 'nis.corr', '{:.2f}'), ('lo_nis2', 'nis.hang', '{:.2f}'), ('lo_nis3', 'nis.miss', '{:.2f}')]
+LO_KEYS = [c[0] for c in COLS if c[0].startswith('lo_')]
 
 
 def pm(xs, nd):
@@ -68,6 +79,18 @@ def read(arg):
     m['stall'] = 100.0 * sum(abs(z[i + STALL_ROWS] - z[i]) < STALL_M for i in range(len(z) - STALL_ROWS)) / (len(z) - STALL_ROWS)
     m['falls'] = float(last.get('auto_reset_count', 0) - r0.get('auto_reset_count', 0))
     m['top'] = top if riser_m > 0 else None; m['all'] = allup if riser_m > 0 else None
+    for k in LO_KEYS: m[k] = None
+    n1, n0 = last.get('ps_lon'), r0.get('ps_lon') or [0] * 7
+    if n1 and len(n1) >= 7:   # the landing offset: this run's counts (the counters restart with the body each run; the model is carried)
+        dec = max(1, n1[0] - n0[0]); h1 = last.get('ps_loh') or [0] * 13; h0 = r0.get('ps_loh') or [0] * 13; cell = float(last.get('ps_loc', 0.01))
+        m['lo_d'] = 100.0 * cell * sum(abs(i - 6) * (h1[i] - h0[i]) for i in range(13)) / dec
+        m['lo_shift'] = 100.0 * (n1[1] - n0[1]) / dec; m['lo_veto'] = (n1[2] - n0[2]) / dec; m['lo_distr'] = 100.0 * (n1[3] - n0[3]) / dec
+        m['lo_pair'] = 100.0 * (n1[4] - n0[4]) / dec
+        sv = last.get('ps_los') or []
+        if len(sv) >= 12:
+            for k in range(4):
+                m[f'lo_sk{k}'] = (1.0 - sv[4 + k] / sv[k]) if sv[k] > 0 else None
+                m[f'lo_nis{k}'] = sv[8 + k] if sv[8 + k] > 0 else None
     return m
 
 

@@ -10,7 +10,7 @@
 #        vocabulary in known worlds, then meet the stairs as a novel one. Unset = the cycle below),
 #        FROM (a chain dir) + FROM_RUN (k): every chain c STARTS from FROM/state_c<c>_r<k>.json (copied in as state_c<c>_r0.json) and
 #        its seeds continue FROM's numbering (10 c + FROM_RUN + k), so the same bench after the same state reproduces FROM's run exactly
-#   run k of chain c: bench (b38, b64, cor)[(c + k) % 3] (or SCHEDULE's k-th; benches b<mm> = one riser, cor, arena), world seed 10 c + k; logs in <out>/r<k>/<arm>_<bench>_c<c>.jsonl.gz, the carried
+#   run k of chain c: bench (b38, b64, cor)[(c + k) % 3] (or SCHEDULE's k-th; benches b<mm> = one riser, cor, arena, grad = the launcher's graded flight), world seed 10 c + k; logs in <out>/r<k>/<arm>_<bench>_c<c>.jsonl.gz, the carried
 #   state in <out>/state_c<c>_r<k>.json. Gates per run: the seed echoed, the row count, and (k > 1) the resume restored exactly the
 #   KEEP modules — a silent cold start would read as "no learning".
 #   Evaluate: stepper_belief.py <out>/r1 (cold) against stepper_belief.py <out>/r<R> (after R - 1 carried runs).
@@ -37,7 +37,7 @@ chain() {
     ev=(env -u OGMA_PICRAWLER_STAIRS_H_MM -u OGMA_PICRAWLER_STAIRS_N -u OGMA_PICRAWLER_STAIRS_START_M -u OGMA_PICRAWLER_RESUME_STATE
         OGMA_PICRAWLER_LOAD_LOG=1 OGMA_PICRAWLER_DIAG_INTERVAL=5 OGMA_SEED=$seed STEPS=$STEPS OGMA_PICRAWLER_SAVE_STATE_AT_EXIT=$name)
     [ -n "${EXPECT:-}" ] && ev+=(OGMA_DUMP_PARAMS=1)
-    if [ $b = cor ]; then ev+=(OGMA_PICRAWLER_GYM=corridor); elif [ $b = arena ]; then ev+=(OGMA_PICRAWLER_GYM=arena); else ev+=(OGMA_PICRAWLER_GYM=stairs OGMA_PICRAWLER_STAIRS_H_MM=${b#b} OGMA_PICRAWLER_STAIRS_N=3 OGMA_PICRAWLER_STAIRS_START_M=0.3); fi
+    if [ $b = cor ]; then ev+=(OGMA_PICRAWLER_GYM=corridor); elif [ $b = arena ]; then ev+=(OGMA_PICRAWLER_GYM=arena); elif [ $b = grad ]; then ev+=(OGMA_PICRAWLER_GYM=stairs); else ev+=(OGMA_PICRAWLER_GYM=stairs OGMA_PICRAWLER_STAIRS_H_MM=${b#b} OGMA_PICRAWLER_STAIRS_N=3 OGMA_PICRAWLER_STAIRS_START_M=0.3); fi
     [ -n "$prev" ] && ev+=(OGMA_PICRAWLER_RESUME_STATE=$prev)
     "${ev[@]}" $TOOLS/run_gain0.sh $CFG $port $f > /dev/null
     got=$(zcat $f | grep -o '"event":"WORLD_READY"[^}]*"seed":"[0-9]*"' | grep -o '[0-9]*"$' | tr -d '"')

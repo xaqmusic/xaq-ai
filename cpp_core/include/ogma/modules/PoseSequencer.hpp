@@ -46,6 +46,7 @@
 #include "ogma/Topics.hpp"
 #include "ogma/body/LegKinematics.hpp"
 #include "ogma/body/LegSolver.hpp"
+#include "ogma/modules/stepper/LandingOffset.hpp"
 #include "ogma/modules/stepper/ScaffoldPlanner.hpp"
 #include "ogma/modules/stepper/StepExecutor.hpp"
 #include "ogma/modules/stepper/StepperCommon.hpp"
@@ -67,6 +68,8 @@ public:
     void tick(uint64_t tick_id) override;
     void on_param_change(std::string_view key, ParamValue const& value) override;
     nlohmann::json diag_snapshot() const override;
+    nlohmann::json snapshot_state() const override;   // the landing offset's model only, and only when it is on (the scaffold itself carries nothing)
+    void restore_state(nlohmann::json const&) override;
 
     using Phase = stepper::Phase;
     static constexpr int kModelFloats = body::LegSolver::kModelFloats;
@@ -74,6 +77,7 @@ public:
     const body::LegSolver& kinematics() const { return kin_; }
     const stepper::StepExecutor& executor() const { return executor_; }
     const stepper::ScaffoldPlanner& planner() const { return planner_; }
+    const stepper::LandingOffset& offset() const { return offset_; }
     body::Vec3f toe_of(int leg, const std::array<double, 3>& t) const { return kin_.toe_of(leg, t); }   // body-frame toe for joint angles
     std::array<double, 3> angles_of_u(int leg, const std::array<double, 3>& u) const { return kin_.angles_of_u(leg, u); }
     std::array<double, 3> u_of_angles(int leg, const std::array<double, 3>& t) const { return kin_.u_of_angles(leg, t); }
@@ -128,6 +132,9 @@ private:
     // the step-outcome stream (Phase 2): "" = not published (the default); the diag carries the latest record either way
     std::string outcome_topic_; int64_t outcome_published_ = 0;
     stepper::ScaffoldPlanner planner_;
+    // THE LANDING OFFSET (learned stepper plan Phase 4, 2026-11-16; lo_gain 0 and lo_learn 0 = off, byte-identical): the first
+    // learned authority over the step, sitting between the planner's intent and the executor -- see stepper/LandingOffset.hpp
+    stepper::LandingOffset offset_;
 };
 
 } // namespace ogma
