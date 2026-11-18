@@ -10840,3 +10840,41 @@ The references on the same runs: the walker in ordinary walking peaks at 12–16
 *Walker → sequencer (the switches at 3000, 9000, 15 000):* engaged within a second (the ramp's own length for the longer ramps), no fall in any arm, four steps taken after 8–11 s — the settle onto neutral toes is the cost of this direction, about ten seconds of standing — then 26–30 steps in the minute. The sequencer's own minutes are the same with and without the hold (median tilt 0.5–1.0°, 27–30 steps/min, 46–48 cm/min).
 
 **Verdicts, in context (flat arena, n = 3 clean seeds, signals).** `homeo_pose_hold` 1: `WORKING` again at the one-minute dose (every clean seed, both switches). `engage_ramp_ticks` 150 / 300: `NULL` for smoothness with the hold on; re-use context: a handover on a slope or onto rough ground, not measured here. Not measured: phase-matched starts, fading the walker down before the sequencer's settle — neither is called for by this data. The switching costs for a selector: about 10 s into the sequencer, 2–3 s into the walker.
+
+### 2026-11-18 (evening) — SERVO SPEED ACROSS THE HANDOVER (operator, from the UI: "the transition is more smooth … when the servo speed is slowed during the transition … the stepper easily supports a servo speed of 3 or even 2 … then the servo speed can be ramped up"): 2.0 rad/s under the stepper and a ramp after the crossfade halves the first second's jolt (signal, 7 of 8 handovers); 3.0 does not; it does not replace the hold; the stepper at 2 and 3 holds on flat ground, the corridor, the graded flight and the 38 mm riser and FALLS on the 64 mm riser
+
+**The UI the observation was made with** (`684600ab`): `[L]` flips the sequencer's `engage` now; the MOTOR-EPM panel's HANDOVER rows (who owns the legs, an alternating timer `handover_every_s` / `OGMA_PICRAWLER_HANDOVER_EVERY_S`, the crossfade, `homeo_pose_hold`); the HUD shows the owner, the countdown and the walker's amplitude gain. An instrument: with the timer off the body log is identical by hash to the scripts before it. **Harness** (`f98646ac`): `OGMA_PICRAWLER_SETPARAM_AT` takes module `body` (a body variable, read back; an unknown key reports FAILED), so a run can schedule `MAX_SERVO_SPEED`.
+
+**The handover battery** (`~/xaq_runs/stepper/servo1`; the alternating protocol — walker 0–3000 at 6.0 rad/s, then a minute each, the body put back at the spawn at 10 500; arena; seeds 2–6; every scheduled flip read back OK on all 25 runs). Arms: `a6` hold 1, servo 6.0 throughout (control); `b2r` hold 1, 2.0 from the tick the stepper takes the legs, held through the one-second crossfade into the walker, then ten equal steps to 6.0 over 4 s; `c3r` the same at 3.0; `d2s` 2.0 under the stepper, a jump to 6.0 at the handover; `e2r0` as `b2r` with the hold off. Seed 3 walked onto a pyramid in its first minute and is left out (as seed 1 was in the alternating test); seed 5 of `a6` met an obstacle in its second walker bout (24 tilt disengages in the stepper's next minute) — its handovers into the walker are kept, they precede it.
+
+*The first second after the handover into the walker (seeds 2, 4, 5, 6 × the switches at 6000 and 12 000; mean, and the range over the 8 handovers):*
+
+| arm | accelerometer off g, peak (m/s²) | peak tilt (deg) | peak yaw rate (deg/s) | peak joint speed (rad/s) |
+|---|---|---|---|---|
+| `a6` control | 4.7 (1.6–11.2) | 10.9 | 35 | 4.4 |
+| `b2r` 2.0, ramped | 2.1 (1.3–2.8) | 7.9 | 21 | 2.1 |
+| `c3r` 3.0, ramped | 4.7 (1.0–10.4) | 10.6 | 43 | 2.9 |
+| `d2s` 2.0, stepped to 6.0 | 3.3 (1.0–8.2) | 8.9 | 28 | 4.6 |
+| `e2r0` 2.0, ramped, no hold | 2.3 (0.4–4.9) | 19.5 | 40 | 2.1 |
+
+`b2r` against `a6`, paired by seed and switch: the jolt lower in 7 of 8, the tilt in 6 of 8, the yaw rate in 6 of 8, and the control's spikes (11.2, 7.6 m/s²) absent. Over the first 3 s the jolt is 5.3 against 7.7 and the peak tilt ties (14.5 against 15.1°); from 3 s on nothing differs from ordinary walking (jolt 8.5, tilt 14.2° per 3 s window); seconds to 80 % of the walker's speed 1–3 in both. **A blind metric, caught by the operator's eye:** the alternating test's measure (peak tilt per 2 s) ties across these arms, because the control was already inside the walker's ordinary rock; the accelerometer's departure from gravity in the first second separates them. It is now in the reader (`servo_read2.py`, scratch — to be moved into `scripts_tools` with the selector's bench).
+
+*Without the hold* (`e2r0`): the gain is 3.1–4.3 at the switch (higher than at 6.0, 2.9–3.8: the walker's measured amplitude is smaller still under a slow servo), peak tilt 25° over the first 3 s and 23° over 3–8 s, jolt 15.9 over 3–8 s, 20–37 s to speed. Slow servos soften the first second and leave the wound gain to act when the speed returns.
+
+*The stepper's own minutes on flat ground* at 2.0 and 3.0 against 6.0: 25–28 steps/min in all, 43–50 against 46–51 cm/min, landing RMS 5–9 mm in all, no missed landing, four steps taken 9–12 s after the switch in all. A tie.
+
+**The stepper on the climbing benches at a fixed servo speed** (`srv_s20` / `srv_s30` / `srv_s42` = 2.0 / 3.0 / 4.22 rad/s by `OGMA_PICRAWLER_MAX_SERVO_SPEED`, the receipt on every run; 2 chains × `b38 b64 grad cor`, paired by seed with `zcrh` chains 1–2; `z_srv_*_vs_crh.txt`):
+
+| bench | cm/min at 6.0 | 2.0 | 3.0 | 4.22 | falls per run at 6.0 / 2.0 / 3.0 / 4.22 |
+|---|---|---|---|---|---|
+| corridor | 60.5 | 57.5 | 57.2 | 58.5 | 0 / 0 / 0 / 0 |
+| graded flight | 48.9 | 47.4 | 48.0 | 48.1 | 0 / 0 / 0 / 0 |
+| 38 mm riser | 34.4 | 36.7 | 26.6 | 36.0 | 0 / 0 / 0 / 0 |
+| 64 mm riser | 14.7 | 11.5 | 14.9 | 14.8 | 0 / 0.5 / 1.0 / 0 |
+
+Corridor: 3–5 % slower (steps/min 33.5–34.4 against 35.0; touchdown error 0.63–0.71 against 0.57 cm), no miss. Graded flight and the 38 mm riser: inside the spread. **The 64 mm riser: one fall in two runs at 2.0 and one in each of two at 3.0, none at 4.22, none at 6.0 in six of six chains.**
+
+**Verdicts, in context** (flat arena for the handover, n = 4 clean seeds, 8 handovers per arm; 2 chains for the benches; all signals). Servo speed 2.0 under the stepper with a ramp after the crossfade: `PARTIAL` — the first second of the handover is calmer by the jolt (loud by consistency, 7 of 8; small in size, the control being already at the walker's ordinary rock), no cost to the walker's return to speed, no effect after 3 s. At 3.0: `NULL`. The stepped return: between the two (two of the spikes remain). As a replacement for `homeo_pose_hold`: `NULL` — complementary, not a substitute. The stepper at 2.0–3.0: a tie on flat ground, the graded flight and the 38 mm riser, a 3–5 % cost in the corridor, and **falls on the 64 mm riser** (n = 2 chains; not resolved) — so a slow servo is the stepper's on easy ground, and the speed has to come back where the step is hard, which is the same shape as the tempo (§9.6 item 3). Not measured: a handover on a slope or rough ground; the ramp's length and start; the robot.
+
+**What transfers to the robot.** There the servo speed is already a software handle: benchd's brain slew (`slew.set`, 20–60 µs per tick ≈ 1.8–5.5 rad/s at 545 µs/rad, allowed in the brain modes; `dash_run.py`'s speed keys). 2.0 and 3.0 are inside its band; the sim stack's 6.0 is outside it (the robot base walks at 4.22). It is also the brownout lever: a stepper at 2.0 draws less on the servo rail. **No lever is built.** Two forms were put to the operator: (1) each walker declares the speed it needs, blended by the share that blends their commands, with a limit on the rise; (2) the limit follows the command's own recent demand with a slow rise. Either needs a brain-to-host channel for the speed (sim: `MAX_SERVO_SPEED`; robot: `slew.set`), default off.
+

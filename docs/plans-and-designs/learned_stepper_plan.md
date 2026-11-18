@@ -769,6 +769,11 @@ counts a walker's own active time; the idle walker keeps predicting in shadow so
    outcomes. Shadow first: predict the touchdown error and the outcomes at tempo 1 / 1.5 / 2 from the dose-response runs already
    on disk.
 4. §9.5's proposal (a learned step intent where the wave's turn is skipped) stands behind these.
+5. *Servo speed as a handle of the handover* (operator's observation, 2026-11-18 evening; ledger of that date): 2.0 rad/s under
+   the stepper and a ramp back after the crossfade halves the first second's jolt (signal), does not replace the hold, and the
+   stepper falls on the 64 mm riser at 2.0–3.0 — so the speed is a per-walker, per-ground quantity like the tempo. On the robot
+   it is benchd's brain slew, 1.8–5.5 rad/s. No lever built; the form (declared per walker and blended, or following the
+   command's own demand) is the operator's choice, and it needs a brain-to-host channel for the speed.
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 
