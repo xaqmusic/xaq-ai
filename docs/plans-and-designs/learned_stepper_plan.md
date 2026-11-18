@@ -331,7 +331,17 @@ i/o mappings that work and build upon them").*
 **Read this section, §4 Phases 3–5, then the ledger's latest entries** (2026-11-16 "a long stairs block", "authority
 sooner"). §10 keeps Phase 3's state and the question as it was put.
 
-**Where it stands (2026-11-17, evening).** The operator's word on §9.4: "go straight to the shadow build. I don't know what
+**Where it stands (2026-11-18).** The operator watched the crouch for 30 minutes on the bowl of the large arena (the robot
+climbing halfway up it, no freeze) and promoted it: the stack of record is `…__p3frz__kgpm__crh.json` (`crouch_max_m` 0.03), the
+pre-crouch control `…__kgpm.json`. On the four benches the corridor and the graded flight are identical to the control and one
+chain of six differs on each riser bench (ledger 2026-11-18). **The scaffold is closed.** What it still gets wrong, unchanged by
+the crouch: the wave's turn skipped at 43 % of decisions on rough ground, 22 % of landings not bearing. The operator's direction
+from here (§9.6): **speed** — the stepper is slow (about two seconds a step on every surface; 0.8 cm/s on flat ground against the
+walker's 4.9–7.0), so (a) the sequencer regulates its own tempo from its certainty, and (b) the brain chooses the walker on flat
+ground and the sequencer for climbing, by an arbitration at the locomotion level, below the intent arbiter. §9.5's proposal (a
+learned step intent where the wave's turn is skipped) stands as written and waits behind these.
+
+**Where it stood (2026-11-17, evening).** The operator's word on §9.4: "go straight to the shadow build. I don't know what
 levers will bear fruit so lets investigate." Built and measured the same day (§9.5): the **after-touch record**
 (`AfterTouch`, `at_learn`), in shadow on the stack of record, graded; and what it found — the re-stepping follows landings
 the executor moved off their plan (the lowering retreat: the same leg steps again after 97 % of them), the plan's own

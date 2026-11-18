@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "INSTRUMENT (2026-11-17) \u2014 the after-touch record in shadow \u00b7 on the stack of record: does the toe just placed bear? \u00b7 the scaffold walks the body",
-    "description": "The stack of record (the frozen sequencer + the knee guard + the plan that predicts its lift gate) with the after-touch record on (PoseSequencer at_learn 1; stepper/AfterTouch.hpp; learned stepper plan 9.5). Each step's record is carried past first contact: the gap between the height the stance gives the landed toe and the height it touched at, whether the toe then bears, whether the same leg lifts next, the tilt; a model predicts these at the touch, in shadow. It reads and moves nothing: the body is the stack of record's, tick for tick. Body log: ps_aft / ps_aftn / ps_aftg; reader scripts_tools/stepper_after.py. Control: sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__kgpm.json.",
+    "name": "INSTRUMENT (2026-11-17) \u2014 the after-touch record in shadow \u00b7 on the pre-crouch control: does the toe just placed bear? \u00b7 the scaffold walks the body",
+    "description": "The pre-crouch control (...__kgpm.json; the frozen sequencer + the knee guard + the plan that predicts its lift gate) with the after-touch record on (PoseSequencer at_learn 1; stepper/AfterTouch.hpp; learned stepper plan 9.5). Each step's record is carried past first contact: the gap between the height the stance gives the landed toe and the height it touched at, whether the toe then bears, whether the same leg lifts next, the tilt; a model predicts these at the touch, in shadow. It reads and moves nothing: the body is the stack of record's, tick for tick. Body log: ps_aft / ps_aftn / ps_aftg; reader scripts_tools/stepper_after.py. Control: sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__kgpm.json.",
     "env_target": "picrawler",
     "gym_mode": "stairs",
     "phase_tag": "motor-epm (minimal/deploy)",
