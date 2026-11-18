@@ -365,6 +365,7 @@ private:
     // back.  Gates the homeostat integrators — see homeo_upright_gate.
     float   upright_ = 1.0f;
     double  homeo_upright_gate_ = 0.0;   // 0 = off (byte-identical)
+    double  homeo_pose_hold_ = 0.0;      // 0 = off (byte-identical); > 0 = the amplitude homeostat integrates and leaks by the gait's own share of the command (1 - pose_engage)
     double  homeo_leak_cycles_  = 0.0;   // homeostat forgetting time constant, in strides
     double  homeo_leak_progress_gate_ = 0.0;  // 1 = only forget while making progress
     double  homeo_leak_upright_only_  = 0.0;  // stop forgetting below this uprightness

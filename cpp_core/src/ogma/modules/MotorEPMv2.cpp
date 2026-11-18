@@ -964,6 +964,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"homeo_upright_gate", ParamMutability::HotMutable,
          "UPRIGHT GATE for the homeostat integrators (height_bias, amp_gain): freeze them whenever uprightness (cos_pitch*cos_roll, ~basis.y.y from the accelerometer) falls below this. Both integrate toward setpoints that are MEANINGLESS when the body is not upright — the belly rangefinder is not looking at the ground it stands on, and amp_target is unreachable — so an inverted episode rails both and they never return. Measured 2026-07-26: after a self-righting from inversion, forward progress stayed NEGATIVE for 7200+ ticks with height_bias pinned at its clamp and amp_gain stuck 30-40x high, while the LEARNED structures (HK self-model, phase search) recovered fine. So this forgetting is an integrator-windup bug, not a learned-weights problem. ~0.5 = freeze past ~60 deg of tilt. 0 = off (byte-identical).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"homeo_pose_hold", ParamMutability::HotMutable,
+         "POSE HOLD for the amplitude homeostat (2026-11-18). While a planner owns the legs through the pose socket (pose_topic, engage e), the gait's own oscillation is not what the body does: amp_ema reads near zero against amp_target and the integrator winds amp_gain to its ceiling (measured 0.1 -> 5.0 over a four-minute sequencer bout; handed the legs back, the gait starts at fifty times its working gain and the body flipped in 2 of 4 seeds). With this > 0 the integration AND the leak are scaled by the gait's own share of the command, 1 - e: a gait that does not own the legs holds its gain (held, not decayed, not trained on another controller's motion). 0 = off (byte-identical).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"height_unwind_free", ParamMutability::HotMutable,
          "ASYMMETRIC WINDUP FADE for height_bias. The windup fix multiplies the height integration by height_rest_frac (which -> 0 while moving forward), so a bias cannot wind up while walking — but it equally cannot UNWIND while walking, so a value railed during a disruption is latched for as long as the robot keeps trying to walk. Non-zero fades ONLY the winding direction, preserving the incline fix while letting a railed bias recover. 0 = legacy symmetric fade (byte-identical).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
@@ -1597,6 +1600,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["swing_hyst_frac"]    = swing_hyst_frac_;
     m["coord_fitness_mode"] = int64_t(coord_fitness_mode_);
     m["homeo_upright_gate"] = homeo_upright_gate_;
+    m["homeo_pose_hold"] = homeo_pose_hold_;
     m["homeo_leak_cycles"] = homeo_leak_cycles_;
     m["homeo_leak_progress_gate"] = homeo_leak_progress_gate_;
     m["homeo_leak_upright_only"]  = homeo_leak_upright_only_;
@@ -1881,6 +1885,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "homeo_leak_cycles", [&](auto const& v){ homeo_leak_cycles_ = get_double(v, "homeo_leak_cycles"); });
     apply_param(params, "rhythm_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) rhythm_topic_ = *p; });
     apply_param(params, "homeo_upright_gate", [&](auto const& v){ homeo_upright_gate_ = get_double(v, "homeo_upright_gate"); });
+    apply_param(params, "homeo_pose_hold", [&](auto const& v){ homeo_pose_hold_ = get_double(v, "homeo_pose_hold"); });
     apply_param(params, "height_unwind_free", [&](auto const& v){ height_unwind_free_ = get_double(v, "height_unwind_free"); });
     apply_param(params, "coord_fitness_mode", [&](auto const& v){ coord_fitness_mode_ = int(get_int(v, "coord_fitness_mode")); });
     apply_param(params, "coord_probe_ticks", [&](auto const& v){ coord_probe_ticks_ = get_int(v, "coord_probe_ticks"); });
@@ -3604,6 +3609,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "homeo_leak_progress_gate") homeo_leak_progress_gate_ = get_double(value, "homeo_leak_progress_gate");
     else if (key == "homeo_leak_cycles") homeo_leak_cycles_ = get_double(value, "homeo_leak_cycles");
     else if (key == "homeo_upright_gate") homeo_upright_gate_ = get_double(value, "homeo_upright_gate");
+    else if (key == "homeo_pose_hold") homeo_pose_hold_ = get_double(value, "homeo_pose_hold");
     else if (key == "height_unwind_free") height_unwind_free_ = get_double(value, "height_unwind_free");
     else if (key == "coord_fitness_mode") coord_fitness_mode_ = int(get_int(value, "coord_fitness_mode"));
     else if (key == "coord_probe_ticks") coord_probe_ticks_ = get_int(value, "coord_probe_ticks");
@@ -4415,8 +4421,15 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     // returning, which is the "movements are exaggerated" symptom.  Freeze
                     // the integrator; the measurement EMA above keeps tracking so it is
                     // current the moment the body is upright again.
+                    // POSE HOLD (homeo_pose_hold, 2026-11-18): while a planner owns the legs through the pose
+                    // socket the gait's oscillation is not the body's motion, so this regulator would wind
+                    // to its ceiling against a target it cannot reach.  Its authority to learn is the gait's
+                    // own share of the command; at full engage the gain is held where it stood.
+                    const bool pose_hold = homeo_pose_hold_ > 0.0 && pose_seen_ && pose_engage_ > 0.0f;
+                    const float own = pose_hold ? (1.0f - pose_engage_) : 1.0f;
                     if (!homeo_gated) {
-                        L.amp_gain += float(amp_homeo_gain_) * (float(amp_target_) - L.amp_ema);
+                        if (pose_hold) L.amp_gain += float(amp_homeo_gain_) * own * (float(amp_target_) - L.amp_ema);
+                        else           L.amp_gain += float(amp_homeo_gain_) * (float(amp_target_) - L.amp_ema);
                     }
                     // Forget toward kAmpGainMin, i.e. MINIMUM AUTHORITY.  Unity (1.0) was
                     // tried first as the "semantically neutral" value for a gain and it cost
@@ -4427,7 +4440,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     // right target is the least-intervention end of the range, where the leak
                     // AGREES with the homeostat in normal operation and only bites after an
                     // excursion.  Applied even when gated so a wound value always decays.
-                    L.amp_gain -= leak_amp_ * (L.amp_gain - kAmpGainMin);
+                    if (pose_hold) L.amp_gain -= leak_amp_ * own * (L.amp_gain - kAmpGainMin);
+                    else           L.amp_gain -= leak_amp_ * (L.amp_gain - kAmpGainMin);
                     L.amp_gain = std::clamp(L.amp_gain, kAmpGainMin, kAmpGainMax);
                 }
             }
