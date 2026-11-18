@@ -7289,9 +7289,16 @@ func _step_one() -> void:
 	for _sp in _sched_patches:
 		if not _sp["done"] and tick_counter >= int(_sp["t"]) and brain != null:
 			_sp["done"] = true
-			var _res = brain.apply_patch({"op": "set_param", "id": _sp["id"],
-				"key": _sp["key"], "value": _sp["val"]})
-			var _ok: bool = typeof(_res) == TYPE_DICTIONARY and bool(_res.get("success", false))
+			var _res = null
+			var _ok: bool = false
+			if str(_sp["id"]) == "body":   # 2026-11-18: module "body" sets one of the BODY's own variables (the servo speed across a handover), read back
+				set(str(_sp["key"]), _sp["val"])
+				_res = get(str(_sp["key"]))
+				_ok = _res != null and is_equal_approx(float(_res), float(_sp["val"]))
+			else:
+				_res = brain.apply_patch({"op": "set_param", "id": _sp["id"],
+					"key": _sp["key"], "value": _sp["val"]})
+				_ok = typeof(_res) == TYPE_DICTIONARY and bool(_res.get("success", false))
 			print("PicrawlerBody: [setparam_at] %s.%s = %s at tick %d -> %s" % [
 				_sp["id"], _sp["key"], str(_sp["val"]), tick_counter,
 				("OK" if _ok else "FAILED " + str(_res))])
