@@ -730,6 +730,46 @@ has already broken. Before it gets gain: one shadow battery with the candidates 
 the scaffold's choice. Alternatives the operator may prefer: the crouch promoted as a scaffold lever after a look in the
 UI; or the landing's depth belief (the band) made the memory's own uncertainty instead of a constant.
 
+### 9.6 Speed: two walkers under one selection (2026-11-18)
+
+**The operator's direction.** "the stepper is very slow. I would like to explore speeding it up if possible. the brain should
+choose the LPG walker on flat ground then transition to the sequencer for climbing, but I feel the sequencer could regulate its
+speed depending on certainty/error." Decided in discussion the same day: the choice between the walkers is an **arbitration at
+the locomotion level**, a second instance of the recipe's selection below the intent arbiter (which races policies with
+different goals; the walkers share one goal and differ in how well their predictions hold on the ground ahead). Below it sit
+the handover's mechanics, the tilt guard as a reflex, and each walker's internals — the sequencer's tempo among them.
+
+**Measured so far** (ledger 2026-11-18, three entries):
+
+- *Where the time goes.* About two seconds a step on every surface; the walker is about ten times faster on the flat arena.
+- *Tempo dose-response* (existing rates × 1.5 / 2 / 3, two chains): nearly free on flat ground (× 3 is 2.2 times the progress, no
+  miss, no fall), bought with falls on the 64 mm riser; the touchdown error rises with the tempo everywhere. A longer stride does
+  nothing on flat ground.
+- *The handover.* After the sequencer has driven, the walker's amplitude homeostat is railed and the body flips (2 of 4 seeds
+  after four minutes). `MotorEPMv2 homeo_pose_hold` (default 0) scales that regulator's learning by the gait's own share of the
+  command: with it on the handover into the walker is at the walker's ordinary rock within two seconds and at speed in 2–3 s. The
+  existing one-second crossfade is enough; longer ramps add nothing on flat ground. Into the sequencer costs about ten seconds
+  (the settle). The sequencer's learners pause by construction; the walker does not age on its own.
+
+**The rule for two walkers on one body.** Learners of a walker's own action consequences are held while it is muted (the
+selection's gain is the learning authority, as in the recipe); learners of the world keep learning under both; forgetting by age
+counts a walker's own active time; the idle walker keeps predicting in shadow so the selection has a current grade for it.
+
+**Next, in order (each waits on the operator's word where marked).**
+
+1. *The hold's promotion* (operator): `homeo_pose_hold` 1 into the stack of record.
+2. *The selection in shadow.* Two competence reports — the walker's (its stride's predicted progress against what the odometry
+   then shows; `StuckSense` and the slip sheet are the existing instruments) and the sequencer's (the after-touch record's
+   outcomes, the plan's drift) — graded while driving and in shadow while idle, into a selector in the recipe's form with the
+   lead's running spread as hysteresis and the measured switching costs (10 s in, 2–3 s out). Logged beside a fixed schedule; no
+   authority. Benches: the flat arena with its pyramids (seed 1 of the alternating test is the case it must get right), the
+   corridor into the graded flight, the terrain path.
+3. *The tempo as an owned value* (operator's go before any authority): the sequencer's four phase rates under one scalar, chosen
+   by expected free energy from the layer's own predicted outcome error — Phase 4's form (`LandingOffset`) with the after-touch
+   outcomes. Shadow first: predict the touchdown error and the outcomes at tempo 1 / 1.5 / 2 from the dose-response runs already
+   on disk.
+4. §9.5's proposal (a learned step intent where the wave's turn is skipped) stands behind these.
+
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 
 *Superseded as the resume point by §9, which records the decision.* The ledger's entries 2026-11-15 "the frozen stance
