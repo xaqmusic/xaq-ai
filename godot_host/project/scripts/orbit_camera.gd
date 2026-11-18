@@ -66,6 +66,16 @@ func snap_to_target() -> void:
     ## rather than slowly sliding back over follow_smoothing_seconds.
     _smoothed_xz_init = false
 
+func carry_with_target(delta: Vector3) -> void:
+    ## The target was MOVED (a teleport), not walked: translate the view by the same jump so the robot stays framed
+    ## exactly as it was -- the low-passed focal carried with it (no slide across the world), and the floor reference
+    ## by the change of ground height (a drop onto a hill would otherwise leave a floor-locked camera inside it).
+    ## The operator's pan (_focal_offset), distance and angles are untouched.
+    if _smoothed_xz_init:
+        _smoothed_xz += Vector2(delta.x, delta.z)
+    if floor_lock:
+        floor_y += delta.y
+
 func _process(_delta: float) -> void:
     # is_instance_valid, NOT `!= null`: a queue_free()d node is not null, it is a
     # FREED INSTANCE, and touching it throws every frame.  That is precisely what

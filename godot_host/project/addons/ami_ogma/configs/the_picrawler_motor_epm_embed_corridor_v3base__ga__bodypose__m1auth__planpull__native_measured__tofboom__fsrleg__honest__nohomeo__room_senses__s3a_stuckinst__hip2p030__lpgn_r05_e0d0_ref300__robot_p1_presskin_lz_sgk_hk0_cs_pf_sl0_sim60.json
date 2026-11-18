@@ -1,6 +1,6 @@
 {
  "metadata": {
-  "name": "SIM-IDEAL · the robot base _cs_pf_sl0 with ideal servos: 6.0 rad/s, LPG period 30 (contact-only load shares, pinged-range floor on the proximity memory, HK learning off, the support gate's allowance fixed at 30 mm)",
+  "name": "PROMOTED · SIM WALKER · the robot base _cs_pf_sl0 with ideal servos: 6.0 rad/s, LPG period 30 (contact-only load shares, pinged-range floor on the proximity memory, HK learning off, the support gate's allowance fixed at 30 mm)",
   "description": "WATCH (2026-10-31): the deployed robot base (robot_p1 + kinematics-aware press, zero-mean corner integrator, support gate + kinematic route, HK learning off, contact-only load shares, pinged-range floor, fixed gate allowance) with the sim's full servo speed, 6.0 rad/s, and the period the speed map put at that speed (30). The sim-ideal twin of the robot's working gait, for gating levers on the new base; the robot's sonar deadzone is not applied.",
   "env_target": "picrawler",
   "gym_mode": "room",

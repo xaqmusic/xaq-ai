@@ -1713,7 +1713,6 @@ var _tof8 = null
 var _tof8_view = null
 var _tof8_show: bool = false                    # the field's rays start hidden (operator, 2026-11-08); [Y] shows them
 var _tof8_last_slot: int = -1
-var _tof8_hud: Label = null
 var _tof8_pitch_env: float = 30.0
 var _tof8_height_env: float = 0.070
 var _tof8_fwd_env: float = 0.0
@@ -5044,6 +5043,37 @@ func _teleport_to_ramp() -> void:
 			surf_y = h.position.y
 	_pending_teleport = Vector3(tx, surf_y, tz)   # applied next physics frame
 
+# The view goes with the robot when the HARNESS moves it (a teleport, a reset): the orbit camera is carried by the same
+# horizontal jump, with no slide across the world, and its floor reference by the change of ground height between the two
+# places, so a drop onto high ground does not leave the camera under the terrain (operator, 2026-11-18).  Windowed only;
+# it reads the world and touches no physics.  Call from the physics step (the ground is found by a ray).
+func _camera_carry(from: Vector3, to: Vector3) -> void:
+	var selftest: bool = OS.get_environment("OGMA_CAMERA_SELFTEST") == "1"   # run it headless and print the view before and after
+	if DisplayServer.get_name() == "headless" and not selftest:
+		return
+	var cam: Node = get_tree().get_root().find_child("Camera3D", true, false)
+	if cam == null or not cam.has_method("carry_with_target"):
+		return
+	var ss := get_world_3d().direct_space_state
+	var gy: Array = [0.0, 0.0]   # the WORLD's surface under each place (the body's own parts are not ground)
+	if ss != null:
+		var k: int = 0
+		for at in [from, to]:
+			var q := PhysicsRayQueryParameters3D.create(Vector3(at.x, 5.0, at.z), Vector3(at.x, -1.0, at.z))
+			q.collision_mask = _LAYER_WORLD
+			var h := ss.intersect_ray(q)
+			if not h.is_empty():
+				gy[k] = float(h.position.y)
+			k += 1
+	var before: Vector3 = (cam as Node3D).global_position - Vector3(from.x, float(gy[0]), from.z)
+	cam.call("carry_with_target", Vector3(to.x - from.x, float(gy[1]) - float(gy[0]), to.z - from.z))
+	if selftest:
+		await get_tree().create_timer(2.0, false, true).timeout   # the robot has landed and the camera has run its frames
+		var c: Vector3 = _chassis.global_transform.origin
+		var after: Vector3 = (cam as Node3D).global_position - Vector3(c.x, float(gy[1]), c.z)
+		print("PicrawlerBody: [camera selftest] moved (%.2f, %.2f) m, ground %+.3f m: the camera from the robot's ground point before (%.3f, %.3f, %.3f), after (%.3f, %.3f, %.3f)" % [
+			to.x - from.x, to.z - from.z, float(gy[1]) - float(gy[0]), before.x, before.y, before.z, after.x, after.y, after.z])
+
 # Drop the EXPERIENCED robot (brain + current pose preserved) onto a ground point.
 # Rigid-translates every part so the chassis lands ~0.30 m ABOVE `ground` (the
 # surface height under it, so it clears tall obstacles) and falls onto it; zeroes
@@ -5067,6 +5097,10 @@ func _teleport_to(ground: Vector3) -> void:
 		var fwd: Vector3 = _chassis.global_transform.basis.z
 		var cur: float = atan2(fwd.x, fwd.z)
 		rot = Basis(Vector3.UP, deg_to_rad(yaw_env.to_float()) - cur) * rot
+	# The view goes with the robot (operator, 2026-11-18): the orbit camera is carried by the same horizontal jump with no
+	# slide, and its floor reference by the change of ground height, so a drop onto high ground does not leave the
+	# camera under the terrain.  Windowed only; nothing here touches physics.
+	_camera_carry(pivot, drop)
 	var parts: Array = [_chassis] + (_coxas as Array) + (_uppers as Array) + (_lowers as Array)
 	for b in parts:
 		b.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
@@ -11447,8 +11481,6 @@ func _tof8_step() -> void:
 			if _tof8_view != null and _tof8_show:
 				_tof8_view.update(_tof8)
 			_tof_cloud_add(xf)
-			if DisplayServer.get_name() != "headless" and (slot % 3) == 0:
-				_update_tof8_hud()
 	var arr := PackedFloat64Array()
 	arr.resize(Tof8Script.ZONES)
 	for z in range(Tof8Script.ZONES):
@@ -11477,24 +11509,8 @@ func _tof_cloud_add(xf: Transform3D) -> void:
 		_tof_view.max_age_ticks = _tof_cloud.max_age_ticks
 	_tof_view.show(_tof_cloud.body_voxels(odom, 6000), TouchCloudScript.level_frame(xf), 0.0)
 
-func _update_tof8_hud() -> void:
-	if _tof8_hud == null:
-		var hud := get_tree().get_root().find_child("HUD", true, false)
-		if hud == null:
-			return
-		_tof8_hud = Label.new()
-		_tof8_hud.name = "Tof8Grid"
-		_tof8_hud.add_theme_font_size_override("font_size", 12)
-		_tof8_hud.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-		_tof8_hud.position = Vector2(-250, -200)
-		hud.add_child(_tof8_hud)
-	var mn: float = _tof8.min_range(Tof8Script.Cls.HIT)
-	_tof8_hud.text = "tof8  pitch %.0f deg  mount %.0f mm  floor %d  hit %d  leg %d  nearest %s\n%s" % [
-		_tof8.pitch_deg, _tof8.height_above_bottom_m * 1000.0, _tof8.count(Tof8Script.Cls.FLOOR),
-		_tof8.count(Tof8Script.Cls.HIT), _tof8.count(Tof8Script.Cls.SELF),
-		("%.2f m" % mn) if mn < INF else "-", _tof8.text_grid()]
-	_tof8_hud.add_theme_color_override("font_color", Color(0.85, 0.95, 0.85, 1.0))
-
+# The 8x8 text grid that stood at the bottom right was removed 2026-11-18 (operator: not needed any more); the mount is in the
+# HUD's hint row and the rays are on [Y].
 func _tof8_adjust(dpitch: float, dheight: float) -> void:
 	_tof8_ensure()
 	_tof8.pitch_deg = clampf(_tof8.pitch_deg + dpitch, -30.0, 90.0)
@@ -12130,6 +12146,8 @@ func _do_hard_reset() -> void:
 	# body in XZ — used by the auto-reset-in-place-outside-the-ring path.
 	var offset: Vector3 = _pending_reset_offset
 	_pending_reset_offset = Vector3.ZERO   # one-shot; clear immediately
+	if is_inside_tree():   # the view goes with the robot (see _camera_carry)
+		_camera_carry(_chassis.global_transform.origin, _chassis_rest_xform.origin + offset)
 	_chassis.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 	_chassis.freeze = true
 	for b in _coxas + _uppers + _lowers:
