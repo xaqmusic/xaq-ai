@@ -420,6 +420,8 @@ func _process(_delta: float) -> void:
 			if mm3.has("support_model"):
 				var smd: Dictionary = mm3["support_model"]
 				sm_str = "   margin=%+.3f n=%d" % [_as_float(smd.get("margin", 0.0)), _as_int(smd.get("n_support", 0))]
+			if _as_float(ps.get("crouch", 0.0)) > 0.0005:   # the crouch lever acting (crouch_max_m > 0): how far the body has come down, mm
+				sm_str += "   crouch=%.0fmm" % (1000.0 * _as_float(ps.get("crouch", 0.0)))
 			lines.append("seq:        %s %s   engage=%.2f   steps=%s   land=%d miss=%d err=%.3f   blocked=%d passed=%d obstacle=%d resets=%d yaw_err=%+.2f%s" % [
 				String(ps.get("phase", "idle")), (leg_names[lg] if lg >= 0 and lg < 4 else "-"), _as_float(ps.get("engage", 0.0)),
 				str(st), _as_int(ps.get("landings", 0)), _as_int(ps.get("missed", 0)), _as_float(ps.get("land_err", 0.0)),

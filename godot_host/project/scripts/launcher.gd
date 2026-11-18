@@ -75,6 +75,7 @@ const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
 	"sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__p4lo__pm.json",  # LEVER (2026-11-17): the plan that predicts its lift gate, alone, on the landing-offset config.
 	"sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__kgpm.json",  # STACK OF RECORD (promoted by the operator 2026-11-17): the frozen sequencer (the scaffold alone) + the knee guard + the plan that predicts its lift gate. The control for every lever from here on. Benches against the pre-promotion scaffold (n = 6): corridor identical, 38 mm +9.9 cm/min, graded flight +7.9 cm/min, 64 mm mixed.
 	"sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__kgpm__aft.json",  # INSTRUMENT on the STACK OF RECORD (2026-11-17): the after-touch record in shadow (at_learn 1) -- does the toe just placed bear, is the same leg stepped again, against the gap between the height the stance gives it and the height it touched at. Reads only: the body is the stack of record's.
+	"sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__kgpm__aft__crh.json",  # LEVER, PARTIAL, for the operator's look (2026-11-18): the crouch on the stack of record (crouch_max_m 0.03) -- the body comes down to a lowering toe that cannot reach its ground. n = 6: retreats -86 %, legs even, distance and re-stepping tie, tilt disengages 4 against 1. HUD seq line shows crouch=<mm>; the [M] panel's STEPPER section has the depth live (0 = the stack of record).
 ]
 
 

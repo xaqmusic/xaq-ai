@@ -28,10 +28,11 @@ const _MODULE_ID: String = "motor_epm"
 # "only_if": <module id> on a section or a slider hides it when the loaded config has no such module (2026-11-17,
 # operator: the stepper's authority beside the LPG controls) -- the stepper rows show only on a sequencer config.
 const _SLIDERS: Array = [
-	{"section": "STEPPER  (PoseSequencer: learned landing offset)", "only_if": "pose_sequencer"},
+	{"section": "STEPPER  (PoseSequencer)", "only_if": "pose_sequencer"},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "lo_gain", "label": "offset authority (0 = scaffold)", "min": 0.0, "max": 1.0, "step": 0.05},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "ik_knee_guard", "label": "knee guard (1 = never past straight)", "min": 0.0, "max": 1.0, "step": 1.0},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "plan_model_margin", "label": "plan predicts its lift gate (1 = on)", "min": 0.0, "max": 1.0, "step": 1.0},
+	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "crouch_max_m", "label": "crouch to a toe that cannot reach (m; 0 = off)", "min": 0.0, "max": 0.05, "step": 0.005},
 	{"section": "PACE  (meta: period + stroke together)"},
 	{"meta": "pace", "key": "pace", "label": "pace (0 slow .. 1 fast)", "min": 0.0, "max": 1.0, "step": 0.05},
 	{"section": "GAIT  (LoadPhaseGait)"},
