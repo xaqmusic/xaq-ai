@@ -420,6 +420,9 @@ func _process(_delta: float) -> void:
 			if mm3.has("support_model"):
 				var smd: Dictionary = mm3["support_model"]
 				sm_str = "   margin=%+.3f n=%d" % [_as_float(smd.get("margin", 0.0)), _as_int(smd.get("n_support", 0))]
+			var wg_v: Variant = body.get("handover_walker_gain") if body != null else null   # the walker's amplitude gain: it winds under the stepper unless homeo_pose_hold is on
+			if wg_v != null and _as_float(wg_v) >= 0.0:
+				sm_str += "   walker_gain=%.2f" % _as_float(wg_v)
 			if _as_float(ps.get("crouch", 0.0)) > 0.0005:   # the crouch lever acting (crouch_max_m > 0): how far the body has come down, mm
 				sm_str += "   crouch=%.0fmm" % (1000.0 * _as_float(ps.get("crouch", 0.0)))
 			lines.append("seq:        %s %s   engage=%.2f   steps=%s   land=%d miss=%d err=%.3f   blocked=%d passed=%d obstacle=%d resets=%d yaw_err=%+.2f%s" % [
@@ -498,6 +501,14 @@ func _process(_delta: float) -> void:
 	# 2026-07-26 — EVERY bound hotkey is listed, split across two lines: run/mode controls
 	# then view toggles.  Keys that carry live state show it, so the hint doubles as a
 	# status readout.  If a binding is added to picrawler_body._handle_key, add it here too.
+	# 2026-11-18 -- [L] who owns the legs, and the alternating timer's countdown when it runs.
+	var legs_hint: String = ""
+	var he_v: Variant = body.get("handover_engage")
+	if he_v != null and _as_float(he_v) >= 0.0:
+		legs_hint = "   [L] legs: %s" % ("STEPPER" if _as_float(he_v) > 0.5 else "WALKER")
+		var hev: float = _as_float(body.get("handover_every_s"))
+		if hev > 0.0:
+			legs_hint += " (every %.0f s, next in %.0f s)" % [hev, maxf(0.0, float(_as_int(body.get("_handover_next_tick")) - _as_int(body.get("tick_counter"))) / 50.0)]
 	var mpanel_hint: String = ""
 	var mpanel: Node = get_tree().get_root().find_child("MotorEpmPanel", true, false)
 	if mpanel != null and mpanel is Control:
@@ -618,7 +629,7 @@ func _process(_delta: float) -> void:
 	var seed_hint: String = "   seed: %s" % (str(_as_int(seed_v)) if seed_v != null and _as_int(seed_v) >= 0 else "cfg")
 	var hint_run: String = "%s%s%s%s%s   [3] hump%s%s%s%s" % [
 		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint, trim_hint,
-		jb_hint + ts_hint, seed_hint]
+		jb_hint + ts_hint, seed_hint + legs_hint]
 	var hint_view: String = "%s%s%s%s%s%s%s%s%s%s%s   [,/.] time  [/] 1x   [`] graph   [F1/F2] clip   [F5] save   [F9] load   [ESC] quit" % [
 		panels_hint, mpanel_hint, abl_hint, cc_hint, imu_hint, hud_hint, path_hint, plan_hint,
 		clouds_hint, tof8_hint, vis_hint]

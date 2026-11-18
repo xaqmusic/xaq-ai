@@ -1578,6 +1578,18 @@ var _slick_at: int = 0
 var _slick_done: bool = false
 var _lesion_at: int = -1
 var _sched_patches: Array = []   # SETPARAM_AT entries: {t, id, key, val, done}
+# THE HANDOVER BETWEEN THE TWO WALKERS, BY HAND AND ON A TIMER (2026-11-18, operator: "I want to observe the
+# transitions").  [L] flips who owns the legs -- the sequencer's own `engage` (1 = the stepper, 0 = the load-phase
+# walker); the module does the crossfade over its engage_ramp_ticks.  handover_every_s > 0 flips it on a timer (robot
+# seconds at 50 ticks/s; the MOTOR-EPM panel's HANDOVER section, or OGMA_PICRAWLER_HANDOVER_EVERY_S).  An operator's
+# instrument: it sets a parameter a config or a selector could set, and nothing else.  handover_engage is the
+# parameter as last read back from the brain (-1 = this config carries no sequencer), for the HUD and the panel.
+var handover_every_s: float = 0.0
+var handover_engage: float = -1.0
+var handover_walker_gain: float = -1.0   # the walker's amplitude gain as the body log last read it (it winds under the stepper unless homeo_pose_hold is on)
+var _handover_seen_s: float = 0.0
+var _handover_next_tick: int = -1
+var _handover_probed: bool = false
 var _lesion_until: int = 0x7FFFFFFF
 var _lesion_scale: float = 0.2
 # "action" (default) attenuates the leg's COMMANDED MOTION; "torque" caps its torque
@@ -3162,6 +3174,10 @@ func _ready() -> void:
 					"key": parts[2], "val": parts[3].to_float(), "done": false})
 			else:
 				push_warning("SETPARAM_AT entry malformed (want tick:module:key:value): " + ent)
+	var hov: String = OS.get_environment("OGMA_PICRAWLER_HANDOVER_EVERY_S")
+	if hov != "":
+		handover_every_s = maxf(0.0, hov.to_float())
+		print("PicrawlerBody: \u26a0 OGMA_PICRAWLER_HANDOVER_EVERY_S=%.1f \u2014 the legs change hands on a timer" % handover_every_s)
 	_abl_init()
 	_abl_parse_env()
 	var ccl: String = OS.get_environment("OGMA_PICRAWLER_CHASSIS_COLLIDE")
@@ -6846,6 +6862,9 @@ func _input(event: InputEvent) -> void:
 			var pc := pp as Control
 			pc.visible = not pc.visible
 			print("PicrawlerBody: [O] plan_authority_panel = %s" % pc.visible)
+	elif key == KEY_L:
+		# 2026-11-18 -- hand the legs to the other walker now (see handover_every_s).
+		_handover_flip("[L]")
 	elif key == KEY_U:
 		# 2026-08-17 (PART IV) — toggle the GAIN EVOLVER panel: live vector +
 		# incumbent/candidate criterion scores + accept history + the mutation-σ
@@ -6856,6 +6875,35 @@ func _input(event: InputEvent) -> void:
 			var gc := gp as Control
 			gc.visible = not gc.visible
 			print("PicrawlerBody: [U] gain_evolver_panel = %s" % gc.visible)
+
+# The sequencer's `engage` as the brain holds it (-1 = no sequencer in this config).
+func _handover_read() -> float:
+	if brain == null or not brain.has_method("get_module_param_schema"):
+		return -1.0
+	var sch = brain.get_module_param_schema("pose_sequencer")
+	if typeof(sch) != TYPE_ARRAY:
+		return -1.0
+	for e in sch:
+		if typeof(e) == TYPE_DICTIONARY and str(e.get("key", "")) == "engage":
+			return float(e.get("current_value", 0.0))
+	return -1.0
+
+# Flip who owns the legs.  Reads the parameter back first, so a flip made from the panel's slider is respected.
+func _handover_flip(why: String) -> void:
+	var cur: float = _handover_read()
+	if cur < 0.0:
+		_ui_notify("[L] this config carries no stepper to hand the legs to")
+		return
+	var to: float = 0.0 if cur > 0.5 else 1.0
+	var res = brain.apply_patch({"op": "set_param", "id": "pose_sequencer", "key": "engage", "value": to})
+	var ok: bool = typeof(res) == TYPE_DICTIONARY and bool(res.get("success", false))
+	if ok:
+		handover_engage = to
+	if handover_every_s > 0.0:   # a flip by hand restarts the timer's count, so the next one is a full period away
+		_handover_next_tick = tick_counter + int(round(handover_every_s * 50.0))
+	var who: String = "the STEPPER" if to > 0.5 else "the WALKER"
+	print("PicrawlerBody: [handover] %s: the legs go to %s at tick %d -> %s" % [why, who, tick_counter, ("OK" if ok else "FAILED " + str(res))])
+	_ui_notify("legs -> %s%s" % [who, ("" if ok else "  (FAILED)")])
 
 # The "discrete" actuation backend: joint-local u (hip1 already splay-signed) → the
 # target angle the PD chases.  Shared by the physics path and export_body_calib.gd, so the
@@ -7247,6 +7295,15 @@ func _step_one() -> void:
 			print("PicrawlerBody: [setparam_at] %s.%s = %s at tick %d -> %s" % [
 				_sp["id"], _sp["key"], str(_sp["val"]), tick_counter,
 				("OK" if _ok else "FAILED " + str(_res))])
+	# The handover's timer and its read-back (see handover_every_s).
+	if brain != null and tick_counter >= 100 and (not _handover_probed or (handover_engage >= 0.0 and tick_counter % 25 == 0)):
+		_handover_probed = true
+		handover_engage = _handover_read()
+	if handover_every_s != _handover_seen_s:
+		_handover_seen_s = handover_every_s
+		_handover_next_tick = (tick_counter + int(round(handover_every_s * 50.0))) if handover_every_s > 0.0 else -1
+	if _handover_next_tick > 0 and tick_counter >= _handover_next_tick and brain != null:
+		_handover_flip("timer")
 	if _teleport_ramp_at > 0 and tick_counter == _teleport_ramp_at:
 		_teleport_to_ramp()
 	elif _teleport_ramp_at > 0 and _teleport_every > 0 and tick_counter > _teleport_ramp_at \
@@ -13782,6 +13839,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# recovering after an inverted episode.  h_max above is the worst: a monotonic
 			# max with no decay and no reset, and it sets the height setpoint.
 			line["amp_gain"] = snappedf(float(_mm.get("amp_gain_mean", 0.0)), 0.001)
+			handover_walker_gain = float(_mm.get("amp_gain_mean", -1.0))   # for the HUD's stepper line
 			line["coord_best_fit"] = snappedf(float(_mm.get("coord_best_fitness", 0.0)), 0.0001)
 			line["motor_tle"] = snappedf(float(_mm.get("motor_tle", 0.0)), 0.0001)
 			# --- 2026-08-02 Phase-0 instruments (report-only).  See

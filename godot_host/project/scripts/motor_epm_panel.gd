@@ -28,6 +28,11 @@ const _MODULE_ID: String = "motor_epm"
 # "only_if": <module id> on a section or a slider hides it when the loaded config has no such module (2026-11-17,
 # operator: the stepper's authority beside the LPG controls) -- the stepper rows show only on a sequencer config.
 const _SLIDERS: Array = [
+	{"section": "HANDOVER  (walker <-> stepper; [L] flips it now)", "only_if": "pose_sequencer"},
+	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "engage", "label": "who owns the legs (0 walker, 1 stepper)", "min": 0.0, "max": 1.0, "step": 1.0},
+	{"body": true, "only_if": "pose_sequencer", "key": "handover_every_s", "label": "alternate every (s; 0 = off)", "min": 0.0, "max": 120.0, "step": 5.0},
+	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "engage_ramp_ticks", "label": "crossfade (ticks; 50 = 1 s)", "min": 10.0, "max": 300.0, "step": 10.0},
+	{"only_if": "pose_sequencer", "key": "homeo_pose_hold", "label": "walker's amplitude gain held under the stepper (0/1)", "min": 0.0, "max": 1.0, "step": 1.0},
 	{"section": "STEPPER  (PoseSequencer)", "only_if": "pose_sequencer"},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "lo_gain", "label": "offset authority (0 = scaffold)", "min": 0.0, "max": 1.0, "step": 0.05},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "ik_knee_guard", "label": "knee guard (1 = never past straight)", "min": 0.0, "max": 1.0, "step": 1.0},
@@ -213,6 +218,15 @@ func _process(_dt: float) -> void:
 				break
 	if _body != null and not _synced:
 		_synced = _sync_from_module()
+	# The handover row follows the body: [L] and the timer flip `engage` outside this panel.
+	if _synced and _body != null and _value_labels.has("pose_sequencer/engage"):
+		var he = _body.get("handover_engage")
+		if he != null and float(he) >= 0.0:
+			var hl: Label = _value_labels["pose_sequencer/engage"]
+			var hs: HSlider = hl.get_meta("slider")
+			if not is_equal_approx(hs.value, float(he)):
+				hs.set_value_no_signal(float(he))
+				hl.text = "%.3f" % float(he)
 
 func _brain() -> Object:
 	if _body == null or not is_instance_valid(_body):
@@ -285,6 +299,9 @@ func _sync_from_module() -> bool:
 		_on_slider("body", "MAX_SERVO_SPEED", 5.5)
 		if present.has("pose_sequencer"):
 			_on_slider("pose_sequencer", "lo_gain", 0.35)
+			_on_slider("pose_sequencer", "engage_ramp_ticks", 150.0)   # the handover rows (2026-11-18)
+			_on_slider(_MODULE_ID, "homeo_pose_hold", 1.0)
+			_on_slider("body", "handover_every_s", 20.0)
 		_selftest_readback(present.has("pose_sequencer"))
 	return true
 
@@ -304,6 +321,9 @@ func _selftest_readback(has_stepper: bool) -> void:
 	var row_visible := str(_value_labels["pose_sequencer/lo_gain"].get_parent().visible)
 	if has_stepper:
 		print("SimTuningPanel selftest: pose_sequencer.lo_gain -> %s (set 0.35; row visible %s)" % [str(_schema_value("pose_sequencer", "lo_gain")), row_visible])
+		print("SimTuningPanel selftest: handover: engage_ramp_ticks -> %s (set 150), homeo_pose_hold -> %s (set 1), body handover_every_s -> %s (set 20), engage row %s" % [
+			str(_schema_value("pose_sequencer", "engage_ramp_ticks")), str(_schema_value(_MODULE_ID, "homeo_pose_hold")), str(_body.get("handover_every_s")),
+			("present, at %s" % str((_value_labels["pose_sequencer/engage"].get_meta("slider") as HSlider).value)) if _value_labels.has("pose_sequencer/engage") else "MISSING"])
 	else:
 		print("SimTuningPanel selftest: no pose_sequencer in this config (stepper rows visible %s)" % row_visible)
 
@@ -349,6 +369,8 @@ func _on_slider(where: String, key: String, v: float) -> void:
 		ok = typeof(res) == TYPE_DICTIONARY and bool(res.get("success", false))
 		if not ok and typeof(res) == TYPE_DICTIONARY:
 			err = str(res.get("error", ""))
+	if where == "pose_sequencer" and key == "engage" and ok and _body != null and is_instance_valid(_body):
+		_body.set("handover_engage", v)   # the body's read-back, so the row does not snap back before its next read
 	var lk := where + "/" + key
 	if _value_labels.has(lk):
 		_value_labels[lk].text = "%.3f" % v
