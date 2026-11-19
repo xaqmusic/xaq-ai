@@ -331,7 +331,14 @@ i/o mappings that work and build upon them").*
 **Read this section, §4 Phases 3–5, then the ledger's latest entries** (2026-11-16 "a long stairs block", "authority
 sooner"). §10 keeps Phase 3's state and the question as it was put.
 
-**Where it stands (2026-11-18).** The operator watched the crouch for 30 minutes on the bowl of the large arena (the robot
+**Where it stands (2026-11-19).** The operator promoted the hold ("promote the hold, then go ahead with the selection in
+shadow"): the stack of record is `…__p3frz__kgpm__crh__hold.json` (`MotorEPMv2 homeo_pose_hold` 1 on the crouch stack), the
+pre-hold control `…__kgpm__crh.json`. On the four benches it ties the control on every metric with no fall (6 chains, paired by
+seed; the runs differ from the first second of the crossfade on, where the walker's gain now integrates by its share), and the
+walker's gain ends a sequencer run at 0.45–0.50 where it used to end at its ceiling of 5 (ledger 2026-11-19, later). The
+selection in shadow (§9.6 item 2) is the work in hand; §9.7 carries it.
+
+**Where it stood (2026-11-18).** The operator watched the crouch for 30 minutes on the bowl of the large arena (the robot
 climbing halfway up it, no freeze) and promoted it: the stack of record is `…__p3frz__kgpm__crh.json` (`crouch_max_m` 0.03), the
 pre-crouch control `…__kgpm.json`. On the four benches the corridor and the graded flight are identical to the control and one
 chain of six differs on each riser bench (ledger 2026-11-18). **The scaffold is closed.** What it still gets wrong, unchanged by
@@ -757,7 +764,8 @@ counts a walker's own active time; the idle walker keeps predicting in shadow so
 
 **Next, in order (each waits on the operator's word where marked).**
 
-1. *The hold's promotion* (operator): `homeo_pose_hold` 1 into the stack of record.
+1. *The hold's promotion* — **done 2026-11-19** (operator): `homeo_pose_hold` 1 is in the stack of record,
+   `…__kgpm__crh__hold.json`; the benches tie (ledger of that date).
 2. *The selection in shadow.* Two competence reports — the walker's (its stride's predicted progress against what the odometry
    then shows; `StuckSense` and the slip sheet are the existing instruments) and the sequencer's (the after-touch record's
    outcomes, the plan's drift) — graded while driving and in shadow while idle, into a selector in the recipe's form with the
