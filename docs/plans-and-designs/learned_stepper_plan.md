@@ -768,6 +768,12 @@ counts a walker's own active time; the idle walker keeps predicting in shadow so
    by expected free energy from the layer's own predicted outcome error — Phase 4's form (`LandingOffset`) with the after-touch
    outcomes. Shadow first: predict the touchdown error and the outcomes at tempo 1 / 1.5 / 2 from the dose-response runs already
    on disk.
+   *The limits, measured 2026-11-19 (ledger; `~/xaq_runs/stepper/tempo_terrain`, `tempo_field`, `tempo_flat`):* on the flat the
+   servo speed sets the ceiling (about x 4 at 6.0 rad/s, x 3 at 4.22, flattening from x 2 at 2.0-3.0; past it more steps buy
+   less distance and landings miss); on features to 25 mm x 3 is free; in the pyramid field the tilt-bound stall (one toe
+   landing without bearing, the body past 10 degrees) is the same at every tempo and x 3 adds falls. So the tempo has a
+   ceiling known from the body and a second one read from the predicted outcome, and under the stall the value to own is the
+   step, not the rate. The [M] panel carries the tempo as one slider for watching it.
 4. §9.5's proposal (a learned step intent where the wave's turn is skipped) stands behind these.
 5. *Servo speed as a handle of the handover* (operator's observation, 2026-11-18 evening; ledger of that date): 2.0 rad/s under
    the stepper and a ramp back after the crossfade halves the first second's jolt (signal), does not replace the hold, and the

@@ -10878,3 +10878,44 @@ Corridor: 3–5 % slower (steps/min 33.5–34.4 against 35.0; touchdown error 0.
 
 **What transfers to the robot.** There the servo speed is already a software handle: benchd's brain slew (`slew.set`, 20–60 µs per tick ≈ 1.8–5.5 rad/s at 545 µs/rad, allowed in the brain modes; `dash_run.py`'s speed keys). 2.0 and 3.0 are inside its band; the sim stack's 6.0 is outside it (the robot base walks at 4.22). It is also the brownout lever: a stepper at 2.0 draws less on the servo rail. **No lever is built.** Two forms were put to the operator: (1) each walker declares the speed it needs, blended by the share that blends their commands, with a limit on the rise; (2) the limit follows the command's own recent demand with a slow rise. Either needs a brain-to-host channel for the speed (sim: `MAX_SERVO_SPEED`; robot: `slew.set`), default off.
 
+
+### 2026-11-19 — THE STEPPER'S TEMPO, ITS LIMITS (operator: "tempo does work to step faster on flat ground but when the robot encountered terrain it froze. Let's explore the limits"): ON FLAT GROUND THE SERVO SPEED SETS THE CEILING; ON ROUGH GROUND THE TILT SETS IT AND THE TEMPO ONLY ADDS FALLS (existing parameters, no lever; signals)
+
+**The UI first** (`a296da0f`). A long label in the tuning panel took its whole row and left the slider no width; every label now has a fixed column (clipped, the full text as a tooltip) and every slider a minimum width. New on a sequencer config: `stepper tempo (x config)`, 0.5–3, the sequencer's five rates (`shift_v_mps`, `lift_v_mps`, `swing_v_mps`, `lower_v_mps`, `lower_fast_v_mps`) as a multiple of the config's own — the speed arms of 2026-11-18 on one handle. Nothing in the brain reads it. The panel's selftest now measures the drawn layout (narrowest slider 114 px, no label clipped).
+
+**Three batteries**, all on the stack of record with the five rates scaled together (× 1.5 / 2 / 3 are the `zz_arm_t15 / t20 / t30` configs; × 4–6 and the flat arms set the rates at tick 50 through `OGMA_PICRAWLER_SETPARAM_AT`, read back in every run), at servo speed 6.0 (the stack's) and 4.22 (the robot's); every arm's rates asserted in every run (`stepper_expect.py`); scripts and readers beside the logs (`run.sh`, `read.py`, `perrun.py`). 152 runs; two died of the host's open heap defect (`corrupted size vs. prev_size`: × 2 at 6.0 field seed 2 at tick 8000, × 3 at 6.0 field seed 3 at tick 22 495) and are read to where they stop.
+
+**(1) The terrain arena from its centre** (`~/xaq_runs/stepper/tempo_terrain`; gym `terrain`, terrain seed = run seed 1–6, 24 000 ticks, n = 6 per arm). The body walks out through the 12, 18 and 25 mm rings (radius reached 3.9 / 5.5 / 7.1 / 8.9 m at × 1 / 1.5 / 2 / 3). Net distance 3.89 ± 0.14 / 5.38 ± 0.09 / 6.92 ± 0.25 / 8.52 ± 0.36 m at 6.0 and the same at 4.22 (3.85 / 5.31 / 6.93 / 8.56). No fall in 48 runs, one tilt disengage, no stretch of 5 s without a step at × 1.5–3. Up to 25 mm of steps, bars and rough ground the tempo is free to × 3.
+
+**(2) The pyramid field** (`tempo_field`; the `tilt1` protocol: terrain seed 0, six spawns along the operator's path of 2026-11-17 from (4.26, 13.88) to (5.06, 18.37), seeds 42–47, 30 000 ticks, n = 6 per arm):
+
+| | × 1 | × 1.5 | × 2 | × 3 |
+|---|---|---|---|---|
+| net distance m, servo 6.0 | 1.43 ± 0.56 | 1.65 ± 0.92 | 1.79 ± 1.11 | 2.21 ± 1.17 |
+| net distance m, servo 4.22 | 1.44 ± 0.66 | 1.69 ± 1.09 | 2.01 ± 1.08 | 2.12 ± 1.24 |
+| path m, 6.0 / 4.22 | 10.7 / 8.9 | 11.8 / 11.4 | 11.9 / 17.4 | 20.8 / 17.7 |
+| steps per minute, 6.0 / 4.22 | 31 / 30 | 38 / 43 | 49 / 52 | 68 / 65 |
+| one leg re-stepping in place, % of engaged time, 6.0 / 4.22 | 24 / 30 | 38 / 40 | 44 / 29 | 31 / 40 |
+| falls (runs with one, of 6), 6.0 | 0 (0) | 0 (0) | 5 (1) | 12 (3) |
+| falls (runs with one, of 6), 4.22 | 4 (1) | 3 (1) | 2 (1) | 10 (2) |
+| tilt disengages, 6.0 / 4.22 | 4 / 4 | 7 / 12 | 11 / 17 | 20 / 15 |
+| phase timeouts per minute, 6.0 / 4.22 | 3.1 / 2.2 | 6.6 / 2.3 | 8.5 / 5.4 | 7.6 / 8.3 |
+
+Three times the rates is twice the steps and twice the path for half again the net distance, inside the spread; the three spawns nearest the bowl end at the same radius at every tempo (19.3–19.6 m) with 0.6–1.0 m net. **What stops the body is the stall already on record (2026-11-17), at every tempo including × 1:** one leg lands again and again while the body does not move — 142 landings of the rear right toe in 405 s at × 2 with the body at 22° and that toe carrying 1 % of the weight; 200 in 360 s at × 1.5 at 17°; 141 of the front left in 385 s at × 3 at 26°; 28 in 117 s at × 1 at 28° — the long ones all within 15 cm of (4.75, 18.9). By chassis tilt the share of time spent so is the same shape in every arm (`stepper_tilt.py`): 1–15 % below 5°, 11–36 % at 5–10°, 28–61 % at 10–15°, 42–82 % above 15°; the planner's block inside it is another planted toe at its minimum reach in 72–90 % of blocked plans, as before. A faster tempo arrives at such a place sooner and taps faster in it; it does not get through.
+
+**A blind metric.** `stepper_freeze.py`'s freeze is 5 s without a completed step. It reads zero at × 2 and × 3 in runs where the body stood within 1 cm for 13–79 % of the time, because the stalled leg keeps completing steps. What the operator sees as a freeze is a body that does not move; read it by displacement (`perrun.py`'s still column, `stepper_tilt.py`'s tapping), not by steps.
+
+**(3) The flat ceiling** (`tempo_flat`; corridor, 9000 ticks, seeds 1–4; cm/min is net displacement after tick 1500, comparable between these arms and not with `bench_seq.py`'s figure):
+
+| servo rad/s | × 1 | × 1.5 | × 2 | × 3 | × 4 | × 5 | × 6 |
+|---|---|---|---|---|---|---|---|
+| 6.0 | | | | 107 | 131 | 128 (7 misses) | 119 (58 misses) |
+| 4.22 | | | | 108 | 108 (6) | 107 (41) | 75 (177) |
+| 3.0 | 49 | 68 | 83 | 91 (1) | | | |
+| 2.0 | 48 | 63 | 73 | 80 (9) | | | |
+
+No fall and no tilt disengage in 64 runs. Past the ceiling the steps per minute keep rising and the distance per step falls (1.5 cm at × 3–4 and 6.0; 0.63 cm at × 6 and 4.22), with landings that find no ground: the command outruns the leg. The ceiling is about × 4 at 6.0, × 3 at 4.22, and at 2.0–3.0 the gain flattens from × 2. The landing error rises from 7 mm at × 1 to 15–17 mm at × 3 at every servo speed. At × 1 the servo speed is free (48–49 cm/min at 2.0 and 3.0), which is the operator's observation of 2026-11-18.
+
+**Verdicts, in context** (n = 4–6 per arm, signals). Tempo × 1.5–3 on flat ground and on features to 25 mm: `WORKING` as dosed — progress follows the tempo, no fall, no stall, at 6.0 and 4.22. Tempo above the servo's ceiling (× 4 at 6.0, × 3 at 4.22): `NULL` then `REGRESSION` — more steps, less distance, missed landings. Tempo in the pyramid field: `NULL` on what limits the body (the tilt-bound stall is the same at every tempo) with a cost in falls at × 3 (12 and 10 against 0 and 4 per six runs; runs with a fall 3 and 2 of 6 against 0 and 1) and in tilt disengages as dosed. Servo 4.22 against 6.0 on rough ground: no difference seen. **Not established:** that the freeze the operator saw is this stall — the UI keeps no per-tick log of their run; the stall is what these runs hold at the places their 2026-11-17 path crosses. **Re-use context:** a fixed fast tempo is a flat-ground setting; on a slope the binding limit is the toe that lands and does not bear with the body tilted past 10°, which no rate reaches.
+
+**What it says about the tempo as an owned value** (plan §9.6 item 3). The tempo has two ceilings and neither is a constant: the servo's (a property of the body, known in advance: the command must not outrun the leg) and the ground's (the outcome error the after-touch record already carries — landings that do not bear, the tilt). A tempo chosen from predicted outcome error would run near the servo's ceiling on the flat and fall to × 1 or lower where the toe is predicted not to bear; and where the stall holds, the value to own is not the rate but the step itself (§9.5's proposal).
