@@ -13416,6 +13416,30 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["stuck_vref"] = snappedf(float(ss.get("v_ref", 0.0)), 0.0001)
 		line["stuck_yr"] = snappedf(float(ss.get("yaw_rate", 0.0)), 0.001)
 		line["stuck_cmd"] = snappedf(float(ss.get("speed_cmd", 0.0)), 0.001)
+	# The walker selection in shadow (learned stepper plan 9.6, 2026-11-19): each walker's competence report (WalkerCompetence:
+	# its progress in m/s of the stride odometry, graded while it holds the legs) and the selector that reads them and moves
+	# nothing (WalkerSelect).  wr = the rhythm, wrr = the same with the range channel alone as its discount, sr = the sequencer.
+	for wsp in [["report_walker", "wr"], ["report_walker_range", "wrr"], ["report_stepper", "sr"]]:
+		if metrics.has(wsp[0]):
+			var wc: Dictionary = metrics[wsp[0]]
+			var wk: String = wsp[1]
+			line[wk + "_est"] = snappedf(float(wc.get("est", 0.0)), 0.00001)
+			line[wk + "_sd"] = snappedf(float(wc.get("sd", 0.0)), 0.00001)
+			line[wk + "_rate"] = snappedf(float(wc.get("rate", 0.0)), 0.00001)
+			line[wk + "_mean"] = snappedf(float(wc.get("mean", 0.0)), 0.00001)
+			line[wk + "_live"] = snappedf(float(wc.get("live", 0.0)), 0.00001)
+			line[wk + "_g"] = [int(bool(wc.get("graded", false))), int(bool(wc.get("settling", false))), int(bool(wc.get("driving", false)))]
+			line[wk + "_n"] = int(wc.get("n", 0))
+			line[wk + "_cost"] = [snappedf(float(wc.get("switch_cost_s", 0.0)), 0.01), int(wc.get("costs", 0)), int(wc.get("takeovers", 0))]
+			line[wk + "_idle"] = [snappedf(float(wc.get("p_same", 1.0)), 0.0001), snappedf(float(wc.get("idle_m", 0.0)), 0.0001)]
+	if metrics.has("walker_select"):
+		var wsel: Dictionary = metrics["walker_select"]
+		line["ws_want"] = int(wsel.get("want", 0))
+		line["ws_cur"] = int(wsel.get("incumbent", 0))
+		line["ws_lead"] = snappedf(float(wsel.get("lead", 0.0)), 0.00001)
+		line["ws_lead_s"] = snappedf(float(wsel.get("lead_s", 0.0)), 0.01)
+		line["ws_g"] = [snappedf(float(wsel.get("g_rhythm", 0.0)), 0.00001), snappedf(float(wsel.get("g_sequencer", 0.0)), 0.00001)]
+		line["ws_n"] = [int(wsel.get("ticks", 0)), int(wsel.get("agree_ticks", 0)), int(wsel.get("calls", 0)), int(wsel.get("want_rhythm_ticks", 0)), int(wsel.get("want_sequencer_ticks", 0))]
 	if metrics.has("load_phase"):
 		# LoadPhaseGait (gait audit 2026-10-12): the load-held per-leg phase's own instruments.
 		var lp: Dictionary = metrics["load_phase"]

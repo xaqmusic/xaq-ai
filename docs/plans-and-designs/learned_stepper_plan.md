@@ -766,7 +766,8 @@ counts a walker's own active time; the idle walker keeps predicting in shadow so
 
 1. *The hold's promotion* — **done 2026-11-19** (operator): `homeo_pose_hold` 1 is in the stack of record,
    `…__kgpm__crh__hold.json`; the benches tie (ledger of that date).
-2. *The selection in shadow.* Two competence reports — the walker's (its stride's predicted progress against what the odometry
+2. *The selection in shadow* — **first read done 2026-11-19 (§9.7): the reports are built and calibrated, the selector on
+   progress alone is right about progress and blind to the flip; not ready for authority.** As planned: Two competence reports — the walker's (its stride's predicted progress against what the odometry
    then shows; `StuckSense` and the slip sheet are the existing instruments) and the sequencer's (the after-touch record's
    outcomes, the plan's drift) — graded while driving and in shadow while idle, into a selector in the recipe's form with the
    lead's running spread as hysteresis and the measured switching costs (10 s in, 2–3 s out). Logged beside a fixed schedule; no
@@ -788,6 +789,60 @@ counts a walker's own active time; the idle walker keeps predicting in shadow so
    stepper falls on the 64 mm riser at 2.0–3.0 — so the speed is a per-walker, per-ground quantity like the tempo. On the robot
    it is benchd's brain slew, 1.8–5.5 rad/s. No lever built; the form (declared per walker and blended, or following the
    command's own demand) is the operator's choice, and it needs a brain-to-host channel for the speed.
+
+### 9.7 The selection in shadow: first read (2026-11-19) — ▶ resume here
+
+**The operator's word:** "promote the hold, then go ahead with the selection in shadow." The hold is promoted (§9 "Where it
+stands"). Ledger 2026-11-19 (afternoon) carries the numbers; runs, runners and readers are in `~/xaq_runs/stepper/sel1`.
+
+**What was measured before anything was built: which walker is competent where.** The rhythm alone on the stepper's own bench
+worlds, the arena and the rough-terrain spawns (36 runs). In this simulator it out-progresses the sequencer on every ground: six
+times on the corridor, across all three 38 mm risers, up the graded flight to its 50 mm riser, and further than the sequencer on
+the terrain where the sequencer has its tilt-bound stall. It fails at a 64 mm riser — a stall, then a flip in 3 runs of 6 — and
+at walls. The sequencer never flips; it does not climb the 64 mm riser in three minutes either. **So the selection here is a
+question of what the walkers risk, not of how fast they go**, and §9.6's picture (the walker on flat ground, the sequencer for
+climbing) holds only from 64 mm up. The robot's own walker config climbs the same 38 mm risers in the simulator (n = 3); whether
+the robot does is a robot measurement.
+
+**Built, in shadow** (config `…__crh__hold__aft__sel.json`; the body unchanged field for field):
+
+- `WalkerCompetence`, one per walker — its progress in m/s of the stride odometry, graded only while it holds the legs, the
+  rhythm's discounted by `StuckSense`'s range channel (the stride alone does not see a stall at a riser: 1.1 cm/s read, 0.3
+  made); held while idle and returned to its own mean over a body length of net travel (a named scaffold); the hand-over's cost
+  measured at each take-over (1.7 s for the rhythm, 5.9 s for the sequencer, to half pace).
+- `WalkerSelect` — expected progress plus optimism, the challenger's value priced by its measured hand-over cost, wanted once
+  its lead has lasted as long as the hand-over takes. Nothing consumes it.
+
+**What the two shadow batteries say** (74 runs; the second with the reports' history carried from an arena run).
+
+- The reports are calibrated where it matters: at pace on flat ground and in a stall, for both walkers. The rhythm's reads about
+  half its true rate where it closes on things at an angle (corridor).
+- On progress the selector is right: at 30 of the 31 scheduled hand-overs with a reading it wanted the walker that then made more
+  ground, and on flat ground, the corridor, the 38 mm bench and the terrain it never wants the sequencer.
+- **It is blind to the flip.** It wanted all 15 hand-backs to the rhythm; the rhythm went over within 45 s at three of them (a
+  pyramid, and twice at the graded flight's 64 mm riser, 2–12 s after taking the legs). The idle walker's estimate cannot know
+  the riser is still there, and the outcome it compares has no attitude in it. The body's tilt at the hand-back does not carry
+  it either: the sequencer levels the body on the riser.
+- The ground ahead is in the forward field: under the sequencer's steady body, a thing of 5.5 cm or more within 0.35 m goes
+  with its own stall in 71–82 % of rows, against 2–12 % under 4.5 cm. Read frame by frame under the rhythm's rocking body it
+  separates nothing; the terrain memory is where to read it.
+
+**Proposed next (the operator's decision; no authority asked for).**
+
+1. *The ground ahead as a vocabulary*: an EPM over the terrain memory's patch in front of the body (conditioned as CLAUDE.md §0
+   rule 2 asks), instrument-only first, with the admission test "its nodes separate the 64 mm riser from the 38 mm one and from
+   flat ground, under both walkers".
+2. *Each walker's outcome per node, with the attitude in it*: progress and tilt excursion, learned while that walker drives; the
+   idle walker's estimate read from the node the body faces. This replaces `relax_m`.
+3. *The selector re-read in shadow* on the same schedules — the three flips are its test — and only then the question of
+   authority.
+4. Standing behind: the tempo as an owned value (§9.6 item 3) and the learned step intent at skipped turns (§9.5), which is what
+   would give the sequencer a ground of its own at 64 mm.
+
+**Open.** The host's heap corruption now reproduces on demand (the alternation on the 64 mm bench, seeds 12 and 32: dead 1–7 s
+after the hand-back at tick 6000); a sanitizer build is proposed as a separate session. The sequencer's niche on the robot is not
+established. `report_walker_range` (the range channel alone as the discount) reads the same as `report_walker` and can leave the
+config.
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 

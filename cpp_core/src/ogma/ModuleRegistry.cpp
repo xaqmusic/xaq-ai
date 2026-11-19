@@ -32,6 +32,8 @@
 #include "ogma/modules/PoseSequencer.hpp"
 #include "ogma/modules/BearingToIntent.hpp"
 #include "ogma/modules/StuckSense.hpp"
+#include "ogma/modules/WalkerCompetence.hpp"
+#include "ogma/modules/WalkerSelect.hpp"
 #include "ogma/modules/LoadPhaseGait.hpp"
 #include "ogma/modules/StuckEscape.hpp"
 #include "ogma/modules/BearingSeekLoop.hpp"
@@ -174,6 +176,8 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("PoseSequencer",         [](){ return std::make_unique<PoseSequencer>(); });        // the careful stepper's sequencer: a statically supported crawl, one pose at a time (2026-11-08)
         reg.register_type("BearingToIntent",       [](){ return std::make_unique<BearingToIntent>(); });      // picrawler S3: a loop's bearing -> goal bearing + speed, holding a reference when silent
         reg.register_type("StuckSense",            [](){ return std::make_unique<StuckSense>(); });           // picrawler S3 lever 2: the range beam as re-afference against the stride's efference
+        reg.register_type("WalkerCompetence",      [](){ return std::make_unique<WalkerCompetence>(); });     // learned stepper 9.6: one walker's progress report, graded while it holds the legs (2026-11-19)
+        reg.register_type("WalkerSelect",          [](){ return std::make_unique<WalkerSelect>(); });         // learned stepper 9.6: the walker selection, in shadow (2026-11-19)
         reg.register_type("LoadPhaseGait",         [](){ return std::make_unique<LoadPhaseGait>(); });        // picrawler gait audit 2026-10-12: a per-leg phase the leg's own load holds (Tegotae)
         reg.register_type("StuckEscape",           [](){ return std::make_unique<StuckEscape>(); });          // picrawler S3 lever 2: confirmed stuck -> back, turn to the freest sector, refract
         reg.register_type("BearingSeekLoop",       [](){ return std::make_unique<BearingSeekLoop>(); });      // duck things phase T2: seeking a thing seen only at stops
