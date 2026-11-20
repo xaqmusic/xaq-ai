@@ -26,6 +26,12 @@ public:
 
     void sense(uint64_t tick_id);        // the tick, and each toe's leaky bearing estimate (the FSR filtered)
     void engage_now(uint64_t tick_id);   // the stance from the gait's pose; Settle next
+    // THE HAND-BACK FROM A STAND (2026-11-19, the operator's observation: the rhythm flails when it is handed the legs in a pose it
+    // does not expect -- a toe in the air, the body shifted over three toes, the toes a stride from their places).  Return is the
+    // mirror of Settle: the stepping toe comes down where it is (at lower_v, to a touch), then the four toes slide to `places`
+    // at settle_v while the body goes to the height h_m at crouch_v (h_m <= 0: the sequencer's own standing height); then Idle,
+    // and only then does the shell ramp the blend out.  A Return that outlasts return_max_ticks_ ends where it is.
+    void return_now(const std::array<body::Vec3f, 4>& places, double h_m);
     void step_machine();                 // one tick of the phase machine
     void hold_stance();                  // the planted toes' heights
     void solve_ik();                     // the commanded toes to joint angles (and the IK error's EMA)
@@ -241,6 +247,9 @@ public:
     int64_t reseeds_ = 0;
     std::array<bool, 4> reseeding_{};   // the walk back at ik_reseed_rate per tick (the step cap, 6 rad/s, flipped the body once when a planted leg snapped to neutral)
     double crouch_ = 0.0; double crouch_max_m_ = 0.0; double crouch_v_ = 0.03; double crouch_relax_v_ = 0.005;
+    // the hand-back's return (0 everywhere while no Return has run since the engage: byte-identical)
+    double ret_h_ = 0.0; double ret_h_goal_m_ = 0.0; double ret_h_max_m_ = 0.04; std::array<body::Vec3f, 4> ret_place_{};
+    int return_max_ticks_ = 400; int64_t returns_ = 0; int64_t return_ticks_ = 0; int64_t return_timeouts_ = 0; int64_t return_lowered_ = 0;
     int64_t crouch_ticks_ = 0;
     bool plan_active_ = false; bool plan_pending_ = false;
     body::Vec3f plan_land_{};

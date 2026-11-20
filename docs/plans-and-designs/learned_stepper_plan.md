@@ -790,7 +790,7 @@ counts a walker's own active time; the idle walker keeps predicting in shadow so
    it is benchd's brain slew, 1.8–5.5 rad/s. No lever built; the form (declared per walker and blended, or following the
    command's own demand) is the operator's choice, and it needs a brain-to-host channel for the speed.
 
-### 9.7 The selection in shadow: first read (2026-11-19) — ▶ resume here
+### 9.7 The selection in shadow: first read (2026-11-19)
 
 **The operator's word:** "promote the hold, then go ahead with the selection in shadow." The hold is promoted (§9 "Where it
 stands"). Ledger 2026-11-19 (afternoon) carries the numbers; runs, runners and readers are in `~/xaq_runs/stepper/sel1`.
@@ -843,6 +843,44 @@ the robot does is a robot measurement.
 after the hand-back at tick 6000); a sanitizer build is proposed as a separate session. The sequencer's niche on the robot is not
 established. `report_walker_range` (the range channel alone as the discount) reads the same as `report_walker` and can leave the
 config.
+
+### 9.8 The hand-back from a stand (2026-11-19, evening) — ▶ resume here
+
+**The operator's read of §9.7's flips:** the walker is stable after its first flailing; it is engaged from a pose it does not
+expect; standing before the switch may be the whole fix; the switch the other way has no problem. Ledger 2026-11-19 (evening)
+carries the numbers; runs and readers are in `~/xaq_runs/stepper/hb1`.
+
+**Built** (`PoseSequencer handback_stand`, default 0, byte-identical off; hot-mutable; a row in the panel's HANDOVER section).
+When the hand-back is asked for, the stepper lands its stepping toe, slides the four toes to a stand and only then lets the
+blend to the rhythm begin. Form 1 stands on the sequencer's neutral toes; form 2 stands in **the rhythm's own mean pose and
+height, learned from its command while it alone drives**. A tilt disengage and a reset still hand back at once.
+
+**Measured** (control against form 2: 166 against 167 hand-backs on 40 worlds, the legs changing hands every 30 s).
+
+- The return works as a mechanism: the walker is handed a pose 0.20 rad from its mean (its own walking spread is 0.21) where
+  the control hands it 0.57, with four toes down; 1.6 s a hand-back, no timeout in 198.
+- **It does not change the flips**: past 60° within 5 s 6 against 5, within 15 s 10 against 11, within 28 s 17 against 17; peak
+  tilt and tilt rate tie; from the second second on the two arms are the same.
+- The flips are the ground's. 24 of the 34 are on the 64 mm bench or the graded flight, and the rate after a hand-back at a
+  64 mm riser (0.33–0.45 a minute) is not above the rhythm's own rate stalled there (0.50). §9.7's "2–12 s after taking the
+  legs" was three events.
+- The first battery alone (55 hand-backs an arm) read 6 against 2 in the hypothesis's direction; the second (110) read 4
+  against 9. The verdict waited for the second.
+
+**Where it stands.** `handback_stand` is not promoted and stays 0 everywhere. Its re-use context is the robot (a 0.7 rad knee
+travel in the second the rhythm fades in meets servo lag and a current limit there, and this simulator has neither) and the
+operator's eye in the UI. §9.7's proposal is unchanged and better supported: what the selection lacks is the ground ahead and
+the attitude in the outcome it compares.
+
+**Open, for the operator.**
+
+1. Where the flailing was seen: on which config (with the hold, the walker is at its ordinary rock within two seconds of a
+   hand-back; without it, 6–31 s — ledger 2026-11-18), on what ground, and whether the panel's `stand before handback` row
+   changes what is seen.
+2. §9.7's items 1–3 (the ground-ahead vocabulary, each walker's outcome per node with the attitude in it, the selector
+   re-read), awaiting the word.
+3. The heap corruption: two more instances, both with the rhythm on rough terrain and no hand-back near; the sanitizer build
+   is still a separate session.
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 

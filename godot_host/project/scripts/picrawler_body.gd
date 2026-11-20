@@ -13322,6 +13322,9 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		if ps.has("plan_model_margin"):   # the plan predicts its gate (2026-11-17), only when on: [decisions biased, the summed shortfall m]
 			var pmm: Array = ps.get("plan_model_margin", [])
 			if pmm.size() >= 2: line["ps_pmm"] = [int(pmm[0]), snappedf(float(pmm[1]), 0.0001)]
+		if ps.has("handback"):   # the hand-back from a stand (2026-11-19), only when it is on: [returns, ticks in them, timed out, toes lowered, the height offset (m), the rhythm's pose ticks]
+			var hb: Array = ps.get("handback", [])
+			if hb.size() >= 6: line["ps_hb"] = [int(hb[0]), int(hb[1]), int(hb[2]), int(hb[3]), snappedf(float(hb[4]), 0.0001), int(hb[5])]
 		if ps.has("knee_guard"):   # the knee guard (2026-11-17), only when it is on: [solves discarded for a knee past straight, retries left off the target]
 			var kg: Array = ps.get("knee_guard", [])
 			if kg.size() >= 2: line["ps_kg"] = [int(kg[0]), int(kg[1])]

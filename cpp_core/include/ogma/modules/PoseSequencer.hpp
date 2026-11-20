@@ -121,6 +121,16 @@ private:
     std::string odom_in_topic_ = "reality.proprio.odom"; std::string odom_out_topic_ = "reality.proprio.odom_seq";
     bool odom_anchored_ = false;
     float engage_level_ = 0.0f;
+    // THE HAND-BACK FROM A STAND (2026-11-19, operator; handback_stand 0 = off, byte-identical).  With engage set to 0 the legs went
+    // back to the rhythm from wherever the crawl stood: a toe in the air in 28 of 40 hand-backs, the pose 0.5-0.9 rad rms from the
+    // rhythm's own mean where its walking spread is 0.2.  With handback_stand on, the executor first RETURNS (StepExecutor::return_now)
+    // and the blend ramps out only from the stand:
+    //     1 = the sequencer's own stance (the toes at their neutral places, the crouch out);
+    //     2 = the rhythm's own pose: the mean of what it commands while it holds the legs (count-annealed over
+    //         handback_pose_tau_ticks), its toes' places and its standing height -- learned from the rhythm, no constant names it.
+    // A tilt disengage and a reset stay immediate.
+    double handback_stand_ = 0.0; int handback_pose_tau_ticks_ = 500;
+    std::array<double, 12> pose_mean_{}; int64_t pose_n_ = 0;
     int64_t disengaged_tilt_ = 0;
     double fk_err_ema_ = 0.0;
     int64_t ticks_engaged_ = 0;

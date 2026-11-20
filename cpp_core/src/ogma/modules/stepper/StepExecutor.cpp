@@ -25,8 +25,15 @@ void StepExecutor::engage_now(uint64_t tick_id) {
         elev_[size_t(i)] = 0.0; elev_landed_[size_t(i)] = 0.0; ground_h_[size_t(i)] = -stand_h_m_; creep_[size_t(i)] = 0.0; air_ticks_[size_t(i)] = 0;
     }
     reloc_active_ = false;   // (the planner's drift prediction is reset by the shell at engage)
-    shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ticks_ = 0; leg_ = -1; phase_ = Phase::Settle; engaged_at_ = int64_t(tick_id); crouch_ = 0.0;
+    shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ticks_ = 0; leg_ = -1; phase_ = Phase::Settle; engaged_at_ = int64_t(tick_id); crouch_ = 0.0; ret_h_ = 0.0;
     yaw_ref_ = (heading_ref_ == "engage" && in_.have_odom_in_) ? in_.odom_in_[2] : 0.0; yaw_err_ = 0.0;
+}
+
+// the hand-back: from wherever the crawl is to a stand (see the header)
+void StepExecutor::return_now(const std::array<Vec3f, 4>& places, double h_m) {
+    if (phase_ == Phase::Shift || phase_ == Phase::Settle) leg_ = -1;   // all four are planted (Shift's leg_ is only the next to lift)
+    ret_place_ = places; ret_h_goal_m_ = h_m; plan_active_ = false; plan_pending_ = false; relief_for_ = -1; free_pending_ = 0; reloc_active_ = false;
+    touch_run_ = 0; phase_ = Phase::Return; phase_ticks_ = 0; ++returns_;
 }
 
 // the planted toes' heights: stand_h below the body plus each toe's relative elevation, recentred on their mean
@@ -90,7 +97,7 @@ void StepExecutor::hold_stance() {
         // body's up vector leans away from is low, and its toes are sent deeper by level_gain of the geometric correction
         // (x ux + z uz) / uy.  (Equal GRAVITY heights were tried, 2026-11-08: four toes on a flat floor share one gravity
         // height at any roll, so that stance held whatever attitude the body had and it rolled to the disengage limit.)
-        toe_tgt_[size_t(i)].y = float(-(stand_h_m_ - crouch_) + std::clamp(elev_[size_t(i)] - mean, -elev_max_m_, elev_max_m_) - creep_[size_t(i)] + (lev[size_t(i)] - lev_mean));
+        toe_tgt_[size_t(i)].y = float(-(stand_h_m_ - crouch_ - ret_h_) + std::clamp(elev_[size_t(i)] - mean, -elev_max_m_, elev_max_m_) - creep_[size_t(i)] + (lev[size_t(i)] - lev_mean));
         if (front_drop_ > 0.0 && toe_tgt_[size_t(i)].z > 0.0f) toe_tgt_[size_t(i)].y += float(front_drop_);   // the front of the chassis comes down
         if (depth_max_m_ > 0.0 && toe_tgt_[size_t(i)].y < float(-depth_max_m_)) { toe_tgt_[size_t(i)].y = float(-depth_max_m_); ++depth_caps_; }
     }
@@ -109,6 +116,32 @@ void StepExecutor::step_machine() {
         }
         ++settle_ticks_;
         if (all_there && phase_ticks_ > 10) { decide_next(tick_now_); shift_acc_ = 0.0; fwd_acc_ = 0.0; fwd_blocked_ = false; still_ticks_ = 0; centre_off_ = false; phase_ = Phase::Shift; phase_ticks_ = 0; }
+        break; }
+    case Phase::Return: {   // the hand-back: the stepping toe down, then the toes to their places and the body to its height; then Idle
+        ++return_ticks_;
+        if (leg_ >= 0) {
+            Vec3f& tg = toe_tgt_[size_t(leg_)];
+            const Vec3f cmd = kin_.toe_of(leg_, angles_[size_t(leg_)]);
+            tg.y -= float(lower_v_ * dt_);
+            if (depth_max_m_ > 0.0 && tg.y < float(-depth_max_m_)) tg.y = float(-depth_max_m_);
+            const bool raw_touch = in_.have_contact_ && in_.contact_[size_t(leg_)] > 0.5f && (!in_.have_load_ || in_.load_[size_t(leg_)] >= float(touch_load_));
+            touch_run_ = raw_touch ? touch_run_ + 1 : 0;
+            const bool touched = touch_run_ >= touch_ticks_ && phase_ticks_ > 3;
+            const bool low = double(tg.y) <= -(stand_h_m_ - crouch_) - sink_max_m_ || phase_ticks_ > 4 * phase_max_ticks_;
+            if (touched || low) { elev_landed_[size_t(leg_)] = double(cmd.y) + stand_h_m_; tg = cmd; leg_ = -1; phase_ticks_ = 0; ++return_lowered_; }   // the stance takes it from here
+            break;
+        }
+        bool all_there = true; const double step = settle_v_ * dt_;
+        for (int i = 0; i < 4; ++i) {
+            Vec3f& tg = toe_tgt_[size_t(i)]; const double dx = ret_place_[size_t(i)].x - tg.x, dz = ret_place_[size_t(i)].z - tg.z, dn = std::hypot(dx, dz);
+            if (dn <= step) { tg.x = ret_place_[size_t(i)].x; tg.z = ret_place_[size_t(i)].z; } else { tg.x += float(dx / dn * step); tg.z += float(dz / dn * step); all_there = false; }
+        }
+        if (ret_h_goal_m_ > 0.0) {   // the body to the height asked for (the crouch, relaxing on its own, is counted in)
+            const double goal = std::clamp(stand_h_m_ - crouch_ - ret_h_goal_m_, -ret_h_max_m_, ret_h_max_m_), dh = goal - ret_h_, hs = crouch_v_ * dt_;
+            if (std::fabs(dh) <= hs) ret_h_ = goal; else { ret_h_ += dh > 0.0 ? hs : -hs; all_there = false; }
+        }
+        const bool late = phase_ticks_ > return_max_ticks_;
+        if ((all_there && phase_ticks_ > 10) || late) { if (late) ++return_timeouts_; phase_ = Phase::Idle; leg_ = -1; }
         break; }
     case Phase::Shift: {
         // the body's move: into the triangle the other toes make, by the margin still missing, and toward the toes' centroid

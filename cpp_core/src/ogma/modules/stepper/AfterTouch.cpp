@@ -66,7 +66,7 @@ void AfterTouch::close(int reason, const StepExecutor&, const StepperInputs& in)
 
 void AfterTouch::observe(const StepExecutor& ex, const ScaffoldPlanner& pl, const StepperInputs& in, const LoadBook& book) {
     const Phase ph = ex.phase_;
-    if (ph == Phase::Idle) {   // disengaged: an open record is dropped, and a step in the air is no longer this stepper's
+    if (ph == Phase::Idle || ph == Phase::Return) {   // disengaged (or on its way out): an open record is dropped, and a step in the air is no longer this stepper's
         if (rec_.open) close(ByDisengage, ex, in);
         seen_seq_ = ex.outcome_seq_; prev_phase_ = ph; go_fresh_ = false;
         return;

@@ -33,6 +33,7 @@ const _SLIDERS: Array = [
 	{"body": true, "only_if": "pose_sequencer", "key": "handover_every_s", "label": "alternate every (s; 0 = off)", "min": 0.0, "max": 120.0, "step": 5.0},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "engage_ramp_ticks", "label": "crossfade (ticks; 50 = 1 s)", "min": 10.0, "max": 300.0, "step": 10.0},
 	{"only_if": "pose_sequencer", "key": "homeo_pose_hold", "label": "hold walker's gain (0/1)", "tip": "homeo_pose_hold: the walker's amplitude gain is held while the stepper owns the legs (0/1)", "min": 0.0, "max": 1.0, "step": 1.0},
+	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "handback_stand", "label": "stand before handback (0/1/2)", "tip": "handback_stand (2026-11-19): before the walker takes the legs back the stepper lands its toe and stands -- 0 off (the blend starts from wherever the crawl is), 1 on the stepper's neutral toes, 2 in the walker's own mean pose (learned while the walker drives)", "min": 0.0, "max": 2.0, "step": 1.0},
 	{"section": "STEPPER  (PoseSequencer)", "only_if": "pose_sequencer"},
 	{"meta": "tempo", "only_if": "pose_sequencer", "key": "tempo", "label": "stepper tempo (x config)", "tip": "the stepper's shift, lift, swing and lowering rates together, as a multiple of the config's own (1 = the config; the 2026-11-18 speed arms were 1.5, 2 and 3)", "min": 0.5, "max": 3.0, "step": 0.1},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "lo_gain", "label": "offset authority (0 = scaffold)", "min": 0.0, "max": 1.0, "step": 0.05},
@@ -328,6 +329,7 @@ func _sync_from_module() -> bool:
 			_on_slider(_MODULE_ID, "homeo_pose_hold", 1.0)
 			_on_slider("body", "handover_every_s", 20.0)
 			_on_slider("meta", "tempo", 2.0)
+			_on_slider("pose_sequencer", "handback_stand", 2.0)   # the stand before the hand-back (2026-11-19)
 		_selftest_readback(present.has("pose_sequencer"))
 	return true
 
@@ -354,6 +356,7 @@ func _selftest_readback(has_stepper: bool) -> void:
 		for tk in _TEMPO_KEYS:
 			rates.append("%s %s (config %s)" % [tk, str(_schema_value("pose_sequencer", tk)), str(_tempo_cfg.get(tk, "?"))])
 		print("SimTuningPanel selftest: stepper tempo set 2.0 -> %s" % ", ".join(rates))
+		print("SimTuningPanel selftest: handback_stand -> %s (set 2; row %s)" % [str(_schema_value("pose_sequencer", "handback_stand")), "present" if _value_labels.has("pose_sequencer/handback_stand") else "MISSING"])
 	else:
 		print("SimTuningPanel selftest: no pose_sequencer in this config (stepper rows visible %s)" % row_visible)
 	# The layout, as it is drawn: every shown row's slider width, and the labels the column clips (a headless run cannot look).

@@ -413,3 +413,83 @@ TEST(PoseSequencer, TheStepOutcomeIsPublishedOncePerLanding_AndTheDiagCarriesThe
     for (int i = 0; i < 4; ++i) { EXPECT_GT(d["room"][i][3].get<double>(), 0.0) << "hip1 inside its stops"; EXPECT_LE(d["room"][i][1].get<double>(), 1.0); }
     EXPECT_EQ(d["outcome"][0].get<double>(), double(total));
 }
+
+// ---- the hand-back from a stand (2026-11-19) ----
+namespace {
+// the test's ground: a toe in the air has no contact; a toe coming down touches at the floor (-0.09 in the body frame)
+std::vector<float> ground_contact(Fix& f) {
+    std::vector<float> c = {1, 1, 1, 1}; const int leg = f.m.active_leg(); const auto ph = f.m.phase();
+    if (leg >= 0 && (ph == PoseSequencer::Phase::Lift || ph == PoseSequencer::Phase::Swing)) c[size_t(leg)] = 0.0f;
+    if (leg >= 0 && (ph == PoseSequencer::Phase::Lower || ph == PoseSequencer::Phase::Return)) c[size_t(leg)] = f.m.diag_snapshot()["toe_tgt"][leg][1].get<double>() <= -0.09 ? 1.0f : 0.0f;
+    return c;
+}
+// crawl until a toe is in the air mid-swing; returns the tick reached
+uint64_t crawl_to_a_swing(Fix& f, uint64_t t0 = 0) {
+    uint64_t t = t0; int in_swing = 0;
+    for (; t < t0 + 3000; ++t) { f.run(t, ground_contact(f)); if (f.m.phase() == PoseSequencer::Phase::Swing && ++in_swing >= 5) break; }
+    return t + 1;
+}
+ogma::ParamMap hb_params(double stand) {
+    return {{"engage", ogma::ParamValue{1.0}}, {"engage_ramp_ticks", ogma::ParamValue{int64_t{10}}}, {"engage_min_tick", ogma::ParamValue{int64_t{0}}}, {"belly_topic", ogma::ParamValue{std::string("")}}, {"handback_stand", ogma::ParamValue{stand}}};
+}
+}
+
+TEST(PoseSequencer, HandbackStandOff_TheLegsGoBackFromWhereverTheCrawlIs) {
+    Fix f(hb_params(0.0));
+    uint64_t t = crawl_to_a_swing(f); ASSERT_EQ(f.m.phase(), PoseSequencer::Phase::Swing);
+    f.m.on_param_change("engage", ogma::ParamValue{0.0});
+    f.run(t, ground_contact(f));
+    EXPECT_EQ(f.m.phase(), PoseSequencer::Phase::Idle) << "off: idle on the next tick, a toe still in the air";
+    EXPECT_LT(f.m.engage_level(), 1.0f);
+    EXPECT_FALSE(f.m.diag_snapshot().contains("handback")) << "the default diag is unchanged";
+}
+
+TEST(PoseSequencer, HandbackStandOne_TheToeComesDownAndTheToesGoToTheirPlacesBeforeTheBlendRampsOut) {
+    Fix f(hb_params(1.0));
+    uint64_t t = crawl_to_a_swing(f); ASSERT_EQ(f.m.phase(), PoseSequencer::Phase::Swing);
+    const int leg = f.m.active_leg(); ASSERT_GE(leg, 0);
+    f.m.on_param_change("engage", ogma::ParamValue{0.0});
+    int ret_ticks = 0; bool lowered_seen = false;
+    for (int k = 0; k < 600 && (k == 0 || f.m.phase() != PoseSequencer::Phase::Idle); ++k, ++t) {
+        f.run(t, ground_contact(f));
+        if (f.m.phase() == PoseSequencer::Phase::Return) { ++ret_ticks; EXPECT_FLOAT_EQ(f.m.engage_level(), 1.0f) << "the sequencer holds the legs until it stands"; if (f.m.active_leg() < 0) lowered_seen = true; }
+    }
+    ASSERT_EQ(f.m.phase(), PoseSequencer::Phase::Idle);
+    EXPECT_GT(ret_ticks, 10); EXPECT_TRUE(lowered_seen);
+    auto d = f.m.diag_snapshot();
+    ASSERT_TRUE(d.contains("handback"));
+    EXPECT_EQ(d["handback"][0].get<double>(), 1.0); EXPECT_EQ(d["handback"][2].get<double>(), 0.0) << "it arrived, no timeout"; EXPECT_EQ(d["handback"][3].get<double>(), 1.0) << "one toe was lowered";
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_NEAR(d["toe_tgt"][i][0].get<double>(), d["neutral"][i][0].get<double>(), 1e-4) << "toe " << i;
+        EXPECT_NEAR(d["toe_tgt"][i][2].get<double>(), d["neutral"][i][1].get<double>(), 1e-4) << "toe " << i;
+        EXPECT_NEAR(d["toe_tgt"][i][1].get<double>(), d["toe_tgt"][0][1].get<double>(), 0.012) << "the four toes stand at one height on a flat floor (toe " << i << ")";
+    }
+    // only now the blend ramps out, over engage_ramp_ticks
+    for (int k = 0; k < 12; ++k, ++t) f.run(t, {1, 1, 1, 1});
+    EXPECT_FLOAT_EQ(f.m.engage_level(), 0.0f);
+}
+
+TEST(PoseSequencer, HandbackStandTwo_TheStandIsTheRhythmsOwnPose_LearnedFromItsCommand) {
+    auto p = hb_params(2.0); p["engage"] = ogma::ParamValue{0.0};
+    Fix f(p);
+    uint64_t t = 0; for (; t < 150; ++t) f.run(t, {1, 1, 1, 1});   // the rhythm drives (the fixture's command: knees at 0.5, hips at 0)
+    f.m.on_param_change("engage", ogma::ParamValue{1.0});
+    t = crawl_to_a_swing(f, t); ASSERT_EQ(f.m.phase(), PoseSequencer::Phase::Swing);
+    f.m.on_param_change("engage", ogma::ParamValue{0.0});
+    for (int k = 0; k < 600 && (k == 0 || f.m.phase() != PoseSequencer::Phase::Idle); ++k, ++t) f.run(t, ground_contact(f));
+    ASSERT_EQ(f.m.phase(), PoseSequencer::Phase::Idle);
+    auto d = f.m.diag_snapshot();
+    EXPECT_EQ(d["handback"][2].get<double>(), 0.0) << "it arrived";
+    EXPECT_GE(d["handback"][5].get<double>(), 100.0) << "the pose was learned while the rhythm drove";
+    ASSERT_EQ(f.out.size(), 13u);
+    for (int k = 0; k < 12; ++k) EXPECT_NEAR(f.out[size_t(1 + k)], (k % 3 == 2) ? 0.5f : 0.0f, 0.08f) << "joint " << k << ": the pose handed back is the one the rhythm commands";
+}
+
+TEST(PoseSequencer, HandbackStand_ABodyGoingOverIsHandedBackAtOnce) {
+    Fix f(hb_params(1.0));
+    uint64_t t = crawl_to_a_swing(f); ASSERT_EQ(f.m.phase(), PoseSequencer::Phase::Swing);
+    f.m.on_param_change("engage", ogma::ParamValue{0.0});
+    f.run(t++, ground_contact(f)); ASSERT_EQ(f.m.phase(), PoseSequencer::Phase::Return);
+    f.run(t++, ground_contact(f), 0.03f, {0.8f, 0.6f, 0.0f});   // the body's up at 53 deg from vertical: past tilt_disengage
+    EXPECT_EQ(f.m.phase(), PoseSequencer::Phase::Idle) << "the return does not hold the legs of a body going over";
+}

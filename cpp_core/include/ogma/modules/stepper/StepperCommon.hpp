@@ -16,7 +16,7 @@ inline Vec3f sub(const Vec3f& a, const Vec3f& b) { return Vec3f(a.x - b.x, a.y -
 inline Vec3f add(const Vec3f& a, const Vec3f& b) { return Vec3f(a.x + b.x, a.y + b.y, a.z + b.z); }
 inline double len(const Vec3f& a) { return std::sqrt(double(a.x) * a.x + double(a.y) * a.y + double(a.z) * a.z); }
 
-enum class Phase { Idle = 0, Shift, Lift, Swing, Lower, Settle };
+enum class Phase { Idle = 0, Shift, Lift, Swing, Lower, Settle, Return };   // Return (2026-11-19): the hand-back's way to a stand, see StepExecutor::return_now
 
 // the signed distance of (cx, cz) inside the triangle p (+ inside) and the inward unit normal of the edge nearest it
 double tri_margin(const std::array<std::array<double, 2>, 3>& p, double cx, double cz, double& nx, double& nz);
