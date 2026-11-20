@@ -844,7 +844,7 @@ after the hand-back at tick 6000); a sanitizer build is proposed as a separate s
 established. `report_walker_range` (the range channel alone as the discount) reads the same as `report_walker` and can leave the
 config.
 
-### 9.8 The hand-back from a stand (2026-11-19, evening) — ▶ resume here
+### 9.8 The hand-back from a stand (2026-11-19, evening)
 
 **The operator's read of §9.7's flips:** the walker is stable after its first flailing; it is engaged from a pose it does not
 expect; standing before the switch may be the whole fix; the switch the other way has no problem. Ledger 2026-11-19 (evening)
@@ -881,6 +881,57 @@ the attitude in the outcome it compares.
    re-read), awaiting the word.
 3. The heap corruption: two more instances, both with the rhythm on rough terrain and no hand-back near; the sanitizer build
    is still a separate session.
+
+### 9.9 The ground ahead as a vocabulary, and the operator's re-weighting (2026-11-20) — ▶ resume here
+
+**The operator's word:** "go ahead with the ground-ahead vocabulary" (§9.7 item 1). Ledger 2026-11-20 carries the numbers; runs,
+runners and readers are in `~/xaq_runs/stepper/ah1`.
+
+**Built, instrument-only** (config `…__hold__aft__sel__ah.json`; the body unchanged field for field):
+
+- `AheadField` — the ground in front of the front toes on a 9 × 3 grid fixed to the body, straight from the forward field:
+  each return levelled by gravity and taken against the planted front toes' own height, each cell averaged over a stride. No
+  datum and no odometry. It also carries the step the body stands across (front toes over rear toes).
+- `TerrainMemory.ahead_topic` — the same grid from the memory, the source first planned; kept beside the other.
+- `AheadFeatures` — the relief in body units, the unknown share per column, a constant component so that a riser's height is
+  a direction for the encoder, optionally the ground under the body.
+- An EPM over each (`epm_ahead`, `epm_ahead_tm`).
+
+**Measured** (15 runs, the legs changing hands every 30 s).
+
+- `AheadField` reads risers of 38–89 mm within 6 mm (median) under both walkers and orders the 12–25 mm ones; the memory's
+  grid matches it under the sequencer and reads 50–64 mm low and wide under the rhythm (its datum moves by centimetres inside
+  two seconds where the walkers alternate).
+- The EPM separates a riser of 64 mm and up from everything lower at recall 0.93, precision 0.93, and flat at 0.97; it does
+  not hold 38 mm as a class (0.30–0.49). It is still growing at six minutes.
+- **Most of a stall is astride the riser, not in front of it**: 56 % of the rhythm's stalled time on stairs has the front toes
+  up a step of 45 mm or more and the rear toes below; 30 % has the step ahead only. The toes carry the astride step (r 0.67–0.74
+  against the truth). Added to the same feature vector it did not help and cost recall at 38 and 50 mm.
+- The node says where the rhythm will make ground across worlds (r 0.59); at a riser it does not say which half of the time
+  the rhythm is stalled.
+
+**The operator's re-weighting (2026-11-20, during this work):** the handover now looks stable on terrain and risers; a stuck
+walker is usually freed by the other; **the main choice is energy** (the picrawler is power-limited and the sequencer suits it)
+and **the brain must know of brownouts** (MCU resets) to fall back to the sequencer. Checked against what exists: the robot
+publishes the servo current and the HAT rail to the brain as instruments, and detects HAT resets in its daemon without
+publishing them to the brain; the simulator has a power model (off in these runs) and no brownout. So the selection's outcome
+is, in order: stuck (either walker, answered by the other), energy with the brownout as its hard event, then attitude.
+
+**Proposed next (the operator's decision; no authority asked for).**
+
+1. *Energy as an observed outcome*: the simulator's power model on, each walker's energy per metre on the map worlds of
+   2026-11-19. One battery, no new code beyond logging.
+2. *The brownout as a sense, on both sides*: the robot's reset count and its age on a `sense.*` topic (the daemon already has
+   them and can inject one); in the simulator, a rail that sags with the modelled current and a reset event at the measured
+   ceiling (`pi_host/tools/brownout_ceiling_sweep.py`). Instrument-only first, admitted by "it separates the rhythm from the
+   sequencer on the robot's own logs".
+3. *Stuck as the hand-over's trigger, in shadow, both directions*: `StuckSense` for the rhythm, the sequencer's own skipped
+   turns for the sequencer; scored by whether the other walker then frees the body.
+4. *Then* each walker's outcomes (stuck, energy, progress) remembered per node of the ground vocabulary, with the astride step
+   as its own small vocabulary beside it, and the selector re-read in shadow.
+
+**Open.** `handback_stand` stays 0 in every config of record; which setting the operator watched is not recorded. The heap
+corruption (two more instances on 2026-11-19, on rough terrain with the rhythm) still wants its sanitizer session.
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 

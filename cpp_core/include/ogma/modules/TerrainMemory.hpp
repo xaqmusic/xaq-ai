@@ -139,9 +139,17 @@ private:
     // nothing is remembered), then N x N precisions]; cell (i, j) is at fwd = (i - N/2 + 0.5) cell, lat = (j - N/2 + 0.5)
     // cell in the toes' frame (feet_xz).  "" = not published, byte-identical.
     std::string patch_topic_ = ""; int patch_cells_ = 16; double patch_cell_m_ = 0.0;   // 0 = the voxel size
+    // THE GROUND AHEAD (2026-11-20, learned stepper plan 9.7 item 1): the memory's heights on a grid in front of the body, for a
+    // module that reads WHAT THE FRONT LEGS ARE ABOUT TO MEET.  rows x cols cells of ahead_row_m (forward) x ahead_col_m
+    // (lateral); row 0's centre is ahead_start_m forward of the body's origin in the toes' frame, the columns are centred on the
+    // body's axis.  Each cell is the precision-pooled height of the voxels under it (sampled every half voxel) and their summed
+    // precision.  ProprioToken [rows, cols, row_m, col_m, start_m, datum, then rows x cols heights (body gravity frame, origin 0;
+    // kNoHeight where nothing is remembered), then rows x cols precisions].  "" = not published, byte-identical.
+    std::string ahead_topic_ = ""; int ahead_rows_ = 9, ahead_cols_ = 3; double ahead_row_m_ = 0.04, ahead_col_m_ = 0.08, ahead_start_m_ = 0.10;
 public:
     static constexpr float kNoHeight = -99.0f;
     static constexpr int   kPatchHeader = 4;
+    static constexpr int   kAheadHeader = 6;
 private:
 
     // inputs

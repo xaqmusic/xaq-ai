@@ -13530,6 +13530,22 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		line["sbv_nism"] = snappedf(float(bsv.get("nis_mean", 0.0)), 0.001)
 		line["sbv_hnis"] = snappedf(float(bsv.get("head_nis_mean", 0.0)), 0.001)
 		line["sbv_sw"] = [int(bsv.get("map_switches", 0)), int(bsv.get("winner_switches", 0))]
+	# the ground ahead (learned stepper 9.7, 2026-11-20): the reliefs in mm (row 1 first), the unknown shares, the EPM over them.
+	# "ah" / "eah" is the grid of record (AheadField: the field against the front toes); "aht" / "eaht" the terrain memory's grid.
+	for ahp in [["ahead_features", "ah", "epm_ahead", "eah"], ["ahead_features_tm", "aht", "epm_ahead_tm", "eaht"]]:
+		if metrics.has(ahp[0]):
+			var ahf: Dictionary = metrics[ahp[0]]; var ak: String = ahp[1]
+			line[ak + "_pub"] = int(ahf.get("published", 0)); line[ak + "_held"] = int(ahf.get("held", 0)); line[ak + "_noref"] = int(ahf.get("no_ref", 0))
+			line[ak + "_ref"] = snappedf(float(ahf.get("ref", 0.0)), 0.001); line[ak + "_norm"] = snappedf(float(ahf.get("norm", 0.0)), 0.01)
+			line[ak + "_mm"] = ahf.get("relief_mm", []); line[ak + "_unk"] = ahf.get("unknown", [])
+			line[ak + "_astr"] = snappedf(float(ahf.get("astride", 0.0)), 0.001)
+		if metrics.has(ahp[2]):
+			var eah: Dictionary = metrics[ahp[2]]; var ek: String = ahp[3]
+			line[ek + "_win"] = int(eah.get("winner_id", -1)); line[ek + "_n"] = int(eah.get("node_count", 0)); line[ek + "_b"] = int(eah.get("baked_count", 0)); line[ek + "_nov"] = 1 if bool(eah.get("is_novel", false)) else 0
+			line[ek + "_tle"] = snappedf(float(eah.get("tle", -1.0)), 0.0001); line[ek + "_qe"] = snappedf(float(eah.get("quant_error", -1.0)), 0.0001)
+	if metrics.has("ahead_field"):
+		var afd: Dictionary = metrics["ahead_field"]
+		line["af_frames"] = int(afd.get("frames", 0)); line["af_noref"] = int(afd.get("no_ref", 0)); line["af_tilted"] = int(afd.get("tilted", 0)); line["af_known"] = int(afd.get("known", 0))
 	if metrics.has("stance_features"):
 		var sft: Dictionary = metrics["stance_features"]
 		line["sf_pub"] = int(sft.get("published", 0))

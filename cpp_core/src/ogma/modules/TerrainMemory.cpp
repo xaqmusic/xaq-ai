@@ -35,6 +35,7 @@ std::vector<TopicSpec> TerrainMemory::input_topics() const {
 std::vector<TopicSpec> TerrainMemory::output_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{predict_topic_, std::type_index(typeid(ProprioToken))}, TopicSpec{error_topic_, std::type_index(typeid(ProprioToken))} };
     if (!patch_topic_.empty()) v.push_back(TopicSpec{patch_topic_, std::type_index(typeid(ProprioToken))});
+    if (!ahead_topic_.empty()) v.push_back(TopicSpec{ahead_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
 
@@ -91,6 +92,12 @@ ParamSchema TerrainMemory::params_schema() const {
         {"patch_topic",  ParamMutability::ConstructionOnly, "THE PATCH for a pose evaluator (SupportModel): ProprioToken [N, cell_m, datum, 0, N*N heights (body gravity frame, origin 0, -99 = none), N*N precisions] on a body-centred grid in the toes' frame, every tick. \"\" = not published (byte-identical).", ParamValue{std::string("")}},
         {"patch_cells",  ParamMutability::ConstructionOnly, "The patch's side, in cells (16 x 3 cm = +/- 24 cm around the body).", ParamValue{int64_t{16}}},
         {"patch_cell_m", ParamMutability::ConstructionOnly, "The patch's cell (m); 0 = the voxel size.", ParamValue{0.0}},
+        {"ahead_topic",   ParamMutability::ConstructionOnly, "THE GROUND AHEAD: ProprioToken [rows, cols, row_m, col_m, start_m, datum, rows*cols heights (body gravity frame, origin 0, -99 = none), rows*cols precisions] on a grid in front of the body. \"\" = not published.", ParamValue{std::string("")}},
+        {"ahead_rows",    ParamMutability::ConstructionOnly, "The ahead grid's rows (forward).", ParamValue{int64_t{9}}},
+        {"ahead_cols",    ParamMutability::ConstructionOnly, "The ahead grid's columns (lateral, centred on the body's axis).", ParamValue{int64_t{3}}},
+        {"ahead_row_m",   ParamMutability::ConstructionOnly, "A row's depth (m).", ParamValue{0.04}},
+        {"ahead_col_m",   ParamMutability::ConstructionOnly, "A column's width (m).", ParamValue{0.08}},
+        {"ahead_start_m", ParamMutability::ConstructionOnly, "Row 0's centre, forward of the body's origin (m): the front toes' line.", ParamValue{0.10}},
         {"diag_max",    ParamMutability::HotMutable, "Voxels listed in the diag, nearest first (0 = all).", ParamValue{int64_t{300}}},
         {"recent_max",  ParamMutability::HotMutable, "Recent prediction errors kept in the diag as rows [tick, leg, h_pred, prec, h_touch, e].", ParamValue{int64_t{32}}},
     };
@@ -116,7 +123,7 @@ void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
     if (!bus_) throw std::invalid_argument("TerrainMemory requires a non-null Bus");
     for (auto pr : std::initializer_list<std::pair<const char*, std::string*>>{
             {"field_topic", &field_topic_}, {"contact_topic", &contact_topic_}, {"feet_xz_topic", &feet_xz_topic_}, {"feet_y_topic", &feet_y_topic_},
-            {"odom_topic", &odom_topic_}, {"predict_topic", &predict_topic_}, {"error_topic", &error_topic_}, {"up_topic", &up_topic_}, {"load_topic", &load_topic_}, {"stall_topic", &stall_topic_}, {"patch_topic", &patch_topic_}, {"belly_topic", &belly_topic_}})
+            {"odom_topic", &odom_topic_}, {"predict_topic", &predict_topic_}, {"error_topic", &error_topic_}, {"up_topic", &up_topic_}, {"load_topic", &load_topic_}, {"stall_topic", &stall_topic_}, {"patch_topic", &patch_topic_}, {"belly_topic", &belly_topic_}, {"ahead_topic", &ahead_topic_}})
         apply_param(params, pr.first, [&](auto const& v){ *pr.second = get_string(v, pr.first); });
     for (auto const& k : {"pitch_deg", "sensor_x_m", "sensor_y_m", "sensor_z_m", "max_range_m", "thing_min_m", "fit_rows", "fit_slope_max", "voxel_m",
                           "max_voxels", "max_age_ticks", "sigma_field_m", "sigma_touch_m", "predict_tau_touches", "predict_radius_m", "plane_tau_ticks",
@@ -125,6 +132,11 @@ void TerrainMemory::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "datum_source", [&](auto const& v){ const std::string x = get_string(v, "datum_source"); if (x != "touch" && x != "planted" && x != "belly" && x != "fused") throw std::invalid_argument("TerrainMemory: datum_source must be \"touch\", \"planted\", \"belly\" or \"fused\""); datum_source_ = x; });
     apply_param(params, "patch_cells", [&](auto const& v){ patch_cells_ = std::clamp(int(get_double(v, "patch_cells")), 2, 64); });
     apply_param(params, "patch_cell_m", [&](auto const& v){ patch_cell_m_ = std::max(0.0, get_double(v, "patch_cell_m")); });
+    apply_param(params, "ahead_rows", [&](auto const& v){ ahead_rows_ = std::clamp(int(get_double(v, "ahead_rows")), 1, 32); });
+    apply_param(params, "ahead_cols", [&](auto const& v){ ahead_cols_ = std::clamp(int(get_double(v, "ahead_cols")), 1, 16); });
+    apply_param(params, "ahead_row_m", [&](auto const& v){ ahead_row_m_ = std::clamp(get_double(v, "ahead_row_m"), 0.005, 0.5); });
+    apply_param(params, "ahead_col_m", [&](auto const& v){ ahead_col_m_ = std::clamp(get_double(v, "ahead_col_m"), 0.005, 0.5); });
+    apply_param(params, "ahead_start_m", [&](auto const& v){ ahead_start_m_ = get_double(v, "ahead_start_m"); });
     auto sub = [&](std::string const& topic, std::string which) {
         if (topic.empty()) return;
         sub_ids_.push_back(bus_->subscribe(topic, SubscriptionKind::Direct, [this, which](std::string_view, MessagePtr p){ handle(which, p); }));
@@ -471,6 +483,31 @@ void TerrainMemory::tick(uint64_t tick_id) {
             else po->values[k + N * N] = 0.0f;
         }
         bus_->publish(patch_topic_, po);
+    }
+    if (!ahead_topic_.empty()) {   // the ground ahead: each cell pools the voxels under it by precision
+        const int R = ahead_rows_, C = ahead_cols_; const double half = 0.5 * voxel_m_;
+        auto ao = std::make_shared<ProprioToken>();
+        ao->tick_id = tick_id; ao->producer_id = out->producer_id; ao->sensor = "terrain_ahead";
+        ao->values = Eigen::VectorXf::Constant(kAheadHeader + 2 * R * C, kNoHeight);
+        ao->values[0] = float(R); ao->values[1] = float(C); ao->values[2] = float(ahead_row_m_); ao->values[3] = float(ahead_col_m_);
+        ao->values[4] = float(ahead_start_m_); ao->values[5] = float(datum_);
+        double px, py, c, s; odom_pose(px, py, c, s);
+        const int nf = std::max(1, int(std::lround(ahead_row_m_ / half))), nl = std::max(1, int(std::lround(ahead_col_m_ / half)));
+        for (int i = 0; i < R; ++i) for (int j = 0; j < C; ++j) {
+            const double f0 = ahead_start_m_ + (i - 0.5) * ahead_row_m_, l0 = (j - 0.5 * C) * ahead_col_m_;
+            double sw = 0.0, sh = 0.0;
+            for (int a = 0; a < nf; ++a) for (int b = 0; b < nl; ++b) {
+                const double fwd = f0 + (a + 0.5) * ahead_row_m_ / nf, lat = l0 + (b + 0.5) * ahead_col_m_ / nl;
+                const double X = px + fwd * c - lat * s, Y = py + fwd * s + lat * c;
+                auto it = vox_.find(Key{int64_t(std::floor(X / voxel_m_)), int64_t(std::floor(Y / voxel_m_))});
+                if (it == vox_.end()) continue;
+                const double w = 1.0 / std::max(1e-9, it->second.var); sw += w; sh += w * (it->second.h - datum_);
+            }
+            const int k = kAheadHeader + i * C + j;
+            if (sw > 0.0) { ao->values[k] = float(sh / sw); ao->values[k + R * C] = float(sw / double(nf * nl)); }
+            else ao->values[k + R * C] = 0.0f;
+        }
+        bus_->publish(ahead_topic_, ao);
     }
 }
 
