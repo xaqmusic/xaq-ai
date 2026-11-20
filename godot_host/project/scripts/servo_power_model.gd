@@ -20,7 +20,8 @@ extends RefCounted
 ## not just the foot: a shin snagged on a rock is exactly the stall that drains the rail.
 ##
 ## INSTRUMENT ONLY.  Nothing here writes to the physics.  The one side effect, contact reporting
-## on coxa/upper segments, is switched on only when the model is enabled.
+## on coxa/upper segments, is switched on only when the model is enabled -- and it is not free:
+## see segment_contacts in setup().
 ##
 ## Read in _physics_process, BEFORE the step: velocities and contact impulses then both belong to
 ## the step just completed, so dL/dt over that step pairs with the impulses it applied.
@@ -28,6 +29,7 @@ extends RefCounted
 const N_JOINTS := 12                 # index = leg * 3 + jt (jt 0 hip1, 1 hip2, 2 knee)
 
 var enabled := false
+var segment_contacts := true          # contact reporting on the coxa and upper segments (see setup)
 var tau := PackedFloat32Array()      # per joint, N·m, along the joint axis (signed)
 var omega := PackedFloat32Array()    # per joint, rad/s, child relative to parent along the axis
 var _have_prev := false
@@ -57,8 +59,14 @@ func setup(chassis: RigidBody3D, coxas: Array, uppers: Array, lowers: Array,
 	for i in range(4):
 		_segs.append_array([coxas[i], uppers[i], lowers[i]])
 		for b in [coxas[i], uppers[i]]:            # lowers already report contacts (foot sensor)
-			b.contact_monitor = true
-			b.max_contacts_reported = 4
+			# ⚠ NOT FREE (measured 2026-11-20): in Godot Physics, contact reporting on a body changes the solve once that body
+			# touches something.  The trajectory is identical to the instrument-off run until a coxa or an upper segment
+			# meets the world (a fall, rough terrain) and a different, equally valid one after.  segment_contacts false
+			# (OGMA_PICRAWLER_POWER_SEG_CONTACTS=0) keeps the body's trajectory exactly and reads a wrong torque only
+			# while one of those segments is in contact.
+			if segment_contacts:
+				b.contact_monitor = true
+				b.max_contacts_reported = 4
 		var parents: Array = [chassis, coxas[i], uppers[i]]
 		var anchors: Array = [hip1_w[i], hip2_w[i], knee_w[i]]
 		var axes: Array = [Vector3.UP, lateral_axes[i], lateral_axes[i]]
@@ -218,3 +226,51 @@ func electrical_step(dt: float) -> void:
 	v_pack = E_V_REST - E_R_PACK * i_bat
 	var v5: float = 5.0 * pow(E_I5_LIM / maxf(i5, 1e-9), E_GAMMA) if i5 > E_I5_LIM else 5.0
 	v_rail = minf(3.3, v5 - E_LDO_DROP)
+
+
+# ---------------------------------------------------------------------------------------------
+# THE BROWNOUT AS AN EVENT (2026-11-20, operator: "the brain needs to be aware of brownout events (mcu reset)").
+#
+# On the robot the HAT's MCU resets when the 3.3 V rail folds far enough for long enough (ledger 2026-10-05: it rode out
+# dips to 2.65-2.68 V lasting 22-91 ms and reset at 2.51 V after 68 ms; every deep dip had the battery current at its
+# ceiling).  Here: the rail under reset_v for reset_s is one reset; the outage then lasts outage_s (the robot is back on its
+# feet 2.2-2.5 s after one), during which no further reset is counted.  reset_v sits between the survived and the fatal
+# depth; the RATE this gives is not calibrated against the robot (in open walking this model's rail is calmer than the
+# robot's), so it is read as a comparison between walkers and grounds, not as the robot's resets per minute.
+# Counting only: whether the body is held still through the outage is the caller's choice (picrawler_body brownout_mode 2).
+# ---------------------------------------------------------------------------------------------
+var reset_v := 2.58
+var reset_s := 0.008
+var outage_s := 2.5
+var resets := 0
+var outage_left := 0.0
+var t_now := 0.0
+var _low_run := 0.0
+var _reset_t := PackedFloat32Array()
+
+
+## One physics step, after electrical_step.  True on the step a reset happens.
+func brownout_step(dt: float) -> bool:
+	t_now += dt
+	if outage_left > 0.0:
+		outage_left = maxf(0.0, outage_left - dt)
+		_low_run = 0.0
+		return false
+	_low_run = (_low_run + dt) if v_rail < reset_v else 0.0
+	if _low_run >= reset_s - 1e-9:
+		resets += 1
+		outage_left = outage_s
+		_low_run = 0.0
+		_reset_t.append(t_now)
+		return true
+	return false
+
+
+## Outages inside the last 60 s (the robot's daemon stops recovering on its own past three).
+func outages_60s() -> int:
+	var n := 0
+	for k in range(_reset_t.size() - 1, -1, -1):
+		if t_now - _reset_t[k] > 60.0:
+			break
+		n += 1
+	return n

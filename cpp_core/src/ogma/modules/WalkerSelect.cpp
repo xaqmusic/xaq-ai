@@ -37,6 +37,7 @@ std::vector<TopicSpec> WalkerSelect::input_topics() const {
     std::vector<TopicSpec> v;
     for (auto const& t : report_topics_) if (!t.empty()) v.push_back(TopicSpec{t, pt, SubscriptionKind::Direct, false});
     if (!share_topic_.empty()) v.push_back(TopicSpec{share_topic_, pt, SubscriptionKind::Direct, false});
+    if (!outage_topic_.empty()) v.push_back(TopicSpec{outage_topic_, pt, SubscriptionKind::Direct, false});
     return v;
 }
 std::vector<TopicSpec> WalkerSelect::output_topics() const {
@@ -54,6 +55,10 @@ ParamSchema WalkerSelect::params_schema() const {
         {"horizon_s",    ParamMutability::HotMutable, "SCAFFOLD. The stretch a hand-over is priced against: the challenger's value is scaled by 1 - its switching cost / horizon_s.", ParamValue{30.0}},
         {"dwell_min_s",  ParamMutability::HotMutable, "The challenger must lead for as long as the hand-over to it takes (its measured switching cost), and at least this long.", ParamValue{2.0}},
         {"hz",           ParamMutability::ConstructionOnly, "Tick rate.", ParamValue{50.0}},
+        {"outage_topic", ParamMutability::ConstructionOnly, "WalkerOutage's report [est_rhythm, est_sequencer, veto_rhythm, veto_sequencer, ...]. \"\" = the supply is not in the selection (byte-identical).", ParamValue{std::string("")}},
+        {"outage_s",     ParamMutability::HotMutable, "Seconds one outage costs its walker (the robot recovers to a stand in 2.2-2.5 s).", ParamValue{2.5}},
+        {"outage_window_s", ParamMutability::HotMutable, "The window WalkerOutage counts over (s).", ParamValue{60.0}},
+        {"trial_after_s", ParamMutability::HotMutable, "SCAFFOLD. A walker never driven is tried only once the incumbent has been graded for this long (0 = at its first grade, as built 2026-11-19): a grade a few seconds old is the incumbent's opening, and a selector that hands over on it can hold the slower walker for good.", ParamValue{0.0}},
     };
 }
 
@@ -63,6 +68,8 @@ ParamMap WalkerSelect::current_params() const {
     m["share_topic"] = ParamValue{share_topic_}; m["share_index"] = ParamValue{int64_t(share_index_)}; m["output_topic"] = ParamValue{output_topic_};
     m["optimism"] = ParamValue{optimism_}; m["horizon_s"] = ParamValue{horizon_s_}; m["dwell_min_s"] = ParamValue{dwell_min_s_};
     m["hz"] = ParamValue{hz_};
+    m["outage_topic"] = ParamValue{outage_topic_}; m["outage_s"] = ParamValue{outage_s_}; m["outage_window_s"] = ParamValue{outage_window_s_};
+    m["trial_after_s"] = ParamValue{trial_after_s_};
     return m;
 }
 
@@ -75,7 +82,8 @@ void WalkerSelect::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "share_index",  [&](auto const& v){ share_index_  = int(get_double(v, "share_index")); });
     apply_param(params, "output_topic", [&](auto const& v){ output_topic_ = get_string(v, "output_topic"); });
     apply_param(params, "hz",           [&](auto const& v){ hz_ = std::max(1.0, get_double(v, "hz")); });
-    for (auto const& k : {"optimism", "horizon_s", "dwell_min_s"})
+    apply_param(params, "outage_topic", [&](auto const& v){ outage_topic_ = get_string(v, "outage_topic"); });
+    for (auto const& k : {"optimism", "horizon_s", "dwell_min_s", "outage_s", "outage_window_s", "trial_after_s"})
         apply_param(params, k, [&](auto const& v){ on_param_change(k, v); });
     if (report_topics_[0].empty() || report_topics_[1].empty()) throw std::invalid_argument("WalkerSelect: both report topics are required");
     if (share_topic_.empty() || share_index_ < 0) throw std::invalid_argument("WalkerSelect: share_topic is required");
@@ -97,6 +105,15 @@ void WalkerSelect::on_setup(Bus* bus, ParamMap const& params) {
             if (!pt || share_index_ >= pt->values.size()) return;
             share_ = double(pt->values[share_index_]); have_share_ = true;
         }));
+    if (!outage_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(outage_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                auto pt = std::dynamic_pointer_cast<const ProprioToken>(p);
+                if (!pt || pt->values.size() < 4) return;
+                out_est_[0] = double(pt->values[0]); out_est_[1] = double(pt->values[1]);
+                out_veto_[0] = pt->values[2] > 0.5f; out_veto_[1] = pt->values[3] > 0.5f; have_outage_ = true;
+            }));
 }
 
 void WalkerSelect::on_param_change(std::string_view key, ParamValue const& value) {
@@ -104,6 +121,9 @@ void WalkerSelect::on_param_change(std::string_view key, ParamValue const& value
     if      (k == "optimism")     optimism_     = std::max(0.0, get_double(value, k));
     else if (k == "horizon_s")    horizon_s_    = std::max(1e-3, get_double(value, k));
     else if (k == "dwell_min_s")  dwell_min_s_  = std::max(0.0, get_double(value, k));
+    else if (k == "outage_s")     outage_s_     = std::max(0.0, get_double(value, k));
+    else if (k == "outage_window_s") outage_window_s_ = std::max(1.0, get_double(value, k));
+    else if (k == "trial_after_s") trial_after_s_ = std::max(0.0, get_double(value, k));
     else throw std::invalid_argument("WalkerSelect: param '" + k + "' is construction-only / unknown");
 }
 
@@ -112,23 +132,36 @@ void WalkerSelect::tick(uint64_t tick_id) {
     if (ticks_ > 0 && cur_ != prev_cur_) { lead_ticks_ = 0; calling_ = false; }   // a hand-over: the count starts afresh
     const int j = 1 - cur_;
     for (int i = 0; i < 2; ++i) g_[size_t(i)] = r_[size_t(i)].est + optimism_ * r_[size_t(i)].sd;
+    const bool supply = !outage_topic_.empty() && have_outage_;
+    if (supply) for (int i = 0; i < 2; ++i) g_[size_t(i)] *= std::max(0.0, 1.0 - out_est_[size_t(i)] * outage_s_ / outage_window_s_);
     const Report& rc = r_[size_t(cur_)]; const Report& rj = r_[size_t(j)];
     int want = cur_;
     if (rc.have && rj.have) {
         const double value_j = g_[size_t(j)] * std::max(0.0, 1.0 - rj.cost / horizon_s_);
         lead_ = value_j - g_[size_t(cur_)];
-        const bool leading = rc.n > 0.0 && (rj.n <= 0.0 || lead_ > 0.0);   // a walker never driven leads once the incumbent has a grade
+        // a walker never driven leads once the incumbent has a grade (and, with trial_after_s, a grade that old)
+        const bool trial = rj.n <= 0.0 && rc.n >= trial_after_s_ * hz_;
+        const bool leading = rc.n > 0.0 && (trial || (rj.n > 0.0 && lead_ > 0.0));
         lead_ticks_ = leading ? lead_ticks_ + 1 : 0;
         if (double(lead_ticks_) >= std::max(dwell_min_s_, rj.cost) * hz_) want = j;
     } else lead_ticks_ = 0;
+    bool veto_call = false;
+    if (supply) {                                               // the reflex: a reset has no gradient
+        const bool vc = out_veto_[size_t(cur_)], vj = out_veto_[size_t(j)];
+        if (vc && (!vj || out_est_[size_t(j)] < out_est_[size_t(cur_)])) { want = j; veto_call = true; }
+        else if (vj) want = cur_;
+    }
+    veto_call_ = veto_call;
     const bool calling = want != cur_;
-    if (calling && !calling_) ++calls_;                         // a new call for the other walker
+    if (calling && !calling_) { ++calls_; if (veto_call) ++veto_calls_; }   // a new call for the other walker
     calling_ = calling; want_ = want; prev_cur_ = cur_;
     ++ticks_; ++want_ticks_[size_t(want_)]; if (!calling) ++agree_;
 
     auto out = std::make_shared<ProprioToken>();
     out->tick_id = tick_id; out->producer_id = id_.empty() ? output_topic_ : id_; out->sensor = "walker_select";
-    out->values = Eigen::VectorXf(7);
+    const bool wide = !outage_topic_.empty();
+    out->values = Eigen::VectorXf(wide ? 9 : 7);
+    if (wide) { out->values[7] = (supply && out_veto_[size_t(cur_)]) ? 1.0f : 0.0f; out->values[8] = veto_call ? 1.0f : 0.0f; }
     out->values[0] = float(want_); out->values[1] = float(lead_); out->values[2] = float(double(lead_ticks_) / hz_);
     out->values[3] = float(g_[0]); out->values[4] = float(g_[1]); out->values[5] = float(cur_); out->values[6] = calling ? 0.0f : 1.0f;
     bus_->publish(output_topic_, out);
@@ -136,20 +169,21 @@ void WalkerSelect::tick(uint64_t tick_id) {
 
 nlohmann::json WalkerSelect::snapshot_state() const {
     return nlohmann::json{{"version", 1}, {"lead_ticks", lead_ticks_}, {"calling", calling_}, {"want", want_}, {"cur", cur_},
-                          {"prev_cur", prev_cur_}, {"ticks", ticks_}, {"agree", agree_}, {"calls", calls_}, {"want_ticks", {want_ticks_[0], want_ticks_[1]}}};
+                          {"prev_cur", prev_cur_}, {"ticks", ticks_}, {"agree", agree_}, {"calls", calls_}, {"veto_calls", veto_calls_}, {"want_ticks", {want_ticks_[0], want_ticks_[1]}}};
 }
 void WalkerSelect::restore_state(nlohmann::json const& s) {
     if (s.is_null() || s.empty() || s.value("version", 0) != 1) return;
     lead_ticks_ = s.value("lead_ticks", int64_t{0}); calling_ = s.value("calling", false);
     want_ = s.value("want", 0); cur_ = s.value("cur", 0); prev_cur_ = s.value("prev_cur", 0);
-    ticks_ = s.value("ticks", int64_t{0}); agree_ = s.value("agree", int64_t{0}); calls_ = s.value("calls", int64_t{0});
+    ticks_ = s.value("ticks", int64_t{0}); agree_ = s.value("agree", int64_t{0}); calls_ = s.value("calls", int64_t{0}); veto_calls_ = s.value("veto_calls", int64_t{0});
     if (s.contains("want_ticks") && s["want_ticks"].size() == 2) { want_ticks_[0] = s["want_ticks"][0].get<int64_t>(); want_ticks_[1] = s["want_ticks"][1].get<int64_t>(); }
 }
 nlohmann::json WalkerSelect::diag_snapshot() const {
     return nlohmann::json{{"want", want_}, {"incumbent", cur_}, {"lead", lead_}, {"lead_s", double(lead_ticks_) / hz_}, {"g_rhythm", g_[0]}, {"g_sequencer", g_[1]},
                           {"agree", want_ == cur_}, {"ticks", ticks_}, {"agree_ticks", agree_}, {"calls", calls_},
                           {"want_rhythm_ticks", want_ticks_[0]}, {"want_sequencer_ticks", want_ticks_[1]},
-                          {"cost_rhythm_s", r_[0].cost}, {"cost_sequencer_s", r_[1].cost}};
+                          {"cost_rhythm_s", r_[0].cost}, {"cost_sequencer_s", r_[1].cost}, {"veto_calls", veto_calls_}, {"veto_call", veto_call_ ? 1 : 0},
+                          {"out_est_rhythm", out_est_[0]}, {"out_est_sequencer", out_est_[1]}, {"veto_rhythm", out_veto_[0] ? 1 : 0}, {"veto_sequencer", out_veto_[1] ? 1 : 0}};
 }
 
 } // namespace ogma

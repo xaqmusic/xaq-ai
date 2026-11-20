@@ -34,6 +34,7 @@ const _SLIDERS: Array = [
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "engage_ramp_ticks", "label": "crossfade (ticks; 50 = 1 s)", "min": 10.0, "max": 300.0, "step": 10.0},
 	{"only_if": "pose_sequencer", "key": "homeo_pose_hold", "label": "hold walker's gain (0/1)", "tip": "homeo_pose_hold: the walker's amplitude gain is held while the stepper owns the legs (0/1)", "min": 0.0, "max": 1.0, "step": 1.0},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "handback_stand", "label": "stand before handback (0/1/2)", "tip": "handback_stand (2026-11-19): before the walker takes the legs back the stepper lands its toe and stands -- 0 off (the blend starts from wherever the crawl is), 1 on the stepper's neutral toes, 2 in the walker's own mean pose (learned while the walker drives)", "min": 0.0, "max": 2.0, "step": 1.0},
+	{"id": "pose_sequencer", "only_if": "walker_outage", "key": "engage_follow", "label": "automatic selection (0/1)", "tip": "engage_follow (2026-11-20): 1 = the selection owns the legs -- the walker by default, the stepper once the walker has browned out twice inside a minute, the walker tried again after the body has travelled; the row above and [L] are then overridden every tick. 0 = the selection only reports (shadow)", "min": 0.0, "max": 1.0, "step": 1.0},
 	{"section": "STEPPER  (PoseSequencer)", "only_if": "pose_sequencer"},
 	{"meta": "tempo", "only_if": "pose_sequencer", "key": "tempo", "label": "stepper tempo (x config)", "tip": "the stepper's shift, lift, swing and lowering rates together, as a multiple of the config's own (1 = the config; the 2026-11-18 speed arms were 1.5, 2 and 3)", "min": 0.5, "max": 3.0, "step": 0.1},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "lo_gain", "label": "offset authority (0 = scaffold)", "min": 0.0, "max": 1.0, "step": 0.05},
@@ -266,6 +267,8 @@ func _sync_from_module() -> bool:
 	for spec in _SLIDERS:
 		if spec.has("key") and not bool(spec.get("body", false)):
 			ids[str(spec.get("id", _MODULE_ID))] = true
+		if spec.has("only_if"):
+			ids[str(spec["only_if"])] = true   # a row may hang on a module other than the one it sets (2026-11-20: engage_follow)
 	for mid in ids.keys():
 		var schema = br.get_module_param_schema(mid)
 		if typeof(schema) != TYPE_ARRAY or schema.is_empty():

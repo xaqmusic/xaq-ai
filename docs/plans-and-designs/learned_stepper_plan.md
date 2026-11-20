@@ -882,7 +882,7 @@ the attitude in the outcome it compares.
 3. The heap corruption: two more instances, both with the rhythm on rough terrain and no hand-back near; the sanitizer build
    is still a separate session.
 
-### 9.9 The ground ahead as a vocabulary, and the operator's re-weighting (2026-11-20) — ▶ resume here
+### 9.9 The ground ahead as a vocabulary, and the operator's re-weighting (2026-11-20)
 
 **The operator's word:** "go ahead with the ground-ahead vocabulary" (§9.7 item 1). Ledger 2026-11-20 carries the numbers; runs,
 runners and readers are in `~/xaq_runs/stepper/ah1`.
@@ -932,6 +932,57 @@ is, in order: stuck (either walker, answered by the other), energy with the brow
 
 **Open.** `handback_stand` stays 0 in every config of record; which setting the operator watched is not recorded. The heap
 corruption (two more instances on 2026-11-19, on rough terrain with the rhythm) still wants its sanitizer session.
+
+### 9.10 Energy, the brownout as a sense, and the selection with the legs (2026-11-20, later) — ▶ resume here
+
+**The operator's words.** "go ahead with the energy map"; then, on its first numbers: "The brownouts usually occur when a leg
+gets stuck and several servos are being driven to maximum current, trying to attain an impossible position. The scenario I
+would like to cover is when I place the robot on mulch, soft carpet, or other uneven surfaces, the stepper will automatically
+become engaged because the brownouts reach a certain threshold per minute. This is something the autonomous brain should be
+able to manage fairly well, but we can build it as a scaffold if necessary. On flat surfaces, the power consumption is
+reasonable and we want the robot to move quickly." And on the hand-back: `handback_stand` was 0 in the runs that looked
+stable; the stand was needed only from an extreme pose at the hand-off, usually a stuck stepper handing to the walker.
+
+Ledger 2026-11-20 (later) and (evening) carry the numbers. Runs: `~/xaq_runs/stepper/en1` (energy), `bo1` (brownouts).
+
+**Measured (§9.9 items 1 and 2; simulation, six runs a cell).**
+
+- *Energy.* The stepper draws 1.9–3.1 W and its rail never dips; the rhythm draws 12–16 W and dips to reset depth on every
+  ground with an obstacle. Per metre they tie on flat ground (the rhythm cheaper in the open, and over 38 mm risers); the
+  stepper is cheaper by 1.6–2.4 from the graded flight up. Peak draw, not energy per metre, is what separates them everywhere.
+- *The power model is not neutral once a leg segment touches something* (its contact reporting changes the solve):
+  `OGMA_PICRAWLER_POWER_SEG_CONTACTS=0` restores field identity. Aggregates were unaffected.
+- *The selection with the legs.* Rhythm alone: locked out (more than three outages in a minute, the daemon's limit) in 24 of
+  24 obstacle runs. Automatic: 1 of 24 (3 of 24 with the trial gate), further before any lockout than either walker alone on
+  every obstacle ground, the stepper holding the legs 71–90 % of the time there, and the rhythm's pace on flat ground (arena
+  646 against 618 cm/min, corridor 278 against 283) once the trial gate is in.
+
+**Built** (all default off; field-identical when off).
+
+- The reset as a sense: simulator (`OGMA_PICRAWLER_BROWNOUT` 1 = publish, 2 = also hold the servos through the outage) and
+  robot (`benchd` frame → `ogma_host` → `sense.hat_reset`; the `ogma_host` edit is uncompiled here, nothing run on the Pi).
+- `WalkerOutage`: outages and rail dips per walker over its own driving time; veto at two a minute, released by travel,
+  probation and a doubling wait on a retry.
+- `WalkerSelect outage_topic` (cost in the value + the veto obeyed at once) and `trial_after_s`.
+- `PoseSequencer engage_follow`: the selection's call sets `engage`. The panel row "automatic selection".
+- Body log: `pw_*` (power), `bo_*` (resets), `wo_*` (the outage count), `ws_veto`, `ps_fol`.
+
+**Scaffolds, named:** the reset criterion (2.58 V for 8 ms) and the 2.5 s outage; `veto_n` 2; `relax_m` 0.25 m;
+`trial_after_s` 30; `outage_s` 2.5. The veto is a reflex by design and stays one; what is to be learned is the layer that
+keeps it quiet (the outage and dip rate per ground, so the stepper is chosen before the second reset).
+
+**Open, in the order the battery ranks them.**
+
+1. *The operator's UI read* of `…__sel__bo__auth__ta30` (launch with `OGMA_PICRAWLER_BROWNOUT=2`), and promotion or not.
+2. *The vetoed walker keeps driving while the sequencer waits for a standing body* (14 of 117 veto calls wait over 3 s; 13
+   take a further outage; one 14 s wait is a lockout). Lever: the vetoed rhythm stands while it waits.
+3. *Extreme-pose hand-offs now occur in a battery* (8 flips in 72 automatic runs: 5 under a stepper that took over a body left
+   on an obstacle, 3 within 2.5 s of a hand-back on terrain). Lever: `handback_stand` 1 or 2 on the retry, A/B on terrain.
+4. *Calibration on the robot*: the reset count in a carpet log against the simulator's rate (flat 0–0.1 a minute in the
+   simulator, 0.1–1.3 on the robot); the servo-rail INA219 is still unfitted.
+5. *The learned layer*: stuck as a trigger in both directions (§9.9 item 3); outages, dips and progress remembered per node
+   of the ground-ahead vocabulary (§9.9 item 4), so the selection anticipates the veto.
+6. The heap corruption: two more of 121 runs.
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 

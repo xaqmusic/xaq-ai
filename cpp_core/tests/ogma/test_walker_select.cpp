@@ -161,6 +161,20 @@ TEST(WalkerSelect, AnUntriedWalkerIsCalledForOnceTheIncumbentHasAGrade) {
     f.run(200, 0.0f, {0.10f, 0.0f, 500.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f});
     EXPECT_EQ(f.m.want(), 1) << "the sequencer has never driven: it is tried";
 }
+TEST(WalkerSelect, TheTrialWaitsForAGradeThatIsOldEnough) {
+    // 2026-11-20: with the legs, the selector tried the sequencer on the rhythm's first four seconds; in 2 flat runs of 12 the
+    // rhythm's whole history was then its opening, and the slower walker kept the legs for the run
+    Sel f({{"trial_after_s", 30.0}});
+    f.run(400, 0.0f, {0.001f, 0.0f, 400.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f});
+    EXPECT_EQ(f.m.want(), 0) << "a grade eight seconds old is the opening";
+    f.run(400, 0.0f, {0.10f, 0.0f, 1499.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f});
+    EXPECT_EQ(f.m.want(), 0) << "one tick short of thirty seconds of grading";
+    f.run(200, 0.0f, {0.10f, 0.0f, 1500.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f});
+    EXPECT_EQ(f.m.want(), 1) << "the sequencer has never driven and the incumbent's grade is old enough: it is tried";
+    Sel g({{"trial_after_s", 30.0}});   // the gate is on the trial alone: a tried challenger that leads is still called for
+    g.run(1000, 0.0f, {0.001f, 0.0f, 400.0f, 2.5f}, {0.007f, 0.0f, 1000.0f, 10.0f});
+    EXPECT_EQ(g.m.want(), 1);
+}
 TEST(WalkerSelect, WhatIsNotKnownCountsForTheIdleWalker) {
     Sel f({{"optimism", 1.0}});
     // the sequencer drives at 0.006; the idle rhythm's estimate is 0.002 with a spread of 0.03 about it after the body has travelled

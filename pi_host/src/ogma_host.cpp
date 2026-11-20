@@ -984,6 +984,18 @@ int main(int argc, char** argv) {
                             rv->values[0] = float(f["rail_v"].get<double>());
                             bus->publish("sense.hat_rail", rv);
                         }
+                        // The supply's outages (HAT resets), instrument only: [count since benchd started, outages in
+                        // the last 60 s].  The brain is paused through an outage, so it meets one as a rise in the count
+                        // on its first tick back.  The simulator's power model publishes the same topic.
+                        if (f.contains("hat_resets") && f["hat_resets"].is_number()) {
+                            auto hr = std::make_shared<ogma::ProprioToken>();
+                            hr->tick_id = uint64_t(ticks); hr->producer_id = "host";
+                            hr->sensor = "hat_reset";
+                            hr->values.resize(2);
+                            hr->values[0] = float(f["hat_resets"].get<double>());
+                            hr->values[1] = float(f.value("outages_60s", 0.0));
+                            bus->publish("sense.hat_reset", hr);
+                        }
                         const uint64_t seq = f.value("seq", uint64_t(0));
                         if (bi_last_seq && seq != bi_last_seq + 1) ++bi_seq_gaps;
                         bi_last_seq = seq;

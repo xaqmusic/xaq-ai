@@ -35,6 +35,7 @@
 #include "ogma/modules/AheadFeatures.hpp"
 #include "ogma/modules/AheadField.hpp"
 #include "ogma/modules/WalkerCompetence.hpp"
+#include "ogma/modules/WalkerOutage.hpp"
 #include "ogma/modules/WalkerSelect.hpp"
 #include "ogma/modules/LoadPhaseGait.hpp"
 #include "ogma/modules/StuckEscape.hpp"
@@ -181,6 +182,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("AheadFeatures",         [](){ return std::make_unique<AheadFeatures>(); });        // learned stepper 9.7: the ground ahead of the front toes, conditioned for an EPM (2026-11-20)
         reg.register_type("AheadField",            [](){ return std::make_unique<AheadField>(); });           // learned stepper 9.7: the ground-ahead grid straight from the field, against the front toes (2026-11-20)
         reg.register_type("WalkerCompetence",      [](){ return std::make_unique<WalkerCompetence>(); });     // learned stepper 9.6: one walker's progress report, graded while it holds the legs (2026-11-19)
+        reg.register_type("WalkerOutage",          [](){ return std::make_unique<WalkerOutage>(); });         // learned stepper 9.10: the supply's outages per walker, the brownout veto (2026-11-20)
         reg.register_type("WalkerSelect",          [](){ return std::make_unique<WalkerSelect>(); });         // learned stepper 9.6: the walker selection, in shadow (2026-11-19)
         reg.register_type("LoadPhaseGait",         [](){ return std::make_unique<LoadPhaseGait>(); });        // picrawler gait audit 2026-10-12: a per-leg phase the leg's own load holds (Tegotae)
         reg.register_type("StuckEscape",           [](){ return std::make_unique<StuckEscape>(); });          // picrawler S3 lever 2: confirmed stuck -> back, turn to the freest sector, refract

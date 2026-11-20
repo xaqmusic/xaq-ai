@@ -246,6 +246,7 @@ add_library(ogma_core
     src/ogma/modules/AheadFeatures.cpp
     src/ogma/modules/AheadField.cpp
     src/ogma/modules/WalkerCompetence.cpp
+    src/ogma/modules/WalkerOutage.cpp
     src/ogma/modules/WalkerSelect.cpp
     src/ogma/modules/LoadPhaseGait.cpp
     src/ogma/modules/StuckEscape.cpp
@@ -396,6 +397,8 @@ add_executable(test_stuck_sense tests/ogma/test_stuck_sense.cpp)
 target_link_libraries(test_stuck_sense PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_walker_select tests/ogma/test_walker_select.cpp)
 target_link_libraries(test_walker_select PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_walker_outage tests/ogma/test_walker_outage.cpp)
+target_link_libraries(test_walker_outage PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_ahead_features tests/ogma/test_ahead_features.cpp)
 target_link_libraries(test_ahead_features PRIVATE ogma_core GTest::gtest_main pthread)
 add_executable(test_stuck_escape tests/ogma/test_stuck_escape.cpp)
@@ -685,6 +688,7 @@ gtest_discover_tests(test_feature_window)
 gtest_discover_tests(test_distress)
 gtest_discover_tests(test_stuck_sense)
 gtest_discover_tests(test_walker_select)
+gtest_discover_tests(test_walker_outage)
 gtest_discover_tests(test_ahead_features)
 gtest_discover_tests(test_stuck_escape)
 gtest_discover_tests(test_inprocess_bus)

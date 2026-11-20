@@ -493,3 +493,26 @@ TEST(PoseSequencer, HandbackStand_ABodyGoingOverIsHandedBackAtOnce) {
     f.run(t++, ground_contact(f), 0.03f, {0.8f, 0.6f, 0.0f});   // the body's up at 53 deg from vertical: past tilt_disengage
     EXPECT_EQ(f.m.phase(), PoseSequencer::Phase::Idle) << "the return does not hold the legs of a body going over";
 }
+
+// THE SELECTION'S AUTHORITY (2026-11-20): engage_topic is followed only with engage_follow 1.
+TEST(PoseSequencer, EngageTopicInShadow_TheWantIsHeardAndNotFollowed) {
+    ogma::ParamMap p = hb_params(0.0); p["engage"] = ogma::ParamValue{0.0}; p["engage_topic"] = ogma::ParamValue{std::string("select.walker")};
+    Fix f(p);
+    auto want = std::make_shared<ogma::ProprioToken>(); want->values.resize(1); want->values[0] = 1.0f;
+    for (uint64_t t = 0; t < 200; ++t) { f.bus.begin_tick(t); f.bus.publish("select.walker", want); f.bus.end_tick(); f.run(t, ground_contact(f)); }
+    EXPECT_EQ(f.m.phase(), PoseSequencer::Phase::Idle); EXPECT_EQ(f.m.engage_level(), 0.0f);
+    const auto d = f.m.diag_snapshot(); ASSERT_TRUE(d.contains("follow"));
+    EXPECT_EQ(d["follow"][1].get<double>(), 1.0) << "heard"; EXPECT_EQ(d["follow"][2].get<double>(), 0.0) << "not followed";
+}
+TEST(PoseSequencer, EngageFollow_TheSelectionTakesAndGivesBackTheLegs) {
+    ogma::ParamMap p = hb_params(0.0); p["engage"] = ogma::ParamValue{0.0}; p["engage_topic"] = ogma::ParamValue{std::string("select.walker")}; p["engage_follow"] = ogma::ParamValue{1.0};
+    Fix f(p);
+    auto want = std::make_shared<ogma::ProprioToken>(); want->values.resize(1); want->values[0] = 1.0f;
+    uint64_t t = 0;
+    for (; t < 200; ++t) { f.bus.begin_tick(t); f.bus.publish("select.walker", want); f.bus.end_tick(); f.run(t, ground_contact(f)); }
+    EXPECT_NE(f.m.phase(), PoseSequencer::Phase::Idle) << "the sequencer has the legs"; EXPECT_GT(f.m.engage_level(), 0.9f);
+    want = std::make_shared<ogma::ProprioToken>(); want->values.resize(1); want->values[0] = 0.0f;
+    for (; t < 400; ++t) { f.bus.begin_tick(t); f.bus.publish("select.walker", want); f.bus.end_tick(); f.run(t, ground_contact(f)); }
+    EXPECT_EQ(f.m.phase(), PoseSequencer::Phase::Idle); EXPECT_EQ(f.m.engage_level(), 0.0f);
+    EXPECT_EQ(f.m.diag_snapshot()["follow"][2].get<double>(), 2.0) << "two sets: on, off";
+}

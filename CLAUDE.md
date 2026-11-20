@@ -261,6 +261,11 @@ godot4 --headless --fixed-fps 60 --quit-after 4000000 \
   sleeping body ignores its motors — the careful stepper's permanent "freeze", present in 40 % of its golden stairs
   runs. `OGMA_PICRAWLER_ALLOW_SLEEP=1` restores the old behaviour to reproduce a log from before; stepper numbers
   measured on stairs or terrain before this date include dead runs.
+- **Power and brownouts in the simulator** (2026-11-20): `OGMA_PICRAWLER_POWER_MODEL=1` adds the battery current, power and
+  rail to the body log (`pw_*`); `OGMA_PICRAWLER_BROWNOUT=1` adds a reset event on `sense.hat_reset` (`=2` also holds the servos
+  through each 2.5 s outage). The reset criterion is uncalibrated: rates order arms, they do not predict the robot's. ⚠ The power
+  model changes the physics once a leg segment touches something (`OGMA_PICRAWLER_POWER_SEG_CONTACTS=0` restores identity). On a
+  config that carries `walker_outage`, the panel's "automatic selection" row hands the legs to the walker selection.
 - Body diagnostics are JSON-per-line on stdout (`fwd_v`, `gc_raw`/`gc_norm`/`cy_norm`,
   `h_ema`/`h_max`/`h_bias`, chassis `y`, `knee[]`, `feet_y[]`, `auto_reset_count`).
 - **UI:** `[P]` toggles the per-metre path trail; `[X]` hides the cloud of touches (purple: the body's own FK

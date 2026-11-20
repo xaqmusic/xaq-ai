@@ -20,9 +20,21 @@
 // a threshold in spreads holds the selection for a minute after the very change it should answer (worked through before the
 // build, ledger 2026-11-19).  Persistence is scale-free, and a lead that flickers on rough ground never completes it.
 //
-// IN SHADOW.  Nothing consumes the output: the legs follow whatever sets pose_sequencer.engage (a schedule, the operator).
+// THE SUPPLY (2026-11-20, operator; outage_topic "" = off, byte-identical).  A walker that browns the supply out loses the
+// time of each outage, and past the daemon's limit it loses the robot.  With WalkerOutage's report on outage_topic
+// ([est_rhythm, est_sequencer, veto_rhythm, veto_sequencer, ...], outages in a walker's last minute at the legs):
+//     G_i  <-  G_i * max(0, 1 - est_i * outage_s / outage_window_s)     the share of a minute the outages leave it
+//     a vetoed incumbent hands over AT ONCE (the reflex: a reset has no gradient, so it does not wait for a lead);
+//     a vetoed challenger is not wanted, whatever its lead;  both vetoed: the one with fewer outages.
+// outage_s is the robot's measured recovery (2.2-2.5 s to stand again, ledger 2026-10-05), a measured constant.
+//
+// AUTHORITY is not here.  The output's first value is the walker wanted; PoseSequencer follows it when its engage_topic names
+// this output AND its engage_follow is 1 (hot, default 0).  Until then the selection is in shadow.
+//
+// IN SHADOW BY DEFAULT.  Nothing consumes the output: the legs follow whatever sets pose_sequencer.engage (a schedule, the operator).
 // The module says, each tick, which walker it would hand the legs to given who has them, and counts how often that agrees.
-// Output ProprioToken [want (0 = the rhythm, 1 = the sequencer), lead, lead_s, G_rhythm, G_sequencer, incumbent, agree].
+// Output ProprioToken [want (0 = the rhythm, 1 = the sequencer), lead, lead_s, G_rhythm, G_sequencer, incumbent, agree] and, with
+// outage_topic set, [7] the incumbent is vetoed (0/1), [8] this call is the reflex's (0/1).
 // Module absent = byte-identical.
 #pragma once
 
@@ -60,6 +72,7 @@ public:
     double lead_s()    const { return double(lead_ticks_) / hz_; }
     double g(int i)    const { return g_[size_t(i)]; }
     int64_t calls()    const { return calls_; }
+    int64_t veto_calls() const { return veto_calls_; }
     int64_t agree_ticks() const { return agree_; }
     int64_t ticks()    const { return ticks_; }
 
@@ -73,7 +86,13 @@ private:
     double horizon_s_    = 30.0;   // SCAFFOLD: the stretch a hand-over is priced against
     double dwell_min_s_  = 2.0;    // the lead must hold at least this long while a walker's switching cost is still unmeasured
     double hz_           = 50.0;
+    std::string outage_topic_ = "";                  // WalkerOutage's report; "" = the supply is not in the selection
+    double outage_s_     = 2.5;    // seconds an outage costs (the robot's recovery to a stand)
+    double outage_window_s_ = 60.0;
+    double trial_after_s_ = 0.0;   // SCAFFOLD: the incumbent's grade must be this old before a walker never driven is tried
 
+    std::array<double, 2> out_est_{}; std::array<bool, 2> out_veto_{}; bool have_outage_ = false;
+    int64_t veto_calls_ = 0; bool veto_call_ = false;
     std::array<Report, 2> r_{};
     double share_ = 0.0; bool have_share_ = false;
     std::array<double, 2> g_{};

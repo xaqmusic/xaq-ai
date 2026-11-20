@@ -104,6 +104,12 @@ private:
     std::string model_topic_ = "reality.proprio.leg_model"; std::string support_topic_ = "support.state"; std::string patch_topic_ = "terrain.patch"; std::string feet_xz_topic_ = "reality.proprio.feet_xz"; std::string feet_y_topic_ = "reality.proprio.toe_y"; std::string up_topic_ = "reality.proprio.up_body"; std::string imu_topic_ = "reality.proprio.imu6"; std::string contact_topic_ = "reality.proprio.foot_contact"; std::string load_topic_ = "reality.proprio.foot_load"; std::string output_topic_ = "pose.targets";
     std::vector<std::string> gait_action_topics_;
     double engage_ = 0.0;
+    // THE SELECTION'S AUTHORITY (2026-11-20, operator: the stepper engaged automatically on brownouts).  engage_topic "" = off,
+    // byte-identical.  With a topic and engage_follow 1 the engage level is the topic's value at engage_index (WalkerSelect's
+    // want: 0 the rhythm, 1 the sequencer) and the `engage` param is overwritten by it each tick; engage_follow 0 (the
+    // default) leaves `engage` to whoever sets it, so the selection stays in shadow until the operator turns this on.
+    std::string engage_topic_ = ""; int engage_index_ = 0; double engage_follow_ = 0.0;
+    double engage_cmd_ = 0.0; bool have_engage_cmd_ = false; int64_t follow_sets_ = 0;
     int engage_ramp_ticks_ = 50;
     // ENGAGE ONLY FROM A STANDING BODY (the first flat run, 2026-11-08: engaged at tick 1 the sequencer froze the gait's
     // lying start pose, legs straight out, and the swing target was out of reach for the whole run): a minimum tick,

@@ -1467,6 +1467,9 @@ void tick_thread(State& S) {
                                 {"i_a", S.ina_ok ? json(S.ina_i) : json(nullptr)}, {"ina_window_ms", 68},
                                 {"a4", tick_a4}, {"rail_v", tick_rail > 0 ? json(std::round(tick_rail * 1000) / 1000) : json(nullptr)},
                                 {"mode", ogma::hw::brain::mode_name(S.mode)}, {"stopped", S.stopped},
+                                // The supply's outages, for the brain (2026-11-20): the count since benchd started and the
+                                // number inside the 60 s window that decides whether a recovery is still automatic (<= 3).
+                                {"hat_resets", S.hat_resets}, {"outages_60s", S.outages_last_60s(ms)},
                                 {"fsr", fsr}, {"fsr_ok", fsr_ok},
                                 {"tof_m", S.tof_m}, {"tof_valid", S.tof_ok && S.tof_valid},
                                 {"tof_ms", S.tof_last_ms}};

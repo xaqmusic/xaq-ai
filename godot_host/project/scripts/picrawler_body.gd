@@ -1843,6 +1843,18 @@ var _odom_err_m: float = 0.0                    # INSTRUMENT: |odom - truth| in 
 # model's battery-side current on the robot's topic sense.servo_current [A], instrument-only.
 # Needs the power model on. Off by default (byte-identical).
 @export var publish_current: bool = false        # OGMA_PICRAWLER_PUBLISH_CURRENT=1
+# ---- THE BROWNOUT (2026-11-20, operator): the supply's outage as an event the brain can sense, from the power model's rail
+# (servo_power_model.gd, "THE BROWNOUT AS AN EVENT").  0 = off (byte-identical).  1 = SENSE: resets are counted and published
+# on the robot's topics, sense.hat_reset [count, outages in the last 60 s] and sense.hat_rail [V, the minimum over the last
+# tick]; the body is untouched.  2 = also the CONSEQUENCE: every servo holds still for the outage (the robot's servos are
+# disarmed and their gears hold the pose; its brain is paused, here it keeps ticking against a body that does not answer).
+#   OGMA_PICRAWLER_BROWNOUT=0|1|2   _BROWNOUT_V (2.58)   _BROWNOUT_S (0.008)   _BROWNOUT_OUTAGE_S (2.5)
+#   OGMA_PICRAWLER_POWER_SEG_CONTACTS=0  the power model without contact reporting on the coxa and upper segments
+@export var brownout_mode: int = 0
+var _bo_freeze: bool = false
+var _bo_rail_ring := PackedFloat32Array()
+var _bo_rail_i: int = 0
+var _bo_frozen_steps: int = 0
 @export var goal_bearing_scaffold_deg: float = NAN   # OGMA_PICRAWLER_GOAL_BEARING_DEG=<deg, + = to body +X>
 var _dbg_contact_swing: float = 0.0   # TRUE swing fraction from the foot-contact sensor
 var _last_foot_contact: PackedFloat64Array = PackedFloat64Array()   # per-leg physics contact, for the log
@@ -2810,6 +2822,18 @@ var _pw_rail_win := PackedFloat32Array()
 var _pw_prev_ang := PackedFloat32Array()
 var _pw_sat_any: bool = false
 const PW_INA_WINDOW_S: float = 0.068
+# The power model in the BODY LOG (2026-11-20, the energy map): sums over the physics steps since the last log line, and two
+# running totals.  Only with the power model on; the keys are pw_* in _emit_jsonl.
+var _pwl_n: int = 0
+var _pwl_i: float = 0.0
+var _pwl_w: float = 0.0
+var _pwl_imax: float = 0.0
+var _pwl_i5max: float = 0.0
+var _pwl_vrmin: float = 3.3
+var _pwl_stall: int = 0
+var _pwl_is := PackedFloat32Array()
+var _pwl_j: float = 0.0                   # battery-side energy since the body was built, J
+var _pwl_q: float = 0.0                   # battery-side charge, A s
 const PW_SAMPLE_S: float = 0.1
 @export var honest_upright: bool = false   # upright/tilt from the fused attitude estimate
 @export var honest_joints:  bool = false   # joints from the servo forward model
@@ -3868,7 +3892,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_ULTRASONIC", "OGMA_PICRAWLER_US_DEADZONE", "OGMA_PICRAWLER_FEET_JAC", "OGMA_PICRAWLER_FEET_XZ", "OGMA_PICRAWLER_TOE_Y", "OGMA_PICRAWLER_LEG_MODEL", "OGMA_PICRAWLER_STAIRS_H_MM", "OGMA_PICRAWLER_STAIRS_N", "OGMA_PICRAWLER_STAIRS_TREAD_M", "OGMA_PICRAWLER_STAIRS_START_M", "OGMA_PICRAWLER_STAIRS_WIDTH_M", "OGMA_PICRAWLER_STAIRS_WALLS", "OGMA_PICRAWLER_STAIRS_DOWN", "OGMA_PICRAWLER_TOF8", "OGMA_PICRAWLER_TOF8_PITCH_DEG", "OGMA_PICRAWLER_TOF8_HEIGHT_MM", "OGMA_PICRAWLER_TOF8_FWD_MM", "OGMA_PICRAWLER_TOF8_LAT_MM", "OGMA_PICRAWLER_TOF8_SELF", "OGMA_PICRAWLER_TOF8_CLOUD_M", "OGMA_PICRAWLER_ROOM_SIZE",
 			  "OGMA_PICRAWLER_CAMERA_ROBOT", "OGMA_PICRAWLER_ODOM", "OGMA_PICRAWLER_ODOM_SCALE",
 			  "OGMA_PICRAWLER_HONEST_VEL_EGO", "OGMA_PICRAWLER_SPEED_CMD", "OGMA_PICRAWLER_GOAL_BEARING_DEG",
-			  "OGMA_PICRAWLER_PUBLISH_CURRENT",
+			  "OGMA_PICRAWLER_PUBLISH_CURRENT", "OGMA_PICRAWLER_BROWNOUT",
 			  "OGMA_PICRAWLER_LOAD_LOG", "OGMA_PICRAWLER_COM_SHIFT"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
@@ -3940,6 +3964,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_SPEED_CMD":         speed_cmd_scaffold = clampf(v.to_float(), -1.0, 1.0)
 			"OGMA_PICRAWLER_GOAL_BEARING_DEG":  goal_bearing_scaffold_deg = v.to_float()
 			"OGMA_PICRAWLER_PUBLISH_CURRENT":   publish_current   = (v != "0" and v != ""); if publish_current: power_model = true
+			"OGMA_PICRAWLER_BROWNOUT":          brownout_mode     = clampi(v.to_int(), 0, 2); if brownout_mode > 0: power_model = true
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -6271,6 +6296,8 @@ func _apply_g6dof_default_preset() -> void:
 # 2026-06-03 — Backend-aware per-tick motor setter.  Caller always
 # passes torque (Nm); helper does the per-backend unit conversion.
 func _set_motor_vf(j: Object, vel: float, force: float) -> void:
+	if _bo_freeze:
+		vel = 0.0                           # the outage: every servo holds where it is (brownout_mode 2)
 	if honest_hold_cap > 0.0:
 		_motor_cmd[j.get_instance_id()] = Vector2(vel, force)
 	if j is HingeJoint3D:
@@ -12319,6 +12346,13 @@ func _accum_grf() -> void:
 # the segments by reference and their anchors in the parents' frames.
 func _power_setup() -> void:
 	_power = load("res://scripts/servo_power_model.gd").new()
+	_power.segment_contacts = OS.get_environment("OGMA_PICRAWLER_POWER_SEG_CONTACTS") != "0"
+	if brownout_mode > 0:
+		if OS.get_environment("OGMA_PICRAWLER_BROWNOUT_V") != "": _power.reset_v = OS.get_environment("OGMA_PICRAWLER_BROWNOUT_V").to_float()
+		if OS.get_environment("OGMA_PICRAWLER_BROWNOUT_S") != "": _power.reset_s = OS.get_environment("OGMA_PICRAWLER_BROWNOUT_S").to_float()
+		if OS.get_environment("OGMA_PICRAWLER_BROWNOUT_OUTAGE_S") != "": _power.outage_s = OS.get_environment("OGMA_PICRAWLER_BROWNOUT_OUTAGE_S").to_float()
+		print("PicrawlerBody: BROWNOUT mode %d (%s): a reset = the 3.3 V rail under %.2f V for %.0f ms; outage %.1f s; segment contacts %s"
+			% [brownout_mode, "sense + servos held through the outage" if brownout_mode >= 2 else "sense only", _power.reset_v, _power.reset_s * 1000.0, _power.outage_s, str(_power.segment_contacts)])
 	_power.setup(_chassis, _coxas, _uppers, _lowers, _hip1_world_c, _hip2_world_c, _knee_world_c,
 				 _hip2_axes)
 	if _power_log_path != "" and _power_log == null:
@@ -12339,10 +12373,43 @@ func _power_setup() -> void:
 func _power_tick() -> void:
 	_power.step(1.0 / float(physics_hz))
 	_power.electrical_step(1.0 / float(physics_hz))
+	var p_w: float = _power.v_pack * _power.i_bat
+	_pwl_n += 1
+	_pwl_i += _power.i_bat
+	_pwl_w += p_w
+	_pwl_imax = maxf(_pwl_imax, _power.i_bat)
+	_pwl_i5max = maxf(_pwl_i5max, _power.i5)
+	_pwl_vrmin = minf(_pwl_vrmin, _power.v_rail)
+	_pwl_j += p_w / float(physics_hz)
+	_pwl_q += _power.i_bat / float(physics_hz)
+	if _pwl_is.size() != 12:
+		_pwl_is.resize(12); _pwl_is.fill(0.0)
+	var n_st: int = 0
+	for k in range(12):
+		_pwl_is[k] += _power.i_servo[k]
+		n_st += int(_power.stalled[k])
+	_pwl_stall = maxi(_pwl_stall, n_st)
 	if publish_current and brain != null:
 		var ci := PackedFloat64Array()
 		ci.append(_power.i_bat)
 		brain.publish_token(ci, "sense.servo_current", "servo_current")
+	if brownout_mode > 0:
+		if _power.brownout_step(1.0 / float(physics_hz)):
+			print('{"event":"BROWNOUT","tick":%d,"n":%d,"outages_60s":%d,"rail":%.3f,"i5":%.2f}' % [tick_counter, _power.resets, _power.outages_60s(), _power.v_rail, _power.i5])
+		_bo_freeze = brownout_mode >= 2 and _power.outage_left > 0.0
+		if _bo_freeze: _bo_frozen_steps += 1
+		var n_ring: int = maxi(1, int(ceil(float(physics_hz) / 50.0)))     # one brain tick of physics steps
+		if _bo_rail_ring.size() != n_ring:
+			_bo_rail_ring.resize(n_ring); _bo_rail_ring.fill(3.3)
+		_bo_rail_ring[_bo_rail_i % n_ring] = _power.v_rail
+		_bo_rail_i += 1
+		if brain != null:
+			var rmin: float = 3.3
+			for rv in _bo_rail_ring: rmin = minf(rmin, rv)
+			var hr := PackedFloat64Array([float(_power.resets), float(_power.outages_60s())])
+			brain.publish_token(hr, "sense.hat_reset", "hat_reset")
+			var hv := PackedFloat64Array([rmin])
+			brain.publish_token(hv, "sense.hat_rail", "hat_rail")
 	if DisplayServer.get_name() != "headless":
 		_power_hud_step()
 	_power_steps += 1
@@ -13322,6 +13389,9 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 		if ps.has("plan_model_margin"):   # the plan predicts its gate (2026-11-17), only when on: [decisions biased, the summed shortfall m]
 			var pmm: Array = ps.get("plan_model_margin", [])
 			if pmm.size() >= 2: line["ps_pmm"] = [int(pmm[0]), snappedf(float(pmm[1]), 0.0001)]
+		if ps.has("follow"):     # the selection's authority (2026-11-20), only with engage_topic: [engage_follow, the want heard, sets, engage]
+			var fo: Array = ps.get("follow", [])
+			if fo.size() >= 4: line["ps_fol"] = [int(fo[0]), int(fo[1]), int(fo[2]), int(fo[3])]
 		if ps.has("handback"):   # the hand-back from a stand (2026-11-19), only when it is on: [returns, ticks in them, timed out, toes lowered, the height offset (m), the rhythm's pose ticks]
 			var hb: Array = ps.get("handback", [])
 			if hb.size() >= 6: line["ps_hb"] = [int(hb[0]), int(hb[1]), int(hb[2]), int(hb[3]), snappedf(float(hb[4]), 0.0001), int(hb[5])]
@@ -13435,8 +13505,23 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line[wk + "_n"] = int(wc.get("n", 0))
 			line[wk + "_cost"] = [snappedf(float(wc.get("switch_cost_s", 0.0)), 0.01), int(wc.get("costs", 0)), int(wc.get("takeovers", 0))]
 			line[wk + "_idle"] = [snappedf(float(wc.get("p_same", 1.0)), 0.0001), snappedf(float(wc.get("idle_m", 0.0)), 0.0001)]
+	if metrics.has("walker_outage"):
+		var wout: Dictionary = metrics["walker_outage"]
+		line["wo_est"] = wout.get("est", [])
+		line["wo_n"] = wout.get("n", [])
+		line["wo_dips"] = wout.get("dips", [])
+		line["wo_veto"] = wout.get("veto", [])
+		line["wo_vetoes"] = wout.get("vetoes", [])
+		line["wo_bk"] = wout.get("backoff", [])
+		line["wo_ps"] = wout.get("p_same", [])
+		line["wo_drv"] = int(wout.get("driver", -1))
+		line["wo_resets"] = int(wout.get("resets", 0))
+		line["wo_dipn"] = int(wout.get("dips_seen", 0))
+		line["wo_rail"] = snappedf(float(wout.get("rail", 3.3)), 0.001)
 	if metrics.has("walker_select"):
 		var wsel: Dictionary = metrics["walker_select"]
+		if wsel.has("veto_calls"):
+			line["ws_veto"] = [int(wsel.get("veto_calls", 0)), int(wsel.get("veto_call", 0)), int(wsel.get("veto_rhythm", 0)), int(wsel.get("veto_sequencer", 0))]
 		line["ws_want"] = int(wsel.get("want", 0))
 		line["ws_cur"] = int(wsel.get("incumbent", 0))
 		line["ws_lead"] = snappedf(float(wsel.get("lead", 0.0)), 0.00001)
@@ -14299,6 +14384,30 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	line["e_now"]  = snappedf(energy_now, 0.0001)
 	line["e_peak"] = snappedf(energy_peak_1s, 0.0001)
 	line["e_avg"]  = snappedf(energy_avg, 0.0001)
+	if _power != null and _pwl_n > 0:
+		# The power model since the last line: mean and peak battery-side current [A], mean battery power [W], the peak 5 V bus
+		# demand [A], the 3.3 V rail's minimum [V], the most servos stalled at once, each servo's mean current [A at 5 V], and
+		# the energy [J] and charge [A s] since the body was built.  pw_n = physics steps in the window.
+		var pn: float = float(_pwl_n)
+		line["pw_n"]     = _pwl_n
+		line["pw_i"]     = snappedf(_pwl_i / pn, 0.0001)
+		line["pw_w"]     = snappedf(_pwl_w / pn, 0.0001)
+		line["pw_imax"]  = snappedf(_pwl_imax, 0.0001)
+		line["pw_i5max"] = snappedf(_pwl_i5max, 0.0001)
+		line["pw_vr"]    = snappedf(_pwl_vrmin, 0.0001)
+		line["pw_stall"] = _pwl_stall
+		line["pw_j"]     = snappedf(_pwl_j, 0.001)
+		line["pw_q"]     = snappedf(_pwl_q, 0.001)
+		var pis: Array = []
+		for k in range(12): pis.append(snappedf(_pwl_is[k] / pn, 0.0001))
+		line["pw_is"]    = pis
+		_pwl_n = 0; _pwl_i = 0.0; _pwl_w = 0.0; _pwl_imax = 0.0; _pwl_i5max = 0.0; _pwl_vrmin = 3.3; _pwl_stall = 0
+		_pwl_is.fill(0.0)
+		if brownout_mode > 0:
+			line["bo_n"] = _power.resets
+			line["bo_60"] = _power.outages_60s()
+			line["bo_out"] = 1 if _power.outage_left > 0.0 else 0
+			line["bo_frz"] = _bo_frozen_steps
 	line["stuck_deficit"]            = snappedf(_stuck_deficit, 0.001)
 	line["distress"]                 = snappedf(_distress, 0.001)
 	if vision_steer:

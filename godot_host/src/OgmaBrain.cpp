@@ -871,7 +871,7 @@ Dictionary OgmaBrain::get_module_metrics() const {
                  type == "StuckSense" || type == "StuckEscape" || type == "LoadPhaseGait" ||
                  type == "TouchMemory" || type == "EncounterFeatures" || type == "Tof8Range" || type == "TerrainMemory" || type == "FootholdShaper" || type == "SupportModel" || type == "PoseSequencer" ||
                  type == "BeliefFilter" || type == "StanceFeatures" ||   // the stance belief (learned stepper Phase 3, 2026-11-15)
-                 type == "WalkerCompetence" || type == "WalkerSelect" ||   // the walker selection in shadow (learned stepper 9.6, 2026-11-19)
+                 type == "WalkerCompetence" || type == "WalkerSelect" || type == "WalkerOutage" ||   // the walker selection in shadow (learned stepper 9.6, 2026-11-19)
                  type == "AheadFeatures" || type == "AheadField") {   // the ground ahead (learned stepper 9.7, 2026-11-20)
             const nlohmann::json dj = m->diag_snapshot();   // a named object: items() of a temporary dangles
             for (auto const& [k, v] : dj.items()) {
