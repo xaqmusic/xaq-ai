@@ -1849,6 +1849,8 @@ var _odom_err_m: float = 0.0                    # INSTRUMENT: |odom - truth| in 
 # tick]; the body is untouched.  2 = also the CONSEQUENCE: every servo holds still for the outage (the robot's servos are
 # disarmed and their gears hold the pose; its brain is paused, here it keeps ticking against a body that does not answer).
 #   OGMA_PICRAWLER_BROWNOUT=0|1|2   _BROWNOUT_V (2.58)   _BROWNOUT_S (0.008)   _BROWNOUT_OUTAGE_S (2.5)
+# LIVE (2026-11-21, operator): brownout_mode is read every physics step, so the [M] panel's SUPPLY row sets it during a run.
+# It needs the power model, which a windowed run has on by default and a headless run only by env.
 #   OGMA_PICRAWLER_POWER_SEG_CONTACTS=0  the power model without contact reporting on the coxa and upper segments
 @export var brownout_mode: int = 0
 var _bo_freeze: bool = false
@@ -12347,10 +12349,12 @@ func _accum_grf() -> void:
 func _power_setup() -> void:
 	_power = load("res://scripts/servo_power_model.gd").new()
 	_power.segment_contacts = OS.get_environment("OGMA_PICRAWLER_POWER_SEG_CONTACTS") != "0"
+	# The reset criterion is read whatever the mode: brownout_mode is live (the panel's SUPPLY row, 2026-11-21), and a mode
+	# switched on later must find the thresholds the launch asked for.  With the mode at 0 nothing reads them.
+	if OS.get_environment("OGMA_PICRAWLER_BROWNOUT_V") != "": _power.reset_v = OS.get_environment("OGMA_PICRAWLER_BROWNOUT_V").to_float()
+	if OS.get_environment("OGMA_PICRAWLER_BROWNOUT_S") != "": _power.reset_s = OS.get_environment("OGMA_PICRAWLER_BROWNOUT_S").to_float()
+	if OS.get_environment("OGMA_PICRAWLER_BROWNOUT_OUTAGE_S") != "": _power.outage_s = OS.get_environment("OGMA_PICRAWLER_BROWNOUT_OUTAGE_S").to_float()
 	if brownout_mode > 0:
-		if OS.get_environment("OGMA_PICRAWLER_BROWNOUT_V") != "": _power.reset_v = OS.get_environment("OGMA_PICRAWLER_BROWNOUT_V").to_float()
-		if OS.get_environment("OGMA_PICRAWLER_BROWNOUT_S") != "": _power.reset_s = OS.get_environment("OGMA_PICRAWLER_BROWNOUT_S").to_float()
-		if OS.get_environment("OGMA_PICRAWLER_BROWNOUT_OUTAGE_S") != "": _power.outage_s = OS.get_environment("OGMA_PICRAWLER_BROWNOUT_OUTAGE_S").to_float()
 		print("PicrawlerBody: BROWNOUT mode %d (%s): a reset = the 3.3 V rail under %.2f V for %.0f ms; outage %.1f s; segment contacts %s"
 			% [brownout_mode, "sense + servos held through the outage" if brownout_mode >= 2 else "sense only", _power.reset_v, _power.reset_s * 1000.0, _power.outage_s, str(_power.segment_contacts)])
 	_power.setup(_chassis, _coxas, _uppers, _lowers, _hip1_world_c, _hip2_world_c, _knee_world_c,
@@ -12410,6 +12414,8 @@ func _power_tick() -> void:
 			brain.publish_token(hr, "sense.hat_reset", "hat_reset")
 			var hv := PackedFloat64Array([rmin])
 			brain.publish_token(hv, "sense.hat_rail", "hat_rail")
+	elif _bo_freeze:
+		_bo_freeze = false                  # the mode was turned off during an outage (the panel's row): the servos answer again
 	if DisplayServer.get_name() != "headless":
 		_power_hud_step()
 	_power_steps += 1

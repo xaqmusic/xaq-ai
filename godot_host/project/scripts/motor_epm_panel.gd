@@ -35,6 +35,9 @@ const _SLIDERS: Array = [
 	{"only_if": "pose_sequencer", "key": "homeo_pose_hold", "label": "hold walker's gain (0/1)", "tip": "homeo_pose_hold: the walker's amplitude gain is held while the stepper owns the legs (0/1)", "min": 0.0, "max": 1.0, "step": 1.0},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "handback_stand", "label": "stand before handback (0/1/2)", "tip": "handback_stand (2026-11-19): before the walker takes the legs back the stepper lands its toe and stands -- 0 off (the blend starts from wherever the crawl is), 1 on the stepper's neutral toes, 2 in the walker's own mean pose (learned while the walker drives)", "min": 0.0, "max": 2.0, "step": 1.0},
 	{"id": "pose_sequencer", "only_if": "walker_outage", "key": "engage_follow", "label": "automatic selection (0/1)", "tip": "engage_follow (2026-11-20): 1 = the selection owns the legs -- the walker by default, the stepper once the walker has browned out twice inside a minute, the walker tried again after the body has travelled; the row above and [L] are then overridden every tick. 0 = the selection only reports (shadow)", "min": 0.0, "max": 1.0, "step": 1.0},
+	{"section": "SUPPLY  (brownouts: the servo rail's resets)"},
+	{"body": true, "key": "brownout_mode", "label": "brownout model (0/1/2)", "tip": "OGMA_PICRAWLER_BROWNOUT, live (2026-11-21): 0 = no resets are modelled; 1 = a reset is counted and published to the brain (sense.hat_reset, sense.hat_rail), the body is untouched; 2 = also its consequence, every servo holds still for the 2.5 s outage. Needs the power model (on in a windowed run). The reset criterion is uncalibrated: rates order arms, they do not predict the robot's", "min": 0.0, "max": 2.0, "step": 1.0},
+	{"id": "walker_outage", "only_if": "walker_outage", "key": "veto_n", "label": "brownouts/min to switch", "tip": "walker_outage.veto_n (SCAFFOLD): a walker that browns out this many times inside a minute of its own driving loses the legs to the other one. The daemon stops recovering on its own past 3, so the switch has to act below that", "min": 0.0, "max": 6.0, "step": 1.0},
 	{"section": "STEPPER  (PoseSequencer)", "only_if": "pose_sequencer"},
 	{"meta": "tempo", "only_if": "pose_sequencer", "key": "tempo", "label": "stepper tempo (x config)", "tip": "the stepper's shift, lift, swing and lowering rates together, as a multiple of the config's own (1 = the config; the 2026-11-18 speed arms were 1.5, 2 and 3)", "min": 0.5, "max": 3.0, "step": 0.1},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "lo_gain", "label": "offset authority (0 = scaffold)", "min": 0.0, "max": 1.0, "step": 0.05},
@@ -333,6 +336,9 @@ func _sync_from_module() -> bool:
 			_on_slider("body", "handover_every_s", 20.0)
 			_on_slider("meta", "tempo", 2.0)
 			_on_slider("pose_sequencer", "handback_stand", 2.0)   # the stand before the hand-back (2026-11-19)
+		_on_slider("body", "brownout_mode", 2.0)                 # the supply's row (2026-11-21): an int field set from a float
+		if present.has("walker_outage"):
+			_on_slider("walker_outage", "veto_n", 3.0)
 		_selftest_readback(present.has("pose_sequencer"))
 	return true
 
@@ -350,6 +356,8 @@ func _selftest_readback(has_stepper: bool) -> void:
 		await get_tree().physics_frame
 	print("SimTuningPanel selftest: load_phase.period_ticks -> %s (set 41), body MAX_SERVO_SPEED -> %s (set 5.5)" % [str(_schema_value("load_phase", "period_ticks")), str(_body.get("MAX_SERVO_SPEED"))])
 	var row_visible := str(_value_labels["pose_sequencer/lo_gain"].get_parent().visible)
+	print("SimTuningPanel selftest: supply: body brownout_mode -> %s (set 2), walker_outage.veto_n -> %s (set 3 where the config has the module; row visible %s)" % [
+		str(_body.get("brownout_mode")), str(_schema_value("walker_outage", "veto_n")), str(_value_labels["walker_outage/veto_n"].get_parent().visible)])
 	if has_stepper:
 		print("SimTuningPanel selftest: pose_sequencer.lo_gain -> %s (set 0.35; row visible %s)" % [str(_schema_value("pose_sequencer", "lo_gain")), row_visible])
 		print("SimTuningPanel selftest: handover: engage_ramp_ticks -> %s (set 150), homeo_pose_hold -> %s (set 1), body handover_every_s -> %s (set 20), engage row %s" % [
