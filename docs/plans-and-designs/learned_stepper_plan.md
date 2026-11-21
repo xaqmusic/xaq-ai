@@ -984,7 +984,7 @@ keeps it quiet (the outage and dip rate per ground, so the stepper is chosen bef
    of the ground-ahead vocabulary (§9.9 item 4), so the selection anticipates the veto.
 6. The heap corruption: two more of 121 runs.
 
-### 9.11 The selection promoted, the tempo as a handle, and the port to the robot (2026-11-21) — ▶ resume here
+### 9.11 The selection promoted, the tempo as a handle, and the port to the robot (2026-11-21)
 
 **The operator's words.** "it looks good. we can promote the brownout mechanism. we should also default the stepper tempo to
 2.0 as that speeds climbing a bit and does not seem to sacrifice stability." Then: "The idea is tempo will be a parameter the
@@ -1032,6 +1032,56 @@ cells have more lockouts and flips at counts too small to decide. The fixed 2 is
    memory checker, and a blocker for the port if the defect is in the core.
 6. §9.10's items 2, 3 and 5 stand (the vetoed walker stands while it waits; `handback_stand` on the terrain retry; the
    learned layer).
+
+### 9.12 The port prepared and the robot built (2026-11-21, afternoon) — ▶ resume here
+
+Evidence: ledger 2026-11-21 (afternoon) and its addendum. The robot page: [`picrawler_robot_resume.md`](picrawler_robot_resume.md),
+"The two walkers on the robot".
+
+**Where the gates of §9.11 item 2 stand.**
+
+| gate | state |
+|---|---|
+| a. the robot-rate twin in the simulator | **done** (signal): the port config at 4.22 rad/s, period 50, tempo 1, footfall memory, no forward field — walker alone locked out in 12 of 12 obstacle runs, the selection in 2 of 36; the stepper alone misses no landing and keeps its 6.0 rad/s pace |
+| b. host work | **done and built on the robot** (`022f5e2b`): `ogma_host --leg-model`, the reset channel in the build, the dash's stepper keys; the robot's own build passes the leg-model tests. `ogma-benchd` not restarted (the operator's) |
+| c. shadow run under the deployed walker | the operator's, next: tick time of 33 modules, the reset count arriving (after the `benchd` restart), the shadow selection on carpet, which feet pass `datum_min_load` |
+| d. the stepper alone on a flat floor, by hand (`t`), tempo 1 | the operator's |
+| e. hand-overs by hand, flat then one obstacle | the operator's |
+| f. the automatic selection (`a`) on carpet and mulch | the operator's |
+
+**The forward 8×8 field: cut, and what the cut costs** (the operator's question: the limits of the floor as voxels captured by
+footfalls). The stepper ties on risers and terrain and loses 5–10 % of its flat pace; the selection ties; no fall in the
+stepper's 26 runs. The limit is anticipation: the front toes lead onto ground no toe has touched, and at a 64 mm riser their
+prediction is off by a median 26–31 mm on three steps in four (4–10 mm with the field). The hind toes inherit the front
+toes' touches and lose little. What carries the landing there is the contact, with the prediction wrong.
+Three things follow, none built:
+1. *The front toe's touch is an observation the memory under-uses.* A front toe that meets ground 3–6 cm above its prediction
+   has measured a riser's top; the other front toe and both hind toes will cross the same edge within a few steps. Whether
+   the pooled prediction at an edge (a mean across both levels) can become a two-level belief is the cheapest next
+   question, and it is the EPM's kind of question (the ground-ahead vocabulary of 2026-11-20 separated 64 mm and up, but it
+   read the field; the touch-side equivalent is `EncounterFeatures` and its EPM, consumed by nothing yet).
+2. *The sensor's case is now a number.* The field would buy the front toes' prediction at tall risers and about a tenth of
+   the flat pace. If the robot's stepper is limited by front-toe surprises at edges (gate d–e will show: hangs, obstacle
+   hits, re-steps), that is the argument for fitting it; if it is limited elsewhere, it is not.
+3. *The range channel is not what moves the selection* in worlds where the walker's trouble is a brownout. It remains the
+   only observation of a walker stuck without one (a wall); on the robot `StuckSense` keeps the ultrasonic.
+
+**The tempo.** On the robot it is the dash's `u` / `i` (the operator's hand), starting at 1. For the brain driving it, the
+candidate signal showed itself in today's data: with the field, the landing error on flat ground doubles from tempo 1 to 2
+(4.5 → 9.2 mm front). Shadow first, as §9.11 item 1 says.
+
+**The heap fault is closed** (the GNG's winner freed inside its own step; `57ac40b5`). On the fixed host the golden traces are
+identical in 29 of 30 runs; the one that differs is the fault itself, caught without a crash (the vision EPM losing its winning
+node at one tick; the body's path unchanged). The stack of record's golden label from here on is `auto_t2_gngfix_2026_11_21`.
+
+**Open, in order.**
+1. The robot's gates c–f, with the checks named in the table.
+2. The robot's outage recovery, shaped by what gate c–f show (the operator, 2026-11-21: real-world observations first).
+3. `TerrainMemory datum_min_load` against the robot's foot forces (read from the first shadow run).
+4. `benchd`'s day logs fill the SD card (24 GB uncompressed in three weeks); compress or rotate at the source.
+5. The walker's power in the twin against the 2026-11-20 runs of the deployed config (9–11 W against 16–17 W on obstacles),
+   not reconciled.
+6. §9.11's items 1 (the tempo in shadow) and 6 stand.
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 
