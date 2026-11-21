@@ -464,6 +464,12 @@ class Dash:
                 d = self.live_diag
                 if "tuck_learned" in d:
                     out += f" (belly {1000 * float(d.get('belly_ema', 0)):.0f} mm, femur {float(d['tuck_learned']):+.2f})"
+            if "tempo" in c.cfg.tunables:      # the stepper (2026-11-21): its tempo, who has the legs, and who decides that
+                def tv(name):
+                    return c.st.tuned.get(name, c.tune_targets.get(name, c.cfg.tunables[name][1]))
+                auto = "auto" in c.cfg.tunables and tv("auto") >= 0.5
+                legs = "the selection decides" if auto else dash_run.fmt_tunable(dash_run.TUNABLES["legs"], tv("legs"))
+                out += f"    stepper tempo {dash_run.fmt_tunable(dash_run.TUNABLES['tempo'], tv('tempo'))}, legs: {legs}"
             return out
         now = f"benchd now {spd(self.bench_slew)}" if self.bench_slew else "benchd slew unknown"
         nxt_s = spd(self.tune_slew) if self.tune_slew else "config's"
@@ -548,6 +554,22 @@ class Dash:
                 if ch in (ord("k"), ord("l")):
                     self.msg = self.ctrl.nudge("slearn", -1 if ch == ord("k") else 1)
                     self.msg_bad = "refused" in self.msg or "not in this config" in self.msg
+                    return True
+                if ch in (ord("u"), ord("i")):       # the stepper's tempo (its five rates as a multiple of the config's)
+                    self.msg = self.ctrl.nudge("tempo", -1 if ch == ord("u") else 1)
+                    self.msg_bad = "refused" in self.msg or "not in this config" in self.msg
+                    return True
+                if ch in (ord("t"), ord("a")):       # t: the legs to the other walker, by hand;  a: the automatic selection on/off
+                    name = "legs" if ch == ord("t") else "auto"
+                    c = self.ctrl
+                    if name in c.cfg.tunables:
+                        cur = c.st.tuned.get(name, c.tune_targets.get(name, c.cfg.tunables[name][1]))
+                        self.msg = c.nudge(name, -1 if cur >= 0.5 else 1)
+                        if name == "legs" and c.st.tuned.get("auto", c.cfg.tunables.get("auto", ("", 0.0))[1]) >= 0.5:
+                            self.msg += "  (the selection is automatic and overrides it: a turns that off)"
+                    else:
+                        self.msg = "no stepper in this config"
+                    self.msg_bad = "refused" in self.msg or "no stepper" in self.msg
                     return True
                 if ch in (ord(","), ord(".")):
                     self.msg = self.ctrl.nudge("height", -1 if ch == ord(",") else 1)
@@ -660,7 +682,7 @@ class Dash:
             self._line(scr, y, 3, " ✓ SAFE TO POWER OFF — every file is on the SD card ", C(OK) | curses.A_BOLD | curses.A_REVERSE); y += 1
         elif st.synced is False:
             self._line(scr, y, 3, " ⚠ the flush failed — wait 30 s before powering off ", C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
-        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   g/w mark good/swim   o p PACE   [ ] speed   - = period   ; ' lift   k l learner   , . belly"
+        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)   g/w mark good/swim   o p PACE   [ ] speed   - = period   ; ' lift   k l learner   , . belly   u i stepper tempo   t legs to the other walker   a selection auto/hand"
                 if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
         self._line(scr, y, 3, keys, C(DIM)); y += 1

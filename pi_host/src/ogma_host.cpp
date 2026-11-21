@@ -42,6 +42,7 @@
 #include "ogma/body/StrideOdometry.hpp"
 #include "ogma/hw/BrainInputs.hpp"
 #include "ogma/hw/Actuation.hpp"
+#include "ogma/hw/LegModel.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -139,6 +140,10 @@ struct Args {
     // touch modules read (TouchMemory, EncounterFeatures).  The dash passes it from body_env OGMA_PICRAWLER_TOE_Y.
     bool        toe_y     = false;
     std::string toe_calib = "pi_host/calib/toe_height_calib.json";
+    // The body's leg model (FK anchors, joint axes, toe offsets, the action-to-angle map: 116 floats) on
+    // reality.proprio.leg_model -- what the stepper's kinematics are built from (PoseSequencer, StanceFeatures).  The
+    // dash passes it from body_env OGMA_PICRAWLER_LEG_MODEL, as the sim reads it.  Off = not published.
+    bool        leg_model = false;
 };
 
 void usage() {
@@ -155,6 +160,8 @@ void usage() {
         "  --feet-xz publishes each toe's [x, z] (m, chassis frame, commanded pose) x 4 on reality.proprio.feet_xz\n"
         "  --toe-y [--toe-calib pi_host/calib/toe_height_calib.json] publishes each toe TIP's height along gravity (m, body origin,\n"
         "    commanded pose, the per-leg floor calibration applied) x 4 on reality.proprio.toe_y -- the touch modules' height\n"
+        "  --leg-model publishes the body's leg model (116 floats: FK anchors, axes, toe offsets, the action-to-angle map)\n"
+        "    on reality.proprio.leg_model, built from --body-calib -- the stepper's kinematics; needs --brain-inputs\n"
         "  --range-deadzone M publishes a valid range closer than M metres as no-echo (leg occlusion); 0 = off\n"
         "  --cmd-fk publishes feet_y_gravity_cmd_imu from the COMMANDED pose (the sim's CMD_FK_SOURCE=1) instead of the zero pose\n"
         "    from stride_v; both need --brain-inputs and are what the sim's OGMA_PICRAWLER_ODOM / _HONEST_VEL_EGO publish\n"
@@ -211,6 +218,7 @@ int main(int argc, char** argv) {
         else if (v == "--feet-jac")                    a.feet_jac = true;
         else if (v == "--feet-xz")                     a.feet_xz = true;
         else if (v == "--toe-y")                       a.toe_y = true;
+        else if (v == "--leg-model")                   a.leg_model = true;
         else if (v == "--toe-calib" && i + 1 < argc)   a.toe_calib = argv[++i];
         else { usage(); return 2; }
     }
@@ -223,6 +231,10 @@ int main(int argc, char** argv) {
     if (!a.actuate.empty() && !a.brain_inputs) {
         std::fprintf(stderr, "ogma_host: --actuate needs --brain-inputs (STOP rides the state feed, and a brain "
                              "with no body inputs must not drive the body)\n");
+        return 2;
+    }
+    if (a.leg_model && !a.brain_inputs) {
+        std::fprintf(stderr, "ogma_host: --leg-model needs --brain-inputs (it is built from the body calib the senses use)\n");
         return 2;
     }
     if ((a.odom || a.vel_ego) && !a.brain_inputs) {
@@ -532,6 +544,7 @@ int main(int argc, char** argv) {
         void* state_sub = nullptr;
         std::unique_ptr<ogma::hw::brain::BrainInputBuilder> builder;
         ogma::hw::brain::ServoMapping builder_map;
+        ogma::hw::brain::LegModel leg_model_tok;   // --leg-model: built once from the body calib, published every tick
         if (a.brain_inputs) {
             auto body = ogma::hw::brain::BodyCalib::load(a.body_calib);
             auto map  = ogma::hw::brain::ServoMapping::load(a.servo_map);
@@ -543,6 +556,14 @@ int main(int argc, char** argv) {
                         "%.1f us/rad, FSR contact >= %d counts, state feed %s\n",
                         body.geometry.c_str(), body.l3, fsr.body_mass_g, calib.servo_us_per_rad,
                         fsr.contact_counts, a.state_endpoint.c_str());
+            if (a.leg_model) {
+                leg_model_tok = ogma::hw::brain::leg_model(body, ogma::hw::brain::ActionMap::load(a.body_calib));
+                if (!leg_model_tok.ok) { std::fprintf(stderr, "ogma_host: --leg-model: %s\n", leg_model_tok.why.c_str()); return 1; }
+                std::printf("ogma_host: leg model ON — %d floats on reality.proprio.leg_model from %s (hip1 %.2f, hip2 %.2f rad per unit; "
+                            "knee rest %.2f, fold %.2f, past straight %.2f)\n", ogma::hw::brain::kLegModelFloats, a.body_calib.c_str(),
+                            double(leg_model_tok.v[109]), double(leg_model_tok.v[111]), double(leg_model_tok.v[112]),
+                            double(leg_model_tok.v[113]), double(leg_model_tok.v[114]));
+            }
             builder_map = map;   // kept for the commanded-servo check each tick
             builder = std::make_unique<ogma::hw::brain::BrainInputBuilder>(
                 std::move(body), std::move(map), fsr, calib.servo_us_per_rad);
@@ -1077,6 +1098,7 @@ int main(int argc, char** argv) {
                     pub("feet_y_gravity_cmd_imu", t.feet_y_gravity_cmd_imu.data(), t.feet_y_gravity_cmd_imu.size());
                     if (a.feet_jac) pub("feet_jac", t.feet_jac.data(), t.feet_jac.size());
                     if (a.feet_xz)  pub("feet_xz", t.feet_xz.data(), t.feet_xz.size());
+                    if (a.leg_model) pub("leg_model", leg_model_tok.v.data(), leg_model_tok.v.size());
                     if (a.toe_y)  { pub("toe_y", t.toe_y.data(), t.toe_y.size()); pub("up_body", t.up_body.data(), t.up_body.size()); }
                     pub("distress", &t.distress, 1);
                     if (a.odom) {

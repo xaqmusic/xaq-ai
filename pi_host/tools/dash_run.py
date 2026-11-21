@@ -145,6 +145,14 @@ TUNABLES = {
     # The per-leg swing-lift learner's rate (plan 7.29): 0 = off, so the bench can A/B it within a run.
     "slearn": Tunable("slearn", "lift learner", "MotorEPMv2", "swing_learn_rate", 0.005, 0.0, 0.03, "",
                       requires="swing_learn_rising"),
+    # ---- THE STEPPER (2026-11-21, the port of the two-walker stack).  All three are HotMutable and read every tick.
+    # The stepper's tempo: its five rates as a multiple of the config's (operator 2026-11-21: "moving the tempo slider
+    # does not, by itself, cause instability ... that can be deployed as a lever on the real robot").
+    "tempo": Tunable("tempo", "stepper tempo", "PoseSequencer", "tempo", 0.1, 0.5, 3.0, "", default=1.0),
+    # Who has the legs, by hand: 0 = the rhythm, 1 = the stepper.  With the selection on it overwrites this every tick.
+    "legs": Tunable("legs", "legs", "PoseSequencer", "engage", 1.0, 0.0, 1.0, "", default=0.0),
+    # The automatic selection's authority over the legs: 0 = by hand (the row above), 1 = the selection decides.
+    "auto": Tunable("auto", "selection", "PoseSequencer", "engage_follow", 1.0, 0.0, 1.0, "", default=0.0),
 }
 
 
@@ -161,6 +169,12 @@ def fmt_tunable(t: Tunable, v: Optional[float]) -> str:
         return f"{v:.1f}"
     if t.name == "stroke":
         return f"{v:.2f}"
+    if t.name == "tempo":
+        return f"×{v:.1f}"
+    if t.name == "legs":
+        return "the stepper" if v >= 0.5 else "the rhythm"
+    if t.name == "auto":
+        return "automatic" if v >= 0.5 else "by hand"
     return f"{v * t.scale:.0f} {t.unit}"
 VBAT_WARN = 7.0                               # limp is 6.4 sustained; belly-up draws ~1.5 A
 
@@ -316,6 +330,8 @@ def list_configs(config_dir: Path = CONFIG_DIR, launcher_gd: Path = LAUNCHER_GD)
             flags.append("--cmd-fk")           # the commanded-FK corner sensor (gait audit 2026-10-13)
         if str(be.get("OGMA_PICRAWLER_TOE_Y", "")) == "1":
             flags.append("--toe-y")            # the calibrated toe tip's height for the touch modules (2026-11-02)
+        if str(be.get("OGMA_PICRAWLER_LEG_MODEL", "")) == "1":
+            flags.append("--leg-model")        # the body's leg model for the stepper's kinematics (2026-11-21)
         out.append(ConfigEntry(file=f, path=p, name=str(md.get("name", f)),
                                faithful=str(be.get("OGMA_PICRAWLER_HONEST_JOINTS", "")) == "1",
                                phase=str(md.get("phase_tag", "")), speed_rad_s=spd,

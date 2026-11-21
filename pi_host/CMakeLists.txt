@@ -89,7 +89,10 @@ if(PI_HOST_BUILD_TESTS)
   set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
   enable_testing()
-  add_executable(test_hw tests/test_hw.cpp tests/test_brain_inputs.cpp tests/test_actuation.cpp)
+  # test_leg_model runs the stepper's own solver on the packed model: LegSolver is a plain component (no bus, no core
+  # library), so its one source is compiled into the test and the seconds-long loop stays.
+  add_executable(test_hw tests/test_hw.cpp tests/test_brain_inputs.cpp tests/test_actuation.cpp tests/test_leg_model.cpp
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../cpp_core/src/ogma/body/LegSolver.cpp)
   target_link_libraries(test_hw PRIVATE ogma_hw gtest_main nlohmann_json::nlohmann_json)
   # The brain-input tests read the REAL calibration files (servo map, exported body), so a
   # re-export or a re-calibration that breaks the contract fails here, not on the robot.

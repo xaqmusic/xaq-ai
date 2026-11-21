@@ -1015,10 +1015,17 @@ cells have more lockouts and flips at counts too small to decide. The fixed 2 is
    stepper alone on a flat floor, engaged by hand: landings against misses, the shift realised against a tape, power against
    the simulator's 2–3 W. (e) Hand-overs by hand, flat then one obstacle. (f) The automatic selection on carpet and mulch.
    The robot runs are the operator's.
-3. *Decisions asked of the operator:* the first robot steps at tempo 1 or 2 (proposed 1); fit the 8×8 sensor or cut the
-   stack's dependence on it for the port (proposed: cut, `StuckSense` on the ultrasonic); the simulator's outage made the
-   robot's first (proposed: yes, in 2a); the dynamic tempo before or after the port (proposed: in the simulator in parallel,
-   the port at a fixed tempo).
+3. *Decided by the operator, 2026-11-21* ("we can start the robot stepper at tempo 1.0. I would like to cut the dependence of
+   the 8x8 tof. we started down the path of tracking the floor as voxels captured by footfalls. I'd like to understand the
+   limits of that concept before attaching the new sensor. outage recovery will be unique to the robot so lets let real world
+   observations drive that before sim (risk to the robot is low). regarding dynamic tempo, moving the tempo slider does not, by
+   itself, cause instability. it seems that can be deployed as a lever on the real robot but we can proceed with caution when
+   adding it to the brain as a control"):
+   - the first robot stepper runs are at tempo 1;
+   - the port carries no forward 8x8 field: the terrain memory is the footfalls' voxels alone, and the limits of that are to be
+     measured before the sensor is fitted (§9.12);
+   - the simulator's outage stays as it is; the robot's recovery is shaped by what the robot shows (2a loses that item);
+   - the tempo goes to the robot as a live lever (the operator's hand on it); the brain driving it comes later, in shadow first.
 4. *To check before 2d:* whether the sequencer or `SupportModel` reads FSR magnitude (the rear-left foot reads about 680 g
    planted against 30–56 g); the veto's release by travel against an odometry that over-reads 2–3 times on slip.
 5. *The heap defect:* `auto_grad_c6` on the promoted config dies at tick 6275 on every run (`bo1/crash2`) — a case for a

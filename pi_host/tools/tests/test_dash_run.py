@@ -158,7 +158,7 @@ class FakeRobot:
 
     def brain_call(self, verb, port=7400, **kw):
         self.log(f"brain {verb} {kw.get('id')}.{kw.get('key')}={kw.get('value')}")
-        if verb == "set_param" and kw.get("id") in ("load_phase", "motor_epm"):
+        if verb == "set_param" and kw.get("id") in ("load_phase", "motor_epm", "pose_sequencer"):
             return {"status": "ok", "batch_id": 1}
         return {"status": "error", "message": "unknown module: " + str(kw.get("id"))}
 
@@ -742,3 +742,51 @@ def test_pace_moves_the_period_and_the_stroke_together_and_reproduces_the_config
     assert any(".period_ticks=" in x for x in sent) and any(".stroke_gain=" in x for x in sent)
     assert ctrl.st.lpg_period is not None and "stroke" in ctrl.st.tuned
     ctrl.end(); ctrl.join(10)
+
+
+# ---- the stepper's live controls (2026-11-21, the port of the two-walker stack) -------------------------------------
+_STACK = "sim60_stairs_seq2_belief__p3settle__p3vis__p3frz__kgpm__crh__hold__aft__sel__bo__auth__ta30__t2.json"
+
+
+def stack_cfg():
+    import tempfile
+    lg = Path(tempfile.mkdtemp()) / "launcher.gd"
+    lg.write_text('const _PICRAWLER_CONFIG_ALLOWLIST: Array = [\n\t"%s",\n]\n' % _STACK)
+    return dash_run.list_configs(launcher_gd=lg)[0]
+
+
+def test_the_two_walker_stack_carries_the_stepper_controls_and_asks_the_host_for_the_leg_model():
+    c = stack_cfg()
+    assert c.tunables["tempo"] == ("pose_sequencer", 2.0)          # the config's own tempo
+    assert c.tunables["legs"] == ("pose_sequencer", 1.0)
+    assert c.tunables["auto"] == ("pose_sequencer", 1.0)
+    assert "--leg-model" in c.host_flags                           # body_env OGMA_PICRAWLER_LEG_MODEL
+    assert "tempo" not in cfg().tunables and "--leg-model" not in cfg().host_flags   # a config with no stepper has neither
+    assert dash_run.fmt_tunable(dash_run.TUNABLES["tempo"], 1.0) == "×1.0"
+    assert dash_run.fmt_tunable(dash_run.TUNABLES["legs"], 0.0) == "the rhythm"
+    assert dash_run.fmt_tunable(dash_run.TUNABLES["auto"], 1.0) == "automatic"
+
+
+def test_the_stepper_tempo_and_the_legs_are_set_live_and_the_tempo_before_the_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash_run, "LOG_DIR", tmp_path)
+    robot = FakeRobot(tmp_path)
+    ctrl = dash_run.RunController(robot, stack_cfg(), "stand", countdown_s=0.3, ready_extra_s=0.0,
+                                  tune={"tempo": 1.0})              # the first robot runs: tempo 1, set before the brain drives
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"}, 8.0)
+    assert "brain set_param pose_sequencer.tempo=1.0" in robot.calls
+    assert ctrl.st.tuned["tempo"] == 1.0
+    ctrl.nudge("tempo", +3)
+    assert abs(ctrl.st.tuned["tempo"] - 1.3) < 1e-9
+    assert "brain set_param pose_sequencer.tempo=1.3" in robot.calls
+    for _ in range(40):
+        ctrl.nudge("tempo", +1)
+    assert ctrl.st.tuned["tempo"] == dash_run.TUNABLES["tempo"].hi  # clamped
+    ctrl.nudge("auto", -1)                                          # the selection off: the legs by hand
+    assert "brain set_param pose_sequencer.engage_follow=0.0" in robot.calls
+    ctrl.nudge("legs", -1)                                          # ... to the rhythm
+    assert "brain set_param pose_sequencer.engage=0.0" in robot.calls
+    ctrl.nudge("legs", -1)                                          # already there: stays 0
+    assert ctrl.st.tuned["legs"] == 0.0
+    ctrl.end()
+    ctrl.join(10)
