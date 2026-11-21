@@ -336,6 +336,22 @@ fwd, lat] × 4, every tick: the height each leg's next landing will meet, in the
 touches), `tm_h_pred`, `tm_prec`, `tm_has`, `tm_err`, `tm_rms`, and `tm_events` rows [tick, leg, h_pred, prec, h_touch,
 e, n_touch_before, n_field_before, landing offset]. Nothing acts on the prediction yet.
 
+## The stepper's leg model and its live controls (2026-11-21)
+
+`ogma_host --leg-model` (the dash passes it from `body_env OGMA_PICRAWLER_LEG_MODEL=1`; needs `--brain-inputs`) publishes
+`reality.proprio.leg_model` every tick: 116 floats, the simulator's layout — per leg the six FK anchor points in the
+chassis rest frame, the hip2 and knee axes and the toe offset (27), then `hip1_rest, hip1_range, hip2_rest, hip2_range,
+knee_rest, knee_fold, knee_hyperext, knee_widening` (8). It is packed once at start from the body calibration and the
+action map the host already loads (`ogma/hw/LegModel.hpp`), so the stepper's kinematics (`PoseSequencer`,
+`StanceFeatures`, through `ogma::body::LegSolver`) run on the same body as the host's `feet_xz` and `toe_y`. The host
+refuses to start with the flag if the action map carries a per-leg hip1 sign other than +1 or a narrow knee range unlike
+hip2's: the layout has no place for either. The host publishes nothing new without the flag.
+
+The dash's live rows for a config that carries `PoseSequencer` (all through `set_param`, all read every tick by the
+module): `tempo` (keys `u` / `i`, 0.5–3.0 in steps of 0.1; the stepper's five rates as a multiple of the config's),
+`engage` (`t`: the legs to the other walker, by hand), `engage_follow` (`a`: 1 = the walker selection decides and
+overwrites `engage`).
+
 ## Local record (SPEC §3)
 
 `pi_host/log/benchd_<YYYYMMDD_HHMMSS>.jsonl` on the Pi: every verb (with reply) and every

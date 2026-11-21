@@ -30,6 +30,26 @@ suffix is one lever on the one before it:
 
 On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (the gate watching only).
 
+## The two walkers on the robot (2026-11-21) — built, not yet run
+
+The stepper, the footfall terrain memory and the walker selection are on the robot as one config,
+`…_cs_pf_sl0__2w.json` ("ROBOT · TWO WALKERS" on the dash). Plan and gates: [`learned_stepper_plan.md`](learned_stepper_plan.md)
+§9.11–9.12; evidence: ledger 2026-11-21 (afternoon).
+
+- **It opens as the deployed walker.** Every walker module and param is `_cs_pf_sl0`'s; the stepper side rides in shadow
+  (`engage` 0, `engage_follow` 0, tempo 1). In the simulator the body log matches the deployed config field for field while
+  the stepper stays disengaged.
+- **Dash keys during a run:** `t` hands the legs to the other walker (by hand); `a` gives the choice to the selection or takes
+  it back; `u` / `i` move the stepper tempo by 0.1 (0.5–3.0).
+- **The host:** `ogma_host --leg-model` (the dash passes it from `body_env`) publishes the leg model the stepper's kinematics
+  are built from. Built on the robot at `022f5e2b`; its calibration and leg-model tests pass there.
+- **Not done on the robot:** `ogma-benchd` has not been restarted, so the brownout count (`sense.hat_reset`) does not reach
+  the brain yet and the outage veto sees nothing; the tick time of 33 modules is unmeasured; which feet pass
+  `TerrainMemory datum_min_load` (0.15 of body weight) is unread.
+- **Order of the first runs** (the operator's): a shadow run on the flat floor (the deployed gait, read the tick time and the
+  shadow selection); `t` on the flat floor for the stepper alone at tempo 1; hand-overs by hand, flat then one obstacle; `a`
+  on carpet or mulch.
+
 ## Read before the next session (2026-10-28)
 
 - **Leg names in brain_diag are the sim's order and the sim is mirrored:** sim `fl` = physical FR (ADC A1), `fr` = FL (A0), `rl` = RR (A3), `rr` = RL (A2).
@@ -238,6 +258,11 @@ On the shelf, not deployed: `_sgkc` (ProxMemory corroboration, below), `_sg0` (t
 - **Deploy:** `ssh picrawler 'cd ~/xaq-ai && git fetch -q origin && git merge --ff-only -q origin/picrawler-dev'`,
   then `cmake --build pi_host/build --target ogma_host -j3` on the Pi (~1 min). No service restart: the dash
   starts the new binary on the next run. Deploys need the operator's go-ahead.
+  **Read `df -h /` on the Pi first** (2026-11-21: the card was full of `benchd` day logs and nothing could be fetched or
+  built; copy the logs home, verify, ask before deleting). When `origin` has not been pushed, the commits can go straight to
+  the robot: `git push ssh://picrawler/home/xaqmusic/xaq-ai HEAD:refs/heads/deploy-<date>`, then
+  `git merge --ff-only deploy-<date>` there (done 2026-11-21). A new `ogma_benchd` takes effect only at a service restart,
+  which is the operator's.
 - **After a boot** the Pi answers on `10.0.0.114` before `picrawler.local` resolves.
 - **Runs land in** `~/xaq-ai/pi_host/log/dashrun_<stamp>/` (feed, brain_diag, events, meta) plus the host log
   `dashrun_<stamp>_…__<config>.log`. Copy them to `~/xaq_runs/robot_<date>/`.
