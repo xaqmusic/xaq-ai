@@ -1,4 +1,66 @@
 {
+ "auto_t2_2026_11_21": {
+  "auto_t2_L42": {
+   "rows": 2600,
+   "sha256_24": "ac593be52e3c42670ed69fe8"
+  },
+  "auto_t2_b38_1": {
+   "rows": 1800,
+   "sha256_24": "daba97d6c90a7275dc819651"
+  },
+  "auto_t2_b38_2": {
+   "rows": 1800,
+   "sha256_24": "046e281f75cef3ab358fe4f0"
+  },
+  "auto_t2_b38_3": {
+   "rows": 1800,
+   "sha256_24": "b57108a16ce026b7bd8225d3"
+  },
+  "auto_t2_b38_4": {
+   "rows": 1800,
+   "sha256_24": "75a2da845ed6f1fdc35d19f8"
+  },
+  "auto_t2_b38_5": {
+   "rows": 1800,
+   "sha256_24": "d9fd1bde0f0678f1b4b772f0"
+  },
+  "auto_t2_b38_6": {
+   "rows": 1800,
+   "sha256_24": "0270b7c6e0523e53f5f3c586"
+  },
+  "auto_t2_b64_1": {
+   "rows": 1800,
+   "sha256_24": "5e795652ea332e933456fcf2"
+  },
+  "auto_t2_b64_2": {
+   "rows": 1800,
+   "sha256_24": "5545867ea6d8dc4b428db210"
+  },
+  "auto_t2_b64_3": {
+   "rows": 1800,
+   "sha256_24": "9eea0ad3098199e664ca424b"
+  },
+  "auto_t2_b64_4": {
+   "rows": 1800,
+   "sha256_24": "fe66231e1e33f0aed030ae49"
+  },
+  "auto_t2_b64_5": {
+   "rows": 1800,
+   "sha256_24": "b3364fd4bb8b9a4e5da2cbf8"
+  },
+  "auto_t2_b64_6": {
+   "rows": 1800,
+   "sha256_24": "661397079d26922836c06cdb"
+  },
+  "auto_t2_cor_1": {
+   "rows": 1800,
+   "sha256_24": "fe14d84d5d86453d68c3c3a3"
+  },
+  "auto_t2_cor_2": {
+   "rows": 1800,
+   "sha256_24": "3ce2a04eaaea6dc93ffdd9e7"
+  }
+ },
  "hold_2026_11_19": {
   "L42": {
    "rows": 2600,

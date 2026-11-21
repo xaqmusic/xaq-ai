@@ -136,6 +136,14 @@ private:
     //         handback_pose_tau_ticks), its toes' places and its standing height -- learned from the rhythm, no constant names it.
     // A tilt disengage and a reset stay immediate.
     double handback_stand_ = 0.0; int handback_pose_tau_ticks_ = 500;
+    // THE TEMPO (2026-11-21, operator: "default the stepper tempo to 2.0"): one handle over the executor's five rates.  The
+    // config's rates are kept here as given and the executor runs at rate x tempo; at 1 the product is the rate itself.
+    double tempo_ = 1.0;
+    double shift_v_base_ = 0.03, lift_v_base_ = 0.10, swing_v_base_ = 0.12, lower_v_base_ = 0.06, lower_fast_v_base_ = 0.0;
+    void apply_tempo_() {
+        executor_.shift_v_ = shift_v_base_ * tempo_; executor_.lift_v_ = lift_v_base_ * tempo_; executor_.swing_v_ = swing_v_base_ * tempo_;
+        executor_.lower_v_ = lower_v_base_ * tempo_; executor_.lower_fast_v_ = lower_fast_v_base_ * tempo_;
+    }
     std::array<double, 12> pose_mean_{}; int64_t pose_n_ = 0;
     int64_t disengaged_tilt_ = 0;
     double fk_err_ema_ = 0.0;

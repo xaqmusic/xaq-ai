@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "name": "CANDIDATE · AUTOMATIC WALKER SELECTION (2026-11-20, not promoted) — the walker by default, the stepper once the walker browns out twice in a minute, the walker tried again after travel · brownout model on (2)",
+    "name": "CONTROL · the automatic walker selection at stepper tempo 1 (the candidate of 2026-11-20, as measured) — promoted 2026-11-21 with tempo 2 as ...__ta30__t2",
     "description": "The stack of record with the after-touch record on (...__crh__hold__aft.json) and the walker selection holding the legs (PoseSequencer engage_follow 1): each walker's progress report (WalkerCompetence), the selector (WalkerSelect, trial_after_s 30: the stepper's first trial waits until the walker has 30 s of record), and the supply's outages per walker (WalkerOutage: a walker that browns out veto_n = 2 times inside a minute of its own driving loses the legs; the veto drops after the body has travelled 0.25 m under the other walker, doubled per repeat). The body models the brownout (OGMA_PICRAWLER_BROWNOUT 2 from this config's body_env: a reset is published on sense.hat_reset and every servo holds still for the 2.5 s outage). MEASURED (ledger 2026-11-20 evening, sim, 6 runs a cell, a signal): lockouts on obstacle grounds 3 of 24 runs against the walker alone 24 of 24; flat pace kept (arena 646 against 618 cm/min). Open: the vetoed walker keeps driving until the body stands (14 of 117 hand-overs waited over 3 s); flips at a hand-over from an extreme pose (8 in 72 runs). SCAFFOLDS: veto_n, relax_m, trial_after_s, the reset criterion (uncalibrated: rates order arms, they do not predict the robot's). LIVE: the [M] panel's HANDOVER row 'automatic selection' and its SUPPLY rows (brownout model 0/1/2, brownouts per minute to switch); [L] hands the legs over by hand while the selection is off. Body log: wr_* / sr_* (reports), ws_* (selector), wo_* (outages), bo_* (resets), ps_fol.",
     "env_target": "picrawler",
     "gym_mode": "stairs",
@@ -29,7 +29,7 @@
       "height_homeostat",
       "panic"
     ],
-    "note": "2026-11-20: __bo with PoseSequencer engage_follow 1 -- the walker selection HAS THE LEGS (progress reports, the supply's outages, the brownout veto). Simulation only. | 2026-11-21: on the launcher's list for the operator's read; body_env OGMA_PICRAWLER_BROWNOUT 1 -> 2 (the mode the battery ran, there by env); name and description written for the dropdown. The brain graph is unchanged.",
+    "note": "2026-11-20: __bo with PoseSequencer engage_follow 1 -- the walker selection HAS THE LEGS (progress reports, the supply's outages, the brownout veto). Simulation only. | 2026-11-21: on the launcher's list for the operator's read; body_env OGMA_PICRAWLER_BROWNOUT 1 -> 2 (the mode the battery ran, there by env); name and description written for the dropdown. The brain graph is unchanged. | 2026-11-21: promoted with tempo 2 as ...__ta30__t2.json; this file stays as the tempo-1 control and left the launcher's list.",
     "body": "measured_fsr",
     "gym_difficulty": 0.3,
     "body_env": {

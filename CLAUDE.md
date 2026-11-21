@@ -265,7 +265,9 @@ godot4 --headless --fixed-fps 60 --quit-after 4000000 \
   rail to the body log (`pw_*`); `OGMA_PICRAWLER_BROWNOUT=1` adds a reset event on `sense.hat_reset` (`=2` also holds the servos
   through each 2.5 s outage). The reset criterion is uncalibrated: rates order arms, they do not predict the robot's. ⚠ The power
   model changes the physics once a leg segment touches something (`OGMA_PICRAWLER_POWER_SEG_CONTACTS=0` restores identity). On a
-  config that carries `walker_outage`, the panel's "automatic selection" row hands the legs to the walker selection. The panel's SUPPLY rows
+  config that carries `walker_outage`, the panel's "automatic selection" row hands the legs to the walker selection; the stack of
+  record carries it from 2026-11-21 (`…__hold__aft__sel__bo__auth__ta30__t2`: the selection with the legs, brownout model 2 from
+  its `body_env`, stepper tempo 2; `…__crh__hold` is the control without the selection and the config of the golden traces). The panel's SUPPLY rows
   set the mode live (`brownout_mode`, 0/1/2) and the brownouts per minute at which a walker loses the legs (`walker_outage.veto_n`; 2026-11-21).
 - Body diagnostics are JSON-per-line on stdout (`fwd_v`, `gc_raw`/`gc_norm`/`cy_norm`,
   `h_ema`/`h_max`/`h_bias`, chassis `y`, `knee[]`, `feet_y[]`, `auto_reset_count`).
@@ -274,7 +276,7 @@ godot4 --headless --fixed-fps 60 --quit-after 4000000 \
   carries it; both and the field's own cloud — green floor, yellow things — live 30 s, the odometry's drift
   making an older claim unlocatable, 2026-11-04); `[Y]` the forward 8x8 time-of-flight field's rays (green floor, orange thing, magenta leg), `[7]`/`[8]`
   its pitch, `[9]`/`[0]` its mount height (`OGMA_PICRAWLER_TOF8=1`, `scripts/tof8.gd`, 2026-11-04);
-  `[L]` hands the legs to the other walker on a config that carries the sequencer (the panel's HANDOVER rows: who owns the legs, an alternating timer, the crossfade, the hold, a stand before the hand-back; 2026-11-18; the STEPPER rows carry a tempo slider, the sequencer's five rates as a multiple of the config's own);
+  `[L]` hands the legs to the other walker on a config that carries the sequencer (the panel's HANDOVER rows: who owns the legs, an alternating timer, the crossfade, the hold, a stand before the hand-back; 2026-11-18; the STEPPER rows carry a tempo slider, `pose_sequencer.tempo`: the sequencer's five rates as a multiple of the rates the config gives, 2 on the stack of record from 2026-11-21);
   `[1]`/`[2]`/`[5]`/`[6]` live-swap arena/corridor/room/terrain (every bound key is listed in the HUD's hint rows with its state); the
   MOTOR-EPM panel has live sliders for every lever. The live viewer is
   [`tools/xaq_inspector`](tools/xaq_inspector/README.md). **Operator/UI-driven diagnosis is

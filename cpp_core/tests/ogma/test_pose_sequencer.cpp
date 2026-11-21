@@ -516,3 +516,35 @@ TEST(PoseSequencer, EngageFollow_TheSelectionTakesAndGivesBackTheLegs) {
     EXPECT_EQ(f.m.phase(), PoseSequencer::Phase::Idle); EXPECT_EQ(f.m.engage_level(), 0.0f);
     EXPECT_EQ(f.m.diag_snapshot()["follow"][2].get<double>(), 2.0) << "two sets: on, off";
 }
+
+// ---- THE TEMPO (2026-11-21): one handle over the five rates ----
+namespace { double steps_of(Fix& f) { const auto d = f.m.diag_snapshot(); double n = 0; for (auto const& v : d["steps"]) n += v.get<double>(); return n; } }   // the snapshot is held: a range-for over a temporary's member reads freed memory
+TEST(PoseSequencer, Tempo_TwoIsTheFiveRatesDoubled_AndTheConfigsRatesAreReportedAsGiven) {
+    ogma::ParamMap pa = hb_params(0.0); pa["lower_fast_v_mps"] = ogma::ParamValue{0.15}; pa["tempo"] = ogma::ParamValue{2.0};
+    ogma::ParamMap pb = hb_params(0.0);
+    pb["shift_v_mps"] = ogma::ParamValue{0.06}; pb["lift_v_mps"] = ogma::ParamValue{0.20}; pb["swing_v_mps"] = ogma::ParamValue{0.24};
+    pb["lower_v_mps"] = ogma::ParamValue{0.12}; pb["lower_fast_v_mps"] = ogma::ParamValue{0.30};
+    Fix a(pa), b(pb);
+    for (uint64_t t = 0; t < 1500; ++t) {
+        a.run(t, ground_contact(a)); b.run(t, ground_contact(b));
+        ASSERT_EQ(a.out.size(), b.out.size());
+        for (size_t k = 0; k < a.out.size(); ++k) ASSERT_EQ(a.out[k], b.out[k]) << "tick " << t << " value " << k;
+    }
+    EXPECT_GT(steps_of(a), 0.0) << "the comparison covered real steps";
+    const auto cp = a.m.current_params();
+    EXPECT_EQ(std::get<double>(cp.at("tempo")), 2.0);
+    EXPECT_EQ(std::get<double>(cp.at("shift_v_mps")), 0.03); EXPECT_EQ(std::get<double>(cp.at("lift_v_mps")), 0.10);
+    EXPECT_EQ(std::get<double>(cp.at("swing_v_mps")), 0.12); EXPECT_EQ(std::get<double>(cp.at("lower_v_mps")), 0.06);
+    EXPECT_EQ(std::get<double>(cp.at("lower_fast_v_mps")), 0.15);
+}
+TEST(PoseSequencer, Tempo_OneIsTheRatesAsGiven_AndTwoStepsMoreInTheSameTime) {
+    ogma::ParamMap p1 = hb_params(0.0); p1["tempo"] = ogma::ParamValue{1.0};
+    Fix a(hb_params(0.0)), b(p1), c(hb_params(0.0));
+    for (uint64_t t = 0; t < 1500; ++t) {
+        if (t == 300) c.m.on_param_change("tempo", ogma::ParamValue{2.0});          // live: the handle a higher loop would hold
+        a.run(t, ground_contact(a)); b.run(t, ground_contact(b)); c.run(t, ground_contact(c));
+        for (size_t k = 0; k < a.out.size(); ++k) ASSERT_EQ(a.out[k], b.out[k]) << "tick " << t << " value " << k;
+    }
+    EXPECT_GT(steps_of(a), 0.0);
+    EXPECT_GT(steps_of(c), steps_of(a)) << "tempo 2 from tick 300: " << steps_of(c) << " steps against " << steps_of(a);
+}

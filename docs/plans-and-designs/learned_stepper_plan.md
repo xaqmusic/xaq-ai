@@ -933,7 +933,7 @@ is, in order: stuck (either walker, answered by the other), energy with the brow
 **Open.** `handback_stand` stays 0 in every config of record; which setting the operator watched is not recorded. The heap
 corruption (two more instances on 2026-11-19, on rough terrain with the rhythm) still wants its sanitizer session.
 
-### 9.10 Energy, the brownout as a sense, and the selection with the legs (2026-11-20, later) — ▶ resume here
+### 9.10 Energy, the brownout as a sense, and the selection with the legs (2026-11-20, later)
 
 **The operator's words.** "go ahead with the energy map"; then, on its first numbers: "The brownouts usually occur when a leg
 gets stuck and several servos are being driven to maximum current, trying to attain an impossible position. The scenario I
@@ -983,6 +983,48 @@ keeps it quiet (the outage and dip rate per ground, so the stepper is chosen bef
 5. *The learned layer*: stuck as a trigger in both directions (§9.9 item 3); outages, dips and progress remembered per node
    of the ground-ahead vocabulary (§9.9 item 4), so the selection anticipates the veto.
 6. The heap corruption: two more of 121 runs.
+
+### 9.11 The selection promoted, the tempo as a handle, and the port to the robot (2026-11-21) — ▶ resume here
+
+**The operator's words.** "it looks good. we can promote the brownout mechanism. we should also default the stepper tempo to
+2.0 as that speeds climbing a bit and does not seem to sacrifice stability." Then: "The idea is tempo will be a parameter the
+autonomous brain can control. The default is a middle point but it must be dynamic to the situation. It seems we are ready to
+port this scaffolding to the real picrawler. Let's discuss those steps."
+
+**Done** (ledger 2026-11-21). The config of record is `…__crh__hold__aft__sel__bo__auth__ta30__t2.json` (§9.10's candidate
+with `PoseSequencer tempo` 2.0); `…__auth__ta30` is its tempo-1 control, `…__crh__hold` the control without the selection and
+the config of the golden traces `hold_2026_11_19`. `tempo` is one hot parameter over the sequencer's five rates. The panel has
+a SUPPLY section (the brownout model, the brownouts per minute at which a walker loses the legs). §9.10's item 1 is closed.
+
+**The tempo on the promoted stack** (49 runs): the stepper alone is 1.8 times as fast on flat ground and terrain and twice on
+64 mm risers; inside the selection the ground before lockout ties everywhere, power rises on risers, and the 64 mm and terrain
+cells have more lockouts and flips at counts too small to decide. The fixed 2 is a scaffold value.
+
+**Open, as proposed to the operator (none decided, none built).**
+
+1. *The tempo driven by the brain.* What error: the stepper's own footfall prediction. On flat ground the tempo's ceiling is
+   the servo (landings missed because the leg cannot follow), on rough ground it is the tilt (2026-11-19). Proposal: the
+   tempo follows the precision of the landing prediction — the quantity `lower_standoff_k` already uses for the descent (the
+   memory's uncertainty and the running landing error), with misses, tilt and rail dips lowering it. Shadow first: publish
+   the tempo it would choose. Gain-0-guarded (a follow switch, as `engage_follow`).
+2. *The port, in gates.* (a) A robot-rate twin in the simulator: 4.22 rad/s, period 50, without the forward field, the
+   outage as the robot has it (the brain paused, the body ramped to the start pose), and the brownout battery on it.
+   (b) Host work, instrument only: `ogma_host` publishes the leg model (the same numbers as the simulator's, one toe checked
+   with a ruler); the reset channel built on the Pi. (c) A shadow run under the deployed walker: tick time, the reset count
+   arriving, what the veto would have done on carpet; this calibrates the simulator's reset rate (§9.10 item 4). (d) The
+   stepper alone on a flat floor, engaged by hand: landings against misses, the shift realised against a tape, power against
+   the simulator's 2–3 W. (e) Hand-overs by hand, flat then one obstacle. (f) The automatic selection on carpet and mulch.
+   The robot runs are the operator's.
+3. *Decisions asked of the operator:* the first robot steps at tempo 1 or 2 (proposed 1); fit the 8×8 sensor or cut the
+   stack's dependence on it for the port (proposed: cut, `StuckSense` on the ultrasonic); the simulator's outage made the
+   robot's first (proposed: yes, in 2a); the dynamic tempo before or after the port (proposed: in the simulator in parallel,
+   the port at a fixed tempo).
+4. *To check before 2d:* whether the sequencer or `SupportModel` reads FSR magnitude (the rear-left foot reads about 680 g
+   planted against 30–56 g); the veto's release by travel against an odometry that over-reads 2–3 times on slip.
+5. *The heap defect:* `auto_grad_c6` on the promoted config dies at tick 6275 on every run (`bo1/crash2`) — a case for a
+   memory checker, and a blocker for the port if the defect is in the core.
+6. §9.10's items 2, 3 and 5 stand (the vetoed walker stands while it waits; `handback_stand` on the terrain retry; the
+   learned layer).
 
 ## 10. Before the decision (2026-11-16): where Phase 3 stood, and the question of authority sooner
 

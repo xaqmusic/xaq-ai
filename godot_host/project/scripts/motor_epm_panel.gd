@@ -39,7 +39,7 @@ const _SLIDERS: Array = [
 	{"body": true, "key": "brownout_mode", "label": "brownout model (0/1/2)", "tip": "OGMA_PICRAWLER_BROWNOUT, live (2026-11-21): 0 = no resets are modelled; 1 = a reset is counted and published to the brain (sense.hat_reset, sense.hat_rail), the body is untouched; 2 = also its consequence, every servo holds still for the 2.5 s outage. Needs the power model (on in a windowed run). The reset criterion is uncalibrated: rates order arms, they do not predict the robot's", "min": 0.0, "max": 2.0, "step": 1.0},
 	{"id": "walker_outage", "only_if": "walker_outage", "key": "veto_n", "label": "brownouts/min to switch", "tip": "walker_outage.veto_n (SCAFFOLD): a walker that browns out this many times inside a minute of its own driving loses the legs to the other one. The daemon stops recovering on its own past 3, so the switch has to act below that", "min": 0.0, "max": 6.0, "step": 1.0},
 	{"section": "STEPPER  (PoseSequencer)", "only_if": "pose_sequencer"},
-	{"meta": "tempo", "only_if": "pose_sequencer", "key": "tempo", "label": "stepper tempo (x config)", "tip": "the stepper's shift, lift, swing and lowering rates together, as a multiple of the config's own (1 = the config; the 2026-11-18 speed arms were 1.5, 2 and 3)", "min": 0.5, "max": 3.0, "step": 0.1},
+	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "tempo", "label": "stepper tempo (x rates)", "tip": "pose_sequencer.tempo (2026-11-21): the stepper's shift, lift, swing and lowering rates together, as a multiple of the rates the config gives; the slider starts at the config's own tempo (2 on the stack of record, 1 where a config does not set it)", "min": 0.5, "max": 3.0, "step": 0.1},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "lo_gain", "label": "offset authority (0 = scaffold)", "min": 0.0, "max": 1.0, "step": 0.05},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "ik_knee_guard", "label": "knee guard (0/1)", "tip": "knee guard: 1 = the IK never takes a knee past straight", "min": 0.0, "max": 1.0, "step": 1.0},
 	{"id": "pose_sequencer", "only_if": "pose_sequencer", "key": "plan_model_margin", "label": "plan predicts lift gate (0/1)", "tip": "the plan predicts its own lift gate (1 = on)", "min": 0.0, "max": 1.0, "step": 1.0},
@@ -92,8 +92,6 @@ var _pace_stroke_cfg: float = -1.0
 # slider over the sequencer's five rates, each a multiple of the config's own value, captured at the first sync.  1.5 / 2 / 3
 # are the speed arms of the ledger's 2026-11-18 dose-response (zz_arm_t15 / t20 / t30).  A handle on existing parameters, not
 # a lever: nothing in the brain reads it.
-const _TEMPO_KEYS: Array = ["shift_v_mps", "lift_v_mps", "swing_v_mps", "lower_v_mps", "lower_fast_v_mps"]
-var _tempo_cfg: Dictionary = {}       # rate key -> the config's value
 # Row layout (2026-11-18, operator: a long label took the whole row and left its slider no width).  The label has a fixed
 # column and is clipped to it (its full text, or the row's "tip", is the tooltip); the slider keeps a minimum width.
 const _LABEL_W: float = 168.0
@@ -295,13 +293,6 @@ func _sync_from_module() -> bool:
 		_pace_period_cfg = float(cur["load_phase/period_ticks"])
 		_pace_stroke_cfg = float(cur[_MODULE_ID + "/stroke_gain"])
 		cur["meta/pace"] = _pace_from_period(_pace_period_cfg)
-	# The stepper's tempo starts at 1: the config's own rates, whatever they are.
-	_tempo_cfg.clear()
-	for tk in _TEMPO_KEYS:
-		if cur.has("pose_sequencer/" + tk) and cur["pose_sequencer/" + tk] != null:
-			_tempo_cfg[tk] = float(cur["pose_sequencer/" + tk])
-	if _tempo_cfg.size() == _TEMPO_KEYS.size():
-		cur["meta/tempo"] = 1.0
 	for opt in _optional:
 		(opt[1] as Control).visible = present.has(opt[0])
 	var missing := 0
@@ -327,6 +318,9 @@ func _sync_from_module() -> bool:
 	# a patch lands at the brain's next tick, and a read in the same frame returns the value before it (2026-11-17: the
 	# first form of this test printed the config's own 30 after setting 41).
 	if OS.get_environment("OGMA_PANEL_SELFTEST") == "1":
+		if _value_labels.has("pose_sequencer/tempo") and _value_labels.has("body/brownout_mode"):
+			print("SimTuningPanel selftest: at sync, before any set: tempo row at %s, brownout model row at %s" % [
+				str((_value_labels["pose_sequencer/tempo"].get_meta("slider") as HSlider).value), str((_value_labels["body/brownout_mode"].get_meta("slider") as HSlider).value)])
 		_on_slider("load_phase", "period_ticks", 41.0)
 		_on_slider("body", "MAX_SERVO_SPEED", 5.5)
 		if present.has("pose_sequencer"):
@@ -334,7 +328,7 @@ func _sync_from_module() -> bool:
 			_on_slider("pose_sequencer", "engage_ramp_ticks", 150.0)   # the handover rows (2026-11-18)
 			_on_slider(_MODULE_ID, "homeo_pose_hold", 1.0)
 			_on_slider("body", "handover_every_s", 20.0)
-			_on_slider("meta", "tempo", 2.0)
+			_on_slider("pose_sequencer", "tempo", 2.5)
 			_on_slider("pose_sequencer", "handback_stand", 2.0)   # the stand before the hand-back (2026-11-19)
 		_on_slider("body", "brownout_mode", 2.0)                 # the supply's row (2026-11-21): an int field set from a float
 		if present.has("walker_outage"):
@@ -363,10 +357,7 @@ func _selftest_readback(has_stepper: bool) -> void:
 		print("SimTuningPanel selftest: handover: engage_ramp_ticks -> %s (set 150), homeo_pose_hold -> %s (set 1), body handover_every_s -> %s (set 20), engage row %s" % [
 			str(_schema_value("pose_sequencer", "engage_ramp_ticks")), str(_schema_value(_MODULE_ID, "homeo_pose_hold")), str(_body.get("handover_every_s")),
 			("present, at %s" % str((_value_labels["pose_sequencer/engage"].get_meta("slider") as HSlider).value)) if _value_labels.has("pose_sequencer/engage") else "MISSING"])
-		var rates: Array = []
-		for tk in _TEMPO_KEYS:
-			rates.append("%s %s (config %s)" % [tk, str(_schema_value("pose_sequencer", tk)), str(_tempo_cfg.get(tk, "?"))])
-		print("SimTuningPanel selftest: stepper tempo set 2.0 -> %s" % ", ".join(rates))
+		print("SimTuningPanel selftest: stepper tempo -> %s (set 2.5); the config's rates are untouched: shift_v_mps %s, lift_v_mps %s" % [str(_schema_value("pose_sequencer", "tempo")), str(_schema_value("pose_sequencer", "shift_v_mps")), str(_schema_value("pose_sequencer", "lift_v_mps"))])
 		print("SimTuningPanel selftest: handback_stand -> %s (set 2; row %s)" % [str(_schema_value("pose_sequencer", "handback_stand")), "present" if _value_labels.has("pose_sequencer/handback_stand") else "MISSING"])
 	else:
 		print("SimTuningPanel selftest: no pose_sequencer in this config (stepper rows visible %s)" % row_visible)
@@ -419,30 +410,11 @@ func _on_pace(p: float) -> void:
 	if _status != null:
 		_status.text = "pace %.2f -> period %.0f ticks (%.2f s/stride), stroke %.2f" % [p, period, period / 50.0, stroke]
 
-func _on_tempo(x: float) -> void:
-	# One meta-control, five handles: each of the stepper's rates at x times the config's own (a rate the config has at 0,
-	# such as an unused fast lowering, stays 0).
-	if _tempo_cfg.size() != _TEMPO_KEYS.size():
-		if _status != null:
-			_status.text = "tempo: this config has no stepper"
-		return
-	x = clampf(x, 0.5, 3.0)
-	for tk in _TEMPO_KEYS:
-		_on_slider("pose_sequencer", tk, float(_tempo_cfg[tk]) * x)
-	if _value_labels.has("meta/tempo"):
-		_value_labels["meta/tempo"].text = "%.2f" % x
-	if _status != null:
-		_status.text = "stepper tempo x %.2f -> shift %.3f, lift %.3f, swing %.3f, lower %.3f m/s" % [x, float(_tempo_cfg["shift_v_mps"]) * x,
-			float(_tempo_cfg["lift_v_mps"]) * x, float(_tempo_cfg["swing_v_mps"]) * x, float(_tempo_cfg["lower_v_mps"]) * x]
-
 func _on_slider(where: String, key: String, v: float) -> void:
 	var ok := false
 	var err := ""
 	if where == "meta":
-		if key == "tempo":
-			_on_tempo(v)
-		else:
-			_on_pace(v)
+		_on_pace(v)
 		return
 	if where == "body":
 		if _body != null and is_instance_valid(_body):
