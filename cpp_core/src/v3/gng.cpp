@@ -127,6 +127,13 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
     if (s1_id < 0) return {0, 0.0f};  // no nodes (shouldn't happen post-bootstrap)
 
     GNGNode& s1 = nodes_.at(s1_id);
+    // THE WINNER OUTLIVES ITS OWN STEP (2026-11-21).  `s1` is written until the end of this function, and two of the
+    // removals below could free it first: the stale prune (its last_visited_step is refreshed only in step 12, so a node
+    // returning after a long absence was pruned on the tick it won) and the health death (its boost also comes in step 12,
+    // so the weakest node was killed on the tick it was revisited).  Both then wrote to a freed node: a heap corruption
+    // that aborted about one run in two hundred ("corrupted size vs. prev_size") and, unseen, reported a dead winner.
+    // A node being visited now is neither stale nor dying: the removals skip it.
+    step_winner_ = s1_id;
 
     // 2. Accumulate error at winner; update short-term EMA
     double d1_sq = static_cast<double>(d1) * d1;
@@ -264,6 +271,7 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
             // permanent facts, not casualties of a long absence.
             if (cfg_.health_death_spares_baked
                 && node.visits >= cfg_.baking_threshold) continue;
+            if (id == step_winner_) continue;   // visited this step: boosted below, not a candidate
             if (node.health < worst_health) {
                 worst_health = node.health;
                 worst_id = id;
@@ -330,6 +338,7 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
         }
     }
 
+    step_winner_ = -1;
     return {s1_id, d1};
 }
 
@@ -348,6 +357,7 @@ void GNG::remove_isolated() {
         if (node.visits >= cfg_.baking_threshold) continue;
         if (node.visits >= near_baked_visits) continue;
         if (node.health > 5.0f) continue;
+        if (id == step_winner_) continue;   // the step's winner is still being written (see step())
         auto it = adj_.find(id);
         if (it == adj_.end() || it->second.empty())
             to_kill.push_back(id);
@@ -377,6 +387,7 @@ void GNG::prune_stale_unbaked() {
         if (node.visits >= cfg_.baking_threshold) continue;
         if (node.visits >= near_baked_visits) continue;
         if (node.health > 5.0f) continue;
+        if (id == step_winner_) continue;   // visited this step: its last_visited_step is refreshed at the step's end
         if (node.last_visited_step < cutoff)
             to_kill.push_back(id);
     }

@@ -424,6 +424,8 @@ private:
     bool last_step_baked_ = false;
     // The previous step's winner (Config::bake_min_entries; -1 = none)
     int prev_winner_ = -1;
+    // The winner of the step in progress (-1 outside step()): no removal inside the step may free it (gng.cpp, step()).
+    int step_winner_ = -1;
 
     // Metabolic Cleanup (D1)
     std::vector<int> last_pruned_ids_;

@@ -785,3 +785,63 @@ TEST(GNGEntriesToBake, OffAddsNothingToASnapshotAndOnRoundTrips) {
     int with_entries = 0; for (const auto& nd : on_j["nodes"]) with_entries += nd.value("entries", 0) > 0;
     EXPECT_GT(with_entries, 2);
 }
+
+// ---------------------------------------------------------------------------
+// The winner outlives its own step (2026-11-21).  Two removals inside step() could free the node that was winning that
+// step -- the stale prune and the health death -- after which the step went on writing to it (a heap corruption that
+// aborted about one sim run in two hundred).  A third node is grown between two, left unvisited, and revisited on exactly
+// the step each removal would take it.
+// ---------------------------------------------------------------------------
+namespace {
+struct ThreeNodes {
+    GNG gng; Eigen::VectorXf a, b, mid; int c = -1;
+    static GNG::Config cfg() {
+        GNG::Config k;
+        k.dim = 4; k.baking_threshold = 100000; k.lambda_new = 1; k.max_nodes = 3; k.min_insertion_error = 0.0f;
+        k.stale_prune_enabled = false; k.health_death_threshold = 0.0f;   // each test turns its own removal on
+        k.health_death_min_nodes = 2; k.death_cooldown_steps = 0;
+        return k;
+    }
+    ThreeNodes() : gng(cfg()), a(4), b(4), mid(4) {
+        a << 1, 0, 0, 0; b << 0, 1, 0, 0; mid = (a + b).normalized();
+        gng.step(a); gng.step(b);                                     // bootstrap: two nodes
+        for (int i = 0; i < 6 && gng.node_count() < 3; ++i) gng.step(i % 2 ? a : b);   // the third is inserted between them
+        c = gng.step(mid).first;                                       // ... and is the midpoint's winner
+    }
+};
+}  // namespace
+
+TEST(GNG, AStaleNodeThatWinsIsNotPrunedInItsOwnStep) {
+    ThreeNodes f;
+    ASSERT_EQ(f.gng.node_count(), 3);
+    const int ia = f.gng.step(f.a).first, ib = f.gng.step(f.b).first;
+    ASSERT_NE(f.c, ia); ASSERT_NE(f.c, ib); ASSERT_NE(ia, ib);
+    const int visits0 = f.gng.get_visit_count(f.c);
+    f.gng.set_stale_prune_enabled(true); f.gng.set_stale_window_factor(10.0f);
+    f.gng.step(f.mid);                                                 // the third node's last visit
+    for (int i = 0; i < 10; ++i) f.gng.step(i % 2 ? f.a : f.b);        // ten steps away from it: it is stale on the next
+    ASSERT_EQ(f.gng.node_count(), 3);
+    const int w = f.gng.step(f.mid).first;                             // it wins on the step the prune would take it
+    EXPECT_EQ(w, f.c);
+    EXPECT_EQ(f.gng.node_count(), 3);
+    ASSERT_TRUE(f.gng.get_prototype(f.c).has_value());                 // alive, and the visit was written to it
+    EXPECT_EQ(f.gng.get_visit_count(f.c), visits0 + 2);
+    for (int id : f.gng.last_pruned_ids()) EXPECT_NE(id, f.c);
+    for (int i = 0; i < 12; ++i) f.gng.step(i % 2 ? f.a : f.b);        // left alone again, it is pruned as before
+    EXPECT_FALSE(f.gng.get_prototype(f.c).has_value());
+}
+
+TEST(GNG, TheWeakestNodeIsNotKilledOnTheStepItWins) {
+    ThreeNodes f;
+    ASSERT_EQ(f.gng.node_count(), 3);
+    for (int i = 0; i < 40; ++i) f.gng.step(i % 2 ? f.a : f.b);        // the two ends earn health; the third only decays
+    ASSERT_EQ(f.gng.node_count(), 3);
+    const int visits0 = f.gng.get_visit_count(f.c);
+    f.gng.set_health_death_threshold(1e9f);                            // every node is now below the death line
+    const int w = f.gng.step(f.mid).first;                             // the weakest wins on the step the death would take it
+    EXPECT_EQ(w, f.c);
+    ASSERT_TRUE(f.gng.get_prototype(f.c).has_value());
+    EXPECT_EQ(f.gng.get_visit_count(f.c), visits0 + 1);
+    for (int id : f.gng.last_pruned_ids()) EXPECT_NE(id, f.c);
+    EXPECT_GE(f.gng.node_count(), 2);
+}
